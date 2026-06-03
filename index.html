@@ -941,8 +941,8 @@ const TABS=[
   ['Temps',[
     ['absences','Absences',       'fa-regular fa-calendar-xmark'],
     ['pointage','Pointage',       'fa-regular fa-clock'],
-    ['tracking','Suivi du temps', 'fa-solid fa-stopwatch', true],
-    ['payroll', 'Paie',           'fa-solid fa-coins',     true],
+    ['tracking','Suivi du temps', 'fa-solid fa-stopwatch'],
+    ['payroll', 'Paie',           'fa-solid fa-coins'],
   ]],
   ['Acquisition',[
     ['recruitment','Recrutement','fa-solid fa-user-plus'],
@@ -966,6 +966,7 @@ function renderShell(){
       <select class="hotelSel" id="hotelSel">${hotels.map(h=>`<option value="${h.id}" ${h.id===hotelId?'selected':''}>${h.name}${h.city?' · '+h.city:''}</option>`).join('')}</select>
       <div class="spacer"></div>
       ${myRole?`<span class="tag" style="background:var(--violet-bg);color:var(--violet-d);font-weight:600;padding:5px 10px;border-radius:8px;font-size:11.5px"><i class="fa-solid fa-user-shield" style="margin-right:5px"></i>${ROLE_LABELS[myRole]||myRole}</span>`:''}
+      <div style="position:relative;display:inline-block"><button class="btn g" id="notifBell" title="Alertes" style="position:relative;padding:8px 12px"><i class="fa-solid fa-bell"></i><span id="notifBadge" style="display:none;position:absolute;top:4px;right:4px;width:16px;height:16px;background:#dc2626;color:#fff;border-radius:50%;font-size:9px;font-weight:700;line-height:16px;text-align:center"></span></button><div id="notifPanel" style="display:none;position:absolute;right:0;top:calc(100% + 8px);width:360px;background:#fff;border:1px solid var(--line);border-radius:16px;box-shadow:0 12px 40px rgba(0,0,0,.15);z-index:9999;max-height:480px;overflow:auto"></div></div>
       ${BE.isTest?'':'<button class="btn g" id="logout"><i class="fa-solid fa-arrow-right-from-bracket"></i> Déconnexion</button>'}
     </div></header>
     <div class="main">
@@ -995,6 +996,7 @@ function renderShell(){
     renderShell();
   };
   const lo=$('logout'); if(lo) lo.onclick=async()=>{await BE.signOut();renderLogin();};
+  wireNotifBell();
   $('nav').onclick=e=>{const b=e.target.closest('.it');if(b)goView(b.dataset.v);};
   $('sbtog').onclick=()=>{sidebarCollapsed=!sidebarCollapsed;$('sb').classList.toggle('collapsed',sidebarCollapsed);
     $('sbtog').title=sidebarCollapsed?'Étendre la barre latérale':'Réduire la barre latérale';
@@ -1419,30 +1421,117 @@ function barRows(rows,color){if(!rows.length)return '<div style="padding:14px;co
   return rows.map(([lab,v])=>`<div class="b"><div class="b-lab" title="${lab}">${lab}</div>
     <div class="b-track"><div class="b-fill" style="width:${Math.max(v/max*100,5)}%;background:${color}">${v}</div></div></div>`).join('');}
 
+/* ===================== CLOCHE NOTIFICATIONS ===================== */
+function wireNotifBell(){
+  const bell=$('notifBell'); const panel=$('notifPanel'); if(!bell||!panel)return;
+  let open=false;
+  const closePanel=()=>{panel.style.display='none';open=false;};
+  bell.onclick=async e=>{
+    e.stopPropagation();
+    if(open){closePanel();return;}
+    open=true; panel.style.display='block';
+    panel.innerHTML='<div style="padding:18px;text-align:center;color:var(--muted)"><i class="fa-solid fa-spinner fa-spin"></i> Chargement…</div>';
+    try{
+      const [docAlerts, medVisits, absReqs]=await Promise.all([
+        BE.listDocumentAlerts(hotelId).catch(()=>[]),
+        BE.listMedicalVisits(hotelId).catch(()=>[]),
+        BE.listAbsences(hotelId).catch(()=>[])
+      ]);
+      const today=isoToday();
+      const soon30=new Date(); soon30.setDate(soon30.getDate()+30);
+      const soon30str=soon30.toISOString().slice(0,10);
+      const medAlerts=medVisits.filter(v=>!v.next_visit_date||v.next_visit_date<=today||(v.next_visit_date<=soon30str));
+      const pendingAbs=absReqs.filter(a=>a.status==='pending');
+      const all=[
+        ...docAlerts.slice(0,5).map(a=>({icon:'fa-file-circle-exclamation',color:'#dc2626',text:`<b>${a.first_name} ${a.last_name}</b> — ${a.doc_label||a.doc_type} ${a.alert_kind==='expired'?'expiré':'bientôt expiré'}`,sub:a.expires_at?`Expire le ${a.expires_at}`:''})),
+        ...medAlerts.slice(0,3).map(v=>{const emp=staff.find(s=>s.id===v.employee_id);return {icon:'fa-stethoscope',color:'#d97706',text:`<b>${emp?emp.last_name+' '+emp.first_name:'?'}</b> — Visite médicale ${!v.next_visit_date||v.next_visit_date<today?'en retard':'à venir'}`,sub:v.next_visit_date||'Non planifiée'};}),
+        ...pendingAbs.slice(0,3).map(a=>{const emp=staff.find(s=>s.id===a.employee_id);return {icon:'fa-calendar-check',color:'#7c3aed',text:`<b>${emp?emp.last_name+' '+emp.first_name:'?'}</b> — Absence à valider`,sub:`${a.type_code||a.type||'Absence'} · du ${a.start_date} au ${a.end_date||a.start_date}`};})
+      ];
+      const badge=$('notifBadge');
+      if(badge){badge.textContent=all.length||'';badge.style.display=all.length?'block':'none';}
+      if(!all.length){panel.innerHTML='<div style="padding:24px;text-align:center;color:var(--muted);font-size:13px"><i class="fa-solid fa-check-circle" style="color:#16a34a;font-size:24px;display:block;margin-bottom:8px"></i>Aucune alerte en cours</div>';return;}
+      panel.innerHTML=`<div style="padding:12px 16px 8px;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--line)">${all.length} alerte${all.length>1?'s':''}</div>`
+        +all.map(a=>`<div style="display:flex;gap:12px;align-items:flex-start;padding:12px 16px;border-bottom:1px solid var(--line);font-size:13px;cursor:default">
+          <i class="fa-solid ${a.icon}" style="color:${a.color};margin-top:2px;flex-shrink:0"></i>
+          <div><div>${a.text}</div>${a.sub?`<div style="font-size:11px;color:var(--muted);margin-top:2px">${a.sub}</div>`:''}</div>
+        </div>`).join('');
+    }catch(e){panel.innerHTML=`<div style="padding:16px;color:#dc2626;font-size:12px">${e.message}</div>`;}
+  };
+  document.addEventListener('click',e=>{if(!bell.contains(e.target)&&!panel.contains(e.target))closePanel();},{passive:true});
+  // badge count on load
+  BE.listDocumentAlerts(hotelId).then(a=>{
+    const b=$('notifBadge');if(!b)return;
+    if(a.length){b.textContent=a.length>9?'9+':a.length;b.style.display='block';}
+  }).catch(()=>{});
+}
+
 function renderReporting(){
   const {counts}=aggCommitted();
-  const svc={};staff.filter(s=>s.active).forEach(s=>{const k=s.department||'—';svc[k]=(svc[k]||0)+1;});
-  const perRole={};staff.filter(s=>s.active).forEach(s=>{const k=s.role||'—';perRole[k]=(perRole[k]||0)+1;});
-  // top jours travaillés (mois courant)
-  const workEmp={};committed.forEach((v,k)=>{if(v.status!=='P')return;const eid=k.split('|')[0];workEmp[eid]=(workEmp[eid]||0)+Number(v.duration||1);});
-  const top=Object.entries(workEmp).map(([eid,n])=>{const s=staff.find(x=>x.id===eid);return [s?`${s.first_name} ${s.last_name}`:'?',n];})
-    .sort((a,b)=>b[1]-a[1]).slice(0,8);
+  const activeStaff=staff.filter(s=>s.active);
+  const nd=dim(cur.getFullYear(),cur.getMonth());
+  const svc={};activeStaff.forEach(s=>{const k=s.department||'—';svc[k]=(svc[k]||0)+1;});
+  const perRole={};activeStaff.forEach(s=>{const k=s.role||'—';perRole[k]=(perRole[k]||0)+1;});
+  const perContract={};activeStaff.forEach(s=>{const k=s.contract_type||'CDI';perContract[k]=(perContract[k]||0)+1;});
+  // top jours travaillés + CP
+  const workEmp={};committed.forEach((v,k)=>{if(v.status!=='P'&&v.status!=='PE')return;const eid=k.split('|')[0];workEmp[eid]=(workEmp[eid]||0)+Number(v.duration||1);});
+  const top=Object.entries(workEmp).map(([eid,n])=>{const s=staff.find(x=>x.id===eid);return [s?`${s.last_name} ${s.first_name}`:'?',n];}).sort((a,b)=>b[1]-a[1]).slice(0,8);
   const cpEmp={};committed.forEach((v,k)=>{if(v.status!=='CP')return;const eid=k.split('|')[0];cpEmp[eid]=(cpEmp[eid]||0)+Number(v.duration||1);});
-  const topCp=Object.entries(cpEmp).map(([eid,n])=>{const s=staff.find(x=>x.id===eid);return [s?`${s.first_name} ${s.last_name}`:'?',n];})
-    .sort((a,b)=>b[1]-a[1]).slice(0,8);
+  const topCp=Object.entries(cpEmp).map(([eid,n])=>{const s=staff.find(x=>x.id===eid);return [s?`${s.last_name} ${s.first_name}`:'?',n];}).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  // taux d'absentéisme = (MAL+ABS+CSS+MAT) / (actifs × jours ouvrés estimés)
+  const absCount=(counts.MAL||0)+(counts.ABS||0)+(counts.CSS||0)+(counts.MAT||0);
+  const workedCount=(counts.P||0)+(counts.PE||0);
+  const totalDays=activeStaff.length*nd;
+  const absRate=totalDays>0?Math.round(absCount/totalDays*1000)/10:0;
   const codeRows=CODES.map(c=>[c[0]+' · '+c[1], counts[c[0]]||0]).filter(r=>r[1]>0);
+  const hName=hotels.find(h=>h.id===hotelId)?.name||'';
   $('view').innerHTML=`<div class="page">
-    <div class="phead"><div><h1>Reporting</h1><div class="sub">${MONTHS[cur.getMonth()]} ${cur.getFullYear()} · ${hotels.find(h=>h.id===hotelId)?.name||''}</div></div></div>
+    <div class="phead">
+      <div><h1>Reporting</h1><div class="sub">${MONTHS[cur.getMonth()]} ${cur.getFullYear()} · ${hName}</div></div>
+      <div class="actions">
+        <button class="btn g" id="repExport"><i class="fa-solid fa-file-csv"></i> Export CSV</button>
+      </div>
+    </div>
+    <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr));margin-bottom:18px">
+      <div class="kc"><div class="kv">${activeStaff.length}</div><div class="kl"><i class="fa-solid fa-users"></i> Effectif actif</div></div>
+      <div class="kc"><div class="kv">${workedCount}</div><div class="kl"><i class="fa-regular fa-clock"></i> Jours P/PE mois</div></div>
+      <div class="kc"><div class="kv">${counts.CP||0}</div><div class="kl"><i class="fa-solid fa-umbrella-beach"></i> CP mois</div></div>
+      <div class="kc"><div class="kv" style="color:${absRate>5?'#dc2626':'inherit'}">${absRate}%</div><div class="kl"><i class="fa-solid fa-person-sick"></i> Taux absentéisme</div></div>
+    </div>
     <div class="cols2">
       <div class="box barchart"><h3><i class="fa-solid fa-building"></i>Effectif par service</h3>${barRows(Object.entries(svc).sort((a,b)=>b[1]-a[1]),'#8B5CF6')}</div>
       <div class="box barchart"><h3><i class="fa-solid fa-id-badge"></i>Effectif par rôle</h3>${barRows(Object.entries(perRole).sort((a,b)=>b[1]-a[1]).slice(0,8),'#3b82f6')}</div>
     </div>
     <div class="cols2" style="margin-top:14px">
-      <div class="box barchart"><h3><i class="fa-regular fa-clock"></i>Top jours travaillés ce mois</h3>${barRows(top,'#16a34a')}</div>
-      <div class="box barchart"><h3><i class="fa-regular fa-plane"></i>Top CP pris ce mois</h3>${barRows(topCp,'#d97706')}</div>
+      <div class="box barchart"><h3><i class="fa-regular fa-clock"></i>Top présences (P+PE) ce mois</h3>${barRows(top,'#16a34a')}</div>
+      <div class="box barchart"><h3><i class="fa-solid fa-umbrella-beach"></i>Top CP pris ce mois</h3>${barRows(topCp,'#d97706')}</div>
     </div>
-    <div class="box barchart" style="margin-top:14px"><h3><i class="fa-solid fa-chart-pie"></i>Répartition par statut (mois)</h3>${barRows(codeRows,'#8B5CF6')}</div>
+    <div class="cols2" style="margin-top:14px">
+      <div class="box barchart"><h3><i class="fa-solid fa-chart-pie"></i>Répartition statuts (mois)</h3>${barRows(codeRows,'#8B5CF6')}</div>
+      <div class="box barchart"><h3><i class="fa-solid fa-file-contract"></i>Répartition contrats</h3>${barRows(Object.entries(perContract).sort((a,b)=>b[1]-a[1]),'#0891b2')}</div>
+    </div>
   </div>`;
+  $('repExport').onclick=()=>{
+    const rows=[
+      ['Métrique','Valeur'],
+      ['Effectif actif',activeStaff.length],
+      ['Jours P+PE',workedCount],
+      ['Congés CP',counts.CP||0],
+      ['RTT',counts.RTT||0],
+      ['Maladie',counts.MAL||0],
+      ['Taux absentéisme (%)',absRate],
+      ['',''],
+      ['Service','Effectif'],
+      ...Object.entries(svc).sort((a,b)=>b[1]-a[1]),
+      ['',''],
+      ['Rôle','Effectif'],
+      ...Object.entries(perRole).sort((a,b)=>b[1]-a[1]),
+    ];
+    const csv=rows.map(r=>r.join(',')).join('\n');
+    const blob=new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'});
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+    a.download=`reporting_${cur.getFullYear()}-${String(cur.getMonth()+1).padStart(2,'0')}.csv`;a.click();
+    flash('CSV exporté');
+  };
 }
 
 /* ===================== VUE PERSONNEL ===================== */
@@ -1459,6 +1548,7 @@ function renderPersonnel(){
           <option value="tous" ${pStatus==='tous'?'selected':''}>Tous</option>
         </select>
         <select id="pdept"><option value="">Service : tous</option>${deptOpts}</select>
+        <button class="btn g" id="pImportCSV" title="Importer des collaborateurs depuis un fichier CSV"><i class="fa-solid fa-file-import"></i> Import CSV</button>
         <button class="btn p" id="pAdd"><i class="fa-solid fa-user-plus"></i> Collaborateur</button>
       </div></div>
     <div class="cards" id="pcards"></div></div>`;
@@ -1486,7 +1576,75 @@ function renderPersonnel(){
   $('pst').onchange=e=>{pStatus=e.target.value;draw();};
   $('pdept').onchange=e=>{pDept=e.target.value;draw();};
   $('pAdd').onclick=()=>openEmpForm(null);
+  $('pImportCSV').onclick=()=>openPersonnelImport();
   draw();
+}
+
+function openPersonnelImport(){
+  $('modal').innerHTML=`
+    <div class="mh">
+      <div class="mh-ic"><i class="fa-solid fa-file-import"></i></div>
+      <div class="mh-ti"><h2>Import collaborateurs CSV</h2>
+        <div class="sub">Colonnes attendues : Prénom, Nom, Service, Rôle, Contrat, Date entrée, Téléphone, Email</div></div>
+      <button class="mh-x" onclick="closeModal()" title="Fermer"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="mb">
+      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:14px;font-size:12.5px;color:#166534;margin-bottom:18px">
+        <b>Format CSV attendu (avec en-tête) :</b><br>
+        <code style="font-size:11px">Prénom,Nom,Service,Rôle,Contrat,Date entrée,Téléphone,Email</code><br>
+        Les colonnes Service, Rôle, Téléphone et Email sont optionnelles. Contrat : CDI, CDD, interim, saisonnier. Date au format AAAA-MM-JJ.
+      </div>
+      <a id="csvTpl" href="#" style="font-size:12px;color:var(--violet);display:inline-block;margin-bottom:16px"><i class="fa-solid fa-download"></i> Télécharger un modèle CSV</a>
+      ${dropzoneHTML('pcsv','Glissez-déposez votre fichier CSV ou cliquez pour parcourir','.csv')}
+      <div id="pimportPreview" style="margin-top:16px"></div>
+    </div>
+    <div class="mact">
+      <button class="btn g" onclick="closeModal()">Annuler</button>
+      <button class="btn p" id="pimportSave" style="display:none"><i class="fa-solid fa-check"></i> Importer</button>
+    </div>`;
+  $('modalbg').classList.add('on');
+  // modèle CSV
+  $('csvTpl').onclick=e=>{
+    e.preventDefault();
+    const tpl='Prénom,Nom,Service,Rôle,Contrat,Date entrée,Téléphone,Email\nJean,Dupont,Réception,Réceptionniste,CDI,2024-01-15,0612345678,j.dupont@hotel.fr\nMarie,Martin,Restauration,Serveuse,CDD,2024-03-01,,';
+    const b=new Blob([tpl],{type:'text/csv;charset=utf-8'});
+    const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='modele_import_collaborateurs.csv';a.click();
+  };
+  let parsed=[];
+  wireDropzone('pcsv',async file=>{
+    const text=await file.text();
+    const lines=text.split(/\r?\n/).filter(l=>l.trim());
+    if(lines.length<2){$('pimportPreview').innerHTML='<div style="color:#dc2626">Fichier vide ou invalide.</div>';return;}
+    parsed=[];
+    const CTYPES=['CDI','CDD','interim','saisonnier'];
+    lines.slice(1).forEach((line,i)=>{
+      const parts=line.split(',').map(s=>s.trim().replace(/^"|"$/g,''));
+      const [fn,ln,dept,role,ct,hd,ph,em]=parts;
+      if(!fn||!ln) return; // skip vide
+      parsed.push({first_name:fn,last_name:ln,department:dept||null,role:role||null,
+        contract_type:CTYPES.includes(ct)?ct:'CDI',hire_date:hd||null,
+        phone:ph||null,email:em||null,active:true});
+    });
+    if(!parsed.length){$('pimportPreview').innerHTML='<div style="color:#dc2626">Aucune ligne valide trouvée (Prénom et Nom requis).</div>';return;}
+    $('pimportPreview').innerHTML=`<div style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--ink2)">${parsed.length} collaborateur(s) à importer :</div>
+      <table class="tbl" style="font-size:12px"><thead><tr><th>Prénom</th><th>Nom</th><th>Service</th><th>Rôle</th><th>Contrat</th><th>Entrée</th></tr></thead><tbody>
+      ${parsed.map(p=>`<tr><td>${p.first_name}</td><td>${p.last_name}</td><td>${p.department||'—'}</td><td>${p.role||'—'}</td><td>${p.contract_type}</td><td>${p.hire_date||'—'}</td></tr>`).join('')}
+      </tbody></table>`;
+    $('pimportSave').style.display='';
+    $('pimportSave').textContent=`Importer ${parsed.length} collaborateur(s)`;
+  });
+  $('pimportSave').onclick=async()=>{
+    if(!parsed.length) return;
+    $('pimportSave').disabled=true;
+    let ok=0, err=0;
+    for(const p of parsed){
+      try{const c=await BE.addEmployee(hotelId,p);staff.push(c);ok++;}
+      catch(e){console.error('import err',e);err++;}
+    }
+    closeModal();
+    flash(`${ok} collaborateur(s) importé(s)${err?` · ${err} erreur(s)`:''}`);
+    renderPersonnel();
+  };
 }
 
 /* ===================== VUE CONTRATS (sous-onglets) ===================== */
