@@ -888,6 +888,9 @@ async function start(){
     $('saveBtn').onclick=saveChanges;
     $('cancelBtn').onclick=cancelChanges;
     await loadHotel();      // charge le rôle de l'utilisateur AVANT d'afficher la shell
+    // Mode kiosque QR : ?mode=clock&eid=<employee_id>
+    const _qp=new URLSearchParams(location.search);
+    if(_qp.get('mode')==='clock'){await renderClockKiosk(_qp.get('eid')); return;}
     renderShell();
   }catch(e){showFatal(e);}
 }
@@ -1473,8 +1476,12 @@ function renderPersonnel(){
         <span class="tag ${s.contract_type==='CDI'?'green':'gray'}">${s.contract_type||'CDI'}</span>
         ${s.hire_date?`<span class="tag gray">depuis ${s.hire_date}</span>`:''}
         ${!s.active&&s.departure_date?`<span class="tag red">parti ${s.departure_date}</span>`:''}
+      </div>
+      <div style="padding:8px 16px 14px;display:flex;justify-content:flex-end">
+        <button class="btn g qr-btn" data-qreid="${s.id}" title="QR Code pointage"><i class="fa-solid fa-qrcode"></i> QR Pointage</button>
       </div></div>`).join('')||'<div style="padding:30px;text-align:center;color:var(--muted);grid-column:1/-1">Aucun collaborateur ne correspond.</div>';
-    $('pcards').querySelectorAll('.card').forEach(c=>c.onclick=()=>openFiche(c.dataset.emp));};
+    $('pcards').querySelectorAll('.card').forEach(c=>c.onclick=()=>openFiche(c.dataset.emp));
+    $('pcards').querySelectorAll('.qr-btn').forEach(b=>b.onclick=e=>{e.stopPropagation();showQRCode(staff.find(s=>s.id===b.dataset.qreid));});};
   $('pq').oninput=e=>{pSearch=e.target.value;draw();};
   $('pst').onchange=e=>{pStatus=e.target.value;draw();};
   $('pdept').onchange=e=>{pDept=e.target.value;draw();};
@@ -3570,6 +3577,122 @@ async function exportOrgPNG(){
     flash('PNG exporté');
   }catch(e){flash('Erreur export : '+e.message);}
 }
+
+/* ===================== QR CODE POINTAGE KIOSQUE ===================== */
+async function showQRCode(emp){
+  if(!emp) return;
+  const url=`${location.origin}${location.pathname}?mode=clock&eid=${emp.id}`;
+  $('modal').innerHTML=`
+    <div class="mh">
+      <div class="mh-ic"><i class="fa-solid fa-qrcode"></i></div>
+      <div class="mh-ti"><h2>QR Pointage</h2><div class="sub">${emp.first_name} ${emp.last_name}</div></div>
+      <button class="mh-x" onclick="closeModal()" title="Fermer"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="mb" style="text-align:center;padding:32px 24px">
+      <div id="qrdiv" style="display:inline-block;padding:16px;background:#fff;border:1px solid var(--line);border-radius:16px;margin-bottom:20px"></div>
+      <div style="font-size:13px;color:var(--ink2);margin-bottom:8px">Affichez ce QR code à la réception.<br>Le salarié le scanne avec son téléphone pour pointer.</div>
+      <div style="font-size:11px;color:var(--muted);word-break:break-all;max-width:380px;margin:0 auto;background:#f9f9f7;padding:8px 12px;border-radius:8px">${url}</div>
+      <div style="margin-top:18px;display:flex;gap:10px;justify-content:center">
+        <button class="btn g" id="qrPrint"><i class="fa-solid fa-print"></i> Imprimer</button>
+        <button class="btn p" onclick="closeModal()">Fermer</button>
+      </div>
+    </div>`;
+  $('modalbg').classList.add('on');
+  await loadScript('https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js');
+  new QRCode(document.getElementById('qrdiv'),{text:url,width:240,height:240,colorDark:'#1a1a2e',colorLight:'#ffffff'});
+  $('qrPrint').onclick=()=>{
+    const w=window.open('','_blank');
+    w.document.write(`<html><head><title>QR Pointage – ${emp.first_name} ${emp.last_name}</title><style>body{font-family:sans-serif;text-align:center;padding:40px}h2{margin-bottom:4px}p{color:#666;font-size:14px}img{margin:20px auto;display:block}</style></head><body><h2>${emp.first_name} ${emp.last_name}</h2><p>${emp.role||''} · ${emp.department||''}</p><img src="${document.querySelector('#qrdiv img')?.src||''}" width="240" height="240"><p style="font-size:11px;color:#999;margin-top:16px">Scanner pour pointer — ${url}</p></body></html>`);
+    w.document.close(); setTimeout(()=>{w.print();},600);
+  };
+}
+
+async function renderClockKiosk(eid){
+  // Full-screen clock-in/out interface for a tablet/phone scan
+  const emp=staff.find(s=>s.id===eid);
+  if(!emp){document.body.innerHTML=`<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;color:#dc2626;font-size:18px">Collaborateur introuvable.</div>`;return;}
+  document.body.innerHTML=`
+    <div id="kiosk" style="min-height:100vh;background:linear-gradient(135deg,#6d28d9 0%,#4f46e5 100%);display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:'Inter',sans-serif;padding:24px;box-sizing:border-box">
+      <div style="background:#fff;border-radius:24px;padding:40px 36px;max-width:420px;width:100%;text-align:center;box-shadow:0 25px 60px rgba(0,0,0,.25)">
+        <div id="kavatar" style="width:80px;height:80px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:28px;font-weight:700;color:#fff;margin-bottom:16px;background:${avColor(emp.last_name)}">${initials(emp.first_name,emp.last_name)}</div>
+        <h2 style="margin:0 0 4px;font-size:22px;color:#1a1a2e">${emp.first_name} ${emp.last_name}</h2>
+        <div style="font-size:14px;color:#6b7280;margin-bottom:8px">${emp.role||''} · ${emp.department||''}</div>
+        <div id="kclock" style="font-size:42px;font-weight:800;color:#6d28d9;letter-spacing:-1px;margin:20px 0 4px">--:--</div>
+        <div id="kdate" style="font-size:14px;color:#9ca3af;margin-bottom:28px"></div>
+        <div id="kstatus" style="margin-bottom:24px;min-height:24px"></div>
+        <div id="kbtns" style="display:flex;flex-direction:column;gap:12px">
+          <button id="kclkin" style="width:100%;padding:18px;border:none;border-radius:16px;background:#6d28d9;color:#fff;font-size:18px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px">
+            <i class="fa-solid fa-arrow-right-to-bracket" style="font-size:20px"></i> Arrivée
+          </button>
+          <button id="kclkout" style="width:100%;padding:18px;border:none;border-radius:16px;background:#f3f4f6;color:#374151;font-size:18px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px" disabled>
+            <i class="fa-solid fa-arrow-right-from-bracket" style="font-size:20px"></i> Départ
+          </button>
+        </div>
+        <div id="kmsg" style="margin-top:20px;min-height:32px;font-size:14px"></div>
+        <a href="${location.pathname}" style="display:block;margin-top:28px;font-size:12px;color:#d1d5db;text-decoration:none">← Retour à l'application</a>
+      </div>
+    </div>`;
+  // add FA icons CDN if not loaded
+  if(!document.querySelector('link[href*="fontawesome"]')){
+    const l=document.createElement('link'); l.rel='stylesheet';
+    l.href='https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css'; document.head.appendChild(l);
+  }
+  // live clock
+  const tickClock=()=>{
+    const n=new Date();
+    const kc=$('kclock'); if(kc) kc.textContent=n.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+    const kd=$('kdate'); if(kd) kd.textContent=n.toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  };
+  tickClock(); setInterval(tickClock,10000);
+  // load today's clockings
+  const today=isoToday();
+  let cks=[];
+  try{ cks=await BE.listClockings(hotelId,today); }catch(e){}
+  const myCks=cks.filter(c=>c.employee_id===eid);
+  const openCk=myCks.find(c=>!c.clock_out_ts);
+  updateKioskUI(openCk);
+  function updateKioskUI(openCk){
+    const st=$('kstatus'); const ki=$('kclkin'); const ko=$('kclkout');
+    if(!st||!ki||!ko) return;
+    if(openCk){
+      const since=timeOnly(openCk.clock_in_ts);
+      st.innerHTML=`<span style="background:#d1fae5;color:#065f46;padding:6px 14px;border-radius:20px;font-size:13px;font-weight:600"><i class="fa-solid fa-circle" style="font-size:8px;vertical-align:middle;margin-right:6px;color:#10b981"></i>En service depuis ${since}</span>`;
+      ki.disabled=true; ki.style.opacity='0.4';
+      ko.disabled=false; ko.style.background='#dc2626'; ko.style.color='#fff';
+    } else if(myCks.length>0){
+      const lastOut=myCks[myCks.length-1];
+      st.innerHTML=`<span style="background:#f3f4f6;color:#6b7280;padding:6px 14px;border-radius:20px;font-size:13px">Pointé jusqu'à ${timeOnly(lastOut.clock_out_ts)} · total ${fmtMin(myCks.reduce((s,c)=>s+(c.clock_out_ts?minutesBetween(c.clock_in_ts,c.clock_out_ts)-(c.break_minutes||0):0),0))}</span>`;
+      ki.disabled=false; ki.style.opacity='1';
+      ko.disabled=true; ko.style.background='#f3f4f6'; ko.style.color='#374151';
+    } else {
+      st.innerHTML='<span style="color:#9ca3af;font-size:13px">Pas encore pointé aujourd\'hui</span>';
+      ki.disabled=false; ki.style.opacity='1';
+      ko.disabled=true; ko.style.background='#f3f4f6'; ko.style.color='#374151';
+    }
+  }
+  function showKMsg(txt,ok){
+    const m=$('kmsg'); if(!m)return;
+    m.innerHTML=`<span style="color:${ok?'#059669':'#dc2626'};font-weight:600">${txt}</span>`;
+    setTimeout(()=>{if(m)m.innerHTML='';},4000);
+  }
+  $('kclkin').onclick=async()=>{
+    $('kclkin').disabled=true;
+    const ts=new Date().toISOString();
+    try{
+      const c=await BE.addClocking(hotelId,{employee_id:eid,day:today,clock_in_ts:ts,clock_out_ts:null,break_minutes:0,source:'qr'});
+      myCks.push(c); updateKioskUI(c); showKMsg('Arrivée enregistrée ✓',true);
+    }catch(e){showKMsg('Erreur : '+e.message,false);$('kclkin').disabled=false;}
+  };
+  $('kclkout').onclick=async()=>{
+    $('kclkout').disabled=true;
+    const ts=new Date().toISOString();
+    try{
+      await BE.updateClocking(openCk.id,{clock_out_ts:ts});
+      openCk.clock_out_ts=ts; updateKioskUI(null); showKMsg('Départ enregistré ✓',true);
+    }catch(e){showKMsg('Erreur : '+e.message,false);$('kclkout').disabled=false;}
+  };
+}
+function fmtMin(m){const h=Math.floor(m/60),mn=Math.round(m%60);return h>0?`${h}h${mn>0?mn.toString().padStart(2,'0'):''}`:mn+'min';}
 
 /* ===================== SUIVI DU TEMPS ===================== */
 let trMonth=new Date().toISOString().slice(0,7); // YYYY-MM
