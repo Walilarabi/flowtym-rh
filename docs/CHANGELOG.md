@@ -55,9 +55,31 @@ Matrice de permissions, filtrage onglets, fiche restreinte, badge rôle, bloc Ac
 
 11 onglets, édition en masse planning, 7 tables RH avec RLS, migrations rejouables. 56 tests.
 
-## Roadmap restante
+## Roadmap restante (blueprint v2 — juin 2026)
 
-- **Phase 3** : Yousign + state machine signature.
-- **Phase 4** : Attestation mutuelle, page d'invitation utilisateurs, durcissement RLS par rôle.
-- Suivi du temps, Paie, Recrutement : modules consommateurs du Pointage.
-- Self check-in QR pour les collaborateurs.
+> Ordre de priorité commerciale : Absences/CP-RTT → Recrutement → Paie → Portail salarié
+
+### Phase 3
+- **3A** — Signature électronique Yousign (table `signature_requests`, machine d'états, webhooks)
+- **3B** — Gestion des absences et compteurs CP/RTT (workflow approbation, soldes, calendrier équipe)
+- **3C** — Recrutement complet : pipeline Kanban candidats + transformation one-click candidat → salarié
+
+### Phase 4
+- **4A** — Éléments variables de paie + exports configurables par logiciel de paie hôtel
+- **4B** — Formations obligatoires et échéances (catalogue, matrice salariés × formations, alertes)
+- **4C** — Visites médicales périodiques (calcul automatique prochaine visite, alertes)
+- **4D** — Matériel remis aux salariés (inventaire, décharges PDF, alerte retour à la sortie)
+- **4E** — Organigramme hôtel (arborescence interactive, export PNG/PDF, basé sur `manager_id`)
+
+### Phase 5
+- Portail salarié **salarie.flowtym.com** — magic-link, planning, absences, documents, formations, matériel
+
+### Phase 6
+- Self check-in QR pour les collaborateurs
+- Notifications push / email événements clés
+
+### Transversal
+- Attestation mutuelle, invitation utilisateurs, conservation légale paramétrable par pays
+- Durcissement RLS par rôle
+
+Voir `docs/BLUEPRINT.md` pour le détail complet.
