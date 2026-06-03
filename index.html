@@ -302,6 +302,13 @@ tr.totals td.lab{text-align:right;padding-right:10px;color:var(--violet-d)}
 .file-chosen .fc-size{font-size:11.5px;color:var(--muted);white-space:nowrap;flex-shrink:0}
 /* Planning row drag */
 .cDrag{width:24px;padding:0 4px!important;background:#fafaf8!important}
+/* Permission toggle */
+.tog-wrap{display:inline-flex;align-items:center;cursor:pointer}
+.tog-wrap input{display:none}
+.tog-sw{width:34px;height:20px;border-radius:10px;background:#d1d5db;transition:.2s;position:relative;display:inline-block}
+.tog-sw::after{content:'';position:absolute;left:2px;top:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:.2s}
+.tog-wrap input:checked+.tog-sw{background:var(--violet)}
+.tog-wrap input:checked+.tog-sw::after{left:16px}
 tr[data-emprow]{cursor:default}
 tr[data-emprow].row-dragging{opacity:.4}
 tr[data-emprow].row-drag-over td{box-shadow:inset 0 2px 0 var(--violet)!important}
@@ -359,19 +366,45 @@ window.addEventListener('unhandledrejection',e=>showFatal(e.reason));
 
 /* ---------- constantes ---------- */
 const CODES=[
-  ['P','Présent','#E8F5E9','#1b5e20','worked'],
-  ['CP','Congé payé','#C6EFCE','#0F5132','paid'],
-  ['RTT','RTT','#BDD7EE','#1F4E78','abs'],
-  ['MAL','Maladie','#FFC7CE','#9C0006','abs'],
-  ['MAT','Mat./Pat.','#E1D5F0','#5B2A86','abs'],
-  ['CSS','Sans solde','#D9D9D9','#3F3F3F','abs'],
-  ['AE','Except.','#FFE699','#7F6000','abs'],
-  ['F','Férié','#EDEDED','#6b7280','holiday'],
-  ['PAT','Paternité','#E8E0F5','#4A2080','abs'],
-  ['ABS','Abs. injust.','#FFD9D9','#7B0000','abs'],
-  ['REC','Récupération','#D4F0FC','#0C4A6E','abs'],
-  ['FORM','Formation','#FEF3C7','#92400E','abs'],
+  ['P', 'Présent',        '#E8F5E9','#1b5e20','worked'],
+  ['PE','Présence Extra', '#FFF3E0','#E65100','worked'],
+  ['CP','Congé payé',     '#C6EFCE','#0F5132','paid'],
+  ['RTT','RTT',           '#BDD7EE','#1F4E78','abs'],
+  ['MAL','Maladie',       '#FFC7CE','#9C0006','abs'],
+  ['MAT','Mat./Pat.',     '#E1D5F0','#5B2A86','abs'],
+  ['CSS','Sans solde',    '#D9D9D9','#3F3F3F','abs'],
+  ['AE','Except.',        '#FFE699','#7F6000','abs'],
+  ['F','Férié',           '#EDEDED','#6b7280','holiday'],
+  ['PAT','Paternité',     '#E8E0F5','#4A2080','abs'],
+  ['ABS','Abs. injust.',  '#FFD9D9','#7B0000','abs'],
+  ['REC','Récupération',  '#D4F0FC','#0C4A6E','abs'],
+  ['FORM','Formation',    '#FEF3C7','#92400E','abs'],
 ];
+// Apply localStorage color overrides (called after hotel selection)
+function applyCustomColors(hid){
+  const s=JSON.parse(localStorage.getItem('fty_colors_'+hid)||'{}');
+  Object.entries(s).forEach(([code,{bg,fg}])=>{
+    const ci=CODES.findIndex(c=>c[0]===code); if(ci<0)return;
+    if(bg){CODES[ci][2]=bg;} if(fg){CODES[ci][3]=fg;}
+  });
+  CODES.forEach(c=>{ CMAP[c[0]].bg=c[2]; CMAP[c[0]].fg=c[3]; });
+}
+function saveCustomColors(hid){
+  const s={};
+  CODES.forEach(c=>{ s[c[0]]={bg:c[2],fg:c[3]}; });
+  localStorage.setItem('fty_colors_'+hid, JSON.stringify(s));
+}
+// Default PERMS snapshot for reset
+const DEFAULT_PERMS_JSON = null; // filled after PERMS defined
+function applyCustomPerms(hid){
+  const s=JSON.parse(localStorage.getItem('fty_perms_'+hid)||'{}');
+  Object.entries(s).forEach(([role,ov])=>{ if(PERMS[role]) Object.assign(PERMS[role],ov); });
+}
+function saveCustomPerms(hid){
+  const s={};
+  Object.entries(PERMS).forEach(([role,p])=>{ s[role]={ficheFull:p.ficheFull,manageUsers:p.manageUsers}; });
+  localStorage.setItem('fty_perms_'+hid, JSON.stringify(s));
+}
 const CMAP={}; CODES.forEach(c=>CMAP[c[0]]={code:c[0],label:c[1],bg:c[2],fg:c[3],cat:c[4]});
 const MONTHS=['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
 const WD=['D','L','Ma','Me','J','V','S'];
@@ -963,6 +996,8 @@ async function loadHotel(){
     BE.listEmployees(hotelId),
     BE.listAbsenceTypes()
   ]);
+  applyCustomColors(hotelId);
+  applyCustomPerms(hotelId);
   fillFilters();
   await loadMonth();
 }
@@ -1036,7 +1071,7 @@ function render(){
       lastDept=deptName;
       h+=`<tr class="dept-sep"><td colspan="${nd+7}" style="background:#f1f0fb;font-size:11px;font-weight:700;color:var(--violet-d);padding:4px 10px;letter-spacing:.05em;text-transform:uppercase">${deptName||'Sans service'}</td></tr>`;
     }
-    h+=`<tr draggable="true" data-emprow="${s.id}"${!s.active?' style="opacity:.55"':''}>`
+    h+=`<tr data-emprow="${s.id}"${!s.active?' style="opacity:.55"':''}>`
       +`<td class="stickL cDrag dh" title="Réordonner"><i class="fa-solid fa-grip-vertical" style="color:var(--muted);font-size:11px;cursor:grab"></i></td>`
       +`<td class="stickL cEmp"><div class="emp" data-emp="${s.id}"><div class="av" style="background:${avColor(s.last_name)}">${initials(s.first_name,s.last_name)}</div>`
       +`<div><div class="nm">${s.first_name} ${s.last_name}${!s.active?' <span style="font-size:9.5px;color:var(--red);font-weight:700;background:var(--red-bg);padding:1px 5px;border-radius:5px;margin-left:4px">PARTI</span>':''}</div><div class="sub">${s.department||'—'} · ${s.contract_type||'CDI'}</div></div></div></td>`
@@ -1079,51 +1114,57 @@ window.addEventListener('resize',applyStickyWidths);
 let _rowDragId=null, _rowDragOver=null;
 function wirePlanningRowDrag(){
   const g=$('grid'); if(!g)return;
+
+  // Activate draggable only on mousedown from the handle — prevents conflicts with cell selection
+  g.querySelectorAll('.dh').forEach(dh=>{
+    const tr=dh.closest('tr[data-emprow]'); if(!tr)return;
+    dh.addEventListener('mousedown',()=>{ tr.draggable=true; });
+  });
+
   g.querySelectorAll('tr[data-emprow]').forEach(tr=>{
     tr.addEventListener('dragstart',e=>{
-      // Only allow drag from handle column
-      if(!e.target.closest('.dh')){e.preventDefault();return;}
+      if(!tr.draggable){e.preventDefault();return;}
       _rowDragId=tr.dataset.emprow;
       e.dataTransfer.effectAllowed='move';
-      tr.classList.add('row-dragging');
+      e.dataTransfer.setData('text/plain',_rowDragId);
+      setTimeout(()=>tr.classList.add('row-dragging'),0);
     });
     tr.addEventListener('dragend',()=>{
+      tr.draggable=false;
       tr.classList.remove('row-dragging');
       g.querySelectorAll('.row-drag-over').forEach(x=>x.classList.remove('row-drag-over'));
-    });
-    tr.addEventListener('dragover',e=>{
-      if(!_rowDragId||_rowDragId===tr.dataset.emprow)return;
-      e.preventDefault(); e.dataTransfer.dropEffect='move';
-      g.querySelectorAll('.row-drag-over').forEach(x=>x.classList.remove('row-drag-over'));
-      tr.classList.add('row-drag-over');
-      _rowDragOver=tr.dataset.emprow;
-    });
-    tr.addEventListener('drop',e=>{
-      e.preventDefault();
-      if(!_rowDragId||!_rowDragOver||_rowDragId===_rowDragOver)return;
-      const fromIdx=visibleRows.findIndex(s=>s.id===_rowDragId);
-      const toIdx=visibleRows.findIndex(s=>s.id===_rowDragOver);
-      if(fromIdx<0||toIdx<0)return;
-      const moved=visibleRows.splice(fromIdx,1)[0];
-      visibleRows.splice(toIdx,0,moved);
-      // Assign new planning_sort_order within each dept group
-      const byDept=new Map();
-      visibleRows.forEach((s,i)=>{
-        const d=s.department||'';
-        if(!byDept.has(d))byDept.set(d,[]);
-        byDept.get(d).push({s,i});
-      });
-      const updates=[];
-      byDept.forEach(rows=>{
-        rows.forEach(({s},pos)=>{
-          if(s.planning_sort_order!==pos){s.planning_sort_order=pos;updates.push(s);}
-        });
-      });
       _rowDragId=null; _rowDragOver=null;
-      render();
-      // Persist asynchronously
-      savePlanningOrder(updates);
     });
+  });
+
+  // dragover/drop on the whole grid to catch events on child cells
+  g.addEventListener('dragover',e=>{
+    if(!_rowDragId)return;
+    const tgt=e.target.closest('tr[data-emprow]');
+    if(!tgt||tgt.dataset.emprow===_rowDragId)return;
+    e.preventDefault(); e.dataTransfer.dropEffect='move';
+    if(_rowDragOver!==tgt.dataset.emprow){
+      g.querySelectorAll('.row-drag-over').forEach(x=>x.classList.remove('row-drag-over'));
+      tgt.classList.add('row-drag-over');
+      _rowDragOver=tgt.dataset.emprow;
+    }
+  });
+
+  g.addEventListener('drop',e=>{
+    e.preventDefault();
+    g.querySelectorAll('.row-drag-over').forEach(x=>x.classList.remove('row-drag-over'));
+    if(!_rowDragId||!_rowDragOver||_rowDragId===_rowDragOver)return;
+    const fromIdx=visibleRows.findIndex(s=>s.id===_rowDragId);
+    const toIdx=visibleRows.findIndex(s=>s.id===_rowDragOver);
+    if(fromIdx<0||toIdx<0)return;
+    visibleRows.splice(toIdx,0,visibleRows.splice(fromIdx,1)[0]);
+    const byDept=new Map();
+    visibleRows.forEach(s=>{ const d=s.department||''; if(!byDept.has(d))byDept.set(d,[]); byDept.get(d).push(s); });
+    const updates=[];
+    byDept.forEach(rows=>rows.forEach((s,pos)=>{ if(s.planning_sort_order!==pos){s.planning_sort_order=pos;updates.push(s);} }));
+    _rowDragId=null; _rowDragOver=null;
+    render();
+    savePlanningOrder(updates);
   });
 }
 async function savePlanningOrder(updates){
@@ -1883,24 +1924,30 @@ async function renderDocuments(){
 
 /* ===================== VUE CONFIGURATION ===================== */
 async function renderConfig(){
+  const isAdmin=canManageUsers();
   $('view').innerHTML=`<div class="page">
     <div class="phead"><div><h1>Paramètres</h1><div class="sub">Référentiels et accès · ${hotels.find(h=>h.id===hotelId)?.name||''}</div></div></div>
 
     <div class="box" style="margin-bottom:14px"><h3><i class="fa-solid fa-user-shield"></i>Accès et permissions</h3>
       <div id="accBox">Chargement…</div>
-      <div style="margin-top:14px;font-size:12px;color:var(--ink2);line-height:1.6">
-        <b style="color:var(--ink)">Matrice des permissions par rôle</b><br>
-        <table class="tbl" style="margin-top:8px;font-size:11.5px">
-          <thead><tr><th>Rôle</th><th>Onglets accessibles</th><th>Fiche collaborateur</th><th>Gestion des accès</th></tr></thead>
-          <tbody>
-            ${Object.entries(PERMS).map(([role,p])=>`<tr>
-              <td><b>${ROLE_LABELS[role]||role}</b></td>
-              <td>${p.tabs==='all'?'<span class="ok">Tous</span>':p.tabs.map(t=>{const all=TABS.flatMap(g=>g[1]);const f=all.find(x=>x[0]===t);return f?f[1]:t;}).join(' · ')}</td>
-              <td>${p.ficheFull?'<span class="ok">Complète (docs, adresse, contact urgence)</span>':'Limitée (nom, poste, téléphone, email seulement)'}</td>
-              <td>${p.manageUsers?'<span class="ok">Oui</span>':'Non'}</td>
-            </tr>`).join('')}
-          </tbody>
+      <div style="margin-top:18px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <b style="font-size:13px;color:var(--ink)">Matrice des permissions par rôle</b>
+          ${isAdmin?`<button class="btn g" id="permReset" style="font-size:11.5px;padding:5px 10px"><i class="fa-solid fa-rotate-left"></i> Réinitialiser</button>`:''}
+        </div>
+        <table class="tbl" style="font-size:11.5px" id="permMatrix">
+          <thead><tr><th>Rôle</th><th>Onglets</th><th>Fiche complète</th><th>Gestion accès</th></tr></thead>
+          <tbody id="permRows"></tbody>
         </table>
+      </div>
+    </div>
+
+    <div class="box" style="margin-bottom:14px"><h3><i class="fa-solid fa-palette"></i>Couleurs des statuts du planning</h3>
+      <div style="font-size:12.5px;color:var(--ink2);margin-bottom:12px">Personnalisez la couleur de fond et de texte de chaque statut. Cliquez sur un swatch pour modifier.</div>
+      <div id="colorsGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px"></div>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button class="btn p" id="saveColors"><i class="fa-solid fa-check"></i> Enregistrer les couleurs</button>
+        <button class="btn g" id="resetColors"><i class="fa-solid fa-rotate-left"></i> Réinitialiser</button>
       </div>
     </div>
 
@@ -1921,9 +1968,82 @@ async function renderConfig(){
     </div>
     <div class="box" style="margin-top:14px"><h3><i class="fa-solid fa-shield-halved"></i>Sécurité & multi-hôtel</h3>
       <div style="font-size:13px;color:var(--ink2);line-height:1.6">
-        Toutes les tables RH disposent d'une RLS active. Vous ne voyez et ne modifiez que les données de l'hôtel sélectionné. Les codes de statut du planning (P, CP, RTT, MAL, MAT, CSS, AE, F) sont fixes et partagés. Le contrôle des accès par rôle est appliqué côté frontend ET côté base via des fonctions <code>SECURITY DEFINER</code>.
+        Toutes les tables RH disposent d'une RLS active. Vous ne voyez et ne modifiez que les données de l'hôtel sélectionné. Le contrôle des accès par rôle est appliqué côté frontend ET côté base via des fonctions <code>SECURITY DEFINER</code>.
       </div></div>
   </div>`;
+
+  // === Matrice permissions ===
+  const drawPermMatrix=()=>{
+    const allTabs=TABS.flatMap(g=>g[1]).filter(t=>!t[3]);
+    $('permRows').innerHTML=Object.entries(PERMS).map(([role,p])=>{
+      const tabLabel=p.tabs==='all'?'<span class="ok">Tous</span>':p.tabs.map(t=>{const f=allTabs.find(x=>x[0]===t);return f?f[1]:t;}).join(' · ');
+      const mkTog=(field,val)=>isAdmin?`<label class="tog-wrap"><input type="checkbox" class="perm-tog" data-role="${role}" data-field="${field}" ${val?'checked':''}><span class="tog-sw"></span></label>`:(val?'<span class="ok">Oui</span>':'<span style="color:var(--muted)">Non</span>');
+      return `<tr><td><b>${ROLE_LABELS[role]||role}</b></td><td style="font-size:11px">${tabLabel}</td><td>${mkTog('ficheFull',p.ficheFull)}</td><td>${mkTog('manageUsers',p.manageUsers)}</td></tr>`;
+    }).join('');
+    if(isAdmin){
+      $('permRows').querySelectorAll('.perm-tog').forEach(cb=>{
+        cb.onchange=()=>{
+          PERMS[cb.dataset.role][cb.dataset.field]=cb.checked;
+          saveCustomPerms(hotelId);
+        };
+      });
+      $('permReset')?.addEventListener('click',()=>{
+        if(!confirm('Réinitialiser toutes les permissions aux valeurs par défaut ?'))return;
+        localStorage.removeItem('fty_perms_'+hotelId);
+        location.reload();
+      });
+    }
+  };
+  drawPermMatrix();
+
+  // === Grille couleurs statuts ===
+  const DEFAULT_COLORS={};
+  const ORIG=[['P','#E8F5E9','#1b5e20'],['PE','#FFF3E0','#E65100'],['CP','#C6EFCE','#0F5132'],
+    ['RTT','#BDD7EE','#1F4E78'],['MAL','#FFC7CE','#9C0006'],['MAT','#E1D5F0','#5B2A86'],
+    ['CSS','#D9D9D9','#3F3F3F'],['AE','#FFE699','#7F6000'],['F','#EDEDED','#6b7280'],
+    ['PAT','#E8E0F5','#4A2080'],['ABS','#FFD9D9','#7B0000'],['REC','#D4F0FC','#0C4A6E'],['FORM','#FEF3C7','#92400E']];
+  ORIG.forEach(([code,bg,fg])=>DEFAULT_COLORS[code]={bg,fg});
+  $('colorsGrid').innerHTML=CODES.map(c=>`
+    <div class="color-row" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:#fff">
+      <span style="background:${c[2]};color:${c[3]};padding:3px 10px;border-radius:6px;font-weight:700;font-size:12px;min-width:42px;text-align:center">${c[0]}</span>
+      <span style="flex:1;font-size:12.5px;color:var(--ink2)">${c[1]}</span>
+      <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted)">Fond<input type="color" class="col-bg" data-code="${c[0]}" value="${c[2]}" style="width:28px;height:28px;border:none;padding:0;cursor:pointer;border-radius:5px"></label>
+      <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted)">Texte<input type="color" class="col-fg" data-code="${c[0]}" value="${c[3]}" style="width:28px;height:28px;border:none;padding:0;cursor:pointer;border-radius:5px"></label>
+    </div>`).join('');
+
+  // Live preview when color changes
+  $('colorsGrid').querySelectorAll('input[type=color]').forEach(inp=>{
+    inp.oninput=()=>{
+      const code=inp.dataset.code;
+      const row=inp.closest('.color-row');
+      const bg=row.querySelector('.col-bg').value;
+      const fg=row.querySelector('.col-fg').value;
+      const badge=row.querySelector('span');
+      badge.style.background=bg; badge.style.color=fg;
+    };
+  });
+
+  $('saveColors').onclick=()=>{
+    $('colorsGrid').querySelectorAll('.color-row').forEach(row=>{
+      const code=row.querySelector('.col-bg').dataset.code;
+      const bg=row.querySelector('.col-bg').value;
+      const fg=row.querySelector('.col-fg').value;
+      const ci=CODES.findIndex(c=>c[0]===code); if(ci<0)return;
+      CODES[ci][2]=bg; CODES[ci][3]=fg;
+      CMAP[code].bg=bg; CMAP[code].fg=fg;
+    });
+    saveCustomColors(hotelId);
+    flash('Couleurs enregistrées');
+    render(); // Refresh planning if open
+  };
+
+  $('resetColors').onclick=()=>{
+    if(!confirm('Réinitialiser toutes les couleurs aux valeurs par défaut ?'))return;
+    localStorage.removeItem('fty_colors_'+hotelId);
+    ORIG.forEach(([code,bg,fg])=>{ const ci=CODES.findIndex(c=>c[0]===code); if(ci<0)return; CODES[ci][2]=bg; CODES[ci][3]=fg; CMAP[code].bg=bg; CMAP[code].fg=fg; });
+    flash('Couleurs réinitialisées');
+    renderConfig();
+  };
 
   // === Bloc Accès et permissions ===
   try{
