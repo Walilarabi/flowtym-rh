@@ -371,6 +371,10 @@ async function makeRealBE(){
     async deleteRole(id){const {error}=await sb.from('staff_roles').delete().eq('id',id);must(error,"Suppression rôle");},
     async listAccess(h){const {data,error}=await sb.rpc('rh_list_users_for_hotel',{p_hotel:h});must(error,"Liste des accès");return data||[];},
     async updateAccess(h,user_id,role){const {error}=await sb.rpc('rh_update_user_role',{p_hotel:h,p_user_id:user_id,p_role:role});must(error,"Modification du rôle");},
+    async listClockings(h,day){const {data,error}=await sb.from('staff_clockings').select('*').eq('hotel_id',h).eq('day',day).order('clock_in_ts');must(error,"Liste des pointages");return data||[];},
+    async addClocking(h,payload){const {data,error}=await sb.from('staff_clockings').insert({hotel_id:h,...payload}).select('*').single();must(error,"Ajout pointage");return data;},
+    async updateClocking(id,patch){const {data,error}=await sb.from('staff_clockings').update(patch).eq('id',id).select('*').single();must(error,"Mise à jour pointage");return data;},
+    async deleteClocking(id){const {error}=await sb.from('staff_clockings').delete().eq('id',id);must(error,"Suppression pointage");},
     async signOut(){await sb.auth.signOut();}
   };
 }
@@ -389,7 +393,7 @@ function makeTestBE(){
     {id:'e5',hotel_id:'h2',first_name:'Marie',last_name:'Dubois',role:'Réceptionniste',department:'Réception',contract_type:'CDI',hire_date:'2020-05-01',rest_days:[0,6],phone:'',email:'',address:'',emergency_contact:'',active:true},
     {id:'e6',hotel_id:'h1',first_name:'Ancien',last_name:'Bouchard',role:'Réceptionniste',department:'Réception',contract_type:'CDD',hire_date:'2019-01-01',rest_days:[],phone:'',email:'',address:'',emergency_contact:'',active:false,departure_date:(()=>{const d=new Date();return new Date(d.getFullYear(),d.getMonth()-2,15).toISOString().slice(0,10);})()},
   ];
-  let planning=[]; let docs=[];
+  let planning=[]; let docs=[]; let clockings=[];
   const k=(eid,day)=>eid+'|'+day;
   return {isTest:true,
     async listHotels(){return hotels;},
@@ -420,6 +424,10 @@ function makeTestBE(){
       {user_id:'u2',email:'reception@flowtym.local',full_name:'Sophie Réception',role:'reception',is_default:false,granted_at:'2025-02-15T00:00:00Z'}
     ];},
     async updateAccess(h,user_id,role){/* no-op en test */ return; },
+    async listClockings(h,day){return clockings.filter(c=>c.hotel_id===h && c.day===day).sort((a,b)=>a.clock_in_ts.localeCompare(b.clock_in_ts));},
+    async addClocking(h,p){const c={id:'c'+Date.now()+Math.random().toString(36).slice(2,6),hotel_id:h,...p,created_at:new Date().toISOString(),updated_at:new Date().toISOString()};clockings.push(c);return c;},
+    async updateClocking(id,patch){const c=clockings.find(x=>x.id===id);if(!c)throw new Error('not found');Object.assign(c,patch,{updated_at:new Date().toISOString()});return c;},
+    async deleteClocking(id){const i=clockings.findIndex(x=>x.id===id);if(i>=0)clockings.splice(i,1);},
     _emps:emps,_planning:()=>planning
   };
 }
@@ -490,15 +498,15 @@ const ROLE_LABELS = {
   maintenance:'Maintenance', breakfast:'Petit-déjeuner', femme_de_chambre:'Femme de chambre'
 };
 const PERMS = {
-  direction:        { tabs:'all',                                                                       ficheFull:true,  manageUsers:true  },
-  admin_hotel:      { tabs:'all',                                                                       ficheFull:true,  manageUsers:true  },
-  comptabilite:     { tabs:['dashboard','reporting','personnel','contracts','tracking','payroll'],      ficheFull:true,  manageUsers:false },
-  revenue_manager:  { tabs:['dashboard','reporting'],                                                   ficheFull:false, manageUsers:false },
-  reception:        { tabs:['dashboard','planning','personnel'],                                        ficheFull:false, manageUsers:false },
-  gouvernante:      { tabs:['dashboard','planning','personnel'],                                        ficheFull:false, manageUsers:false },
-  maintenance:      { tabs:['dashboard','planning','personnel'],                                        ficheFull:false, manageUsers:false },
-  breakfast:        { tabs:['dashboard','planning','personnel'],                                        ficheFull:false, manageUsers:false },
-  femme_de_chambre: { tabs:['dashboard','planning'],                                                    ficheFull:false, manageUsers:false }
+  direction:        { tabs:'all',                                                                                ficheFull:true,  manageUsers:true  },
+  admin_hotel:      { tabs:'all',                                                                                ficheFull:true,  manageUsers:true  },
+  comptabilite:     { tabs:['dashboard','reporting','personnel','contracts','pointage','tracking','payroll'],    ficheFull:true,  manageUsers:false },
+  revenue_manager:  { tabs:['dashboard','reporting'],                                                            ficheFull:false, manageUsers:false },
+  reception:        { tabs:['dashboard','planning','personnel'],                                                 ficheFull:false, manageUsers:false },
+  gouvernante:      { tabs:['dashboard','planning','personnel'],                                                 ficheFull:false, manageUsers:false },
+  maintenance:      { tabs:['dashboard','planning','personnel'],                                                 ficheFull:false, manageUsers:false },
+  breakfast:        { tabs:['dashboard','planning','personnel'],                                                 ficheFull:false, manageUsers:false },
+  femme_de_chambre: { tabs:['dashboard','planning'],                                                             ficheFull:false, manageUsers:false }
 };
 function canSee(tab){if(!myRole)return false;const p=PERMS[myRole];if(!p)return false;if(p.tabs==='all')return true;return p.tabs.includes(tab);}
 function canFicheFull(){return PERMS[myRole]?.ficheFull===true;}
@@ -516,7 +524,7 @@ const TABS=[
     ['documents','Documents', 'fa-regular fa-folder-open'],
   ]],
   ['Temps',[
-    ['pointage','Pointage',       'fa-regular fa-clock', true],
+    ['pointage','Pointage',       'fa-regular fa-clock'],
     ['tracking','Suivi du temps', 'fa-solid fa-stopwatch', true],
     ['payroll', 'Paie',           'fa-solid fa-coins',     true],
   ]],
@@ -580,8 +588,7 @@ function goView(v){
   const r={dashboard:renderDashboard, planning:renderPlanning, reporting:renderReporting,
            personnel:renderPersonnel, contracts:renderContracts, documents:renderDocuments,
            config:renderConfig,
-           pointage:()=>renderStub('Pointage','fa-regular fa-clock','Saisie des heures d\'arrivée et de départ des collaborateurs, en temps réel, par scan QR ou validation manuelle.',
-             ['Check-in / Check-out instantané','Détection des retards et heures supplémentaires','Synchronisation automatique avec le planning prévu','Export vers la paie']),
+           pointage:renderPointage,
            tracking:()=>renderStub('Suivi du temps','fa-solid fa-stopwatch','Consolidation des heures réelles travaillées par collaborateur, par semaine et par mois.',
              ['Calcul automatique des heures réalisées vs planifiées','Détection des écarts','Validation et signature des relevés','Export Excel / PDF']),
            payroll:()=>renderStub('Paie','fa-solid fa-coins','Préparation des éléments variables de paie à partir du planning, des absences et du pointage.',
@@ -1070,6 +1077,202 @@ async function renderConfig(){
     try{const d=await BE.addDepartment(hotelId,v);deps.push(d);$('newDep').value='';drawDeps();flash('Service ajouté');}catch(e){flash('Erreur : '+e.message);}};
   $('addRol').onclick=async()=>{const v=$('newRol').value.trim();if(!v)return;
     try{const r=await BE.addRole(hotelId,v,$('newRolDep').value||null);rols.push(r);$('newRol').value='';drawRols();flash('Rôle ajouté');}catch(e){flash('Erreur : '+e.message);}};
+}
+
+/* ===================== VUE POINTAGE ===================== */
+let pDay = new Date().toISOString().slice(0,10);   // jour sélectionné dans Pointage
+let pSearchQ = '';
+
+function isoToday(){ return new Date().toISOString().slice(0,10); }
+function timeOnly(ts){ if(!ts)return ''; const d=new Date(ts); return d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}); }
+function minutesBetween(a,b){ return Math.max(0, Math.round((new Date(b)-new Date(a))/60000)); }
+function hoursLabel(min){ if(min<=0) return '—'; const h=Math.floor(min/60), m=min%60; return m?`${h}h${String(m).padStart(2,'0')}`:`${h}h`; }
+function buildTs(day,timeStr){
+  // day = 'YYYY-MM-DD', timeStr = 'HH:MM' -> 'YYYY-MM-DDTHH:MM:00' interprété en heure locale
+  return new Date(`${day}T${timeStr}:00`).toISOString();
+}
+
+async function renderPointage(){
+  const hName = hotels.find(h=>h.id===hotelId)?.name || '';
+  $('view').innerHTML = `<div class="page">
+    <div class="phead">
+      <div><h1>Pointage</h1><div class="sub">${hName} · saisie des heures réelles travaillées</div></div>
+      <div class="actions">
+        <input type="date" id="ptDay" value="${pDay}" max="${isoToday()}" style="font-family:inherit;padding:8px 12px;border:1px solid var(--line);border-radius:10px;font-size:13px;background:#fff">
+        <button class="btn g" id="ptToday"><i class="fa-solid fa-calendar-day"></i> Aujourd'hui</button>
+        <div class="search"><i class="fa-solid fa-magnifying-glass"></i><input type="text" id="ptSearch" placeholder="Rechercher…" value="${pSearchQ}"></div>
+        <button class="btn p" id="ptAdd"><i class="fa-solid fa-plus"></i> Pointage</button>
+      </div>
+    </div>
+    <div id="ptStats" class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))"></div>
+    <div class="box" style="padding:0"><div id="ptList">Chargement…</div></div>
+  </div>`;
+  $('ptDay').onchange = e => { pDay = e.target.value; redrawPointage(); };
+  $('ptToday').onclick = () => { pDay = isoToday(); $('ptDay').value = pDay; redrawPointage(); };
+  $('ptSearch').oninput = e => { pSearchQ = e.target.value.toLowerCase(); redrawPointage(); };
+  $('ptAdd').onclick = () => openClockingForm(null);
+  redrawPointage();
+}
+
+async function redrawPointage(){
+  $('ptList').innerHTML = 'Chargement…';
+  try{
+    const [clockings] = await Promise.all([ BE.listClockings(hotelId, pDay) ]);
+    // récupérer le planning prévu pour ce jour (depuis committed s'il s'agit du mois courant, sinon refetch)
+    let planMap = new Map(); // employee_id → {status, duration}
+    const [py,pm,pd] = pDay.split('-').map(Number);
+    if(py===cur.getFullYear() && pm-1===cur.getMonth()){
+      committed.forEach((v,k)=>{ const [eid,day]=k.split('|'); if(day===pDay) planMap.set(eid,v); });
+    }else{
+      try{
+        const rows = await BE.listMonthPlanning(hotelId, py, pm-1);
+        rows.filter(r=>r.day===pDay).forEach(r=>planMap.set(r.employee_id, {status:r.status, duration:Number(r.duration)}));
+      }catch(e){ /* tolérant */ }
+    }
+
+    // construire la liste : tous les actifs (ou search match) + ceux qui ont pointé
+    const q = pSearchQ;
+    const employees = staff.filter(s => s.active && (!q || `${s.first_name} ${s.last_name} ${s.role||''}`.toLowerCase().includes(q)))
+      .sort((a,b)=>a.last_name.localeCompare(b.last_name));
+
+    // grouper les pointages par employé
+    const byEmp = new Map();
+    clockings.forEach(c=>{ if(!byEmp.has(c.employee_id)) byEmp.set(c.employee_id, []); byEmp.get(c.employee_id).push(c); });
+
+    // KPI du jour
+    let nPresent=0, nAbsent=0, nNoClock=0, totalMin=0, openSessions=0;
+    employees.forEach(s=>{
+      const plan = planMap.get(s.id);
+      const cks  = byEmp.get(s.id) || [];
+      if(cks.length){
+        nPresent++;
+        cks.forEach(c=>{
+          if(c.clock_out_ts){ totalMin += minutesBetween(c.clock_in_ts, c.clock_out_ts) - (c.break_minutes||0); }
+          else openSessions++;
+        });
+      } else if(plan && CMAP[plan.status]?.cat==='paid'){ nAbsent++; }
+        else if(plan && CMAP[plan.status]?.cat==='abs'){ nAbsent++; }
+        else if(plan && plan.status==='P'){ nNoClock++; }
+    });
+
+    $('ptStats').innerHTML = `
+      <div class="kpi v"><div class="ic"><i class="fa-solid fa-user-check"></i></div><div class="n">${nPresent}</div><div class="l">Pointés ce jour</div></div>
+      <div class="kpi a"><div class="ic"><i class="fa-solid fa-user-clock"></i></div><div class="n">${nNoClock}</div><div class="l">Prévus mais non pointés</div></div>
+      <div class="kpi b"><div class="ic"><i class="fa-solid fa-stopwatch"></i></div><div class="n">${openSessions}</div><div class="l">Sessions en cours</div></div>
+      <div class="kpi g"><div class="ic"><i class="fa-regular fa-clock"></i></div><div class="n">${hoursLabel(totalMin)}</div><div class="l">Heures totales du jour</div></div>`;
+
+    if(!employees.length){ $('ptList').innerHTML='<div style="padding:24px;text-align:center;color:var(--muted)">Aucun collaborateur actif.</div>'; return; }
+
+    $('ptList').innerHTML = `<table class="tbl" style="border:0;border-radius:14px">
+      <thead><tr><th>Collaborateur</th><th>Planifié</th><th>Pointages</th><th style="text-align:right">Heures réelles</th><th></th></tr></thead>
+      <tbody>
+      ${employees.map(s=>{
+        const plan = planMap.get(s.id);
+        const cks  = byEmp.get(s.id) || [];
+        let realMin = 0;
+        cks.forEach(c=>{ if(c.clock_out_ts) realMin += minutesBetween(c.clock_in_ts, c.clock_out_ts) - (c.break_minutes||0); });
+        const planStatus = plan ? (CMAP[plan.status]?.lab || plan.status) : 'Repos';
+        const planBg = plan ? CMAP[plan.status]?.bg : '#f4f4f7';
+        const planFg = plan ? CMAP[plan.status]?.fg : '#999';
+        const planExpected = plan && plan.status==='P' ? (plan.duration===0.5 ? '½ jour' : 'Journée') : '';
+        const sessionsHtml = cks.length
+          ? cks.map(c=>{
+              const dur = c.clock_out_ts ? minutesBetween(c.clock_in_ts,c.clock_out_ts)-(c.break_minutes||0) : 0;
+              const open = !c.clock_out_ts;
+              return `<span class="ck" data-cid="${c.id}" style="display:inline-flex;align-items:center;gap:6px;background:${open?'#fef3c7':'#f4f2fd'};color:${open?'#92400e':'var(--violet-d)'};padding:4px 10px;border-radius:8px;font-size:12px;font-weight:600;margin:2px;cursor:pointer">
+                ${timeOnly(c.clock_in_ts)} → ${c.clock_out_ts ? timeOnly(c.clock_out_ts) : '<i>en cours</i>'}
+                ${c.break_minutes ? `<span style="font-weight:500;opacity:.75">pause ${c.break_minutes}min</span>`:''}
+                ${dur ? `<span style="font-weight:700;opacity:.7">· ${hoursLabel(dur)}</span>`:''}
+              </span>`;
+            }).join('')
+          : '<span style="color:var(--muted);font-size:12px;font-style:italic">— Aucun pointage —</span>';
+        return `<tr>
+          <td><b>${s.first_name} ${s.last_name}</b><div style="font-size:11.5px;color:var(--muted);font-weight:500">${s.role||'—'}</div></td>
+          <td><span class="tag" style="background:${planBg};color:${planFg};font-weight:700">${planStatus}</span> ${planExpected?`<span style="font-size:11px;color:var(--muted);margin-left:4px">${planExpected}</span>`:''}</td>
+          <td>${sessionsHtml}</td>
+          <td style="text-align:right"><b style="font-size:14px;color:${realMin>0?'var(--green)':'var(--muted)'}">${realMin>0?hoursLabel(realMin):'—'}</b></td>
+          <td style="text-align:right"><button class="btn p" data-add-for="${s.id}" style="padding:5px 10px;font-size:11.5px"><i class="fa-solid fa-plus"></i></button></td>
+        </tr>`;
+      }).join('')}
+      </tbody></table>`;
+
+    // Click sur un pointage → éditer
+    $('ptList').querySelectorAll('.ck').forEach(el=>el.onclick=()=>{
+      const c = clockings.find(x=>x.id===el.dataset.cid);
+      if(c) openClockingForm(c);
+    });
+    // Bouton + sur chaque ligne → ajouter pointage pour ce collaborateur
+    $('ptList').querySelectorAll('[data-add-for]').forEach(b=>b.onclick=()=>{
+      openClockingForm(null, b.dataset.addFor);
+    });
+  }catch(e){ $('ptList').innerHTML=`<div style="padding:24px;color:var(--red)">Erreur : ${e.message||e}</div>`; }
+}
+
+function openClockingForm(c, presetEmpId){
+  // c = pointage existant (édition) ou null (création)
+  // presetEmpId = id employé pré-sélectionné (création depuis une ligne)
+  const isEdit = !!c;
+  const emp = isEdit ? staff.find(s=>s.id===c.employee_id) : (presetEmpId ? staff.find(s=>s.id===presetEmpId) : null);
+  const day = isEdit ? c.day : pDay;
+  const tin  = isEdit && c.clock_in_ts  ? new Date(c.clock_in_ts).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}) : '';
+  const tout = isEdit && c.clock_out_ts ? new Date(c.clock_out_ts).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}) : '';
+  const empOptions = staff.filter(s=>s.active).sort((a,b)=>a.last_name.localeCompare(b.last_name))
+    .map(s=>`<option value="${s.id}" ${(emp&&s.id===emp.id)?'selected':''}>${s.first_name} ${s.last_name}${s.role?' · '+s.role:''}</option>`).join('');
+
+  $('modal').innerHTML = `
+    <h3 style="margin-bottom:14px"><i class="fa-regular fa-clock" style="color:var(--violet);margin-right:8px"></i>${isEdit?'Modifier le pointage':'Nouveau pointage'}</h3>
+    <div class="fld"><label>Collaborateur</label><select id="ck_emp" ${isEdit?'disabled':''}><option value="">— choisir —</option>${empOptions}</select></div>
+    <div class="fld"><label>Jour</label><input type="date" id="ck_day" value="${day}" max="${isoToday()}"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="fld"><label>Heure d'arrivée *</label><input type="time" id="ck_in" value="${tin}" required></div>
+      <div class="fld"><label>Heure de départ</label><input type="time" id="ck_out" value="${tout}" placeholder="laissez vide si en cours"></div>
+    </div>
+    <div class="fld"><label>Pause (en minutes, non rémunérée)</label><input type="number" id="ck_brk" value="${c?.break_minutes||0}" min="0" max="480" step="5"></div>
+    <div class="fld"><label>Notes (facultatif)</label><textarea id="ck_notes" rows="2" placeholder="ex : remplacement de X, heures sup validées par…">${c?.notes||''}</textarea></div>
+    <div style="display:flex;gap:8px;margin-top:14px">
+      ${isEdit?'<button class="btn d" id="ck_del" style="margin-right:auto"><i class="fa-solid fa-trash"></i> Supprimer</button>':''}
+      <div style="${isEdit?'':'margin-left:auto'};display:flex;gap:8px">
+        <button class="btn g" id="ck_cancel">Annuler</button>
+        <button class="btn p" id="ck_save"><i class="fa-solid fa-check"></i> ${isEdit?'Enregistrer':'Créer'}</button>
+      </div>
+    </div>`;
+  $('modalbg').classList.add('on');
+  $('ck_cancel').onclick = closeModal;
+  $('ck_save').onclick = async () => {
+    const eid  = $('ck_emp').value || c?.employee_id;
+    const d    = $('ck_day').value;
+    const tinV = $('ck_in').value;
+    const toutV= $('ck_out').value;
+    const brk  = parseInt($('ck_brk').value||'0',10) || 0;
+    const notes= $('ck_notes').value.trim() || null;
+    if(!eid){ flash('Choisissez un collaborateur'); return; }
+    if(!d || !tinV){ flash('Le jour et l\'heure d\'arrivée sont obligatoires'); return; }
+    const clock_in_ts  = buildTs(d, tinV);
+    let clock_out_ts   = toutV ? buildTs(d, toutV) : null;
+    if(clock_out_ts && new Date(clock_out_ts) <= new Date(clock_in_ts)){
+      // heure de sortie avant l'heure d'entrée → on suppose une fin de service le lendemain
+      clock_out_ts = buildTs(new Date(new Date(d).getTime()+86400000).toISOString().slice(0,10), toutV);
+    }
+    try{
+      if(isEdit){
+        await BE.updateClocking(c.id, {day:d, clock_in_ts, clock_out_ts, break_minutes:brk, notes, employee_id:eid});
+      }else{
+        await BE.addClocking(hotelId, {employee_id:eid, day:d, clock_in_ts, clock_out_ts, break_minutes:brk, notes, source:'manual'});
+      }
+      closeModal(); flash(isEdit?'Pointage mis à jour':'Pointage créé');
+      pDay = d;
+      if(view==='pointage') redrawPointage();
+    }catch(e){ flash('Erreur : '+(e.message||e)); }
+  };
+  const del = $('ck_del');
+  if(del) del.onclick = async () => {
+    if(!confirm(`Supprimer ce pointage ?`)) return;
+    try{
+      await BE.deleteClocking(c.id);
+      closeModal(); flash('Pointage supprimé');
+      if(view==='pointage') redrawPointage();
+    }catch(e){ flash('Erreur : '+(e.message||e)); }
+  };
 }
 
 /* ===================== STUBS (modules à venir) ===================== */

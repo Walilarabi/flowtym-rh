@@ -1,57 +1,59 @@
 # Flowtym RH — Changelog
 
+## v1.2 — Module Pointage
+
+### Frontend
+- **Onglet Pointage fonctionnel** (n'est plus un stub) pour `direction`, `admin_hotel`, `comptabilite`.
+- **Vue par jour** : date picker + bouton « Aujourd'hui » + recherche par nom/rôle.
+- **Tableau collaborateurs** avec, pour chaque ligne :
+  - Statut planifié (issu du planning du même jour, lecture seule)
+  - Liste des **sessions pointées** (badges colorés ; orange pour les sessions en cours sans clock-out)
+  - **Heures réelles** calculées automatiquement (arrivée → départ moins la pause)
+  - Bouton + pour ajouter rapidement un pointage pour ce collaborateur
+- **4 KPI du jour** en haut : pointés, prévus non pointés, sessions en cours, heures totales.
+- **Modal d'ajout / édition / suppression** : sélection du collaborateur, jour, heure d'arrivée, heure de départ (facultative pour les sessions en cours), pause en minutes, notes. Gestion automatique des shifts de nuit (heure de sortie < arrivée → lendemain).
+- Cliquez sur un badge de session pour l'éditer ou la supprimer.
+
+### Base de données
+- Migration `06_rh_staff_clockings_module.sql` :
+  - Table `staff_clockings` avec `hotel_id`, `employee_id`, `day`, `clock_in_ts`, `clock_out_ts`, `break_minutes`, `notes`, `source` (`manual` / `qr` / `self`).
+  - Contraintes CHECK strictes : break_minutes ∈ [0, 480], clock_out_ts > clock_in_ts.
+  - **RLS active** : `hotel_id IN (SELECT pl_my_hotels())` en USING et WITH CHECK.
+  - Index sur `(hotel_id, day)` et `(employee_id, day desc)` pour les requêtes courantes.
+  - Trigger `updated_at`.
+
+### Tests
+- 75 tests jsdom (7 nouveaux pour Pointage : KPI, table, modal d'ajout, création d'un pointage, calcul des heures, masquage pour la réception).
+
 ## v1.1 — Gestion des accès par rôle
 
 ### Frontend
-- **Matrice de permissions** pour les 9 rôles existants (direction, admin_hotel, comptabilite, revenue_manager, reception, gouvernante, maintenance, breakfast, femme_de_chambre) — alignée sur le référentiel `admin_user_role` partagé avec le PMS.
-- **Filtrage automatique des onglets** dans la barre latérale selon le rôle de l'utilisateur connecté pour l'hôtel actif.
-- **Fiche collaborateur restreinte** pour les rôles opérationnels : nom, prénom, poste, service, statut, téléphone et e-mail uniquement. Pas de documents, pas d'adresse personnelle, pas de contact d'urgence, pas d'action Modifier ni Marquer comme parti.
-- **Badge du rôle dans la topbar** pour que l'utilisateur sache toujours dans quel contexte il opère.
-- Nouveau bloc **Accès et permissions** dans Paramètres :
-  - Liste des utilisateurs rattachés à l'hôtel avec leur rôle (dropdown éditable).
-  - Confirmation avant chaque changement de rôle, rollback en cas d'erreur API.
-  - Matrice de référence des permissions en lecture sous le tableau.
-- **Refresh complet de la shell** au changement d'hôtel (le rôle peut différer d'un hôtel à l'autre pour un même utilisateur).
-- **Exports Planning Excel et PDF** (PDF en A4 paysage, table pleine page, cellules colorées selon les statuts, multi-page avec en-tête répété et numéro de page).
+- **Matrice de permissions** pour les 9 rôles existants — alignée sur le référentiel `admin_user_role` partagé avec le PMS.
+- **Filtrage automatique des onglets** dans la sidebar selon le rôle.
+- **Fiche collaborateur restreinte** pour les rôles opérationnels (nom, prénom, poste, service, statut, téléphone, e-mail uniquement).
+- **Badge du rôle dans la topbar**.
+- Bloc **Accès et permissions** dans Paramètres : liste éditable + matrice de référence en lecture.
+- **Refresh complet de la shell** au changement d'hôtel.
+- **Exports Planning Excel et PDF** (A4 paysage, table pleine page, multi-page).
 
 ### Base de données
-- Migration `05_rh_access_management_functions.sql` :
-  - `rh_my_role(p_hotel)` : retourne le rôle de l'utilisateur courant pour un hôtel donné.
-  - `rh_list_users_for_hotel(p_hotel)` : liste tous les utilisateurs rattachés à l'hôtel. Réservée aux rôles `direction` et `admin_hotel`.
-  - `rh_update_user_role(p_hotel, p_user_id, p_role)` : modifie le rôle d'un utilisateur. Réservée aux rôles `direction` et `admin_hotel`. Empêche l'auto-modification.
-- Toutes en `SECURITY DEFINER` avec vérification du rôle de l'appelant à chaque appel. N'affecte ni les tables existantes ni les policies du PMS.
+- Migration `05` : 3 fonctions `SECURITY DEFINER` (`rh_my_role`, `rh_list_users_for_hotel`, `rh_update_user_role`).
 
 ### Tests
-- 68 tests jsdom (rendu, navigation, édition, persistance, départs, sidebar, exports, permissions).
+- 68 tests jsdom.
 
 ## v1.0 — Lancement production
 
-### Frontend
-- Application mono-fichier avec **11 onglets** organisés en 5 groupes (Pilotage, Équipe, Temps, Acquisition, Réglages).
-- Barre latérale rétractable avec préférence persistée localement.
-- Authentification Supabase, multi-hôtel via `user_active_hotel`.
-- **Tableau de bord** : KPI temps réel (effectif, jours travaillés, CP, fiches incomplètes).
-- **Planning** : grille mensuelle, colonnes nom/rôle figées, édition cellule par cellule et **édition en masse** (glisser, Ctrl/Cmd-clic, Maj-clic).
-- **Reporting** : graphes effectif par service/rôle, top jours travaillés, top CP, répartition par statut.
-- **Personnel, Contrats, Documents, Paramètres** : CRUD complet.
-- **Masquage automatique** des collaborateurs partis à partir du mois suivant.
-
-### Base de données
-- 7 tables avec `hotel_id` partout, **RLS active** sur toutes.
-- Contraintes CHECK strictes, unicité `(hotel_id, employee_id, day)` sur le planning.
-- Référentiels semés par hôtel (6 départements + 12 rôles).
-
-### Migration
-- Migration de données du prototype `pl_*` vers le nouveau modèle, sans perte (4 346 entrées validées).
-
-### Tests
+- 11 onglets, 7 fonctionnels + 4 stubs roadmap.
+- Édition en masse du planning (drag/Ctrl-clic/Maj-clic).
+- 7 tables RH avec RLS par hotel_id, migrations rejouables.
 - 56 tests jsdom + tests SQL.
 
-## Roadmap
+## Roadmap restante
 
-- **Pointage** : timestamps d'arrivée/départ par collaborateur.
-- **Suivi du temps** : consolidation des heures réelles vs planifiées.
-- **Paie** : calcul des éléments variables, export DSN.
-- **Recrutement** : pipeline candidatures jusqu'à l'embauche.
-- **Page d'invitation** : créer un compte utilisateur + rattachement à un hôtel depuis l'UI Paramètres.
-- **Policies RLS par rôle** pour `employee_documents` et autres tables sensibles (durcissement complémentaire au gating frontend).
+- **Suivi du temps** : consolidation hebdomadaire / mensuelle des heures réelles vs planifiées.
+- **Paie** : calcul des heures supplémentaires, indemnités, export DSN.
+- **Recrutement** : pipeline candidatures.
+- **Self check-in via QR code** : appli mobile pour que le collaborateur pointe lui-même.
+- **Page d'invitation** : créer un compte utilisateur + rattachement hôtel depuis l'UI Paramètres.
+- **Policies RLS par rôle** : durcissement complémentaire au gating frontend pour les tables sensibles.
