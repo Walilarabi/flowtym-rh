@@ -132,6 +132,35 @@ button,select,input,textarea{font-family:inherit}
 .stub ul li{padding:5px 0;display:flex;gap:8px;align-items:center}
 .stub ul li i{color:var(--violet);font-size:11px}
 
+/* sous-onglets Contrats */
+.ctab{border:0;background:transparent;padding:11px 18px;font-family:inherit;font-size:13.5px;color:var(--ink2);font-weight:600;cursor:pointer;border-bottom:2px solid transparent;display:inline-flex;align-items:center;gap:7px;margin-bottom:-1px}
+.ctab:hover{color:var(--violet-d)}
+.ctab.on{color:var(--violet);border-bottom-color:var(--violet)}
+
+/* lignes documents dans la fiche enrichie */
+.docitem{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;margin-bottom:6px;background:#fff}
+.docitem .ic{width:30px;height:30px;border-radius:7px;display:grid;place-items:center;color:#fff;font-size:11px;flex-shrink:0}
+.docitem .ic.identity{background:#8B5CF6}.docitem .ic.health{background:#16a34a}.docitem .ic.banking{background:#2563eb}.docitem .ic.admin{background:#f59e0b}.docitem .ic.rh{background:#ec4899}.docitem .ic.other{background:#6b7280}
+.docitem .nm{font-weight:600;font-size:13px;flex:1;min-width:0}
+.docitem .meta{font-size:11px;color:var(--muted);margin-top:2px}
+.docitem .badge-st{font-size:10.5px;padding:3px 7px;border-radius:5px;font-weight:700;text-transform:uppercase;letter-spacing:.03em}
+.badge-st.valid{background:var(--green-bg);color:var(--green)}
+.badge-st.expired{background:var(--red-bg);color:var(--red)}
+.badge-st.expiring_soon{background:#fef3c7;color:#92400e}
+.badge-st.missing{background:#f1f1f5;color:var(--muted)}
+.docitem .acts{display:flex;gap:4px}
+.docitem .acts button{border:0;background:transparent;color:var(--ink2);cursor:pointer;padding:5px 8px;border-radius:6px;font-size:12px}
+.docitem .acts button:hover{background:#f4f2fd;color:var(--violet)}
+.docitem .acts button.del:hover{background:var(--red-bg);color:var(--red)}
+
+/* alertes dashboard */
+.alertrow{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px dashed var(--line);font-size:13px}
+.alertrow:last-child{border:0}
+.alertrow .av{width:28px;height:28px;border-radius:7px;font-size:10px}
+.alertrow .nm{flex:1;font-weight:600}
+.alertrow .sub{font-size:11.5px;color:var(--muted)}
+.alertrow .badge-st{flex-shrink:0}
+
 /* toolbar planning (à l'intérieur de la vue) */
 .ptbar{padding:11px 18px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex-shrink:0}
 
@@ -307,7 +336,23 @@ const CMAP={}; CODES.forEach(c=>CMAP[c[0]]={code:c[0],label:c[1],bg:c[2],fg:c[3]
 const MONTHS=['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
 const WD=['D','L','Ma','Me','J','V','S'];
 const CONTRACTS=['CDI','CDD','Extra','Stage','Interim','Apprentissage'];
-const DOC_TYPES=[['cni','CNI / Passeport'],['sejour','Titre de séjour'],['rib','RIB'],['domicile','Justif. de domicile'],['hebergement','Attestation d\'hébergement'],['contrat','Contrat signé'],['autre','Autre document']];
+// Aligné sur le référentiel public.document_types en base
+const DOC_TYPES=[
+  ['cni','Carte d\'identité','identity',true],
+  ['passport','Passeport','identity',true],
+  ['titre_sejour','Titre de séjour','identity',true],
+  ['permis_travail','Permis de travail','identity',true],
+  ['carte_vitale','Carte Vitale','health',false],
+  ['visite_med','Visite médicale','health',true],
+  ['rib','RIB','banking',false],
+  ['domicile','Justif. de domicile','admin',true],
+  ['hebergement','Attestation d\'hébergement','admin',false],
+  ['mutuelle','Attestation mutuelle','rh',true],
+  ['contrat','Contrat signé','rh',false],
+  ['diplome','Diplôme','rh',false],
+  ['autre','Autre','other',false]
+];
+const CONTRACT_TYPES = ['CDI','CDD','Extra','Saisonnier','Stage','Apprentissage','Interim'];
 const dim=(y,m)=>new Date(y,m+1,0).getDate();
 const iso=(y,m,d)=>`${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
 const initials=(f,l)=>((f?.[0]||'')+(l?.[0]||'')).toUpperCase();
@@ -375,6 +420,67 @@ async function makeRealBE(){
     async addClocking(h,payload){const {data,error}=await sb.from('staff_clockings').insert({hotel_id:h,...payload}).select('*').single();must(error,"Ajout pointage");return data;},
     async updateClocking(id,patch){const {data,error}=await sb.from('staff_clockings').update(patch).eq('id',id).select('*').single();must(error,"Mise à jour pointage");return data;},
     async deleteClocking(id){const {error}=await sb.from('staff_clockings').delete().eq('id',id);must(error,"Suppression pointage");},
+    /* --- TEMPLATES DE CONTRATS --- */
+    async listTemplates(h){const {data,error}=await sb.from('contract_templates').select('*').eq('hotel_id',h).order('status').order('created_at',{ascending:false});must(error,'Modèles');return data||[];},
+    async saveTemplate(h,payload){const {data,error}=await sb.from('contract_templates').insert({hotel_id:h,version:1,status:'active',...payload}).select('*').single();must(error,'Création modèle');return data;},
+    async updateTemplate(id,patch){const {data,error}=await sb.from('contract_templates').update(patch).eq('id',id).select('*').single();must(error,'Mise à jour modèle');return data;},
+    async newVersionOfTemplate(h,parent_id,body_html,name){
+      const {data:p,error:pe}=await sb.from('contract_templates').select('*').eq('id',parent_id).single();must(pe,'Lookup');
+      const {data,error}=await sb.from('contract_templates').insert({hotel_id:h,parent_id,version:(p.version||1)+1,name:name||p.name,contract_type:p.contract_type,department_id:p.department_id,role_id:p.role_id,body_html,status:'active'}).select('*').single();
+      must(error,'Nouvelle version');
+      await sb.from('contract_templates').update({status:'archived'}).eq('id',parent_id);
+      return data;
+    },
+    async archiveTemplate(id){const {error}=await sb.from('contract_templates').update({status:'archived'}).eq('id',id);must(error,'Archive');},
+    async deleteTemplate(id){const {error}=await sb.from('contract_templates').delete().eq('id',id);must(error,'Suppression');},
+
+    /* --- DOCUMENTS ENRICHIS + STORAGE --- */
+    async listDocumentsForEmployee(h,eid){const {data,error}=await sb.from('employee_documents').select('*').eq('hotel_id',h).eq('employee_id',eid).order('created_at',{ascending:false});must(error,'Documents');return data||[];},
+    async uploadEmployeeDocument(hotel_id, employee_id, doc_type_code, file, opts){
+      const safe = (file.name||'doc').replace(/[^\w.\-]+/g,'_').slice(0,80);
+      const ext = (safe.match(/\.[^.]+$/)||['.bin'])[0];
+      const ts  = Date.now();
+      const path = `${hotel_id}/${employee_id}/${doc_type_code}_${ts}${ext}`;
+      const {error:upErr} = await sb.storage.from('hr-documents').upload(path, file, {contentType:file.type, upsert:false});
+      must(upErr,'Upload fichier');
+      // archive ancien fichier s'il existait (même type)
+      const {data:existing} = await sb.from('employee_documents').select('id,file_path').eq('hotel_id',hotel_id).eq('employee_id',employee_id).eq('doc_type',doc_type_code).maybeSingle();
+      const payload = {hotel_id, employee_id, doc_type:doc_type_code, doc_type_code, status:'provided', file_path:path, file_size:file.size, file_mime:file.type, expires_at: opts?.expires_at||null, issued_at: opts?.issued_at||null, notes: opts?.notes||null};
+      if(existing){
+        if(existing.file_path && existing.file_path!==path) await sb.storage.from('hr-documents').remove([existing.file_path]);
+        const {data,error}=await sb.from('employee_documents').update(payload).eq('id',existing.id).select('*').single();
+        must(error,'MAJ doc');
+        return data;
+      }
+      const {data,error}=await sb.from('employee_documents').insert(payload).select('*').single();
+      must(error,'Insertion doc');
+      return data;
+    },
+    async getSignedDocUrl(file_path, expSec){
+      const {data,error}=await sb.storage.from('hr-documents').createSignedUrl(file_path, expSec||60);
+      must(error,'URL signée');
+      return data?.signedUrl||null;
+    },
+    async deleteEmployeeDocument(doc_id){
+      const {data:doc,error:e1}=await sb.from('employee_documents').select('id,file_path').eq('id',doc_id).maybeSingle();
+      if(e1)throw e1;
+      if(doc?.file_path) await sb.storage.from('hr-documents').remove([doc.file_path]);
+      const {error}=await sb.from('employee_documents').delete().eq('id',doc_id);
+      must(error,'Suppression doc');
+    },
+    async listDocumentTypes(){const {data,error}=await sb.from('document_types').select('*').eq('active',true).order('sort_order');must(error,'Types');return data||[];},
+    async listDocumentAlerts(h){const {data,error}=await sb.from('v_employee_documents_alerts').select('*').eq('hotel_id',h).not('alert_kind','is',null).order('days_until_expiry',{nullsFirst:false});must(error,'Alertes');return data||[];},
+
+    /* --- AUDIT --- */
+    async logAudit(action,entity_type,entity_id,employee_id,details){
+      try{
+        const {data:{user}}=await sb.auth.getUser();
+        let actor_user_id=null;
+        if(user){const {data:pu}=await sb.from('users').select('id').eq('auth_id',user.id).maybeSingle();if(pu)actor_user_id=pu.id;}
+        await sb.from('hr_document_audit_logs').insert({hotel_id:hotelId, actor_user_id, actor_email:user?.email||null, action, entity_type, entity_id, employee_id:employee_id||null, details:details||null});
+      }catch(e){console.warn('audit failed',e);}
+    },
+    async listAuditLogs(h, limit){const {data,error}=await sb.from('hr_document_audit_logs').select('*').eq('hotel_id',h).order('created_at',{ascending:false}).limit(limit||50);must(error,'Audit');return data||[];},
     async signOut(){await sb.auth.signOut();}
   };
 }
@@ -393,7 +499,7 @@ function makeTestBE(){
     {id:'e5',hotel_id:'h2',first_name:'Marie',last_name:'Dubois',role:'Réceptionniste',department:'Réception',contract_type:'CDI',hire_date:'2020-05-01',rest_days:[0,6],phone:'',email:'',address:'',emergency_contact:'',active:true},
     {id:'e6',hotel_id:'h1',first_name:'Ancien',last_name:'Bouchard',role:'Réceptionniste',department:'Réception',contract_type:'CDD',hire_date:'2019-01-01',rest_days:[],phone:'',email:'',address:'',emergency_contact:'',active:false,departure_date:(()=>{const d=new Date();return new Date(d.getFullYear(),d.getMonth()-2,15).toISOString().slice(0,10);})()},
   ];
-  let planning=[]; let docs=[]; let clockings=[];
+  let planning=[]; let docs=[]; let clockings=[]; let templates=[];
   const k=(eid,day)=>eid+'|'+day;
   return {isTest:true,
     async listHotels(){return hotels;},
@@ -428,6 +534,45 @@ function makeTestBE(){
     async addClocking(h,p){const c={id:'c'+Date.now()+Math.random().toString(36).slice(2,6),hotel_id:h,...p,created_at:new Date().toISOString(),updated_at:new Date().toISOString()};clockings.push(c);return c;},
     async updateClocking(id,patch){const c=clockings.find(x=>x.id===id);if(!c)throw new Error('not found');Object.assign(c,patch,{updated_at:new Date().toISOString()});return c;},
     async deleteClocking(id){const i=clockings.findIndex(x=>x.id===id);if(i>=0)clockings.splice(i,1);},
+    /* --- TEMPLATES (test) --- */
+    async listTemplates(h){return templates.filter(t=>t.hotel_id===h).sort((a,b)=>(a.status===b.status?b.created_at.localeCompare(a.created_at):a.status==='active'?-1:1));},
+    async saveTemplate(h,p){const t={id:'t'+Date.now(),hotel_id:h,version:1,status:'active',created_at:new Date().toISOString(),...p};templates.push(t);return t;},
+    async updateTemplate(id,patch){const t=templates.find(x=>x.id===id);if(!t)throw new Error('not found');Object.assign(t,patch);return t;},
+    async newVersionOfTemplate(h,parent_id,body_html,name){
+      const p=templates.find(x=>x.id===parent_id); if(!p) throw new Error('parent not found');
+      const t={id:'t'+Date.now(),hotel_id:h,parent_id,version:(p.version||1)+1,name:name||p.name,contract_type:p.contract_type,department_id:p.department_id,role_id:p.role_id,body_html,status:'active',created_at:new Date().toISOString()};
+      templates.push(t); p.status='archived';
+      return t;
+    },
+    async archiveTemplate(id){const t=templates.find(x=>x.id===id);if(t)t.status='archived';},
+    async deleteTemplate(id){const i=templates.findIndex(x=>x.id===id);if(i>=0)templates.splice(i,1);},
+
+    /* --- DOCS (test, simulé sans Storage réel) --- */
+    async listDocumentsForEmployee(h,eid){return docs.filter(d=>d.hotel_id===h && d.employee_id===eid);},
+    async uploadEmployeeDocument(h,eid,code,file,opts){
+      const path=`${h}/${eid}/${code}_${Date.now()}.bin`;
+      const existing=docs.find(d=>d.hotel_id===h && d.employee_id===eid && d.doc_type===code);
+      const rec={id:'d'+Date.now()+Math.random().toString(36).slice(2,5),hotel_id:h,employee_id:eid,doc_type:code,doc_type_code:code,status:'provided',file_path:path,file_size:file.size||0,file_mime:file.type||'',expires_at:opts?.expires_at||null,issued_at:opts?.issued_at||null,notes:opts?.notes||null,created_at:new Date().toISOString()};
+      if(existing) Object.assign(existing,rec); else docs.push(rec);
+      return rec;
+    },
+    async getSignedDocUrl(p){return 'about:blank#test:'+encodeURIComponent(p);},
+    async deleteEmployeeDocument(id){const i=docs.findIndex(d=>d.id===id);if(i>=0)docs.splice(i,1);},
+    async listDocumentTypes(){return DOC_TYPES.map(([code,label,category,has_expiration],i)=>({code,label,category,has_expiration,alert_days_before:30,required_default:false,sort_order:(i+1)*10,active:true}));},
+    async listDocumentAlerts(h){
+      const today=new Date(); const cutoff=new Date(today.getTime()+30*86400000);
+      return docs.filter(d=>d.hotel_id===h && d.expires_at).map(d=>{
+        const e=new Date(d.expires_at);
+        let kind=null;
+        if(e<today)kind='expired';
+        else if(e<cutoff)kind='expiring_soon';
+        if(!kind)return null;
+        const emp=emps.find(x=>x.id===d.employee_id);
+        return {hotel_id:h,employee_id:d.employee_id,first_name:emp?.first_name,last_name:emp?.last_name,doc_type_code:d.doc_type,doc_label:(DOC_TYPES.find(x=>x[0]===d.doc_type)||[])[1]||d.doc_type,expires_at:d.expires_at,status:'provided',alert_kind:kind,days_until_expiry:Math.round((e-today)/86400000)};
+      }).filter(Boolean);
+    },
+    async logAudit(){/* no-op en test */},
+    async listAuditLogs(h,limit){return [];},
     _emps:emps,_planning:()=>planning
   };
 }
@@ -835,11 +980,8 @@ function renderDashboard(){
   const actifs=staff.filter(s=>s.active).length;
   const partis=staff.filter(s=>!s.active).length;
   const {trav,cp,abs}=aggCommitted();
-  // employés sans contact d'urgence (alerte simple)
   const alerts=staff.filter(s=>s.active && !s.emergency_contact).length;
-  // équipe (premiers actifs)
   const team=staff.filter(s=>s.active).slice(0,7);
-  // activité : derniers jours du mois courant
   const recent=[];committed.forEach((v,k)=>{const [eid,day]=k.split('|');const s=staff.find(x=>x.id===eid);
     if(s)recent.push({day, name:`${s.first_name} ${s.last_name}`, status:v.status});});
   recent.sort((a,b)=>b.day.localeCompare(a.day));
@@ -863,10 +1005,40 @@ function renderDashboard(){
           <div><div class="nm">${r.name}</div><div class="sub">${r.day}</div></div></div>`;}).join('')||'<div style="padding:14px;color:var(--muted)">Aucune saisie pour le mois.</div>'}
       </div></div>
     </div>
+    ${canFicheFull()?`<div class="box" style="margin-top:14px"><h3><i class="fa-solid fa-bell"></i>Alertes documents <span id="alertCount" style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:5px;font-size:11px;font-weight:700;margin-left:6px">…</span></h3>
+      <div id="alertList">Chargement…</div></div>`:''}
     ${partis?`<div class="box" style="margin-top:14px"><h3><i class="fa-regular fa-circle-question"></i>Partis</h3>
       <div style="font-size:13px;color:var(--ink2)">${partis} collaborateur(s) ne sont plus actifs. Allez dans Personnel + filtre « Partis » pour les consulter ou les réactiver.</div></div>`:''}
   </div>`;
   $('goPlan').onclick=()=>goView('planning');
+  if(canFicheFull()) drawDashboardAlerts();
+}
+
+async function drawDashboardAlerts(){
+  try{
+    const list = await BE.listDocumentAlerts(hotelId);
+    $('alertCount').textContent = list.length;
+    if(!list.length){$('alertList').innerHTML='<div style="padding:14px;color:var(--muted);font-size:13px"><i class="fa-solid fa-circle-check" style="color:var(--green);margin-right:6px"></i>Aucune alerte. Tous les documents sont à jour.</div>';return;}
+    const top = list.slice(0,10);
+    $('alertList').innerHTML = top.map(a=>{
+      const fullName = `${a.first_name||'?'} ${a.last_name||''}`.trim();
+      let label='', cls='valid';
+      if(a.alert_kind==='expired'){label=`Expiré il y a ${-a.days_until_expiry} j`; cls='expired';}
+      else if(a.alert_kind==='expiring_soon'){label=`Expire dans ${a.days_until_expiry} j`; cls='expiring_soon';}
+      else if(a.alert_kind==='missing'){label='Manquant'; cls='missing';}
+      return `<div class="alertrow" data-eid="${a.employee_id}" style="cursor:pointer">
+        <div class="av" style="background:${avColor(a.last_name||'')};color:#fff;display:grid;place-items:center;font-weight:700">${initials(a.first_name||'?',a.last_name||'')}</div>
+        <div style="flex:1"><div class="nm">${fullName}</div><div class="sub">${a.doc_label||a.doc_type_code}${a.expires_at?` · ${a.expires_at}`:''}</div></div>
+        <span class="badge-st ${cls}">${label}</span>
+      </div>`;
+    }).join('');
+    if(list.length>top.length){
+      $('alertList').innerHTML += `<div style="text-align:center;padding:10px 0 0;font-size:12px;color:var(--muted)">… et ${list.length-top.length} autre(s).</div>`;
+    }
+    $('alertList').querySelectorAll('.alertrow').forEach(r=>r.onclick=()=>openFiche(r.dataset.eid));
+  }catch(e){
+    $('alertList').innerHTML=`<div style="padding:12px;color:var(--red);font-size:12px">Erreur chargement alertes : ${e.message||e}</div>`;
+  }
 }
 
 /* ===================== VUE REPORTING ===================== */
@@ -937,27 +1109,377 @@ function renderPersonnel(){
   draw();
 }
 
-/* ===================== VUE CONTRATS ===================== */
+/* ===================== VUE CONTRATS (sous-onglets) ===================== */
+let contractsSubTab = 'overview';  // overview | templates | generate
+
 function renderContracts(){
+  const hName = hotels.find(h=>h.id===hotelId)?.name||'';
+  $('view').innerHTML = `<div class="page">
+    <div class="phead"><div><h1>Contrats</h1><div class="sub">${hName}</div></div></div>
+    <div class="ctab-bar" style="display:flex;gap:4px;margin-bottom:18px;border-bottom:1px solid var(--line)">
+      <button class="ctab ${contractsSubTab==='overview'?'on':''}" data-sub="overview"><i class="fa-regular fa-rectangle-list"></i> Vue d'ensemble</button>
+      <button class="ctab ${contractsSubTab==='templates'?'on':''}" data-sub="templates"><i class="fa-regular fa-file-lines"></i> Modèles</button>
+      <button class="ctab ${contractsSubTab==='generate'?'on':''}" data-sub="generate"><i class="fa-solid fa-wand-magic-sparkles"></i> Générer un contrat</button>
+    </div>
+    <div id="csub"></div>
+  </div>`;
+  $('view').querySelectorAll('.ctab').forEach(b=>b.onclick=()=>{contractsSubTab=b.dataset.sub;renderContracts();});
+  if(contractsSubTab==='overview')      renderContractsOverview();
+  else if(contractsSubTab==='templates') renderContractsTemplates();
+  else                                   renderContractsGenerate();
+}
+
+function renderContractsOverview(){
   const list=staff.slice().sort((a,b)=>a.last_name.localeCompare(b.last_name));
-  $('view').innerHTML=`<div class="page">
-    <div class="phead"><div><h1>Contrats</h1><div class="sub">${list.length} collaborateur(s) · ${hotels.find(h=>h.id===hotelId)?.name||''}</div></div></div>
-    <table class="tbl"><thead><tr>
+  $('csub').innerHTML=`<table class="tbl"><thead><tr>
       <th>Collaborateur</th><th>Rôle</th><th>Service</th><th>Contrat</th><th>Entrée</th><th>Départ</th><th>Statut</th><th></th>
     </tr></thead><tbody>
     ${list.map(s=>`<tr data-emp="${s.id}">
       <td><b>${s.first_name} ${s.last_name}</b></td>
       <td>${s.role||'—'}</td><td>${s.department||'—'}</td>
       <td><span class="tag ${s.contract_type==='CDI'?'green':'gray'}">${s.contract_type||'CDI'}</span></td>
-      <td>${s.hire_date||'—'}</td>
-      <td>${s.departure_date||'—'}</td>
+      <td>${s.hire_date||'—'}</td><td>${s.departure_date||'—'}</td>
       <td>${s.active?'<span class="ok">Actif</span>':'<span class="ko">Parti</span>'}</td>
       <td><button title="Voir la fiche"><i class="fa-regular fa-eye"></i></button></td>
     </tr>`).join('')||'<tr><td colspan="8" style="padding:24px;text-align:center;color:var(--muted)">Aucun collaborateur enregistré.</td></tr>'}
-    </tbody></table>
-    <div style="margin-top:14px;color:var(--muted);font-size:12px"><i class="fa-solid fa-circle-info"></i> La table <code>employee_contracts</code> permet d'enregistrer un historique multi-période par collaborateur (renouvellements, avenants). Le formulaire d'ajout/édition de contrats détaillés sera ouvert depuis ces fiches.</div>
+    </tbody></table>`;
+  $('csub').querySelectorAll('tr[data-emp]').forEach(tr=>tr.onclick=()=>openFiche(tr.dataset.emp));
+}
+
+async function renderContractsTemplates(){
+  $('csub').innerHTML=`
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+      <div style="flex:1;font-size:13.5px;color:var(--ink2)">Modèles HTML versionnés. Utilisez les variables ci-dessous, elles seront remplacées à la génération.</div>
+      <button class="btn p" id="tplNew"><i class="fa-solid fa-plus"></i> Nouveau modèle</button>
+    </div>
+    <div id="tplList">Chargement…</div>
+    <div class="box" style="margin-top:18px"><h3><i class="fa-solid fa-code"></i>Variables disponibles</h3>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;font-family:'SFMono-Regular',Consolas,monospace;font-size:11.5px">
+        ${TEMPLATE_VARS.map(v=>`<div style="background:#f4f2fd;padding:6px 10px;border-radius:6px;color:var(--violet-d)"><b>{{${v[0]}}}</b><br><span style="color:var(--muted);font-family:'Inter'">${v[1]}</span></div>`).join('')}
+      </div>
+    </div>`;
+  $('tplNew').onclick=()=>openTemplateForm(null);
+  try{
+    const list=await BE.listTemplates(hotelId);
+    if(!list.length){$('tplList').innerHTML='<div style="padding:30px;text-align:center;color:var(--muted);background:#fff;border:1px dashed var(--line);border-radius:14px">Aucun modèle enregistré.<br><span style="font-size:12px">Cliquez « Nouveau modèle » pour démarrer.</span></div>';return;}
+    $('tplList').innerHTML=`<table class="tbl"><thead><tr><th>Modèle</th><th>Type</th><th>Service / Rôle</th><th>Version</th><th>Statut</th><th>Mis à jour</th><th></th></tr></thead><tbody>
+      ${list.map(t=>{const dp=deps.find(d=>d.id===t.department_id),rl=rols.find(r=>r.id===t.role_id);
+        return `<tr data-tid="${t.id}" ${t.status==='archived'?'style="opacity:.55"':''}>
+          <td><b>${t.name}</b></td>
+          <td><span class="tag">${t.contract_type}</span></td>
+          <td style="font-size:12px">${dp?dp.name:'—'}${rl?' · '+rl.name:''}</td>
+          <td>v${t.version||1}</td>
+          <td>${t.status==='active'?'<span class="ok">Actif</span>':'<span class="ko">Archivé</span>'}</td>
+          <td style="font-size:11.5px;color:var(--muted)">${(t.updated_at||t.created_at||'').slice(0,10)}</td>
+          <td style="text-align:right;white-space:nowrap">
+            <button data-act="edit"  title="Modifier"><i class="fa-solid fa-pen"></i></button>
+            <button data-act="newver" title="Nouvelle version"><i class="fa-solid fa-code-branch"></i></button>
+            ${t.status==='active'?'<button data-act="archive" title="Archiver"><i class="fa-solid fa-box-archive"></i></button>':''}
+            <button data-act="del" title="Supprimer"><i class="fa-solid fa-trash"></i></button>
+          </td>
+        </tr>`;}).join('')}
+      </tbody></table>`;
+    $('tplList').querySelectorAll('tr[data-tid]').forEach(tr=>{
+      const tid=tr.dataset.tid; const t=list.find(x=>x.id===tid);
+      tr.querySelectorAll('button[data-act]').forEach(b=>b.onclick=async ev=>{ev.stopPropagation();const act=b.dataset.act;
+        if(act==='edit')        openTemplateForm(t);
+        else if(act==='newver') openTemplateForm(t,true);
+        else if(act==='archive'){if(!confirm('Archiver ce modèle ?'))return;try{await BE.archiveTemplate(tid);await BE.logAudit('template_archive','contract_template',tid);flash('Archivé');renderContractsTemplates();}catch(e){flash('Erreur : '+e.message);}}
+        else if(act==='del'){if(!confirm('Supprimer définitivement ce modèle ?'))return;try{await BE.deleteTemplate(tid);flash('Supprimé');renderContractsTemplates();}catch(e){flash('Erreur : '+e.message);}}
+      });
+    });
+  }catch(e){$('tplList').innerHTML=`<div style="padding:20px;color:var(--red)">Erreur : ${e.message||e}</div>`;}
+}
+
+const TEMPLATE_VARS=[
+  ['employee_first_name','Prénom'],['employee_last_name','Nom'],['employee_full_name','Nom complet'],
+  ['birth_date','Date de naissance'],['birth_place','Lieu de naissance'],['nationality','Nationalité'],
+  ['social_security_number','N° sécurité sociale'],['residency_permit_number','N° titre de séjour'],
+  ['address','Adresse'],['phone','Téléphone'],['email','E-mail'],
+  ['job_title','Poste'],['department','Service'],['contract_type','Type de contrat'],
+  ['contract_start_date','Date de début'],['contract_end_date','Date de fin'],
+  ['trial_period','Période d\'essai'],['weekly_hours','Temps de travail'],['salary','Rémunération'],
+  ['work_location','Lieu de travail'],['manager_name','Responsable hiérarchique'],
+  ['collective_agreement','Convention collective'],
+  ['hotel_name','Nom de l\'hôtel'],['hotel_address','Adresse de l\'hôtel'],
+  ['today','Date du jour']
+];
+
+function openTemplateForm(t, isNewVersion){
+  const isEdit  = !!t && !isNewVersion;
+  const isVer   = !!t && isNewVersion;
+  const title   = isVer ? `Nouvelle version de « ${t.name} »` : isEdit ? 'Modifier le modèle' : 'Nouveau modèle de contrat';
+  const depOpts = deps.map(d=>`<option value="${d.id}" ${(t&&t.department_id===d.id)?'selected':''}>${d.name}</option>`).join('');
+  const rolOpts = rols.map(r=>`<option value="${r.id}" ${(t&&t.role_id===r.id)?'selected':''}>${r.name}</option>`).join('');
+  const typeOpts= CONTRACT_TYPES.map(c=>`<option ${(t&&t.contract_type===c)?'selected':''}>${c}</option>`).join('');
+
+  $('modal').innerHTML=`
+    <h3 style="margin-bottom:14px"><i class="fa-regular fa-file-lines" style="color:var(--violet);margin-right:8px"></i>${title}</h3>
+    <div class="fld"><label>Nom du modèle</label><input type="text" id="tn" value="${t?.name||''}" placeholder="ex : CDI Réceptionniste"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+      <div class="fld"><label>Type de contrat</label><select id="tc">${typeOpts}</select></div>
+      <div class="fld"><label>Service (facultatif)</label><select id="td"><option value="">— Tous —</option>${depOpts}</select></div>
+      <div class="fld"><label>Rôle (facultatif)</label><select id="tr"><option value="">— Tous —</option>${rolOpts}</select></div>
+    </div>
+    <div class="fld"><label>Corps HTML du modèle <span style="font-weight:400;color:var(--muted);font-size:11px">— utilisez {{variable}} pour les champs dynamiques</span></label>
+      <textarea id="tb" rows="14" style="font-family:'SFMono-Regular',Consolas,monospace;font-size:12px;line-height:1.5">${t?.body_html||DEFAULT_TEMPLATE_BODY}</textarea></div>
+    <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
+      <button class="btn g" id="tplCancel">Annuler</button>
+      <button class="btn p" id="tplSave"><i class="fa-solid fa-check"></i> ${isVer?'Créer la version':isEdit?'Enregistrer':'Créer'}</button>
+    </div>`;
+  $('modalbg').classList.add('on');
+  $('tplCancel').onclick=closeModal;
+  $('tplSave').onclick=async()=>{
+    const payload={name:$('tn').value.trim(),contract_type:$('tc').value,
+      department_id:$('td').value||null,role_id:$('tr').value||null,
+      body_html:$('tb').value};
+    if(!payload.name||!payload.body_html){flash('Nom et contenu sont obligatoires');return;}
+    try{
+      if(isVer){
+        const newT=await BE.newVersionOfTemplate(hotelId,t.id,payload.body_html,payload.name);
+        await BE.logAudit('template_update','contract_template',newT.id,null,{from:t.id,version:newT.version});
+        flash('Nouvelle version créée');
+      }else if(isEdit){
+        await BE.updateTemplate(t.id,payload);
+        await BE.logAudit('template_update','contract_template',t.id);
+        flash('Modèle mis à jour');
+      }else{
+        const newT=await BE.saveTemplate(hotelId,payload);
+        await BE.logAudit('template_upload','contract_template',newT.id,null,{contract_type:payload.contract_type});
+        flash('Modèle créé');
+      }
+      closeModal(); renderContractsTemplates();
+    }catch(e){flash('Erreur : '+(e.message||e));}
+  };
+}
+
+const DEFAULT_TEMPLATE_BODY = `<h1>Contrat de travail à durée indéterminée</h1>
+<p><b>Entre les soussignés :</b></p>
+<p>{{hotel_name}}, sis {{hotel_address}}, représenté par {{manager_name}}, ci-après dénommé « l'Employeur »,</p>
+<p><b>Et :</b></p>
+<p>{{employee_full_name}}, né(e) le {{birth_date}} à {{birth_place}}, de nationalité {{nationality}},
+demeurant {{address}}, n° de sécurité sociale {{social_security_number}}, ci-après dénommé(e) « le Salarié ».</p>
+<h2>Article 1 — Engagement</h2>
+<p>Le Salarié est engagé en qualité de {{job_title}} ({{department}}) à compter du {{contract_start_date}}, en {{contract_type}}.</p>
+<h2>Article 2 — Période d'essai</h2>
+<p>Période d'essai : {{trial_period}}.</p>
+<h2>Article 3 — Durée du travail</h2>
+<p>{{weekly_hours}}</p>
+<h2>Article 4 — Rémunération</h2>
+<p>La rémunération brute mensuelle est de {{salary}}.</p>
+<h2>Article 5 — Lieu de travail</h2>
+<p>{{work_location}}</p>
+<h2>Article 6 — Convention collective</h2>
+<p>{{collective_agreement}}</p>
+<p style="margin-top:40px">Fait à {{hotel_address}}, le {{today}}, en deux exemplaires.</p>
+<table style="width:100%;margin-top:30px"><tr><td style="width:50%"><b>L'Employeur</b></td><td><b>Le Salarié</b></td></tr></table>`;
+
+function renderContractsGenerate(){
+  $('csub').innerHTML=`<div class="box" style="padding:24px;text-align:center;color:var(--ink2)">
+    <i class="fa-solid fa-wand-magic-sparkles" style="font-size:36px;color:var(--violet);margin-bottom:14px"></i>
+    <h2 style="font-size:18px;font-weight:800;color:var(--ink);margin-bottom:8px">Générateur de contrat</h2>
+    <p style="font-size:13.5px;max-width:520px;margin:0 auto 14px">À partir d'un collaborateur et d'un modèle, le système remplit les variables, produit un aperçu et génère le PDF prêt à signer.</p>
+    <button class="btn p" id="genStart" style="margin-top:6px"><i class="fa-solid fa-play"></i> Lancer l'assistant</button>
   </div>`;
-  $('view').querySelectorAll('tr[data-emp]').forEach(tr=>tr.onclick=()=>openFiche(tr.dataset.emp));
+  $('genStart').onclick=()=>openGenerateWizard();
+}
+
+/* ===== MOTEUR DE SUBSTITUTION DE VARIABLES ===== */
+function buildContractContext(emp, hotel, fields){
+  const fmt = v => v ? new Date(v).toLocaleDateString('fr-FR') : '';
+  return {
+    employee_first_name: emp.first_name||'',
+    employee_last_name : emp.last_name||'',
+    employee_full_name : `${emp.first_name||''} ${emp.last_name||''}`.trim(),
+    birth_date         : fmt(emp.birth_date),
+    birth_place        : emp.birth_place||'',
+    nationality        : emp.nationality||'',
+    social_security_number  : emp.social_security_number||'',
+    residency_permit_number : emp.residency_permit_number||'',
+    address            : emp.address||'',
+    phone              : emp.phone||'',
+    email              : emp.email||'',
+    job_title          : emp.role||'',
+    department         : emp.department||'',
+    contract_type      : fields.contract_type||emp.contract_type||'',
+    contract_start_date: fmt(fields.contract_start_date),
+    contract_end_date  : fmt(fields.contract_end_date),
+    trial_period       : fields.trial_period||'',
+    weekly_hours       : fields.weekly_hours||'',
+    salary             : fields.salary||'',
+    work_location      : fields.work_location||'',
+    manager_name       : fields.manager_name||'',
+    collective_agreement : fields.collective_agreement||'',
+    hotel_name         : hotel?.name||'',
+    hotel_address      : hotel?.city||'',
+    today              : new Date().toLocaleDateString('fr-FR'),
+  };
+}
+function substituteVariables(html, ctx){
+  return html.replace(/\{\{(\w+)\}\}/g, (m,k)=> ctx[k] !== undefined ? String(ctx[k]) : `<span style="background:#fef3c7;color:#92400e;padding:0 4px;border-radius:3px">${m}</span>`);
+}
+
+/* ===== ASSISTANT DE GÉNÉRATION ===== */
+let genState = {step:1, employee_id:'', template_id:'', fields:{}};
+
+async function openGenerateWizard(){
+  genState = {step:1, employee_id:'', template_id:'', fields:{}};
+  drawGenWizard();
+}
+
+async function drawGenWizard(){
+  $('modal').innerHTML = `
+    <h3 style="margin-bottom:6px"><i class="fa-solid fa-wand-magic-sparkles" style="color:var(--violet);margin-right:8px"></i>Générer un contrat</h3>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Étape ${genState.step} / 4</div>
+    <div id="genBody"></div>`;
+  $('modalbg').classList.add('on');
+  if(genState.step===1)      await drawGenStep1();
+  else if(genState.step===2) await drawGenStep2();
+  else if(genState.step===3) drawGenStep3();
+  else                       await drawGenStep4();
+}
+
+async function drawGenStep1(){
+  const list = staff.filter(s=>s.active).sort((a,b)=>a.last_name.localeCompare(b.last_name));
+  $('genBody').innerHTML=`
+    <div class="fld"><label>Collaborateur</label>
+      <select id="gEmp"><option value="">— choisir —</option>${list.map(s=>`<option value="${s.id}" ${s.id===genState.employee_id?'selected':''}>${s.first_name} ${s.last_name} · ${s.role||'—'}</option>`).join('')}</select></div>
+    <div style="background:#fef3c7;border-radius:8px;padding:10px 12px;font-size:12px;color:#92400e;margin-top:10px" id="gWarn"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
+      <button class="btn g" id="gCancel">Annuler</button>
+      <button class="btn p" id="gNext"><i class="fa-solid fa-arrow-right"></i> Suivant</button>
+    </div>`;
+  const checkEmp=()=>{const eid=$('gEmp').value;const e=staff.find(x=>x.id===eid);
+    if(!e){$('gWarn').style.display='none';return;}
+    const miss=[];
+    if(!e.birth_date)miss.push('date de naissance'); if(!e.birth_place)miss.push('lieu de naissance');
+    if(!e.nationality)miss.push('nationalité'); if(!e.social_security_number)miss.push('n° sécurité sociale');
+    if(!e.address)miss.push('adresse');
+    if(miss.length){$('gWarn').style.display='block';$('gWarn').innerHTML=`<i class="fa-solid fa-triangle-exclamation"></i> Données civiles manquantes : ${miss.join(', ')}. Le contrat affichera ces variables surlignées en jaune. Vous pouvez compléter la fiche depuis Personnel.`;}
+    else{$('gWarn').style.display='none';}
+  };
+  $('gEmp').onchange=checkEmp; checkEmp();
+  $('gCancel').onclick=closeModal;
+  $('gNext').onclick=()=>{const v=$('gEmp').value;if(!v){flash('Choisissez un collaborateur');return;}genState.employee_id=v;genState.step=2;drawGenWizard();};
+}
+
+async function drawGenStep2(){
+  const all = await BE.listTemplates(hotelId);
+  const actives = all.filter(t=>t.status==='active');
+  const emp = staff.find(s=>s.id===genState.employee_id);
+  // suggérer les modèles correspondant au service/rôle de l'employé
+  const suggested = actives.filter(t=>{
+    if(t.department_id && t.department_id !== emp?.department_id) return false;
+    if(t.role_id && t.role_id !== emp?.role_id) return false;
+    return true;
+  });
+  $('genBody').innerHTML=`
+    <div style="font-size:12.5px;color:var(--ink2);margin-bottom:10px">Modèles actifs ${suggested.length<actives.length?'· <b>suggérés</b> pour ce poste, puis tous les autres':''}.</div>
+    <div class="fld"><label>Modèle</label>
+      <select id="gTpl"><option value="">— choisir —</option>
+        ${suggested.length?`<optgroup label="Suggérés">${suggested.map(t=>`<option value="${t.id}" ${t.id===genState.template_id?'selected':''}>${t.name} · ${t.contract_type} · v${t.version}</option>`).join('')}</optgroup>`:''}
+        ${(suggested.length<actives.length)?`<optgroup label="Tous les autres">${actives.filter(t=>!suggested.includes(t)).map(t=>`<option value="${t.id}" ${t.id===genState.template_id?'selected':''}>${t.name} · ${t.contract_type}</option>`).join('')}</optgroup>`:''}
+      </select>
+    </div>
+    ${actives.length?'':'<div style="background:var(--red-bg);color:var(--red);padding:10px 12px;border-radius:8px;font-size:12.5px;margin-top:10px"><i class="fa-solid fa-circle-exclamation"></i> Aucun modèle actif. Créez-en un depuis l\'onglet Modèles.</div>'}
+    <div style="display:flex;gap:8px;margin-top:14px;justify-content:space-between">
+      <button class="btn g" id="gBack"><i class="fa-solid fa-arrow-left"></i> Retour</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn g" id="gCancel">Annuler</button>
+        <button class="btn p" id="gNext" ${actives.length?'':'disabled'}><i class="fa-solid fa-arrow-right"></i> Suivant</button>
+      </div>
+    </div>`;
+  $('gBack').onclick=()=>{genState.step=1;drawGenWizard();};
+  $('gCancel').onclick=closeModal;
+  $('gNext').onclick=()=>{const v=$('gTpl').value;if(!v){flash('Choisissez un modèle');return;}genState.template_id=v;genState.step=3;drawGenWizard();};
+}
+
+function drawGenStep3(){
+  const f = genState.fields;
+  $('genBody').innerHTML=`
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="fld"><label>Date de début *</label><input type="date" id="f_start" value="${f.contract_start_date||''}"></div>
+      <div class="fld"><label>Date de fin (CDD/Extra/Stage)</label><input type="date" id="f_end" value="${f.contract_end_date||''}"></div>
+      <div class="fld"><label>Période d'essai</label><input type="text" id="f_trial" value="${f.trial_period||''}" placeholder="ex : 2 mois"></div>
+      <div class="fld"><label>Temps de travail</label><input type="text" id="f_hours" value="${f.weekly_hours||''}" placeholder="ex : 35h/semaine"></div>
+      <div class="fld"><label>Rémunération brute</label><input type="text" id="f_salary" value="${f.salary||''}" placeholder="ex : 2 100 € brut/mois"></div>
+      <div class="fld"><label>Lieu de travail</label><input type="text" id="f_loc" value="${f.work_location||''}" placeholder="adresse de l'établissement"></div>
+      <div class="fld"><label>Responsable hiérarchique</label><input type="text" id="f_mgr" value="${f.manager_name||''}"></div>
+      <div class="fld"><label>Convention collective</label><input type="text" id="f_conv" value="${f.collective_agreement||'HCR – Hôtels Cafés Restaurants'}"></div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:14px;justify-content:space-between">
+      <button class="btn g" id="gBack"><i class="fa-solid fa-arrow-left"></i> Retour</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn g" id="gCancel">Annuler</button>
+        <button class="btn p" id="gNext"><i class="fa-solid fa-eye"></i> Aperçu</button>
+      </div>
+    </div>`;
+  $('gBack').onclick=()=>{genState.step=2;drawGenWizard();};
+  $('gCancel').onclick=closeModal;
+  $('gNext').onclick=()=>{
+    genState.fields={
+      contract_start_date:$('f_start').value, contract_end_date:$('f_end').value,
+      trial_period:$('f_trial').value, weekly_hours:$('f_hours').value,
+      salary:$('f_salary').value, work_location:$('f_loc').value,
+      manager_name:$('f_mgr').value, collective_agreement:$('f_conv').value
+    };
+    if(!genState.fields.contract_start_date){flash('Date de début obligatoire');return;}
+    genState.step=4; drawGenWizard();
+  };
+}
+
+async function drawGenStep4(){
+  const emp = staff.find(s=>s.id===genState.employee_id);
+  const hotel = hotels.find(h=>h.id===hotelId);
+  const all = await BE.listTemplates(hotelId);
+  const tpl = all.find(t=>t.id===genState.template_id);
+  if(!emp||!tpl){flash('Données manquantes');closeModal();return;}
+  const ctx = buildContractContext(emp, hotel, {...genState.fields, contract_type: tpl.contract_type});
+  const rendered = substituteVariables(tpl.body_html, ctx);
+  $('genBody').innerHTML=`
+    <div style="font-size:12px;color:var(--muted);margin-bottom:8px">Aperçu — vérifiez les variables avant de générer le PDF.</div>
+    <div id="genPreview" style="border:1px solid var(--line);border-radius:10px;padding:24px;max-height:55vh;overflow-y:auto;background:#fff;font-family:'Times New Roman',serif;font-size:13px;line-height:1.5;color:#222">${rendered}</div>
+    <div style="display:flex;gap:8px;margin-top:14px;justify-content:space-between;align-items:center">
+      <button class="btn g" id="gBack"><i class="fa-solid fa-arrow-left"></i> Retour</button>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn g" id="gCancel">Annuler</button>
+        <button class="btn p" id="gGen"><i class="fa-solid fa-file-pdf"></i> Générer le PDF</button>
+      </div>
+    </div>`;
+  $('gBack').onclick=()=>{genState.step=3;drawGenWizard();};
+  $('gCancel').onclick=closeModal;
+  $('gGen').onclick=async()=>{
+    const btn=$('gGen'); btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Génération…';
+    try{
+      const pdfBlob = await renderHtmlToPdfBlob(rendered, `Contrat - ${emp.first_name} ${emp.last_name}`);
+      const filename = `contrat_${(emp.last_name||'').toLowerCase()}_${(emp.first_name||'').toLowerCase()}_${new Date().toISOString().slice(0,10)}.pdf`;
+      const file = new File([pdfBlob], filename, {type:'application/pdf'});
+      // 1. Sauvegarder dans Storage + employee_documents (type 'contrat')
+      const opts = {issued_at:new Date().toISOString().slice(0,10), notes:`Généré depuis modèle ${tpl.name} v${tpl.version}`};
+      await BE.uploadEmployeeDocument(hotelId, emp.id, 'contrat', file, opts);
+      await BE.logAudit('contract_generate','employee_contract', tpl.id, emp.id, {template:tpl.name, version:tpl.version, contract_type:tpl.contract_type});
+      // 2. Télécharger pour l'utilisateur
+      const url = URL.createObjectURL(pdfBlob); const a=document.createElement('a'); a.href=url; a.download=filename; a.click(); URL.revokeObjectURL(url);
+      closeModal(); flash('Contrat généré et stocké dans la fiche');
+    }catch(e){flash('Erreur génération : '+(e.message||e)); btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-file-pdf"></i> Générer le PDF';}
+  };
+}
+
+async function renderHtmlToPdfBlob(html, title){
+  if(!(window.jspdf && window.jspdf.jsPDF)){
+    await loadScript('https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js');
+  }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({orientation:'portrait', unit:'mm', format:'a4'});
+  // Conteneur invisible pour mesurer + rendu
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'position:fixed;left:-9999px;top:0;width:170mm;padding:20px;font-family:"Times New Roman",serif;font-size:11pt;line-height:1.45;color:#000;background:#fff';
+  wrap.innerHTML = `<div style="margin-bottom:10mm;font-size:9pt;color:#999;text-align:right">${title}</div>${html}`;
+  document.body.appendChild(wrap);
+  try{
+    await doc.html(wrap, {x:15, y:15, width:180, windowWidth:wrap.scrollWidth, autoPaging:'text'});
+  }finally{ document.body.removeChild(wrap); }
+  return doc.output('blob');
 }
 
 /* ===================== VUE DOCUMENTS ===================== */
@@ -1305,7 +1827,7 @@ async function openFiche(eid){
   const s=staff.find(x=>x.id===eid); if(!s)return;
   const badge=s.contract_type==='CDI'?'cdi':s.contract_type==='CDD'?'cdd':'ext';
   const restNames=(s.rest_days||[]).map(d=>['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'][d]).join(', ')||'—';
-  const full=canFicheFull();   // false pour réception, gouvernante, maintenance, breakfast, femme_de_chambre
+  const full=canFicheFull();
   $('drawer').innerHTML=`
     <div class="dh"><button class="close" data-x><i class="fa-solid fa-xmark"></i></button>
       <div class="av" style="background:${avColor(s.last_name)}">${initials(s.first_name,s.last_name)}</div>
@@ -1320,7 +1842,14 @@ async function openFiche(eid){
       ${full?`<div class="fr"><span class="k">Adresse</span><span class="v">${s.address||'—'}</span></div>
       <div class="fr"><span class="k">Contact d'urgence</span><span class="v">${s.emergency_contact||'—'}</span></div>`:''}
     </div>
-    ${full?'<div class="sec"><h4>Documents RH</h4><div id="docs">Chargement…</div></div>':''}
+    ${full?`<div class="sec"><h4>État civil <span style="font-size:10.5px;color:var(--muted);font-weight:500;text-transform:none;letter-spacing:0;margin-left:6px">— RGPD sensible</span></h4>
+      <div class="fr"><span class="k">Date de naissance</span><span class="v">${s.birth_date||'—'}</span></div>
+      <div class="fr"><span class="k">Lieu de naissance</span><span class="v">${s.birth_place||'—'}</span></div>
+      <div class="fr"><span class="k">Nationalité</span><span class="v">${s.nationality||'—'}</span></div>
+      <div class="fr"><span class="k">N° sécu sociale</span><span class="v" style="font-family:'SFMono-Regular',monospace;font-size:12px">${s.social_security_number||'—'}</span></div>
+      ${s.residency_permit_number?`<div class="fr"><span class="k">Titre de séjour</span><span class="v">${s.residency_permit_number}${s.residency_permit_expires?` (exp. ${s.residency_permit_expires})`:''}</span></div>`:''}
+    </div>`:''}
+    ${full?'<div class="sec"><h4>Documents RH <button class="btn p" data-upload style="float:right;padding:5px 10px;font-size:11.5px"><i class="fa-solid fa-upload"></i> Ajouter</button></h4><div id="docs">Chargement…</div></div>':''}
     ${full?`<div class="sec" style="display:flex;gap:10px"><button class="btn g" data-edit style="flex:1;justify-content:center"><i class="fa-solid fa-pen"></i> Modifier</button>
       ${s.active
         ? '<button class="btn d" data-del style="flex:1;justify-content:center"><i class="fa-solid fa-trash"></i> Marquer comme parti</button>'
@@ -1344,16 +1873,88 @@ async function openFiche(eid){
     await BE.updateEmployee(s.id, {active:true, departure_date:null});
     s.active=true; s.departure_date=null;
     closeFiche(); render(); flash('Collaborateur réactivé');};
-  if(!full) return;   // ni docs ni actions sensibles pour les rôles restreints
-  const list=await BE.listDocuments(hotelId,eid);
-  const map={}; list.forEach(d=>map[d.doc_type]=d.status);
-  $('docs').innerHTML=DOC_TYPES.map(([k,lab])=>{const st=map[k]||'missing';const ok=st==='provided';
-    return `<div class="doc" data-d="${k}"><span class="nm">${lab}</span>${ok?'<span class="docok"><i class="fa-solid fa-circle-check"></i> Fourni</span>':'<span class="docko"><i class="fa-solid fa-circle-exclamation"></i> Manquant</span>'}</div>`;}).join('');
-  $('docs').querySelectorAll('.doc').forEach(d=>d.onclick=async()=>{
-    const k=d.dataset.d, ok=d.querySelector('.docok'); const next=ok?'missing':'provided';
-    await BE.setDocument(hotelId,eid,k,next);
-    d.innerHTML=`<span class="nm">${DOC_TYPES.find(x=>x[0]===k)[1]}</span>${next==='provided'?'<span class="docok"><i class="fa-solid fa-circle-check"></i> Fourni</span>':'<span class="docko"><i class="fa-solid fa-circle-exclamation"></i> Manquant</span>'}`;
+  if(!full) return;
+  $('drawer').querySelector('[data-upload]').onclick=()=>openDocUploadForm(s);
+  await drawEmployeeDocs(s);
+}
+
+async function drawEmployeeDocs(s){
+  const list = await BE.listDocumentsForEmployee(hotelId, s.id);
+  if(!list.length){$('docs').innerHTML='<div style="padding:14px;color:var(--muted);font-size:12.5px;font-style:italic">Aucun document. Cliquez sur Ajouter pour téléverser un fichier (CNI, RIB, contrat signé, etc.).</div>';return;}
+  const today = new Date();
+  const items = list.sort((a,b)=>{const dt=DOC_TYPES.findIndex(x=>x[0]===a.doc_type)-DOC_TYPES.findIndex(x=>x[0]===b.doc_type);return dt;}).map(d=>{
+    const dt = DOC_TYPES.find(x=>x[0]===d.doc_type) || ['autre','Autre','other',false];
+    const [code,label,category]=dt;
+    let status='valid', statusLabel='Valide';
+    if(d.status==='missing'){status='missing';statusLabel='Manquant';}
+    else if(d.expires_at){
+      const exp=new Date(d.expires_at);
+      const diff=Math.round((exp-today)/86400000);
+      if(diff<0){status='expired';statusLabel=`Expiré ${-diff} j`;}
+      else if(diff<30){status='expiring_soon';statusLabel=`Expire dans ${diff} j`;}
+    }
+    return `<div class="docitem" data-did="${d.id}">
+      <div class="ic ${category}"><i class="fa-solid fa-file-lines"></i></div>
+      <div style="flex:1;min-width:0">
+        <div class="nm">${label}</div>
+        <div class="meta">
+          ${d.file_size?`${(d.file_size/1024).toFixed(0)} ko · `:''}
+          ${d.issued_at?`émis ${d.issued_at}`:''}${d.expires_at?` · expire ${d.expires_at}`:''}
+          ${d.notes?` · <i>${d.notes}</i>`:''}
+        </div>
+      </div>
+      <span class="badge-st ${status}">${statusLabel}</span>
+      <div class="acts">
+        ${d.file_path?'<button data-act="dl" title="Télécharger"><i class="fa-solid fa-download"></i></button>':''}
+        <button data-act="del" class="del" title="Supprimer"><i class="fa-solid fa-trash"></i></button>
+      </div>
+    </div>`;
+  }).join('');
+  $('docs').innerHTML=items;
+  $('docs').querySelectorAll('.docitem').forEach(it=>{
+    const did=it.dataset.did; const d=list.find(x=>x.id===did);
+    it.querySelectorAll('button[data-act]').forEach(b=>b.onclick=async ev=>{ev.stopPropagation();const act=b.dataset.act;
+      if(act==='dl'){
+        try{const url=await BE.getSignedDocUrl(d.file_path);await BE.logAudit('document_download','employee_document',d.id,s.id,{doc_type:d.doc_type});window.open(url,'_blank');}
+        catch(e){flash('Erreur : '+(e.message||e));}
+      }else if(act==='del'){
+        if(!confirm('Supprimer ce document ?'))return;
+        try{await BE.deleteEmployeeDocument(d.id);await BE.logAudit('document_delete','employee_document',d.id,s.id,{doc_type:d.doc_type});flash('Document supprimé');drawEmployeeDocs(s);}
+        catch(e){flash('Erreur : '+(e.message||e));}
+      }
+    });
   });
+}
+
+function openDocUploadForm(s){
+  const typeOpts = DOC_TYPES.map(([code,label])=>`<option value="${code}">${label}</option>`).join('');
+  $('modal').innerHTML=`
+    <h3 style="margin-bottom:14px"><i class="fa-solid fa-upload" style="color:var(--violet);margin-right:8px"></i>Ajouter un document — ${s.first_name} ${s.last_name}</h3>
+    <div class="fld"><label>Type de document *</label><select id="du_type">${typeOpts}</select></div>
+    <div class="fld"><label>Fichier * <span style="font-weight:400;color:var(--muted);font-size:11px">(PDF, JPEG, PNG, max 10 Mo)</span></label><input type="file" id="du_file" accept=".pdf,.jpg,.jpeg,.png,.heic,.webp"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="fld"><label>Date d'émission</label><input type="date" id="du_issued"></div>
+      <div class="fld"><label>Date d'expiration</label><input type="date" id="du_expires"></div>
+    </div>
+    <div class="fld"><label>Notes (facultatif)</label><input type="text" id="du_notes" placeholder="ex : copie certifiée conforme"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
+      <button class="btn g" id="du_cancel">Annuler</button>
+      <button class="btn p" id="du_save"><i class="fa-solid fa-check"></i> Téléverser</button>
+    </div>`;
+  $('modalbg').classList.add('on');
+  $('du_cancel').onclick=closeModal;
+  $('du_save').onclick=async()=>{
+    const file=$('du_file').files[0]; const code=$('du_type').value;
+    if(!file){flash('Choisissez un fichier');return;}
+    if(file.size>10*1024*1024){flash('Fichier trop volumineux (max 10 Mo)');return;}
+    const btn=$('du_save'); btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Téléversement…';
+    try{
+      const opts={issued_at:$('du_issued').value||null, expires_at:$('du_expires').value||null, notes:$('du_notes').value.trim()||null};
+      const rec=await BE.uploadEmployeeDocument(hotelId, s.id, code, file, opts);
+      await BE.logAudit('document_upload','employee_document',rec.id,s.id,{doc_type:code, file_size:file.size});
+      closeModal(); flash('Document téléversé'); drawEmployeeDocs(s);
+    }catch(e){flash('Erreur : '+(e.message||e)); btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-check"></i> Téléverser';}
+  };
 }
 function closeFiche(){$('dbg').classList.remove('on');$('drawer').classList.remove('on');}
 $('dbg').onclick=()=>{closeFiche();closeModal();};
@@ -1394,6 +1995,22 @@ function openEmpForm(s){
       </div>
       <div class="fld"><label>Adresse</label><input type="text" id="ea" value="${s?.address||''}"></div>
       <div class="fld"><label>Contact d'urgence</label><input type="text" id="eu" value="${s?.emergency_contact||''}"></div>
+      ${canFicheFull()?`
+      <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--line)">
+        <div style="font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:10px"><i class="fa-solid fa-id-card" style="margin-right:5px"></i>État civil <span style="color:#92400e;background:#fef3c7;padding:1px 6px;border-radius:4px;margin-left:6px;font-size:10px">RGPD sensible</span></div>
+        <div class="row2">
+          <div class="fld"><label>Date de naissance</label><input type="date" id="ebd" value="${s?.birth_date||''}"></div>
+          <div class="fld"><label>Lieu de naissance</label><input type="text" id="ebp" value="${s?.birth_place||''}"></div>
+        </div>
+        <div class="row2">
+          <div class="fld"><label>Nationalité</label><input type="text" id="ent" value="${s?.nationality||''}"></div>
+          <div class="fld"><label>N° sécurité sociale</label><input type="text" id="essn" value="${s?.social_security_number||''}" maxlength="20" pattern="[0-9 ]*" placeholder="1 85 04 75 116 001 23"></div>
+        </div>
+        <div class="row2">
+          <div class="fld"><label>N° titre de séjour</label><input type="text" id="ersp" value="${s?.residency_permit_number||''}"></div>
+          <div class="fld"><label>Expiration titre de séjour</label><input type="date" id="erspe" value="${s?.residency_permit_expires||''}"></div>
+        </div>
+      </div>`:''}
     </div>
     <div class="mact">
       <button class="btn g" id="ecancel">Annuler</button>
@@ -1415,6 +2032,14 @@ function openEmpForm(s){
       address:$('ea').value.trim()||null, emergency_contact:$('eu').value.trim()||null,
       active:!isLeft, departure_date: isLeft?dep:null,
     };
+    if(canFicheFull()){
+      p.birth_date  = $('ebd').value||null;
+      p.birth_place = $('ebp').value.trim()||null;
+      p.nationality = $('ent').value.trim()||null;
+      p.social_security_number  = $('essn').value.trim()||null;
+      p.residency_permit_number = $('ersp').value.trim()||null;
+      p.residency_permit_expires= $('erspe').value||null;
+    }
     if(!p.first_name||!p.last_name){flash('Prénom et nom requis');return;}
     $('esave').disabled=true;
     try{
@@ -1694,7 +2319,10 @@ window.__rh={
   setRole:(r)=>{ myRole=r; renderShell(); },
   myRole:()=>myRole,
   staff:()=>staff,
-  openFiche,
+  openFiche, openEmpForm, openTemplateForm, openGenerateWizard,
+  substituteVariables, buildContractContext,
+  TEMPLATE_VARS, DOC_TYPES, CONTRACT_TYPES,
+  setContractsSubTab:(t)=>{contractsSubTab=t;},
   BE:()=>BE
 };
 
