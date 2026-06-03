@@ -495,6 +495,7 @@ async function makeRealBE(){
     async listAccess(h){const {data,error}=await sb.rpc('rh_list_users_for_hotel',{p_hotel:h});must(error,"Liste des accès");return data||[];},
     async updateAccess(h,user_id,role){const {error}=await sb.rpc('rh_update_user_role',{p_hotel:h,p_user_id:user_id,p_role:role});must(error,"Modification du rôle");},
     async listClockings(h,day){const {data,error}=await sb.from('staff_clockings').select('*').eq('hotel_id',h).eq('day',day).order('clock_in_ts');must(error,"Liste des pointages");return data||[];},
+    async listClockingsByRange(h,from,to){const {data,error}=await sb.from('staff_clockings').select('*').eq('hotel_id',h).gte('day',from).lte('day',to).order('day').order('clock_in_ts');must(error,"Pointages période");return data||[];},
     async addClocking(h,payload){const {data,error}=await sb.from('staff_clockings').insert({hotel_id:h,...payload}).select('*').single();must(error,"Ajout pointage");return data;},
     async updateClocking(id,patch){const {data,error}=await sb.from('staff_clockings').update(patch).eq('id',id).select('*').single();must(error,"Mise à jour pointage");return data;},
     async deleteClocking(id){const {error}=await sb.from('staff_clockings').delete().eq('id',id);must(error,"Suppression pointage");},
@@ -701,6 +702,7 @@ function makeTestBE(){
     ];},
     async updateAccess(h,user_id,role){/* no-op en test */ return; },
     async listClockings(h,day){return clockings.filter(c=>c.hotel_id===h && c.day===day).sort((a,b)=>a.clock_in_ts.localeCompare(b.clock_in_ts));},
+    async listClockingsByRange(h,from,to){return clockings.filter(c=>c.hotel_id===h && c.day>=from && c.day<=to).sort((a,b)=>a.day===b.day?a.clock_in_ts.localeCompare(b.clock_in_ts):a.day.localeCompare(b.day));},
     async addClocking(h,p){const c={id:'c'+Date.now()+Math.random().toString(36).slice(2,6),hotel_id:h,...p,created_at:new Date().toISOString(),updated_at:new Date().toISOString()};clockings.push(c);return c;},
     async updateClocking(id,patch){const c=clockings.find(x=>x.id===id);if(!c)throw new Error('not found');Object.assign(c,patch,{updated_at:new Date().toISOString()});return c;},
     async deleteClocking(id){const i=clockings.findIndex(x=>x.id===id);if(i>=0)clockings.splice(i,1);},
@@ -1007,10 +1009,7 @@ function goView(v){
            config:renderConfig, absences:renderAbsences, pointage:renderPointage,
            recruitment:renderRecruitment, training:renderTraining,
            medical:renderMedical, equipment:renderEquipment, orgchart:renderOrgChart,
-           tracking:()=>renderStub('Suivi du temps','fa-solid fa-stopwatch','Consolidation des heures réelles.',
-             ['Calcul heures réalisées vs planifiées','Détection des écarts','Export Excel/PDF']),
-           payroll:()=>renderStub('Paie','fa-solid fa-coins','Éléments variables de paie.',
-             ['Calcul heures supp.','Décomptes CP/RTT','Export logiciel de paie'])};
+           tracking:renderTracking, payroll:renderPayroll};
   (r[v]||r.dashboard)();
 }
 /* ===================== VUE PLANNING ===================== */
@@ -3572,6 +3571,249 @@ async function exportOrgPNG(){
   }catch(e){flash('Erreur export : '+e.message);}
 }
 
+/* ===================== SUIVI DU TEMPS ===================== */
+let trMonth=new Date().toISOString().slice(0,7); // YYYY-MM
+async function renderTracking(){
+  const hName=hotels.find(h=>h.id===hotelId)?.name||'';
+  $('view').innerHTML=`<div class="page">
+    <div class="phead">
+      <div><h1>Suivi du temps</h1><div class="sub">${hName} · heures réelles vs planifiées</div></div>
+      <div class="actions">
+        <input type="month" id="trMonth" value="${trMonth}" style="font-family:inherit;padding:8px 12px;border:1px solid var(--line);border-radius:10px;font-size:13px;background:#fff">
+        <button class="btn g" id="trExport"><i class="fa-solid fa-file-csv"></i> CSV</button>
+      </div>
+    </div>
+    <div id="trKpis" class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))"></div>
+    <div class="box" style="padding:0"><div id="trTable">Chargement…</div></div>
+  </div>`;
+  $('trMonth').onchange=e=>{trMonth=e.target.value;drawTracking();};
+  $('trExport').onclick=()=>exportTrackingCSV();
+  await drawTracking();
+}
+async function drawTracking(){
+  const el=$('trTable'); if(!el)return;
+  el.innerHTML='<div style="padding:24px;text-align:center;color:var(--muted)">Chargement…</div>';
+  const [y,m]=trMonth.split('-').map(Number);
+  const from=iso(y,m,1), to=iso(y,m,dim(y,m));
+  try{
+    const [planRows, clockRows]=await Promise.all([
+      BE.listMonthPlanning(hotelId,y,m),
+      BE.listClockingsByRange(hotelId,from,to)
+    ]);
+    const active=staff.filter(s=>s.active!==false);
+    // index planning by empId+day
+    const planMap=new Map();
+    planRows.forEach(r=>planMap.set(r.employee_id+'|'+r.day, r.status));
+    // index clockings by empId
+    const clockMap=new Map();
+    clockRows.forEach(c=>{
+      if(!clockMap.has(c.employee_id)) clockMap.set(c.employee_id,[]);
+      clockMap.get(c.employee_id).push(c);
+    });
+    const nd=dim(y,m);
+    const rows=active.map(emp=>{
+      let planned=0,worked=0,cp=0,rtt=0,abs=0,extraMin=0;
+      for(let d=1;d<=nd;d++){
+        const k=emp.id+'|'+iso(y,m,d);
+        const st=planMap.get(k)||'';
+        if(st==='P'||st==='PE') planned++;
+        if(st==='CP') cp++;
+        if(st==='RTT') rtt++;
+        if(st==='MAL'||st==='ABS'||st==='MAT'||st==='CSS') abs++;
+      }
+      const cks=clockMap.get(emp.id)||[];
+      cks.forEach(c=>{
+        if(c.clock_out_ts) extraMin+=minutesBetween(c.clock_in_ts,c.clock_out_ts)-(c.break_minutes||0);
+      });
+      worked=Math.round(extraMin/60*10)/10;
+      const plannedH=planned*7; // 7h par jour planifié par défaut
+      const diff=Math.round((worked-plannedH)*10)/10;
+      return {emp,planned,cp,rtt,abs,worked,plannedH,diff};
+    });
+    // KPIs
+    const totalPlannedH=rows.reduce((s,r)=>s+r.plannedH,0);
+    const totalWorked=rows.reduce((s,r)=>s+r.worked,0);
+    const totalDiff=Math.round((totalWorked-totalPlannedH)*10)/10;
+    const withClock=rows.filter(r=>r.worked>0).length;
+    const kpiEl=$('trKpis');
+    if(kpiEl) kpiEl.innerHTML=[
+      {icon:'fa-users',label:'Collaborateurs actifs',val:active.length,color:''},
+      {icon:'fa-clock',label:'Heures planifiées',val:totalPlannedH+'h',color:''},
+      {icon:'fa-stopwatch',label:'Heures pointées',val:totalWorked+'h',color:''},
+      {icon:'fa-chart-line',label:'Écart global',val:(totalDiff>0?'+':'')+totalDiff+'h',color:totalDiff>=0?'#16a34a':'#dc2626'},
+    ].map(k=>`<div class="kc"><div class="kv" style="${k.color?'color:'+k.color:''}">${k.val}</div><div class="kl"><i class="fa-solid ${k.icon}"></i> ${k.label}</div></div>`).join('');
+    // Table
+    window._trRows=rows;
+    const diffColor=d=>d>0?'color:#16a34a;font-weight:600':d<0?'color:#dc2626;font-weight:600':'color:var(--muted)';
+    el.innerHTML=`<table class="rtable">
+      <thead><tr>
+        <th>Collaborateur</th><th>Service</th><th>Contrat</th>
+        <th style="text-align:center">Jours P/PE</th>
+        <th style="text-align:center">CP</th>
+        <th style="text-align:center">RTT</th>
+        <th style="text-align:center">Abs.</th>
+        <th style="text-align:right">Planifié (h)</th>
+        <th style="text-align:right">Pointé (h)</th>
+        <th style="text-align:right">Écart</th>
+      </tr></thead>
+      <tbody>
+        ${rows.map(r=>`<tr>
+          <td><b>${r.emp.last_name} ${r.emp.first_name}</b></td>
+          <td>${r.emp.department||'—'}</td>
+          <td style="font-size:11px;color:var(--muted)">${r.emp.contract_type||'—'}</td>
+          <td style="text-align:center">${r.planned}</td>
+          <td style="text-align:center">${r.cp||'—'}</td>
+          <td style="text-align:center">${r.rtt||'—'}</td>
+          <td style="text-align:center">${r.abs||'—'}</td>
+          <td style="text-align:right">${r.plannedH}h</td>
+          <td style="text-align:right">${r.worked>0?r.worked+'h':'<span style="color:var(--muted)">—</span>'}</td>
+          <td style="text-align:right;${diffColor(r.diff)}">${r.worked>0?(r.diff>0?'+':'')+r.diff+'h':'—'}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+  }catch(e){el.innerHTML=`<div style="padding:24px;color:#dc2626">${e.message}</div>`;}
+}
+function exportTrackingCSV(){
+  const rows=window._trRows||[];
+  const hdr='Nom,Prénom,Service,Contrat,Jours planifiés,CP,RTT,Abs,Heures planifiées,Heures pointées,Écart\n';
+  const body=rows.map(r=>[
+    r.emp.last_name, r.emp.first_name, r.emp.department||'', r.emp.contract_type||'',
+    r.planned, r.cp, r.rtt, r.abs, r.plannedH, r.worked, r.diff
+  ].join(',')).join('\n');
+  const blob=new Blob(['﻿'+hdr+body],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download=`suivi_temps_${trMonth}.csv`; a.click();
+}
+
+/* ===================== PAIE — ÉLÉMENTS VARIABLES ===================== */
+let pyMonth=new Date().toISOString().slice(0,7);
+async function renderPayroll(){
+  const hName=hotels.find(h=>h.id===hotelId)?.name||'';
+  $('view').innerHTML=`<div class="page">
+    <div class="phead">
+      <div><h1>Éléments variables de paie</h1><div class="sub">${hName} · récapitulatif mensuel</div></div>
+      <div class="actions">
+        <input type="month" id="pyMonth" value="${pyMonth}" style="font-family:inherit;padding:8px 12px;border:1px solid var(--line);border-radius:10px;font-size:13px;background:#fff">
+        <button class="btn g" id="pyExport"><i class="fa-solid fa-file-csv"></i> Export CSV logiciel de paie</button>
+      </div>
+    </div>
+    <div id="pyKpis" class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))"></div>
+    <div class="box" style="padding:0"><div id="pyTable">Chargement…</div></div>
+    <div style="margin-top:12px;font-size:11px;color:var(--muted);padding:0 4px">
+      <i class="fa-solid fa-circle-info"></i> Les heures supplémentaires sont calculées à partir des pointages validés. Le seuil légal est de 35h/semaine (7h/j). Ce tableau est indicatif — vérifiez avec votre gestionnaire de paie.
+    </div>
+  </div>`;
+  $('pyMonth').onchange=e=>{pyMonth=e.target.value;drawPayroll();};
+  $('pyExport').onclick=()=>exportPayrollCSV();
+  await drawPayroll();
+}
+async function drawPayroll(){
+  const el=$('pyTable'); if(!el)return;
+  el.innerHTML='<div style="padding:24px;text-align:center;color:var(--muted)">Chargement…</div>';
+  const [y,m]=pyMonth.split('-').map(Number);
+  const from=iso(y,m,1), to=iso(y,m,dim(y,m));
+  try{
+    const [planRows, clockRows, absRows]=await Promise.all([
+      BE.listMonthPlanning(hotelId,y,m),
+      BE.listClockingsByRange(hotelId,from,to),
+      BE.listAbsences(hotelId).catch(()=>[])
+    ]);
+    const active=staff.filter(s=>s.active!==false);
+    const planMap=new Map(); planRows.forEach(r=>planMap.set(r.employee_id+'|'+r.day, r.status));
+    const clockMap=new Map(); clockRows.forEach(c=>{if(!clockMap.has(c.employee_id))clockMap.set(c.employee_id,[]);clockMap.get(c.employee_id).push(c);});
+    const nd=dim(y,m);
+    const rows=active.map(emp=>{
+      let P=0,PE=0,CP=0,RTT=0,MAL=0,MAT=0,CSS=0,AE=0,F=0,PAT=0,ABS=0,REC=0,FORM=0,repos=0;
+      for(let d=1;d<=nd;d++){
+        const st=planMap.get(emp.id+'|'+iso(y,m,d))||'';
+        if(!st){repos++;continue;}
+        if(st==='P') P++;
+        else if(st==='PE') PE++;
+        else if(st==='CP') CP++;
+        else if(st==='RTT') RTT++;
+        else if(st==='MAL') MAL++;
+        else if(st==='MAT') MAT++;
+        else if(st==='CSS') CSS++;
+        else if(st==='AE') AE++;
+        else if(st==='F') F++;
+        else if(st==='PAT') PAT++;
+        else if(st==='ABS') ABS++;
+        else if(st==='REC') REC++;
+        else if(st==='FORM') FORM++;
+      }
+      const cks=clockMap.get(emp.id)||[];
+      let totalMin=0;
+      cks.forEach(c=>{if(c.clock_out_ts) totalMin+=minutesBetween(c.clock_in_ts,c.clock_out_ts)-(c.break_minutes||0);});
+      const totalH=Math.round(totalMin/60*100)/100;
+      const plannedH=(P+PE)*7;
+      const heuresSup=Math.max(0,Math.round((totalH-plannedH)*100)/100);
+      return {emp,P,PE,CP,RTT,MAL,MAT,CSS,AE,F,PAT,ABS,REC,FORM,repos,totalH,plannedH,heuresSup};
+    });
+    window._pyRows=rows;
+    // KPIs
+    const kpiEl=$('pyKpis');
+    if(kpiEl){
+      const totP=rows.reduce((s,r)=>s+r.P+r.PE,0);
+      const totCP=rows.reduce((s,r)=>s+r.CP,0);
+      const totRTT=rows.reduce((s,r)=>s+r.RTT,0);
+      const totSup=rows.reduce((s,r)=>s+r.heuresSup,0);
+      kpiEl.innerHTML=[
+        {icon:'fa-calendar-check',label:'Jours travaillés (P+PE)',val:totP},
+        {icon:'fa-umbrella-beach',label:'Congés payés (CP)',val:totCP},
+        {icon:'fa-couch',label:'RTT',val:totRTT},
+        {icon:'fa-plus-circle',label:'Heures supplémentaires',val:Math.round(totSup*100)/100+'h'},
+      ].map(k=>`<div class="kc"><div class="kv">${k.val}</div><div class="kl"><i class="fa-solid ${k.icon}"></i> ${k.label}</div></div>`).join('');
+    }
+    el.innerHTML=`<table class="rtable" style="font-size:12px">
+      <thead><tr>
+        <th>Collaborateur</th><th>Service</th><th>Contrat</th>
+        <th title="Présent" style="text-align:center">P</th>
+        <th title="Présence Extra" style="text-align:center">PE</th>
+        <th title="Congé payé" style="text-align:center">CP</th>
+        <th title="RTT" style="text-align:center">RTT</th>
+        <th title="Maladie" style="text-align:center">MAL</th>
+        <th title="Maternité" style="text-align:center">MAT</th>
+        <th title="Autres abs." style="text-align:center">Abs.</th>
+        <th title="Fériés" style="text-align:center">F</th>
+        <th style="text-align:right">Planifié (h)</th>
+        <th style="text-align:right">Pointé (h)</th>
+        <th style="text-align:right;color:#f59e0b">H. Sup.</th>
+      </tr></thead>
+      <tbody>
+        ${rows.map(r=>`<tr>
+          <td><b>${r.emp.last_name} ${r.emp.first_name}</b></td>
+          <td>${r.emp.department||'—'}</td>
+          <td style="color:var(--muted)">${r.emp.contract_type||'—'}</td>
+          <td style="text-align:center;font-weight:600">${r.P||'—'}</td>
+          <td style="text-align:center;color:#E65100">${r.PE||'—'}</td>
+          <td style="text-align:center;color:#0F5132">${r.CP||'—'}</td>
+          <td style="text-align:center;color:#1e40af">${r.RTT||'—'}</td>
+          <td style="text-align:center;color:#9d174d">${r.MAL||'—'}</td>
+          <td style="text-align:center;color:#7c3aed">${r.MAT||'—'}</td>
+          <td style="text-align:center;color:#dc2626">${(r.CSS+r.AE+r.PAT+r.ABS+r.REC+r.FORM)||'—'}</td>
+          <td style="text-align:center;color:var(--muted)">${r.F||'—'}</td>
+          <td style="text-align:right">${r.plannedH}h</td>
+          <td style="text-align:right">${r.totalH>0?r.totalH+'h':'—'}</td>
+          <td style="text-align:right;font-weight:600;color:${r.heuresSup>0?'#f59e0b':'var(--muted)'}">${r.heuresSup>0?'+'+r.heuresSup+'h':'—'}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+  }catch(e){el.innerHTML=`<div style="padding:24px;color:#dc2626">${e.message}</div>`;}
+}
+function exportPayrollCSV(){
+  const rows=window._pyRows||[];
+  const hdr='Nom,Prénom,Service,Contrat,P,PE,CP,RTT,MAL,MAT,Autres abs,Fériés,Planifié (h),Pointé (h),H.Sup\n';
+  const body=rows.map(r=>[
+    r.emp.last_name, r.emp.first_name, r.emp.department||'', r.emp.contract_type||'',
+    r.P, r.PE, r.CP, r.RTT, r.MAL, r.MAT,
+    r.CSS+r.AE+r.PAT+r.ABS+r.REC+r.FORM, r.F,
+    r.plannedH, r.totalH, r.heuresSup
+  ].join(',')).join('\n');
+  const blob=new Blob(['﻿'+hdr+body],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download=`elements_variables_paie_${pyMonth}.csv`; a.click();
+}
+
 /* ===================== STUBS (modules à venir) ===================== */
 function renderStub(title, icon, desc, bullets){
   $('view').innerHTML=`<div class="page"><div class="stub">
@@ -3810,6 +4052,7 @@ function openEmpForm(s){
       </div>
       <div class="fld"><label>Adresse</label><input type="text" id="ea" value="${s?.address||''}"></div>
       <div class="fld"><label>Contact d'urgence</label><input type="text" id="eu" value="${s?.emergency_contact||''}"></div>
+      <div class="fld"><label>Responsable hiérarchique</label><select id="emgr"><option value="">— Aucun —</option>${staff.filter(x=>x.active!==false&&x.id!==(s?.id||'__')).map(x=>`<option value="${x.id}" ${s?.manager_id===x.id?'selected':''}>${x.last_name} ${x.first_name}</option>`).join('')}</select></div>
       ${canFicheFull()?`
       <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--line)">
         <div style="font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:10px"><i class="fa-solid fa-id-card" style="margin-right:5px"></i>État civil <span style="color:#92400e;background:#fef3c7;padding:1px 6px;border-radius:4px;margin-left:6px;font-size:10px">RGPD sensible</span></div>
@@ -3845,6 +4088,7 @@ function openEmpForm(s){
       rest_days:[...$('modal').querySelectorAll('input[data-rest]:checked')].map(c=>+c.dataset.rest),
       phone:$('ep').value.trim()||null, email:$('em').value.trim()||null,
       address:$('ea').value.trim()||null, emergency_contact:$('eu').value.trim()||null,
+      manager_id:$('emgr').value||null,
       active:!isLeft, departure_date: isLeft?dep:null,
     };
     if(canFicheFull()){
