@@ -369,6 +369,8 @@ async function makeRealBE(){
     async deleteDepartment(id){const {error}=await sb.from('staff_departments').delete().eq('id',id);must(error,"Suppression département");},
     async addRole(h,name,department_id){const {data,error}=await sb.from('staff_roles').insert({hotel_id:h,name,department_id:department_id||null}).select('*').single();must(error,"Création rôle");return data;},
     async deleteRole(id){const {error}=await sb.from('staff_roles').delete().eq('id',id);must(error,"Suppression rôle");},
+    async listAccess(h){const {data,error}=await sb.rpc('rh_list_users_for_hotel',{p_hotel:h});must(error,"Liste des accès");return data||[];},
+    async updateAccess(h,user_id,role){const {error}=await sb.rpc('rh_update_user_role',{p_hotel:h,p_user_id:user_id,p_role:role});must(error,"Modification du rôle");},
     async signOut(){await sb.auth.signOut();}
   };
 }
@@ -413,6 +415,11 @@ function makeTestBE(){
     async deleteDepartment(id){Object.keys(depts).forEach(h=>{depts[h]=depts[h].filter(d=>d.id!==id);});},
     async addRole(h,name,department_id){const r={id:'r'+Date.now(),hotel_id:h,name,department_id:department_id||null};(roles[h]||(roles[h]=[])).push(r);return r;},
     async deleteRole(id){Object.keys(roles).forEach(h=>{roles[h]=roles[h].filter(r=>r.id!==id);});},
+    async listAccess(h){return [
+      {user_id:'u1',email:'demo@flowtym.local',full_name:'Wali Larabi',role:'direction',is_default:true,granted_at:'2025-01-01T00:00:00Z'},
+      {user_id:'u2',email:'reception@flowtym.local',full_name:'Sophie Réception',role:'reception',is_default:false,granted_at:'2025-02-15T00:00:00Z'}
+    ];},
+    async updateAccess(h,user_id,role){/* no-op en test */ return; },
     _emps:emps,_planning:()=>planning
   };
 }
@@ -460,15 +467,42 @@ async function start(){
     else userEmail='demo@flowtym.local';
     $('saveBtn').onclick=saveChanges;
     $('cancelBtn').onclick=cancelChanges;
+    await loadHotel();      // charge le rôle de l'utilisateur AVANT d'afficher la shell
     renderShell();
-    await loadHotel();
   }catch(e){showFatal(e);}
 }
 /* ===================== ÉTAT MULTI-VUES ===================== */
 let view='planning';
 let userEmail='—';
+let myRole=null;          // rôle de l'utilisateur connecté pour l'hôtel actif
 const LS={get(k){try{return localStorage.getItem(k);}catch(e){return null;}},set(k,v){try{localStorage.setItem(k,v);}catch(e){}}};
 let sidebarCollapsed = LS.get('rh_sidebar')==='1';
+
+/* ===== PERMISSIONS PAR RÔLE =====
+   - tabs : 'all' ou liste explicite des onglets visibles
+   - ficheFull : true = voit toutes les infos d'un collaborateur (docs, adresse, contact urgence)
+                 false = ne voit que les infos opérationnelles (nom, poste, téléphone, email, dates)
+   - manageUsers : true = peut accéder à Paramètres et gérer les accès et référentiels
+*/
+const ROLE_LABELS = {
+  direction:'Direction', admin_hotel:'Admin hôtel', comptabilite:'Comptabilité',
+  revenue_manager:'Revenue manager', reception:'Réception', gouvernante:'Gouvernante',
+  maintenance:'Maintenance', breakfast:'Petit-déjeuner', femme_de_chambre:'Femme de chambre'
+};
+const PERMS = {
+  direction:        { tabs:'all',                                                                       ficheFull:true,  manageUsers:true  },
+  admin_hotel:      { tabs:'all',                                                                       ficheFull:true,  manageUsers:true  },
+  comptabilite:     { tabs:['dashboard','reporting','personnel','contracts','tracking','payroll'],      ficheFull:true,  manageUsers:false },
+  revenue_manager:  { tabs:['dashboard','reporting'],                                                   ficheFull:false, manageUsers:false },
+  reception:        { tabs:['dashboard','planning','personnel'],                                        ficheFull:false, manageUsers:false },
+  gouvernante:      { tabs:['dashboard','planning','personnel'],                                        ficheFull:false, manageUsers:false },
+  maintenance:      { tabs:['dashboard','planning','personnel'],                                        ficheFull:false, manageUsers:false },
+  breakfast:        { tabs:['dashboard','planning','personnel'],                                        ficheFull:false, manageUsers:false },
+  femme_de_chambre: { tabs:['dashboard','planning'],                                                    ficheFull:false, manageUsers:false }
+};
+function canSee(tab){if(!myRole)return false;const p=PERMS[myRole];if(!p)return false;if(p.tabs==='all')return true;return p.tabs.includes(tab);}
+function canFicheFull(){return PERMS[myRole]?.ficheFull===true;}
+function canManageUsers(){return PERMS[myRole]?.manageUsers===true;}
 
 const TABS=[
   ['Pilotage',[
@@ -501,16 +535,20 @@ function renderShell(){
       <div class="logo"><div class="mk"><i class="fa-solid fa-hotel"></i></div>Flowtym <small>RH</small></div>
       <select class="hotelSel" id="hotelSel">${hotels.map(h=>`<option value="${h.id}" ${h.id===hotelId?'selected':''}>${h.name}${h.city?' · '+h.city:''}</option>`).join('')}</select>
       <div class="spacer"></div>
+      ${myRole?`<span class="tag" style="background:var(--violet-bg);color:var(--violet-d);font-weight:600;padding:5px 10px;border-radius:8px;font-size:11.5px"><i class="fa-solid fa-user-shield" style="margin-right:5px"></i>${ROLE_LABELS[myRole]||myRole}</span>`:''}
       ${BE.isTest?'':'<button class="btn g" id="logout"><i class="fa-solid fa-arrow-right-from-bracket"></i> Déconnexion</button>'}
     </div></header>
     <div class="main">
       <aside class="sidebar ${sidebarCollapsed?'collapsed':''}" id="sb">
         <div class="sbhead"><button class="sbtog" id="sbtog" title="Réduire la barre latérale"><i class="fa-solid fa-chevron-left"></i></button></div>
         <nav class="menu" id="nav">
-          ${TABS.map(([grp,items])=>`<div class="grp">${grp}</div>`
-            +items.map(([k,lab,ic,soon])=>`<button class="it ${k===view?'on':''}" data-v="${k}" title="${lab}">
-              <i class="ic ${ic}"></i><span class="lbl">${lab}</span>${soon?'<span class="soon">à venir</span>':''}</button>`).join('')
-          ).join('')}
+          ${TABS.map(([grp,items])=>{
+            const vis=items.filter(([k])=>canSee(k));
+            if(!vis.length) return '';
+            return `<div class="grp">${grp}</div>`
+              + vis.map(([k,lab,ic,soon])=>`<button class="it ${k===view?'on':''}" data-v="${k}" title="${lab}">
+                <i class="ic ${ic}"></i><span class="lbl">${lab}</span>${soon?'<span class="soon">à venir</span>':''}</button>`).join('');
+          }).join('')}
         </nav>
         <div class="me" title="${userEmail}">
           <div class="av" style="background:${avColor(userEmail)};color:#fff;display:grid;place-items:center;font-weight:700;font-size:11px">${initials(userEmail.split('@')[0]||'?', '')}</div>
@@ -519,18 +557,24 @@ function renderShell(){
       </aside>
       <section class="content"><div id="view"></div></section>
     </div>`;
-  $('hotelSel').onchange=async e=>{hotelId=e.target.value;pending.clear();selection.clear();await loadHotel();};
+  $('hotelSel').onchange=async e=>{
+    hotelId=e.target.value; pending.clear(); selection.clear();
+    await loadHotel();
+    // rôle potentiellement différent dans l'autre hôtel -> refresh complet de la shell
+    if(!canSee(view)) view='dashboard';
+    renderShell();
+  };
   const lo=$('logout'); if(lo) lo.onclick=async()=>{await BE.signOut();renderLogin();};
   $('nav').onclick=e=>{const b=e.target.closest('.it');if(b)goView(b.dataset.v);};
   $('sbtog').onclick=()=>{sidebarCollapsed=!sidebarCollapsed;$('sb').classList.toggle('collapsed',sidebarCollapsed);
     $('sbtog').title=sidebarCollapsed?'Étendre la barre latérale':'Réduire la barre latérale';
     LS.set('rh_sidebar',sidebarCollapsed?'1':'0');
-    // recaler la grille planning (colonnes figées) après la transition
     setTimeout(()=>{if(typeof applyStickyWidths==='function')applyStickyWidths();},280);};
   goView(view);
 }
 
 function goView(v){
+  if(!canSee(v)) v='dashboard';   // garde-fou : ne jamais ouvrir un onglet non autorisé
   view=v;
   $('nav').querySelectorAll('.it').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
   const r={dashboard:renderDashboard, planning:renderPlanning, reporting:renderReporting,
@@ -606,9 +650,19 @@ function fillFilters(){
 
 async function loadHotel(){
   if(!BE.isTest) await BE.setActiveHotel(hotelId);
-  [deps,rols,staff]=await Promise.all([BE.listDepartments(hotelId),BE.listRoles(hotelId),BE.listEmployees(hotelId)]);
+  await loadMyRole();
+  [deps, rols, staff] = await Promise.all([BE.listDepartments(hotelId), BE.listRoles(hotelId), BE.listEmployees(hotelId)]);
   fillFilters();
   await loadMonth();
+}
+
+async function loadMyRole(){
+  if(BE.isTest){ myRole='direction'; return; }
+  try{
+    const { data, error } = await BE.sb.rpc('rh_my_role', { p_hotel: hotelId });
+    if(error) throw error;
+    myRole = data || null;
+  }catch(e){ myRole=null; console.warn('Impossible de charger le rôle:', e); }
 }
 async function loadMonth(){
   pending.clear(); selection.clear();
@@ -925,7 +979,26 @@ async function renderDocuments(){
 /* ===================== VUE CONFIGURATION ===================== */
 async function renderConfig(){
   $('view').innerHTML=`<div class="page">
-    <div class="phead"><div><h1>Paramètres</h1><div class="sub">Référentiels par hôtel · ${hotels.find(h=>h.id===hotelId)?.name||''}</div></div></div>
+    <div class="phead"><div><h1>Paramètres</h1><div class="sub">Référentiels et accès · ${hotels.find(h=>h.id===hotelId)?.name||''}</div></div></div>
+
+    <div class="box" style="margin-bottom:14px"><h3><i class="fa-solid fa-user-shield"></i>Accès et permissions</h3>
+      <div id="accBox">Chargement…</div>
+      <div style="margin-top:14px;font-size:12px;color:var(--ink2);line-height:1.6">
+        <b style="color:var(--ink)">Matrice des permissions par rôle</b><br>
+        <table class="tbl" style="margin-top:8px;font-size:11.5px">
+          <thead><tr><th>Rôle</th><th>Onglets accessibles</th><th>Fiche collaborateur</th><th>Gestion des accès</th></tr></thead>
+          <tbody>
+            ${Object.entries(PERMS).map(([role,p])=>`<tr>
+              <td><b>${ROLE_LABELS[role]||role}</b></td>
+              <td>${p.tabs==='all'?'<span class="ok">Tous</span>':p.tabs.map(t=>{const all=TABS.flatMap(g=>g[1]);const f=all.find(x=>x[0]===t);return f?f[1]:t;}).join(' · ')}</td>
+              <td>${p.ficheFull?'<span class="ok">Complète (docs, adresse, contact urgence)</span>':'Limitée (nom, poste, téléphone, email seulement)'}</td>
+              <td>${p.manageUsers?'<span class="ok">Oui</span>':'Non'}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
     <div class="cols2">
       <div class="box"><h3><i class="fa-solid fa-layer-group"></i>Services</h3>
         <div id="depList"></div>
@@ -943,9 +1016,43 @@ async function renderConfig(){
     </div>
     <div class="box" style="margin-top:14px"><h3><i class="fa-solid fa-shield-halved"></i>Sécurité & multi-hôtel</h3>
       <div style="font-size:13px;color:var(--ink2);line-height:1.6">
-        Toutes les tables RH disposent d'une RLS active. Vous ne voyez et ne modifiez que les données de l'hôtel sélectionné. Les codes de statut du planning (P, CP, RTT, MAL, MAT, CSS, AE, F) sont fixes et partagés.
+        Toutes les tables RH disposent d'une RLS active. Vous ne voyez et ne modifiez que les données de l'hôtel sélectionné. Les codes de statut du planning (P, CP, RTT, MAL, MAT, CSS, AE, F) sont fixes et partagés. Le contrôle des accès par rôle est appliqué côté frontend ET côté base via des fonctions <code>SECURITY DEFINER</code>.
       </div></div>
   </div>`;
+
+  // === Bloc Accès et permissions ===
+  try{
+    const list=await BE.listAccess(hotelId);
+    const ROLES_OPTS=Object.keys(ROLE_LABELS);
+    $('accBox').innerHTML=`<table class="tbl">
+      <thead><tr><th>Utilisateur</th><th>E-mail</th><th>Rôle</th><th>Depuis</th></tr></thead>
+      <tbody>${list.map(u=>`<tr data-uid="${u.user_id}">
+        <td><b>${u.full_name||'—'}</b></td>
+        <td>${u.email}</td>
+        <td><select class="roleSel" data-uid="${u.user_id}" style="font-size:12.5px;padding:5px 8px">
+          ${ROLES_OPTS.map(r=>`<option value="${r}" ${r===u.role?'selected':''}>${ROLE_LABELS[r]}</option>`).join('')}
+        </select></td>
+        <td style="font-size:11.5px;color:var(--muted)">${u.granted_at?u.granted_at.slice(0,10):'—'}</td>
+      </tr>`).join('')||'<tr><td colspan="4" style="padding:20px;text-align:center;color:var(--muted)">Aucun utilisateur affecté à cet hôtel.</td></tr>'}</tbody></table>
+      <div style="margin-top:10px;font-size:12px;color:var(--ink2)"><i class="fa-solid fa-circle-info"></i> Pour ajouter un nouvel utilisateur, créez-lui un compte côté Supabase Authentication et ajoutez-le à <code>public.user_hotels</code>. Une page d'invitation directe viendra dans une prochaine itération.</div>`;
+    $('accBox').querySelectorAll('.roleSel').forEach(sel=>{
+      const initial=sel.value;
+      sel.onchange=async()=>{
+        const newRole=sel.value, uid=sel.dataset.uid;
+        if(!confirm(`Confirmer le changement de rôle vers « ${ROLE_LABELS[newRole]} » ?`)){sel.value=initial;return;}
+        try{
+          await BE.updateAccess(hotelId, uid, newRole);
+          flash('Rôle mis à jour');
+        }catch(e){
+          flash('Erreur : '+(e.message||e));
+          sel.value=initial;
+        }
+      };
+    });
+  }catch(e){
+    $('accBox').innerHTML=`<div style="padding:14px;color:var(--red);font-size:13px"><i class="fa-solid fa-triangle-exclamation"></i> Impossible de charger les accès : ${e.message||e}</div>`;
+  }
+
   const drawDeps=()=>{$('depList').innerHTML=deps.map(d=>`<div style="display:flex;align-items:center;padding:7px 0;border-bottom:1px dashed var(--line);font-size:13px">
     <span style="flex:1">${d.name}</span>
     <button class="btn d" data-deldep="${d.id}" style="padding:4px 9px;font-size:11px"><i class="fa-solid fa-trash"></i></button></div>`).join('')||'<div style="color:var(--muted);font-size:12px">Aucun service défini.</div>';
@@ -995,6 +1102,7 @@ async function openFiche(eid){
   const s=staff.find(x=>x.id===eid); if(!s)return;
   const badge=s.contract_type==='CDI'?'cdi':s.contract_type==='CDD'?'cdd':'ext';
   const restNames=(s.rest_days||[]).map(d=>['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'][d]).join(', ')||'—';
+  const full=canFicheFull();   // false pour réception, gouvernante, maintenance, breakfast, femme_de_chambre
   $('drawer').innerHTML=`
     <div class="dh"><button class="close" data-x><i class="fa-solid fa-xmark"></i></button>
       <div class="av" style="background:${avColor(s.last_name)}">${initials(s.first_name,s.last_name)}</div>
@@ -1002,25 +1110,27 @@ async function openFiche(eid){
     <div class="sec"><h4>Informations</h4>
       <div class="fr"><span class="k">Statut</span><span class="v" style="${s.active?'color:var(--green)':'color:var(--red)'}">${s.active?'Actif':'Parti'}</span></div>
       ${!s.active&&s.departure_date?`<div class="fr"><span class="k">Date de départ</span><span class="v">${s.departure_date}</span></div>`:''}
-      <div class="fr"><span class="k">Date d'entrée</span><span class="v">${s.hire_date||'—'}</span></div>
-      <div class="fr"><span class="k">Jours de repos</span><span class="v">${restNames}</span></div>
+      ${full?`<div class="fr"><span class="k">Date d'entrée</span><span class="v">${s.hire_date||'—'}</span></div>
+      <div class="fr"><span class="k">Jours de repos</span><span class="v">${restNames}</span></div>`:''}
       <div class="fr"><span class="k">Téléphone</span><span class="v">${s.phone||'—'}</span></div>
       <div class="fr"><span class="k">E-mail</span><span class="v">${s.email||'—'}</span></div>
-      <div class="fr"><span class="k">Adresse</span><span class="v">${s.address||'—'}</span></div>
-      <div class="fr"><span class="k">Contact d'urgence</span><span class="v">${s.emergency_contact||'—'}</span></div></div>
-    <div class="sec"><h4>Documents RH</h4><div id="docs">Chargement…</div></div>
-    <div class="sec" style="display:flex;gap:10px"><button class="btn g" data-edit style="flex:1;justify-content:center"><i class="fa-solid fa-pen"></i> Modifier</button>
+      ${full?`<div class="fr"><span class="k">Adresse</span><span class="v">${s.address||'—'}</span></div>
+      <div class="fr"><span class="k">Contact d'urgence</span><span class="v">${s.emergency_contact||'—'}</span></div>`:''}
+    </div>
+    ${full?'<div class="sec"><h4>Documents RH</h4><div id="docs">Chargement…</div></div>':''}
+    ${full?`<div class="sec" style="display:flex;gap:10px"><button class="btn g" data-edit style="flex:1;justify-content:center"><i class="fa-solid fa-pen"></i> Modifier</button>
       ${s.active
         ? '<button class="btn d" data-del style="flex:1;justify-content:center"><i class="fa-solid fa-trash"></i> Marquer comme parti</button>'
-        : '<button class="btn p" data-react style="flex:1;justify-content:center"><i class="fa-solid fa-rotate-left"></i> Réactiver</button>'}</div>`;
+        : '<button class="btn p" data-react style="flex:1;justify-content:center"><i class="fa-solid fa-rotate-left"></i> Réactiver</button>'}</div>`:''}`;
   $('dbg').classList.add('on'); $('drawer').classList.add('on');
   $('drawer').querySelector('[data-x]').onclick=closeFiche;
-  $('drawer').querySelector('[data-edit]').onclick=()=>{closeFiche();openEmpForm(s);};
+  const ed=$('drawer').querySelector('[data-edit]');
+  if(ed) ed.onclick=()=>{closeFiche();openEmpForm(s);};
   const dl=$('drawer').querySelector('[data-del]');
   if(dl) dl.onclick=async()=>{
     const today=new Date().toISOString().slice(0,10);
     const d=prompt(`Date de départ pour ${s.first_name} ${s.last_name} ? (format AAAA-MM-JJ, par défaut aujourd'hui)`, today);
-    if(d===null) return; // annulé
+    if(d===null) return;
     const date=d.trim()||today;
     if(!/^\d{4}-\d{2}-\d{2}$/.test(date)){flash('Format de date invalide (AAAA-MM-JJ)');return;}
     await BE.updateEmployee(s.id, {active:false, departure_date:date});
@@ -1031,7 +1141,7 @@ async function openFiche(eid){
     await BE.updateEmployee(s.id, {active:true, departure_date:null});
     s.active=true; s.departure_date=null;
     closeFiche(); render(); flash('Collaborateur réactivé');};
-  // documents : checklist
+  if(!full) return;   // ni docs ni actions sensibles pour les rôles restreints
   const list=await BE.listDocuments(hotelId,eid);
   const map={}; list.forEach(d=>map[d.doc_type]=d.status);
   $('docs').innerHTML=DOC_TYPES.map(([k,lab])=>{const st=map[k]||'missing';const ok=st==='provided';
@@ -1377,6 +1487,11 @@ window.__rh={
   setMonth:(y,m)=>{cur=new Date(y,m,1);loadMonth();},
   mapCode, sameName, normName,
   exportExcel, exportPDF,
+  PERMS, ROLE_LABELS, canSee, canFicheFull, canManageUsers,
+  setRole:(r)=>{ myRole=r; renderShell(); },
+  myRole:()=>myRole,
+  staff:()=>staff,
+  openFiche,
   BE:()=>BE
 };
 
