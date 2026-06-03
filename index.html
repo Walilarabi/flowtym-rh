@@ -264,15 +264,44 @@ tr.totals td.lab{text-align:right;padding-right:10px;color:var(--violet-d)}
 .badge{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700}
 .badge.cdi{background:var(--green-bg);color:var(--green)}.badge.cdd{background:#fff3cd;color:#92633a}.badge.ext{background:var(--violet-bg);color:var(--violet-d)}
 
-.modalbg{position:fixed;inset:0;background:rgba(20,20,40,.4);display:none;z-index:70;align-items:center;justify-content:center}
+/* ---- modale premium ---- */
+.modalbg{position:fixed;inset:0;background:rgba(14,16,28,.48);display:none;z-index:70;align-items:center;justify-content:center;padding:20px}
 .modalbg.on{display:flex}
-.modal{background:#fff;border-radius:16px;width:520px;max-width:96vw;max-height:90vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,.2)}
-.modal .mh{padding:18px 22px;border-bottom:1px solid var(--line);font-size:17px;font-weight:800}
-.modal .mb{padding:18px 22px}
-.modal .mb .fld{margin-bottom:12px}
-.modal .mb .fld label{font-size:11px}.modal .mb .fld input,.modal .mb .fld select{width:100%}
-.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.mact{padding:14px 22px;border-top:1px solid var(--line);display:flex;gap:10px;justify-content:flex-end}
+.modal{background:#fff;border-radius:18px;width:min(720px,94vw);max-height:calc(100vh - 44px);overflow-y:auto;box-shadow:0 32px 80px rgba(0,0,0,.22),0 0 0 1px rgba(0,0,0,.05);display:flex;flex-direction:column}
+.modal .mh{padding:18px 22px 16px;border-bottom:1px solid var(--line);display:flex;align-items:flex-start;gap:12px;flex-shrink:0}
+.modal .mh .mh-ic{width:38px;height:38px;border-radius:10px;background:var(--violet-bg);color:var(--violet-d);display:grid;place-items:center;font-size:15px;flex-shrink:0}
+.modal .mh .mh-ti{flex:1;min-width:0}
+.modal .mh .mh-ti h2{font-size:17px;font-weight:800;margin:0;line-height:1.25}
+.modal .mh .mh-ti small{display:block;font-size:12px;color:var(--muted);font-weight:500;margin-top:2px}
+.modal .mh .mh-x{width:30px;height:30px;border-radius:8px;border:0;background:transparent;cursor:pointer;color:var(--ink2);font-size:13px;display:grid;place-items:center;flex-shrink:0;margin-top:2px;transition:.15s}
+.modal .mh .mh-x:hover{background:var(--red-bg);color:var(--red)}
+.modal .mb{padding:20px 24px;flex:1}
+.modal .mb .fld{margin-bottom:14px}
+.modal .mb .fld label{display:block;font-size:11.5px;font-weight:600;color:var(--ink2);margin-bottom:5px;letter-spacing:.01em}
+.modal .mb .fld input[type=text],.modal .mb .fld input[type=email],.modal .mb .fld input[type=tel],.modal .mb .fld input[type=date],.modal .mb .fld input[type=time],.modal .mb .fld input[type=number],.modal .mb .fld select{width:100%;height:40px;padding:0 12px;border:1px solid var(--line);border-radius:10px;font-size:13.5px;font-family:inherit;color:var(--ink);background:#fff;transition:.15s}
+.modal .mb .fld input:focus,.modal .mb .fld select:focus{outline:none;border-color:var(--violet);box-shadow:0 0 0 3px var(--violet-bg)}
+.modal .mb .fld textarea{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;font-size:13.5px;font-family:inherit;color:var(--ink);resize:vertical;min-height:80px;transition:.15s;line-height:1.5}
+.modal .mb .fld textarea:focus{outline:none;border-color:var(--violet);box-shadow:0 0 0 3px var(--violet-bg)}
+.modal .mb .field-err{color:var(--red);font-size:11.5px;margin-top:4px;display:none}
+.modal .mb .field-err.on{display:block}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
+.mact{padding:16px 24px;border-top:1px solid var(--line);display:flex;gap:10px;justify-content:flex-end;flex-shrink:0}
+/* drag & drop zone */
+.dropzone{border:2px dashed #d4d8e2;border-radius:12px;padding:24px 20px;text-align:center;cursor:pointer;transition:.15s;position:relative;overflow:hidden;background:#fafafc}
+.dropzone:hover,.dropzone.drag-over{border-color:var(--violet);background:var(--violet-bg)}
+.dropzone input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.dropzone .dz-ic{font-size:26px;color:var(--muted);display:block;margin-bottom:8px;transition:.15s}
+.dropzone:hover .dz-ic,.dropzone.drag-over .dz-ic{color:var(--violet)}
+.dropzone .dz-label{font-size:13px;font-weight:600;color:var(--ink2);margin-bottom:3px}
+.dropzone .dz-hint{font-size:11.5px;color:var(--muted)}
+.file-chosen{display:none;align-items:center;gap:12px;padding:10px 14px;background:var(--violet-bg);border:1px solid #d4c9f9;border-radius:10px;font-size:13px;margin-top:8px}
+.file-chosen.on{display:flex}
+.file-chosen .fc-ic{width:34px;height:34px;border-radius:8px;background:var(--violet);color:#fff;display:grid;place-items:center;font-size:13px;flex-shrink:0}
+.file-chosen .fc-name{flex:1;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.file-chosen .fc-size{font-size:11.5px;color:var(--muted);white-space:nowrap;flex-shrink:0}
+.file-chosen .fc-rm{border:0;background:transparent;color:var(--muted);cursor:pointer;padding:4px 7px;border-radius:6px;font-size:13px;flex-shrink:0}
+.file-chosen .fc-rm:hover{background:var(--red-bg);color:var(--red)}
 
 /* popover */
 .pop{position:fixed;z-index:80;background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 36px rgba(0,0,0,.18);padding:8px;display:none;width:220px}
@@ -1336,20 +1365,24 @@ function openTemplateForm(t, isNewVersion){
   const rolOpts = rols.map(r=>`<option value="${r.id}" ${(t&&t.role_id===r.id)?'selected':''}>${r.name}</option>`).join('');
   const typeOpts= CONTRACT_TYPES.map(c=>`<option ${(t&&t.contract_type===c)?'selected':''}>${c}</option>`).join('');
 
-  $('modal').innerHTML=`
-    <h3 style="margin-bottom:14px"><i class="fa-regular fa-file-lines" style="color:var(--violet);margin-right:8px"></i>${title}</h3>
-    <div class="fld"><label>Nom du modèle</label><input type="text" id="tn" value="${t?.name||''}" placeholder="ex : CDI Réceptionniste"></div>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+  $('modal').innerHTML = mhHTML('fa-regular fa-file-lines', title) + `
+  <div class="mb">
+    <div class="fld"><label>Nom du modèle *</label>
+      <input type="text" id="tn" value="${t?.name||''}" placeholder="ex : CDI Réceptionniste"></div>
+    <div class="row3">
       <div class="fld"><label>Type de contrat</label><select id="tc">${typeOpts}</select></div>
-      <div class="fld"><label>Service (facultatif)</label><select id="td"><option value="">— Tous —</option>${depOpts}</select></div>
-      <div class="fld"><label>Rôle (facultatif)</label><select id="tr"><option value="">— Tous —</option>${rolOpts}</select></div>
+      <div class="fld"><label>Service <span style="font-weight:400;color:var(--muted)">(facultatif)</span></label><select id="td"><option value="">— Tous —</option>${depOpts}</select></div>
+      <div class="fld"><label>Rôle <span style="font-weight:400;color:var(--muted)">(facultatif)</span></label><select id="tr"><option value="">— Tous —</option>${rolOpts}</select></div>
     </div>
-    <div class="fld"><label>Corps HTML du modèle <span style="font-weight:400;color:var(--muted);font-size:11px">— utilisez {{variable}} pour les champs dynamiques</span></label>
-      <textarea id="tb" rows="14" style="font-family:'SFMono-Regular',Consolas,monospace;font-size:12px;line-height:1.5">${t?.body_html||DEFAULT_TEMPLATE_BODY}</textarea></div>
-    <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
-      <button class="btn g" id="tplCancel">Annuler</button>
-      <button class="btn p" id="tplSave"><i class="fa-solid fa-check"></i> ${isVer?'Créer la version':isEdit?'Enregistrer':'Créer'}</button>
-    </div>`;
+    <div class="fld">
+      <label>Corps HTML du modèle — utilisez <code style="background:#f4f2fd;color:var(--violet-d);padding:1px 5px;border-radius:4px;font-size:11.5px">{{variable}}</code></label>
+      <textarea id="tb" rows="16" style="font-family:'SFMono-Regular',Consolas,monospace;font-size:12px;line-height:1.5;min-height:280px">${t?.body_html||DEFAULT_TEMPLATE_BODY}</textarea>
+    </div>
+  </div>
+  <div class="mact">
+    <button class="btn g" id="tplCancel">Annuler</button>
+    <button class="btn p" id="tplSave"><i class="fa-solid fa-check"></i> ${isVer?'Créer la version':isEdit?'Enregistrer':'Créer'}</button>
+  </div>`;
   $('modalbg').classList.add('on');
   $('tplCancel').onclick=closeModal;
   $('tplSave').onclick=async()=>{
@@ -1451,10 +1484,8 @@ async function openGenerateWizard(){
 }
 
 async function drawGenWizard(){
-  $('modal').innerHTML = `
-    <h3 style="margin-bottom:6px"><i class="fa-solid fa-wand-magic-sparkles" style="color:var(--violet);margin-right:8px"></i>Générer un contrat</h3>
-    <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Étape ${genState.step} / 4</div>
-    <div id="genBody"></div>`;
+  $('modal').innerHTML = mhHTML('fa-solid fa-wand-magic-sparkles','Générer un contrat',`Étape ${genState.step} / 4`) + `
+    <div class="mb"><div id="genBody"></div></div>`;
   $('modalbg').classList.add('on');
   if(genState.step===1)      await drawGenStep1();
   else if(genState.step===2) await drawGenStep2();
@@ -1864,23 +1895,32 @@ function openClockingForm(c, presetEmpId){
   const empOptions = staff.filter(s=>s.active).sort((a,b)=>a.last_name.localeCompare(b.last_name))
     .map(s=>`<option value="${s.id}" ${(emp&&s.id===emp.id)?'selected':''}>${s.first_name} ${s.last_name}${s.role?' · '+s.role:''}</option>`).join('');
 
-  $('modal').innerHTML = `
-    <h3 style="margin-bottom:14px"><i class="fa-regular fa-clock" style="color:var(--violet);margin-right:8px"></i>${isEdit?'Modifier le pointage':'Nouveau pointage'}</h3>
-    <div class="fld"><label>Collaborateur</label><select id="ck_emp" ${isEdit?'disabled':''}><option value="">— choisir —</option>${empOptions}</select></div>
-    <div class="fld"><label>Jour</label><input type="date" id="ck_day" value="${day}" max="${isoToday()}"></div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-      <div class="fld"><label>Heure d'arrivée *</label><input type="time" id="ck_in" value="${tin}" required></div>
-      <div class="fld"><label>Heure de départ</label><input type="time" id="ck_out" value="${tout}" placeholder="laissez vide si en cours"></div>
-    </div>
-    <div class="fld"><label>Pause (en minutes, non rémunérée)</label><input type="number" id="ck_brk" value="${c?.break_minutes||0}" min="0" max="480" step="5"></div>
-    <div class="fld"><label>Notes (facultatif)</label><textarea id="ck_notes" rows="2" placeholder="ex : remplacement de X, heures sup validées par…">${c?.notes||''}</textarea></div>
-    <div style="display:flex;gap:8px;margin-top:14px">
-      ${isEdit?'<button class="btn d" id="ck_del" style="margin-right:auto"><i class="fa-solid fa-trash"></i> Supprimer</button>':''}
-      <div style="${isEdit?'':'margin-left:auto'};display:flex;gap:8px">
-        <button class="btn g" id="ck_cancel">Annuler</button>
-        <button class="btn p" id="ck_save"><i class="fa-solid fa-check"></i> ${isEdit?'Enregistrer':'Créer'}</button>
+  $('modal').innerHTML = mhHTML('fa-regular fa-clock', isEdit?'Modifier le pointage':'Nouveau pointage') + `
+  <div class="mb">
+    <div class="row2">
+      <div class="fld"><label>Collaborateur *</label>
+        <select id="ck_emp" ${isEdit?'disabled':''}><option value="">— choisir —</option>${empOptions}</select>
       </div>
-    </div>`;
+      <div class="fld"><label>Jour *</label>
+        <input type="date" id="ck_day" value="${day}" max="${isoToday()}">
+      </div>
+    </div>
+    <div class="row2">
+      <div class="fld"><label>Heure d'arrivée *</label><input type="time" id="ck_in" value="${tin}"></div>
+      <div class="fld"><label>Heure de départ <span style="font-weight:400;color:var(--muted)">(laisser vide si en cours)</span></label><input type="time" id="ck_out" value="${tout}"></div>
+    </div>
+    <div class="fld" style="max-width:200px"><label>Pause (min, non rémunérée)</label>
+      <input type="number" id="ck_brk" value="${c?.break_minutes||0}" min="0" max="480" step="5">
+    </div>
+    <div class="fld"><label>Notes <span style="font-weight:400;color:var(--muted)">(facultatif)</span></label>
+      <textarea id="ck_notes" rows="2" placeholder="ex : remplacement de X, heures sup validées par…">${c?.notes||''}</textarea>
+    </div>
+  </div>
+  <div class="mact">
+    ${isEdit?'<button class="btn d" id="ck_del" style="margin-right:auto"><i class="fa-solid fa-trash"></i> Supprimer</button>':''}
+    <button class="btn g" id="ck_cancel">Annuler</button>
+    <button class="btn p" id="ck_save"><i class="fa-solid fa-check"></i> ${isEdit?'Enregistrer':'Créer'}</button>
+  </div>`;
   $('modalbg').classList.add('on');
   $('ck_cancel').onclick = closeModal;
   $('ck_save').onclick = async () => {
@@ -2243,36 +2283,46 @@ function openAbsenceRequestForm(existingReq) {
     : (()=>{ const me = activeStaff[0]; return me ? `<option value="${me.id}" selected>${me.first_name} ${me.last_name}</option>` : ''; })();
   const typeOpts = absenceTypes.map(t=>`<option value="${t.code}">${t.label}</option>`).join('');
 
-  $('modal').innerHTML = `
-    <div class="mh"><i class="fa-regular fa-calendar-xmark" style="color:var(--violet);margin-right:8px"></i>Nouvelle demande d'absence</div>
-    <div class="mb">
+  $('modal').innerHTML = mhHTML('fa-regular fa-calendar-xmark','Nouvelle demande d\'absence') + `
+  <div class="mb">
+    <div class="row2">
       <div class="fld"><label>Collaborateur *</label>
         <select id="abs_emp" ${!canApproveAbsences()?'disabled':''}><option value="">— choisir —</option>${empOpts}</select>
       </div>
-      <div class="fld"><label>Type d'absence *</label><select id="abs_type"><option value="">— choisir —</option>${typeOpts}</select></div>
-      <div class="row2">
-        <div class="fld"><label>Date de début *</label><input type="date" id="abs_start"></div>
-        <div class="fld"><label>Date de fin *</label><input type="date" id="abs_end"></div>
+      <div class="fld"><label>Type d'absence *</label>
+        <select id="abs_type"><option value="">— choisir —</option>${typeOpts}</select>
       </div>
-      <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:13px;margin-bottom:10px">
-        <label style="display:inline-flex;gap:7px;align-items:center"><input type="checkbox" id="abs_hds"> Demi-journée début
-          <select id="abs_hds_p" style="display:none"><option value="matin">Matin</option><option value="après-midi">Après-midi</option></select>
-        </label>
-        <label style="display:inline-flex;gap:7px;align-items:center"><input type="checkbox" id="abs_hde"> Demi-journée fin
-          <select id="abs_hde_p" style="display:none"><option value="matin">Matin</option><option value="après-midi">Après-midi</option></select>
-        </label>
-      </div>
-      <div style="background:#f4f2fd;border-radius:8px;padding:10px 14px;font-size:13px;margin-bottom:10px">
-        <span style="color:var(--muted)">Nombre de jours : </span><b id="abs_days_preview" style="color:var(--violet-d)">—</b>
-        <span id="abs_bal_warn" style="color:#d97706;margin-left:10px;font-size:12px"></span>
-      </div>
-      <div class="fld"><label>Commentaire</label><textarea id="abs_note" rows="2" placeholder="Facultatif"></textarea></div>
-      <div class="fld" id="abs_file_wrap"><label>Pièce jointe</label><input type="file" id="abs_file" accept=".pdf,.jpg,.jpeg,.png"></div>
     </div>
-    <div class="mact">
-      <button class="btn g" id="abs_cancel">Annuler</button>
-      <button class="btn p" id="abs_submit"><i class="fa-solid fa-paper-plane"></i> Soumettre</button>
-    </div>`;
+    <div class="row2">
+      <div class="fld"><label>Date de début *</label><input type="date" id="abs_start"></div>
+      <div class="fld"><label>Date de fin *</label><input type="date" id="abs_end"></div>
+    </div>
+    <div style="display:flex;gap:22px;flex-wrap:wrap;font-size:13px;margin-bottom:14px;padding:10px 14px;background:#fafafe;border:1px solid var(--line);border-radius:10px">
+      <label style="display:inline-flex;gap:8px;align-items:center;cursor:pointer"><input type="checkbox" id="abs_hds"> <span>Demi-journée début</span>
+        <select id="abs_hds_p" style="display:none;margin-left:4px"><option value="matin">Matin</option><option value="après-midi">Après-midi</option></select>
+      </label>
+      <label style="display:inline-flex;gap:8px;align-items:center;cursor:pointer"><input type="checkbox" id="abs_hde"> <span>Demi-journée fin</span>
+        <select id="abs_hde_p" style="display:none;margin-left:4px"><option value="matin">Matin</option><option value="après-midi">Après-midi</option></select>
+      </label>
+    </div>
+    <div style="background:var(--violet-bg);border:1px solid #d4c9f9;border-radius:10px;padding:11px 16px;font-size:13px;margin-bottom:14px;display:flex;align-items:center;gap:10px">
+      <i class="fa-regular fa-clock" style="color:var(--violet-d)"></i>
+      <span style="color:var(--muted)">Nombre de jours :</span>
+      <b id="abs_days_preview" style="color:var(--violet-d)">—</b>
+      <span id="abs_bal_warn" style="color:#d97706;margin-left:6px;font-size:12px"></span>
+    </div>
+    <div class="fld"><label>Commentaire <span style="font-weight:400;color:var(--muted)">(facultatif)</span></label>
+      <textarea id="abs_note" rows="2" placeholder="Précisez si nécessaire…"></textarea>
+    </div>
+    <div class="fld" id="abs_file_wrap">
+      <label>Pièce jointe <span id="abs_file_req" style="color:var(--red);font-size:11px"></span></label>
+      ${dropzoneHTML('abs_file')}
+    </div>
+  </div>
+  <div class="mact">
+    <button class="btn g" id="abs_cancel">Annuler</button>
+    <button class="btn p" id="abs_submit"><i class="fa-solid fa-paper-plane"></i> Soumettre</button>
+  </div>`;
   $('modalbg').classList.add('on');
   $('abs_cancel').onclick = closeModal;
 
@@ -2298,13 +2348,16 @@ function openAbsenceRequestForm(existingReq) {
     } else { const w=$('abs_bal_warn'); if(w) w.textContent=''; }
   };
 
+  wireDropzone('abs_file', ()=>{});
+
   $('abs_hds').onchange = e => { $('abs_hds_p').style.display=e.target.checked?'':'none'; updateDays(); };
   $('abs_hde').onchange = e => { $('abs_hde_p').style.display=e.target.checked?'':'none'; updateDays(); };
   $('abs_start').onchange = updateDays;
   $('abs_end').onchange = updateDays;
   $('abs_type').onchange = () => {
     const t = absenceTypes.find(x=>x.code===$('abs_type').value);
-    $('abs_file_wrap').style.display = t?.requires_attachment ? '' : '';
+    const req = $('abs_file_req');
+    if(req) req.textContent = t?.requires_attachment ? '(obligatoire)' : '(facultatif)';
     updateDays();
   };
   $('abs_emp').onchange = updateDays;
@@ -2354,14 +2407,20 @@ async function openApproveRejectModal(reqId, action) {
   const icon = isApprove ? 'fa-check' : isReject ? 'fa-xmark' : 'fa-ban';
 
   $('modal').innerHTML = `
-    <div class="mh"><i class="fa-solid ${icon}" style="color:${color};margin-right:8px"></i>${title}</div>
+    <div class="mh">
+      <div class="mh-ic" style="background:${isApprove?'var(--green-bg)':isReject?'var(--red-bg)':'#fff3cd'};color:${color}"><i class="fa-solid ${icon}"></i></div>
+      <div class="mh-ti"><h2>${title}</h2></div>
+      <button class="mh-x" onclick="closeModal()" title="Fermer"><i class="fa-solid fa-xmark"></i></button>
+    </div>
     <div class="mb">
-      <div style="background:#f8f9fb;border-radius:10px;padding:12px;margin-bottom:12px;font-size:13px">
-        <b>${emp ? emp.first_name+' '+emp.last_name : '—'}</b> · ${req.absence_types?.label||req.type_code}<br>
-        <span style="color:var(--muted)">${req.start_date} → ${req.end_date} · ${req.days_count} jour(s)</span>
+      <div style="background:#f8f9fb;border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:16px;font-size:13.5px">
+        <div style="font-weight:700;margin-bottom:4px">${emp ? emp.first_name+' '+emp.last_name : '—'}</div>
+        <div style="color:var(--ink2)">${req.absence_types?.label||req.type_code} · ${req.start_date}${req.end_date!==req.start_date?' → '+req.end_date:''} · <b>${req.days_count}</b> jour(s)</div>
       </div>
-      <div class="fld"><label>Commentaire ${isReject?'*':''}</label>
-        <textarea id="appr_comment" rows="3" placeholder="${isReject?'Motif du refus obligatoire':'Commentaire facultatif'}"></textarea>
+      <div class="fld">
+        <label>Commentaire${isReject?' <span style="color:var(--red)">*</span>':' <span style="font-weight:400;color:var(--muted)">(facultatif)</span>'}</label>
+        <textarea id="appr_comment" rows="3" placeholder="${isReject?'Motif du refus obligatoire':'Commentaire optionnel…'}"></textarea>
+        <div class="field-err" id="appr_comment_err">Le motif de refus est obligatoire.</div>
       </div>
     </div>
     <div class="mact">
@@ -2372,7 +2431,7 @@ async function openApproveRejectModal(reqId, action) {
   $('appr_cancel').onclick = closeModal;
   $('appr_confirm').onclick = async () => {
     const comment = $('appr_comment').value.trim();
-    if(isReject && !comment){ flash('Le motif de refus est obligatoire'); return; }
+    if(isReject && !comment){ $('appr_comment_err')?.classList.add('on'); return; }
     try {
       $('appr_confirm').disabled = true;
       const newStatus = isApprove ? 'approved' : isReject ? 'rejected' : 'cancelled';
@@ -2563,32 +2622,68 @@ async function drawEmployeeDocs(s){
 
 function openDocUploadForm(s){
   const typeOpts = DOC_TYPES.map(([code,label])=>`<option value="${code}">${label}</option>`).join('');
-  $('modal').innerHTML=`
-    <h3 style="margin-bottom:14px"><i class="fa-solid fa-upload" style="color:var(--violet);margin-right:8px"></i>Ajouter un document — ${s.first_name} ${s.last_name}</h3>
-    <div class="fld"><label>Type de document *</label><select id="du_type">${typeOpts}</select></div>
-    <div class="fld"><label>Fichier * <span style="font-weight:400;color:var(--muted);font-size:11px">(PDF, JPEG, PNG, max 10 Mo)</span></label><input type="file" id="du_file" accept=".pdf,.jpg,.jpeg,.png,.heic,.webp"></div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+  $('modal').innerHTML = mhHTML('fa-solid fa-cloud-arrow-up','Ajouter un document',`${s.first_name} ${s.last_name}`) + `
+  <div class="mb">
+    <div class="fld">
+      <label>Type de document *</label>
+      <select id="du_type"><option value="">— Choisir le type —</option>${typeOpts}</select>
+      <div class="field-err" id="du_type_err">Veuillez choisir un type de document.</div>
+    </div>
+    <div class="fld">
+      <label>Fichier *</label>
+      ${dropzoneHTML('du_file')}
+      <div class="field-err" id="du_file_err">Veuillez sélectionner un fichier.</div>
+      <div class="field-err" id="du_size_err">Fichier trop volumineux (max 10 Mo).</div>
+    </div>
+    <div class="row2">
       <div class="fld"><label>Date d'émission</label><input type="date" id="du_issued"></div>
       <div class="fld"><label>Date d'expiration</label><input type="date" id="du_expires"></div>
     </div>
-    <div class="fld"><label>Notes (facultatif)</label><input type="text" id="du_notes" placeholder="ex : copie certifiée conforme"></div>
-    <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
-      <button class="btn g" id="du_cancel">Annuler</button>
-      <button class="btn p" id="du_save"><i class="fa-solid fa-check"></i> Téléverser</button>
-    </div>`;
+    <div class="fld"><label>Notes <span style="font-weight:400;color:var(--muted)">(facultatif)</span></label>
+      <input type="text" id="du_notes" placeholder="ex : copie certifiée conforme"></div>
+  </div>
+  <div class="mact">
+    <button class="btn g" id="du_cancel">Annuler</button>
+    <button class="btn p" id="du_save" disabled><i class="fa-solid fa-cloud-arrow-up"></i> Téléverser</button>
+  </div>`;
   $('modalbg').classList.add('on');
-  $('du_cancel').onclick=closeModal;
-  $('du_save').onclick=async()=>{
-    const file=$('du_file').files[0]; const code=$('du_type').value;
-    if(!file){flash('Choisissez un fichier');return;}
-    if(file.size>10*1024*1024){flash('Fichier trop volumineux (max 10 Mo)');return;}
-    const btn=$('du_save'); btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Téléversement…';
+  $('du_cancel').onclick = closeModal;
+
+  let chosenFile = null;
+  const saveBtn = $('du_save');
+  const refreshSubmit = () => {
+    saveBtn.disabled = !($('du_type').value && chosenFile);
+  };
+  $('du_type').onchange = () => { $('du_type_err').classList.remove('on'); refreshSubmit(); };
+  wireDropzone('du_file', f => {
+    chosenFile = f;
+    $('du_file_err').classList.remove('on');
+    $('du_size_err').classList.remove('on');
+    if(f && f.size > 10*1024*1024){
+      $('du_size_err').classList.add('on');
+      chosenFile = null;
+    }
+    refreshSubmit();
+  });
+
+  saveBtn.onclick = async () => {
+    let ok = true;
+    if(!$('du_type').value){ $('du_type_err').classList.add('on'); ok=false; }
+    if(!chosenFile){ $('du_file_err').classList.add('on'); ok=false; }
+    if(!ok) return;
+    const code = $('du_type').value;
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Téléversement…';
     try{
-      const opts={issued_at:$('du_issued').value||null, expires_at:$('du_expires').value||null, notes:$('du_notes').value.trim()||null};
-      const rec=await BE.uploadEmployeeDocument(hotelId, s.id, code, file, opts);
-      await BE.logAudit('document_upload','employee_document',rec.id,s.id,{doc_type:code, file_size:file.size});
+      const opts = {issued_at:$('du_issued').value||null, expires_at:$('du_expires').value||null, notes:$('du_notes').value.trim()||null};
+      const rec = await BE.uploadEmployeeDocument(hotelId, s.id, code, chosenFile, opts);
+      await BE.logAudit('document_upload','employee_document',rec.id,s.id,{doc_type:code, file_size:chosenFile.size});
       closeModal(); flash('Document téléversé'); drawEmployeeDocs(s);
-    }catch(e){flash('Erreur : '+(e.message||e)); btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-check"></i> Téléverser';}
+    }catch(e){
+      flash('Erreur : '+(e.message||e));
+      saveBtn.disabled = false;
+      saveBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i> Téléverser';
+    }
   };
 }
 function closeFiche(){$('dbg').classList.remove('on');$('drawer').classList.remove('on');}
@@ -2599,7 +2694,11 @@ function openEmpForm(s){
   const isNew=!s;
   const restSel=d=>(s?.rest_days||[]).includes(d)?'checked':'';
   $('modal').innerHTML=`
-    <div class="mh">${isNew?'Nouveau collaborateur':'Modifier le collaborateur'}</div>
+    <div class="mh">
+      <div class="mh-ic"><i class="fa-regular fa-user"></i></div>
+      <div class="mh-ti"><h2>${isNew?'Nouveau collaborateur':'Modifier le collaborateur'}</h2></div>
+      <button class="mh-x" onclick="closeModal()" title="Fermer"><i class="fa-solid fa-xmark"></i></button>
+    </div>
     <div class="mb">
       <div class="row2">
         <div class="fld"><label>Prénom *</label><input type="text" id="ef" value="${s?.first_name||''}"></div>
@@ -2686,6 +2785,58 @@ function openEmpForm(s){
   };
 }
 function closeModal(){$('modalbg').classList.remove('on');}
+
+/* ---- Helper : en-tête standard de modale ----
+   icon    = classe Font Awesome  ex: 'fa-solid fa-upload'
+   title   = titre principal
+   sub     = sous-titre optionnel
+   Returns : HTML string pour .mh */
+function mhHTML(icon, title, sub=''){
+  return `<div class="mh">
+    <div class="mh-ic"><i class="${icon}"></i></div>
+    <div class="mh-ti"><h2>${title}</h2>${sub?`<small>${sub}</small>`:''}</div>
+    <button class="mh-x" onclick="closeModal()" title="Fermer"><i class="fa-solid fa-xmark"></i></button>
+  </div>`;
+}
+
+/* ---- Helper : file drop zone ----
+   inputId = id de l'input[type=file]
+   Returns : HTML string */
+function dropzoneHTML(inputId){
+  return `<div class="dropzone" id="dz_${inputId}">
+    <input type="file" id="${inputId}" accept=".pdf,.jpg,.jpeg,.png,.heic,.webp">
+    <i class="fa-solid fa-cloud-arrow-up dz-ic"></i>
+    <div class="dz-label">Glissez-déposez un fichier ou cliquez pour parcourir</div>
+    <div class="dz-hint">PDF · JPEG · PNG — 10 Mo maximum</div>
+  </div>
+  <div class="file-chosen" id="fc_${inputId}">
+    <div class="fc-ic"><i class="fa-regular fa-file"></i></div>
+    <span class="fc-name" id="fc_name_${inputId}"></span>
+    <span class="fc-size" id="fc_size_${inputId}"></span>
+    <button class="fc-rm" id="fc_rm_${inputId}" type="button" title="Retirer le fichier"><i class="fa-solid fa-xmark"></i></button>
+  </div>`;
+}
+
+/* ---- Helper : brancher la drop zone sur un input ---- */
+function wireDropzone(inputId, onFileChange){
+  const dz   = $('dz_'+inputId);
+  const inp  = $(inputId);
+  const fc   = $('fc_'+inputId);
+  const fcN  = $('fc_name_'+inputId);
+  const fcS  = $('fc_size_'+inputId);
+  const fcRm = $('fc_rm_'+inputId);
+  const fmtSz= b => b<1024*1024 ? (b/1024).toFixed(0)+' Ko' : (b/1024/1024).toFixed(1)+' Mo';
+  const setFile = f => {
+    if(!f){ fc.classList.remove('on'); inp.value=''; if(onFileChange) onFileChange(null); return; }
+    fcN.textContent=f.name; fcS.textContent=fmtSz(f.size); fc.classList.add('on');
+    if(onFileChange) onFileChange(f);
+  };
+  inp.onchange = e => setFile(e.target.files[0]||null);
+  fcRm.onclick = e => { e.stopPropagation(); setFile(null); };
+  dz.addEventListener('dragover',  e=>{ e.preventDefault(); dz.classList.add('drag-over'); });
+  dz.addEventListener('dragleave', ()=> dz.classList.remove('drag-over'));
+  dz.addEventListener('drop', e=>{ e.preventDefault(); dz.classList.remove('drag-over'); const f=e.dataTransfer.files[0]; if(f){ const dt=new DataTransfer(); dt.items.add(f); inp.files=dt.files; setFile(f); } });
+}
 $('modalbg').onclick=e=>{if(e.target.id==='modalbg')closeModal();};
 
 /* ===================== EXPORT EXCEL ===================== */
