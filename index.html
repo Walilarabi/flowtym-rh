@@ -264,15 +264,51 @@ tr.totals td.lab{text-align:right;padding-right:10px;color:var(--violet-d)}
 .badge{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700}
 .badge.cdi{background:var(--green-bg);color:var(--green)}.badge.cdd{background:#fff3cd;color:#92633a}.badge.ext{background:var(--violet-bg);color:var(--violet-d)}
 
-.modalbg{position:fixed;inset:0;background:rgba(20,20,40,.4);display:none;z-index:70;align-items:center;justify-content:center}
+/* ---- modale premium ---- */
+.modalbg{position:fixed;inset:0;background:rgba(14,16,28,.48);display:none;z-index:70;align-items:center;justify-content:center;padding:20px}
 .modalbg.on{display:flex}
-.modal{background:#fff;border-radius:16px;width:520px;max-width:96vw;max-height:90vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,.2)}
-.modal .mh{padding:18px 22px;border-bottom:1px solid var(--line);font-size:17px;font-weight:800}
-.modal .mb{padding:18px 22px}
-.modal .mb .fld{margin-bottom:12px}
-.modal .mb .fld label{font-size:11px}.modal .mb .fld input,.modal .mb .fld select{width:100%}
-.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.mact{padding:14px 22px;border-top:1px solid var(--line);display:flex;gap:10px;justify-content:flex-end}
+.modal{background:#fff;border-radius:18px;width:min(720px,94vw);max-height:calc(100vh - 44px);overflow-y:auto;box-shadow:0 32px 80px rgba(0,0,0,.22),0 0 0 1px rgba(0,0,0,.05);display:flex;flex-direction:column}
+.modal .mh{padding:18px 22px 16px;border-bottom:1px solid var(--line);display:flex;align-items:flex-start;gap:12px;flex-shrink:0}
+.modal .mh .mh-ic{width:38px;height:38px;border-radius:10px;background:var(--violet-bg);color:var(--violet-d);display:grid;place-items:center;font-size:15px;flex-shrink:0}
+.modal .mh .mh-ti{flex:1;min-width:0}
+.modal .mh .mh-ti h2{font-size:17px;font-weight:800;margin:0;line-height:1.25}
+.modal .mh .mh-ti small{display:block;font-size:12px;color:var(--muted);font-weight:500;margin-top:2px}
+.modal .mh .mh-x{width:30px;height:30px;border-radius:8px;border:0;background:transparent;cursor:pointer;color:var(--ink2);font-size:13px;display:grid;place-items:center;flex-shrink:0;margin-top:2px;transition:.15s}
+.modal .mh .mh-x:hover{background:var(--red-bg);color:var(--red)}
+.modal .mb{padding:20px 24px;flex:1}
+.modal .mb .fld{margin-bottom:14px}
+.modal .mb .fld label{display:block;font-size:11.5px;font-weight:600;color:var(--ink2);margin-bottom:5px;letter-spacing:.01em}
+.modal .mb .fld input[type=text],.modal .mb .fld input[type=email],.modal .mb .fld input[type=tel],.modal .mb .fld input[type=date],.modal .mb .fld input[type=time],.modal .mb .fld input[type=number],.modal .mb .fld select{width:100%;height:40px;padding:0 12px;border:1px solid var(--line);border-radius:10px;font-size:13.5px;font-family:inherit;color:var(--ink);background:#fff;transition:.15s}
+.modal .mb .fld input:focus,.modal .mb .fld select:focus{outline:none;border-color:var(--violet);box-shadow:0 0 0 3px var(--violet-bg)}
+.modal .mb .fld textarea{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;font-size:13.5px;font-family:inherit;color:var(--ink);resize:vertical;min-height:80px;transition:.15s;line-height:1.5}
+.modal .mb .fld textarea:focus{outline:none;border-color:var(--violet);box-shadow:0 0 0 3px var(--violet-bg)}
+.modal .mb .field-err{color:var(--red);font-size:11.5px;margin-top:4px;display:none}
+.modal .mb .field-err.on{display:block}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
+.mact{padding:16px 24px;border-top:1px solid var(--line);display:flex;gap:10px;justify-content:flex-end;flex-shrink:0}
+/* drag & drop zone */
+.dropzone{border:2px dashed #d4d8e2;border-radius:12px;padding:24px 20px;text-align:center;cursor:pointer;transition:.15s;position:relative;overflow:hidden;background:#fafafc}
+.dropzone:hover,.dropzone.drag-over{border-color:var(--violet);background:var(--violet-bg)}
+.dropzone input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.dropzone .dz-ic{font-size:26px;color:var(--muted);display:block;margin-bottom:8px;transition:.15s}
+.dropzone:hover .dz-ic,.dropzone.drag-over .dz-ic{color:var(--violet)}
+.dropzone .dz-label{font-size:13px;font-weight:600;color:var(--ink2);margin-bottom:3px}
+.dropzone .dz-hint{font-size:11.5px;color:var(--muted)}
+.file-chosen{display:none;align-items:center;gap:12px;padding:10px 14px;background:var(--violet-bg);border:1px solid #d4c9f9;border-radius:10px;font-size:13px;margin-top:8px}
+.file-chosen.on{display:flex}
+.file-chosen .fc-ic{width:34px;height:34px;border-radius:8px;background:var(--violet);color:#fff;display:grid;place-items:center;font-size:13px;flex-shrink:0}
+.file-chosen .fc-name{flex:1;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.file-chosen .fc-size{font-size:11.5px;color:var(--muted);white-space:nowrap;flex-shrink:0}
+/* Planning row drag */
+.cDrag{width:24px;padding:0 4px!important;background:#fafaf8!important}
+tr[data-emprow]{cursor:default}
+tr[data-emprow].row-dragging{opacity:.4}
+tr[data-emprow].row-drag-over td{box-shadow:inset 0 2px 0 var(--violet)!important}
+.dh{cursor:grab!important;user-select:none}
+tr.dept-sep td{pointer-events:none}
+.file-chosen .fc-rm{border:0;background:transparent;color:var(--muted);cursor:pointer;padding:4px 7px;border-radius:6px;font-size:13px;flex-shrink:0}
+.file-chosen .fc-rm:hover{background:var(--red-bg);color:var(--red)}
 
 /* popover */
 .pop{position:fixed;z-index:80;background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 36px rgba(0,0,0,.18);padding:8px;display:none;width:220px}
@@ -331,6 +367,10 @@ const CODES=[
   ['CSS','Sans solde','#D9D9D9','#3F3F3F','abs'],
   ['AE','Except.','#FFE699','#7F6000','abs'],
   ['F','Férié','#EDEDED','#6b7280','holiday'],
+  ['PAT','Paternité','#E8E0F5','#4A2080','abs'],
+  ['ABS','Abs. injust.','#FFD9D9','#7B0000','abs'],
+  ['REC','Récupération','#D4F0FC','#0C4A6E','abs'],
+  ['FORM','Formation','#FEF3C7','#92400E','abs'],
 ];
 const CMAP={}; CODES.forEach(c=>CMAP[c[0]]={code:c[0],label:c[1],bg:c[2],fg:c[3],cat:c[4]});
 const MONTHS=['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -481,7 +521,54 @@ async function makeRealBE(){
       }catch(e){console.warn('audit failed',e);}
     },
     async listAuditLogs(h, limit){const {data,error}=await sb.from('hr_document_audit_logs').select('*').eq('hotel_id',h).order('created_at',{ascending:false}).limit(limit||50);must(error,'Audit');return data||[];},
-    async signOut(){await sb.auth.signOut();}
+    async signOut(){await sb.auth.signOut();},
+    /* --- ABSENCES --- */
+    async listAbsenceTypes(){
+      const {data,error}=await sb.from('absence_types').select('*').eq('active',true).order('sort_order');
+      must(error,'Types absences'); return data||[];
+    },
+    async listAbsenceRequests(h,filters){
+      let q=sb.from('absence_requests')
+        .select('*, absence_types(label,color_bg,color_fg,planning_code,debit_balance,balance_type)')
+        .eq('hotel_id',h).order('start_date',{ascending:false});
+      if(filters?.status) q=q.eq('status',filters.status);
+      if(filters?.employee_id) q=q.eq('employee_id',filters.employee_id);
+      if(filters?.month){ q=q.gte('start_date',filters.month+'-01').lte('start_date',filters.month+'-31'); }
+      const {data,error}=await q; must(error,'Demandes absences'); return data||[];
+    },
+    async createAbsenceRequest(h,payload){
+      const {data:{user}}=await sb.auth.getUser();
+      let created_by=null;
+      if(user){const {data:u}=await sb.from('users').select('id').eq('auth_id',user.id).maybeSingle();if(u)created_by=u.id;}
+      const {data,error}=await sb.from('absence_requests')
+        .insert({hotel_id:h,...payload,created_by,updated_by:created_by,status:'submitted'})
+        .select('*, absence_types(label,color_bg,color_fg,planning_code,debit_balance,balance_type)').single();
+      must(error,'Création demande'); return data;
+    },
+    async updateAbsenceRequestStatus(id,status,actorUserId,actorEmail,comment,hotelId,employeeId){
+      const {data,error}=await sb.from('absence_requests').update({status,updated_by:actorUserId}).eq('id',id).select('*').single();
+      must(error,'MAJ statut');
+      await sb.from('absence_approval_history').insert({hotel_id:hotelId,request_id:id,employee_id:employeeId,
+        action:status==='approved'?'approve':status==='rejected'?'reject':'cancel',
+        actor_user_id:actorUserId,actor_email:actorEmail,comment:comment||null});
+      return data;
+    },
+    async listAbsenceBalances(h,year){
+      const {data,error}=await sb.from('absence_balances').select('*').eq('hotel_id',h).eq('year',year).order('employee_id');
+      must(error,'Soldes'); return data||[];
+    },
+    async upsertAbsenceBalance(h,employee_id,year,type_code,patch){
+      const {error}=await sb.from('absence_balances').upsert({hotel_id:h,employee_id,year,type_code,...patch},{onConflict:'hotel_id,employee_id,year,type_code'});
+      must(error,'MAJ solde');
+    },
+    async addBalanceMovement(h,employee_id,type_code,year,delta,reason,request_id,created_by){
+      const {error}=await sb.from('absence_balance_movements').insert({hotel_id:h,employee_id,type_code,year,delta,reason,request_id:request_id||null,created_by:created_by||null});
+      must(error,'Mouvement solde');
+    },
+    async listApprovalHistory(h,request_id){
+      const {data,error}=await sb.from('absence_approval_history').select('*').eq('hotel_id',h).eq('request_id',request_id).order('created_at');
+      must(error,'Historique'); return data||[];
+    }
   };
 }
 
@@ -500,6 +587,7 @@ function makeTestBE(){
     {id:'e6',hotel_id:'h1',first_name:'Ancien',last_name:'Bouchard',role:'Réceptionniste',department:'Réception',contract_type:'CDD',hire_date:'2019-01-01',rest_days:[],phone:'',email:'',address:'',emergency_contact:'',active:false,departure_date:(()=>{const d=new Date();return new Date(d.getFullYear(),d.getMonth()-2,15).toISOString().slice(0,10);})()},
   ];
   let planning=[]; let docs=[]; let clockings=[]; let templates=[];
+  let absenceRequests=[]; let absenceBalances=[]; let absenceMovements=[]; let absenceHistory=[];
   const k=(eid,day)=>eid+'|'+day;
   return {isTest:true,
     async listHotels(){return hotels;},
@@ -573,13 +661,77 @@ function makeTestBE(){
     },
     async logAudit(){/* no-op en test */},
     async listAuditLogs(h,limit){return [];},
-    _emps:emps,_planning:()=>planning
+
+    /* --- ABSENCES (test) --- */
+    async listAbsenceTypes(){
+      return [
+        {code:'CP',   label:'Congé payé',          planning_code:'CP',   debit_balance:true,  balance_type:'CP',  requires_attachment:false, sort_order:10,  color_bg:'#C6EFCE', color_fg:'#0F5132', active:true},
+        {code:'RTT',  label:'RTT',                  planning_code:'RTT',  debit_balance:true,  balance_type:'RTT', requires_attachment:false, sort_order:20,  color_bg:'#BDD7EE', color_fg:'#1F4E78', active:true},
+        {code:'MAL',  label:'Maladie',              planning_code:'MAL',  debit_balance:false, balance_type:null,  requires_attachment:true,  sort_order:30,  color_bg:'#FFC7CE', color_fg:'#9C0006', active:true},
+        {code:'MAT',  label:'Maternité',            planning_code:'MAT',  debit_balance:false, balance_type:null,  requires_attachment:false, sort_order:40,  color_bg:'#E1D5F0', color_fg:'#5B2A86', active:true},
+        {code:'PAT',  label:'Paternité',            planning_code:'PAT',  debit_balance:false, balance_type:null,  requires_attachment:false, sort_order:50,  color_bg:'#E8E0F5', color_fg:'#4A2080', active:true},
+        {code:'ABS',  label:'Absence injustifiée',  planning_code:'ABS',  debit_balance:false, balance_type:null,  requires_attachment:false, sort_order:60,  color_bg:'#FFD9D9', color_fg:'#7B0000', active:true},
+        {code:'REC',  label:'Récupération',         planning_code:'REC',  debit_balance:false, balance_type:null,  requires_attachment:false, sort_order:70,  color_bg:'#D4F0FC', color_fg:'#0C4A6E', active:true},
+        {code:'REPOS',label:'Repos compensateur',   planning_code:null,   debit_balance:false, balance_type:null,  requires_attachment:false, sort_order:80,  color_bg:'#F5F5F5', color_fg:'#6B7280', active:true},
+        {code:'FORM', label:'Formation',            planning_code:'FORM', debit_balance:false, balance_type:null,  requires_attachment:false, sort_order:90,  color_bg:'#FEF3C7', color_fg:'#92400E', active:true},
+        {code:'AUT',  label:'Autre',                planning_code:'AE',   debit_balance:false, balance_type:null,  requires_attachment:false, sort_order:100, color_bg:'#FFE699', color_fg:'#7F6000', active:true},
+      ];
+    },
+    async listAbsenceRequests(h,filters){
+      let list=absenceRequests.filter(r=>r.hotel_id===h);
+      if(filters?.status) list=list.filter(r=>r.status===filters.status);
+      if(filters?.employee_id) list=list.filter(r=>r.employee_id===filters.employee_id);
+      if(filters?.month){
+        list=list.filter(r=>r.start_date>=filters.month+'-01' && r.start_date<=filters.month+'-31');
+      }
+      const types=await this.listAbsenceTypes();
+      return list.sort((a,b)=>b.start_date.localeCompare(a.start_date)).map(r=>{
+        const t=types.find(x=>x.code===r.type_code);
+        return {...r, absence_types:t||null};
+      });
+    },
+    async createAbsenceRequest(h,payload){
+      const id='ar'+Date.now()+Math.random().toString(36).slice(2,6);
+      const types=await this.listAbsenceTypes();
+      const t=types.find(x=>x.code===payload.type_code);
+      const rec={id,hotel_id:h,...payload,status:'submitted',created_at:new Date().toISOString(),updated_at:new Date().toISOString(), absence_types:t||null};
+      absenceRequests.push(rec);
+      return rec;
+    },
+    async updateAbsenceRequestStatus(id,status,actorUserId,actorEmail,comment,hotelId,employeeId){
+      const r=absenceRequests.find(x=>x.id===id); if(!r) throw new Error('not found');
+      r.status=status; r.updated_at=new Date().toISOString();
+      absenceHistory.push({id:'ah'+Date.now(),hotel_id:hotelId,request_id:id,employee_id:employeeId,
+        action:status==='approved'?'approve':status==='rejected'?'reject':'cancel',
+        actor_user_id:actorUserId,actor_email:actorEmail,comment:comment||null,created_at:new Date().toISOString()});
+      return r;
+    },
+    async listAbsenceBalances(h,year){
+      return absenceBalances.filter(b=>b.hotel_id===h && b.year===year);
+    },
+    async upsertAbsenceBalance(h,employee_id,year,type_code,patch){
+      const i=absenceBalances.findIndex(b=>b.hotel_id===h&&b.employee_id===employee_id&&b.year===year&&b.type_code===type_code);
+      if(i>=0) Object.assign(absenceBalances[i],patch,{updated_at:new Date().toISOString()});
+      else absenceBalances.push({id:'ab'+Date.now(),hotel_id:h,employee_id,year,type_code,entitled:0,taken:0,adjusted:0,...patch,created_at:new Date().toISOString(),updated_at:new Date().toISOString()});
+    },
+    async addBalanceMovement(h,employee_id,type_code,year,delta,reason,request_id,created_by){
+      absenceMovements.push({id:'am'+Date.now(),hotel_id:h,employee_id,type_code,year,delta,reason,request_id:request_id||null,created_by:created_by||null,created_at:new Date().toISOString()});
+    },
+    async listApprovalHistory(h,request_id){
+      return absenceHistory.filter(x=>x.hotel_id===h && x.request_id===request_id).sort((a,b)=>a.created_at.localeCompare(b.created_at));
+    },
+
+    _emps:emps,_planning:()=>planning,
+    _absenceRequests:()=>absenceRequests, _absenceBalances:()=>absenceBalances,
+    _absenceMovements:()=>absenceMovements, _absenceHistory:()=>absenceHistory
   };
 }
 
 /* ===================== ÉTAT ===================== */
 let BE=null;
 let hotels=[],hotelId=null,deps=[],rols=[],staff=[],cur=new Date();
+let absenceTypes=[];
+let absSubTab='requests'; // requests | calendar | balances
 let committed=new Map();        // 'eid|YYYY-MM-DD' -> {status, duration}
 const pending=new Map();        // 'eid|YYYY-MM-DD' -> code  ('' = repos/supprimer)
 let editMode=false, fSearch='', fRole='', fDept='', fStatus='actif';
@@ -643,15 +795,15 @@ const ROLE_LABELS = {
   maintenance:'Maintenance', breakfast:'Petit-déjeuner', femme_de_chambre:'Femme de chambre'
 };
 const PERMS = {
-  direction:        { tabs:'all',                                                                                ficheFull:true,  manageUsers:true  },
-  admin_hotel:      { tabs:'all',                                                                                ficheFull:true,  manageUsers:true  },
-  comptabilite:     { tabs:['dashboard','reporting','personnel','contracts','pointage','tracking','payroll'],    ficheFull:true,  manageUsers:false },
-  revenue_manager:  { tabs:['dashboard','reporting'],                                                            ficheFull:false, manageUsers:false },
-  reception:        { tabs:['dashboard','planning','personnel'],                                                 ficheFull:false, manageUsers:false },
-  gouvernante:      { tabs:['dashboard','planning','personnel'],                                                 ficheFull:false, manageUsers:false },
-  maintenance:      { tabs:['dashboard','planning','personnel'],                                                 ficheFull:false, manageUsers:false },
-  breakfast:        { tabs:['dashboard','planning','personnel'],                                                 ficheFull:false, manageUsers:false },
-  femme_de_chambre: { tabs:['dashboard','planning'],                                                             ficheFull:false, manageUsers:false }
+  direction:        { tabs:'all',                                                                                               ficheFull:true,  manageUsers:true  },
+  admin_hotel:      { tabs:'all',                                                                                               ficheFull:true,  manageUsers:true  },
+  comptabilite:     { tabs:['dashboard','reporting','personnel','contracts','absences','pointage','tracking','payroll'],        ficheFull:true,  manageUsers:false },
+  revenue_manager:  { tabs:['dashboard','reporting'],                                                                           ficheFull:false, manageUsers:false },
+  reception:        { tabs:['dashboard','planning','personnel','absences'],                                                     ficheFull:false, manageUsers:false },
+  gouvernante:      { tabs:['dashboard','planning','personnel','absences'],                                                     ficheFull:false, manageUsers:false },
+  maintenance:      { tabs:['dashboard','planning','personnel','absences'],                                                     ficheFull:false, manageUsers:false },
+  breakfast:        { tabs:['dashboard','planning','personnel','absences'],                                                     ficheFull:false, manageUsers:false },
+  femme_de_chambre: { tabs:['dashboard','planning'],                                                                            ficheFull:false, manageUsers:false }
 };
 function canSee(tab){if(!myRole)return false;const p=PERMS[myRole];if(!p)return false;if(p.tabs==='all')return true;return p.tabs.includes(tab);}
 function canFicheFull(){return PERMS[myRole]?.ficheFull===true;}
@@ -669,6 +821,7 @@ const TABS=[
     ['documents','Documents', 'fa-regular fa-folder-open'],
   ]],
   ['Temps',[
+    ['absences','Absences',       'fa-regular fa-calendar-xmark'],
     ['pointage','Pointage',       'fa-regular fa-clock'],
     ['tracking','Suivi du temps', 'fa-solid fa-stopwatch', true],
     ['payroll', 'Paie',           'fa-solid fa-coins',     true],
@@ -733,6 +886,7 @@ function goView(v){
   const r={dashboard:renderDashboard, planning:renderPlanning, reporting:renderReporting,
            personnel:renderPersonnel, contracts:renderContracts, documents:renderDocuments,
            config:renderConfig,
+           absences:renderAbsences,
            pointage:renderPointage,
            tracking:()=>renderStub('Suivi du temps','fa-solid fa-stopwatch','Consolidation des heures réelles travaillées par collaborateur, par semaine et par mois.',
              ['Calcul automatique des heures réalisées vs planifiées','Détection des écarts','Validation et signature des relevés','Export Excel / PDF']),
@@ -803,7 +957,12 @@ function fillFilters(){
 async function loadHotel(){
   if(!BE.isTest) await BE.setActiveHotel(hotelId);
   await loadMyRole();
-  [deps, rols, staff] = await Promise.all([BE.listDepartments(hotelId), BE.listRoles(hotelId), BE.listEmployees(hotelId)]);
+  [deps, rols, staff, absenceTypes] = await Promise.all([
+    BE.listDepartments(hotelId),
+    BE.listRoles(hotelId),
+    BE.listEmployees(hotelId),
+    BE.listAbsenceTypes()
+  ]);
   fillFilters();
   await loadMonth();
 }
@@ -841,6 +1000,15 @@ function render(){
     if(fDept&&s.department!==fDept)return false;
     if(fSearch&&!(`${s.first_name} ${s.last_name} ${s.role||''} ${s.department||''}`.toLowerCase().includes(fSearch)))return false;
     return true;});
+  // Sort by dept sort_order, then planning_sort_order, then last_name
+  visibleRows.sort((a,b)=>{
+    const da=deps.find(d=>d.name===a.department)?.sort_order??999;
+    const db=deps.find(d=>d.name===b.department)?.sort_order??999;
+    if(da!==db) return da-db;
+    const sa=(a.planning_sort_order??999), sb=(b.planning_sort_order??999);
+    if(sa!==sb) return sa-sb;
+    return a.last_name.localeCompare(b.last_name);
+  });
   if(!visibleRows.length){
     $('grid').innerHTML='';
     const wrap=$('grid').parentElement;
@@ -852,15 +1020,25 @@ function render(){
   } else { const e=$('grid').parentElement.querySelector('.empty'); if(e)e.remove(); }
 
   const sums=['Trav.','CP','Abs.','Repos'];
-  let h='<thead><tr><th class="stickL cEmp" rowspan="2" style="text-align:left">Collaborateur</th>'
+  let h='<thead><tr><th class="stickL cDrag" rowspan="2" style="width:24px;padding:0"></th>'
+       +'<th class="stickL cEmp" rowspan="2" style="text-align:left">Collaborateur</th>'
        +'<th class="stickL cRole" rowspan="2" style="text-align:left">Rôle</th>';
   for(let d=1;d<=nd;d++){const wd=new Date(y,m,d).getDay();h+=`<th class="dcol ${wd===0||wd===6?'we':''}">${d}</th>`;}
   sums.forEach(s=>h+=`<th class="sumh" rowspan="2">${s}</th>`);
   h+='</tr><tr>';
   for(let d=1;d<=nd;d++){const wd=new Date(y,m,d).getDay();h+=`<th class="wd dcol ${wd===0||wd===6?'we':''}">${WD[wd]}</th>`;}
   h+='</tr></thead><tbody>';
+  let lastDept=null;
   visibleRows.forEach((s,ri)=>{
-    h+=`<tr${!s.active?' style="opacity:.55"':''}><td class="stickL cEmp"><div class="emp" data-emp="${s.id}"><div class="av" style="background:${avColor(s.last_name)}">${initials(s.first_name,s.last_name)}</div>`
+    // Dept header separator row
+    const deptName=s.department||'';
+    if(deptName!==lastDept){
+      lastDept=deptName;
+      h+=`<tr class="dept-sep"><td colspan="${nd+7}" style="background:#f1f0fb;font-size:11px;font-weight:700;color:var(--violet-d);padding:4px 10px;letter-spacing:.05em;text-transform:uppercase">${deptName||'Sans service'}</td></tr>`;
+    }
+    h+=`<tr draggable="true" data-emprow="${s.id}"${!s.active?' style="opacity:.55"':''}>`
+      +`<td class="stickL cDrag dh" title="Réordonner"><i class="fa-solid fa-grip-vertical" style="color:var(--muted);font-size:11px;cursor:grab"></i></td>`
+      +`<td class="stickL cEmp"><div class="emp" data-emp="${s.id}"><div class="av" style="background:${avColor(s.last_name)}">${initials(s.first_name,s.last_name)}</div>`
       +`<div><div class="nm">${s.first_name} ${s.last_name}${!s.active?' <span style="font-size:9.5px;color:var(--red);font-weight:700;background:var(--red-bg);padding:1px 5px;border-radius:5px;margin-left:4px">PARTI</span>':''}</div><div class="sub">${s.department||'—'} · ${s.contract_type||'CDI'}</div></div></div></td>`
       +`<td class="stickL cRole">${s.role||'—'}</td>`;
     let trav=0,cp=0,abs=0,rep=0;
@@ -875,7 +1053,7 @@ function render(){
   const rows=[['Présents',k=>CMAP[effective(k)]?.cat==='worked'],
               ['Absents', k=>{const c=CMAP[effective(k)];return c&&c.cat!=='worked'&&c.cat!=='holiday';}],
               ['CP',      k=>CMAP[effective(k)]?.cat==='paid']];
-  rows.forEach(([lab,test])=>{h+=`<tr class="totals"><td class="stickL cEmp lab" style="left:0">${lab} / jour</td><td class="stickL cRole" style="background:#f6f4fd"></td>`;
+  rows.forEach(([lab,test])=>{h+=`<tr class="totals"><td class="stickL cDrag" style="background:#f6f4fd"></td><td class="stickL cEmp lab" style="left:0">${lab} / jour</td><td class="stickL cRole" style="background:#f6f4fd"></td>`;
     for(let d=1;d<=nd;d++){let n=0;visibleRows.forEach(s=>{if(test(s.id+'|'+iso(y,m,d)))n++;});h+=`<td>${n||''}</td>`;}
     h+=`<td colspan="4"></td></tr>`;});
   h+='</tbody>';
@@ -883,15 +1061,80 @@ function render(){
   $('grid').innerHTML=h; gw.scrollLeft=sl; gw.scrollTop=stp;
   cellMap={}; $('grid').querySelectorAll('td.day').forEach(td=>cellMap[td.dataset.k]=td);
   $('grid').querySelectorAll('[data-emp]').forEach(el=>el.onclick=()=>openFiche(el.dataset.emp));
+  wirePlanningRowDrag();
   applyStickyWidths(); updateSaveBar();
 }
 function applyStickyWidths(){
   const g=$('grid'); if(!g)return;
-  const th=g.querySelector('thead .cEmp'); if(!th)return;
-  const w=Math.ceil(th.getBoundingClientRect().width);
-  if(w>0) g.querySelectorAll('.cRole').forEach(td=>{td.style.left=w+'px';});
+  const thDrag=g.querySelector('thead .cDrag');
+  const thEmp=g.querySelector('thead .cEmp'); if(!thEmp)return;
+  const wDrag=thDrag?Math.ceil(thDrag.getBoundingClientRect().width):0;
+  const wEmp=Math.ceil(thEmp.getBoundingClientRect().width);
+  if(wDrag>0) g.querySelectorAll('.cEmp').forEach(td=>{td.style.left=wDrag+'px';});
+  if(wEmp>0) g.querySelectorAll('.cRole').forEach(td=>{td.style.left=(wDrag+wEmp)+'px';});
 }
 window.addEventListener('resize',applyStickyWidths);
+
+/* Row drag-and-drop reorder for planning */
+let _rowDragId=null, _rowDragOver=null;
+function wirePlanningRowDrag(){
+  const g=$('grid'); if(!g)return;
+  g.querySelectorAll('tr[data-emprow]').forEach(tr=>{
+    tr.addEventListener('dragstart',e=>{
+      // Only allow drag from handle column
+      if(!e.target.closest('.dh')){e.preventDefault();return;}
+      _rowDragId=tr.dataset.emprow;
+      e.dataTransfer.effectAllowed='move';
+      tr.classList.add('row-dragging');
+    });
+    tr.addEventListener('dragend',()=>{
+      tr.classList.remove('row-dragging');
+      g.querySelectorAll('.row-drag-over').forEach(x=>x.classList.remove('row-drag-over'));
+    });
+    tr.addEventListener('dragover',e=>{
+      if(!_rowDragId||_rowDragId===tr.dataset.emprow)return;
+      e.preventDefault(); e.dataTransfer.dropEffect='move';
+      g.querySelectorAll('.row-drag-over').forEach(x=>x.classList.remove('row-drag-over'));
+      tr.classList.add('row-drag-over');
+      _rowDragOver=tr.dataset.emprow;
+    });
+    tr.addEventListener('drop',e=>{
+      e.preventDefault();
+      if(!_rowDragId||!_rowDragOver||_rowDragId===_rowDragOver)return;
+      const fromIdx=visibleRows.findIndex(s=>s.id===_rowDragId);
+      const toIdx=visibleRows.findIndex(s=>s.id===_rowDragOver);
+      if(fromIdx<0||toIdx<0)return;
+      const moved=visibleRows.splice(fromIdx,1)[0];
+      visibleRows.splice(toIdx,0,moved);
+      // Assign new planning_sort_order within each dept group
+      const byDept=new Map();
+      visibleRows.forEach((s,i)=>{
+        const d=s.department||'';
+        if(!byDept.has(d))byDept.set(d,[]);
+        byDept.get(d).push({s,i});
+      });
+      const updates=[];
+      byDept.forEach(rows=>{
+        rows.forEach(({s},pos)=>{
+          if(s.planning_sort_order!==pos){s.planning_sort_order=pos;updates.push(s);}
+        });
+      });
+      _rowDragId=null; _rowDragOver=null;
+      render();
+      // Persist asynchronously
+      savePlanningOrder(updates);
+    });
+  });
+}
+async function savePlanningOrder(updates){
+  for(const s of updates){
+    try{ await BE.updateEmployee(s.id,{planning_sort_order:s.planning_sort_order}); }
+    catch(e){ console.warn('savePlanningOrder',e); }
+    // Update staff array too
+    const idx=staff.findIndex(x=>x.id===s.id);
+    if(idx>=0) staff[idx].planning_sort_order=s.planning_sort_order;
+  }
+}
 
 /* ===================== SÉLECTION / ÉDITION EN MASSE ===================== */
 function rc(td){return {r:+td.dataset.r,d:+td.dataset.d};}
@@ -1074,8 +1317,9 @@ function renderReporting(){
 }
 
 /* ===================== VUE PERSONNEL ===================== */
-let pSearch='', pStatus='actif';
+let pSearch='', pStatus='actif', pDept='';
 function renderPersonnel(){
+  const deptOpts=deps.map(d=>`<option value="${d.name}" ${pDept===d.name?'selected':''}>${d.name}</option>`).join('');
   $('view').innerHTML=`<div class="page">
     <div class="phead"><div><h1>Personnel</h1><div class="sub">${hotels.find(h=>h.id===hotelId)?.name||''}</div></div>
       <div class="actions">
@@ -1085,12 +1329,14 @@ function renderPersonnel(){
           <option value="parti" ${pStatus==='parti'?'selected':''}>Partis</option>
           <option value="tous" ${pStatus==='tous'?'selected':''}>Tous</option>
         </select>
+        <select id="pdept"><option value="">Service : tous</option>${deptOpts}</select>
         <button class="btn p" id="pAdd"><i class="fa-solid fa-user-plus"></i> Collaborateur</button>
       </div></div>
     <div class="cards" id="pcards"></div></div>`;
   const draw=()=>{const list=staff.filter(s=>{
       if(pStatus==='actif'&&!s.active)return false;
       if(pStatus==='parti'&&s.active)return false;
+      if(pDept&&s.department!==pDept)return false;
       const q=pSearch.toLowerCase();
       if(q&&!(`${s.first_name} ${s.last_name} ${s.role||''} ${s.department||''}`.toLowerCase().includes(q)))return false;
       return true;}).sort((a,b)=>(b.active?1:0)-(a.active?1:0));
@@ -1105,6 +1351,7 @@ function renderPersonnel(){
     $('pcards').querySelectorAll('.card').forEach(c=>c.onclick=()=>openFiche(c.dataset.emp));};
   $('pq').oninput=e=>{pSearch=e.target.value;draw();};
   $('pst').onchange=e=>{pStatus=e.target.value;draw();};
+  $('pdept').onchange=e=>{pDept=e.target.value;draw();};
   $('pAdd').onclick=()=>openEmpForm(null);
   draw();
 }
@@ -1150,6 +1397,7 @@ async function renderContractsTemplates(){
   $('csub').innerHTML=`
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
       <div style="flex:1;font-size:13.5px;color:var(--ink2)">Modèles HTML versionnés. Utilisez les variables ci-dessous, elles seront remplacées à la génération.</div>
+      <button class="btn g" id="tplImport"><i class="fa-solid fa-file-import"></i> Importer PDF / Word</button>
       <button class="btn p" id="tplNew"><i class="fa-solid fa-plus"></i> Nouveau modèle</button>
     </div>
     <div id="tplList">Chargement…</div>
@@ -1159,6 +1407,7 @@ async function renderContractsTemplates(){
       </div>
     </div>`;
   $('tplNew').onclick=()=>openTemplateForm(null);
+  $('tplImport').onclick=()=>openTemplateImportForm();
   try{
     const list=await BE.listTemplates(hotelId);
     if(!list.length){$('tplList').innerHTML='<div style="padding:30px;text-align:center;color:var(--muted);background:#fff;border:1px dashed var(--line);border-radius:14px">Aucun modèle enregistré.<br><span style="font-size:12px">Cliquez « Nouveau modèle » pour démarrer.</span></div>';return;}
@@ -1213,20 +1462,24 @@ function openTemplateForm(t, isNewVersion){
   const rolOpts = rols.map(r=>`<option value="${r.id}" ${(t&&t.role_id===r.id)?'selected':''}>${r.name}</option>`).join('');
   const typeOpts= CONTRACT_TYPES.map(c=>`<option ${(t&&t.contract_type===c)?'selected':''}>${c}</option>`).join('');
 
-  $('modal').innerHTML=`
-    <h3 style="margin-bottom:14px"><i class="fa-regular fa-file-lines" style="color:var(--violet);margin-right:8px"></i>${title}</h3>
-    <div class="fld"><label>Nom du modèle</label><input type="text" id="tn" value="${t?.name||''}" placeholder="ex : CDI Réceptionniste"></div>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+  $('modal').innerHTML = mhHTML('fa-regular fa-file-lines', title) + `
+  <div class="mb">
+    <div class="fld"><label>Nom du modèle *</label>
+      <input type="text" id="tn" value="${t?.name||''}" placeholder="ex : CDI Réceptionniste"></div>
+    <div class="row3">
       <div class="fld"><label>Type de contrat</label><select id="tc">${typeOpts}</select></div>
-      <div class="fld"><label>Service (facultatif)</label><select id="td"><option value="">— Tous —</option>${depOpts}</select></div>
-      <div class="fld"><label>Rôle (facultatif)</label><select id="tr"><option value="">— Tous —</option>${rolOpts}</select></div>
+      <div class="fld"><label>Service <span style="font-weight:400;color:var(--muted)">(facultatif)</span></label><select id="td"><option value="">— Tous —</option>${depOpts}</select></div>
+      <div class="fld"><label>Rôle <span style="font-weight:400;color:var(--muted)">(facultatif)</span></label><select id="tr"><option value="">— Tous —</option>${rolOpts}</select></div>
     </div>
-    <div class="fld"><label>Corps HTML du modèle <span style="font-weight:400;color:var(--muted);font-size:11px">— utilisez {{variable}} pour les champs dynamiques</span></label>
-      <textarea id="tb" rows="14" style="font-family:'SFMono-Regular',Consolas,monospace;font-size:12px;line-height:1.5">${t?.body_html||DEFAULT_TEMPLATE_BODY}</textarea></div>
-    <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
-      <button class="btn g" id="tplCancel">Annuler</button>
-      <button class="btn p" id="tplSave"><i class="fa-solid fa-check"></i> ${isVer?'Créer la version':isEdit?'Enregistrer':'Créer'}</button>
-    </div>`;
+    <div class="fld">
+      <label>Corps HTML du modèle — utilisez <code style="background:#f4f2fd;color:var(--violet-d);padding:1px 5px;border-radius:4px;font-size:11.5px">{{variable}}</code></label>
+      <textarea id="tb" rows="16" style="font-family:'SFMono-Regular',Consolas,monospace;font-size:12px;line-height:1.5;min-height:280px">${t?.body_html||DEFAULT_TEMPLATE_BODY}</textarea>
+    </div>
+  </div>
+  <div class="mact">
+    <button class="btn g" id="tplCancel">Annuler</button>
+    <button class="btn p" id="tplSave"><i class="fa-solid fa-check"></i> ${isVer?'Créer la version':isEdit?'Enregistrer':'Créer'}</button>
+  </div>`;
   $('modalbg').classList.add('on');
   $('tplCancel').onclick=closeModal;
   $('tplSave').onclick=async()=>{
@@ -1251,6 +1504,131 @@ function openTemplateForm(t, isNewVersion){
       closeModal(); renderContractsTemplates();
     }catch(e){flash('Erreur : '+(e.message||e));}
   };
+}
+
+/* ===== IMPORT DE MODÈLE DEPUIS PDF / WORD ===== */
+async function openTemplateImportForm(){
+  const depOpts=deps.map(d=>`<option value="${d.id}">${d.name}</option>`).join('');
+  const rolOpts=rols.map(r=>`<option value="${r.id}">${r.name}</option>`).join('');
+  const typeOpts=CONTRACT_TYPES.map(c=>`<option>${c}</option>`).join('');
+  const varList=TEMPLATE_VARS.map(v=>`<button class="btn g ti-var" data-var="${v[0]}" title="${v[1]}" style="font-size:11px;padding:4px 8px;font-family:monospace">{{${v[0]}}}</button>`).join('');
+
+  $('modal').innerHTML = mhHTML('fa-solid fa-file-import','Importer un modèle','Choisissez un fichier Word (.docx) ou PDF') + `
+  <div class="mb">
+    ${dropzoneHTML('ti_file','Glissez un fichier .docx ou .pdf ici','application/pdf,.pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document')}
+    <div id="ti_warn" style="display:none;background:#fef3c7;border-radius:8px;padding:10px 12px;font-size:12.5px;color:#92400e;margin-top:10px"></div>
+    <div id="ti_fields" style="display:none;margin-top:14px">
+      <div class="fld"><label>Nom du modèle *</label><input type="text" id="ti_name" placeholder="ex : CDI Réceptionniste"></div>
+      <div class="row3">
+        <div class="fld"><label>Type de contrat</label><select id="ti_tc">${typeOpts}</select></div>
+        <div class="fld"><label>Service</label><select id="ti_td"><option value="">— Tous —</option>${depOpts}</select></div>
+        <div class="fld"><label>Rôle</label><select id="ti_tr"><option value="">— Tous —</option>${rolOpts}</select></div>
+      </div>
+      <div class="fld"><label>Corps HTML du modèle — modifiez et insérez des variables</label>
+        <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px">${varList}</div>
+        <textarea id="ti_body" rows="14" style="font-family:'SFMono-Regular',Consolas,monospace;font-size:12px;line-height:1.5;min-height:260px"></textarea>
+      </div>
+    </div>
+  </div>
+  <div class="mact">
+    <button class="btn g" id="ti_cancel">Annuler</button>
+    <button class="btn p" id="ti_save" disabled><i class="fa-solid fa-check"></i> Créer le modèle</button>
+  </div>`;
+  $('modalbg').classList.add('on');
+  $('ti_cancel').onclick=closeModal;
+
+  // Variable insertion buttons
+  $('modal').querySelectorAll('.ti-var').forEach(btn=>{
+    btn.onclick=()=>{
+      const ta=$('ti_body'); if(!ta)return;
+      const v=`{{${btn.dataset.var}}}`;
+      const s=ta.selectionStart, e=ta.selectionEnd;
+      ta.value=ta.value.slice(0,s)+v+ta.value.slice(e);
+      ta.selectionStart=ta.selectionEnd=s+v.length;
+      ta.focus();
+    };
+  });
+
+  wireDropzone('ti_file', async f=>{
+    const ext=f.name.split('.').pop().toLowerCase();
+    $('ti_warn').style.display='none';
+    $('ti_fields').style.display='none';
+    $('ti_save').disabled=true;
+    if(ext==='docx'){
+      await convertDocx(f);
+    } else if(ext==='pdf'){
+      await convertPdf(f);
+    } else {
+      $('ti_warn').textContent='Format non supporté. Utilisez un fichier .docx ou .pdf.';
+      $('ti_warn').style.display='block';
+    }
+  });
+
+  $('ti_save').onclick=async()=>{
+    const payload={name:$('ti_name').value.trim(),contract_type:$('ti_tc').value,
+      department_id:$('ti_td').value||null,role_id:$('ti_tr').value||null,
+      body_html:$('ti_body').value};
+    if(!payload.name||!payload.body_html){flash('Nom et contenu sont obligatoires');return;}
+    try{
+      const newT=await BE.saveTemplate(hotelId,payload);
+      await BE.logAudit('template_upload','contract_template',newT.id,null,{contract_type:payload.contract_type,source:'import'});
+      flash('Modèle importé');
+      closeModal(); renderContractsTemplates();
+    }catch(e){flash('Erreur : '+(e.message||e));}
+  };
+}
+
+async function convertDocx(file){
+  try{
+    if(!window.mammoth) await loadScript('https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js');
+    const ab=await file.arrayBuffer();
+    const result=await window.mammoth.convertToHtml({arrayBuffer:ab});
+    $('ti_body').value=result.value||'';
+    if(result.messages&&result.messages.length){
+      $('ti_warn').textContent='Conversion DOCX terminée avec des avertissements — vérifiez le rendu.';
+      $('ti_warn').style.display='block';
+    }
+    $('ti_name').value=$('ti_name').value||file.name.replace(/\.docx$/i,'');
+    $('ti_fields').style.display='block';
+    $('ti_save').disabled=false;
+  }catch(e){
+    $('ti_warn').textContent='Erreur de conversion Word : '+(e.message||e);
+    $('ti_warn').style.display='block';
+  }
+}
+
+async function convertPdf(file){
+  try{
+    if(!window.pdfjsLib){
+      await loadScript('https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.min.mjs');
+      window.pdfjsLib=window['pdfjs-dist/build/pdf']||window.pdfjsLib;
+    }
+    // pdfjs-dist 4.x ESM — load via import() as fallback
+    let pdfjsLib=window.pdfjsLib;
+    if(!pdfjsLib){
+      const mod=await import('https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.min.mjs');
+      pdfjsLib=mod;
+    }
+    if(pdfjsLib.GlobalWorkerOptions) pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.worker.min.mjs';
+    const ab=await file.arrayBuffer();
+    const pdf=await pdfjsLib.getDocument({data:ab}).promise;
+    let html='';
+    for(let i=1;i<=pdf.numPages;i++){
+      const page=await pdf.getPage(i);
+      const tc=await page.getTextContent();
+      const lines=tc.items.map(it=>it.str).join(' ').trim();
+      if(lines) html+=`<p>${lines.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</p>\n`;
+    }
+    $('ti_body').value=html||'';
+    $('ti_warn').innerHTML='<i class="fa-solid fa-triangle-exclamation"></i> Extraction PDF : la mise en page complexe peut nécessiter des corrections manuelles. Utilisez <b>.docx</b> pour un meilleur résultat.';
+    $('ti_warn').style.display='block';
+    $('ti_name').value=$('ti_name').value||file.name.replace(/\.pdf$/i,'');
+    $('ti_fields').style.display='block';
+    $('ti_save').disabled=false;
+  }catch(e){
+    $('ti_warn').textContent='Erreur de lecture PDF : '+(e.message||e)+'. Préférez le format .docx.';
+    $('ti_warn').style.display='block';
+  }
 }
 
 const DEFAULT_TEMPLATE_BODY = `<h1>Contrat de travail à durée indéterminée</h1>
@@ -1328,10 +1706,8 @@ async function openGenerateWizard(){
 }
 
 async function drawGenWizard(){
-  $('modal').innerHTML = `
-    <h3 style="margin-bottom:6px"><i class="fa-solid fa-wand-magic-sparkles" style="color:var(--violet);margin-right:8px"></i>Générer un contrat</h3>
-    <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Étape ${genState.step} / 4</div>
-    <div id="genBody"></div>`;
+  $('modal').innerHTML = mhHTML('fa-solid fa-wand-magic-sparkles','Générer un contrat',`Étape ${genState.step} / 4`) + `
+    <div class="mb"><div id="genBody"></div></div>`;
   $('modalbg').classList.add('on');
   if(genState.step===1)      await drawGenStep1();
   else if(genState.step===2) await drawGenStep2();
@@ -1741,23 +2117,32 @@ function openClockingForm(c, presetEmpId){
   const empOptions = staff.filter(s=>s.active).sort((a,b)=>a.last_name.localeCompare(b.last_name))
     .map(s=>`<option value="${s.id}" ${(emp&&s.id===emp.id)?'selected':''}>${s.first_name} ${s.last_name}${s.role?' · '+s.role:''}</option>`).join('');
 
-  $('modal').innerHTML = `
-    <h3 style="margin-bottom:14px"><i class="fa-regular fa-clock" style="color:var(--violet);margin-right:8px"></i>${isEdit?'Modifier le pointage':'Nouveau pointage'}</h3>
-    <div class="fld"><label>Collaborateur</label><select id="ck_emp" ${isEdit?'disabled':''}><option value="">— choisir —</option>${empOptions}</select></div>
-    <div class="fld"><label>Jour</label><input type="date" id="ck_day" value="${day}" max="${isoToday()}"></div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-      <div class="fld"><label>Heure d'arrivée *</label><input type="time" id="ck_in" value="${tin}" required></div>
-      <div class="fld"><label>Heure de départ</label><input type="time" id="ck_out" value="${tout}" placeholder="laissez vide si en cours"></div>
-    </div>
-    <div class="fld"><label>Pause (en minutes, non rémunérée)</label><input type="number" id="ck_brk" value="${c?.break_minutes||0}" min="0" max="480" step="5"></div>
-    <div class="fld"><label>Notes (facultatif)</label><textarea id="ck_notes" rows="2" placeholder="ex : remplacement de X, heures sup validées par…">${c?.notes||''}</textarea></div>
-    <div style="display:flex;gap:8px;margin-top:14px">
-      ${isEdit?'<button class="btn d" id="ck_del" style="margin-right:auto"><i class="fa-solid fa-trash"></i> Supprimer</button>':''}
-      <div style="${isEdit?'':'margin-left:auto'};display:flex;gap:8px">
-        <button class="btn g" id="ck_cancel">Annuler</button>
-        <button class="btn p" id="ck_save"><i class="fa-solid fa-check"></i> ${isEdit?'Enregistrer':'Créer'}</button>
+  $('modal').innerHTML = mhHTML('fa-regular fa-clock', isEdit?'Modifier le pointage':'Nouveau pointage') + `
+  <div class="mb">
+    <div class="row2">
+      <div class="fld"><label>Collaborateur *</label>
+        <select id="ck_emp" ${isEdit?'disabled':''}><option value="">— choisir —</option>${empOptions}</select>
       </div>
-    </div>`;
+      <div class="fld"><label>Jour *</label>
+        <input type="date" id="ck_day" value="${day}" max="${isoToday()}">
+      </div>
+    </div>
+    <div class="row2">
+      <div class="fld"><label>Heure d'arrivée *</label><input type="time" id="ck_in" value="${tin}"></div>
+      <div class="fld"><label>Heure de départ <span style="font-weight:400;color:var(--muted)">(laisser vide si en cours)</span></label><input type="time" id="ck_out" value="${tout}"></div>
+    </div>
+    <div class="fld" style="max-width:200px"><label>Pause (min, non rémunérée)</label>
+      <input type="number" id="ck_brk" value="${c?.break_minutes||0}" min="0" max="480" step="5">
+    </div>
+    <div class="fld"><label>Notes <span style="font-weight:400;color:var(--muted)">(facultatif)</span></label>
+      <textarea id="ck_notes" rows="2" placeholder="ex : remplacement de X, heures sup validées par…">${c?.notes||''}</textarea>
+    </div>
+  </div>
+  <div class="mact">
+    ${isEdit?'<button class="btn d" id="ck_del" style="margin-right:auto"><i class="fa-solid fa-trash"></i> Supprimer</button>':''}
+    <button class="btn g" id="ck_cancel">Annuler</button>
+    <button class="btn p" id="ck_save"><i class="fa-solid fa-check"></i> ${isEdit?'Enregistrer':'Créer'}</button>
+  </div>`;
   $('modalbg').classList.add('on');
   $('ck_cancel').onclick = closeModal;
   $('ck_save').onclick = async () => {
@@ -1795,6 +2180,537 @@ function openClockingForm(c, presetEmpId){
       if(view==='pointage') redrawPointage();
     }catch(e){ flash('Erreur : '+(e.message||e)); }
   };
+}
+
+/* ===================== VUE ABSENCES ===================== */
+
+function countAbsenceDays(startDate, endDate, halfDayStart, halfDayEnd) {
+  const s = new Date(startDate), e = new Date(endDate);
+  let days = 0;
+  const c = new Date(s);
+  while(c <= e) { days++; c.setDate(c.getDate()+1); }
+  if(halfDayStart) days -= 0.5;
+  if(halfDayEnd) days -= 0.5;
+  return Math.max(days, 0.5);
+}
+
+async function syncAbsenceToPlanning(req) {
+  const planCode = req.absence_types?.planning_code || absenceTypes.find(t=>t.code===req.type_code)?.planning_code;
+  if(!planCode) return;
+  const upserts = [];
+  const s = new Date(req.start_date), e = new Date(req.end_date);
+  const c = new Date(s); let day = 0;
+  while(c <= e) {
+    const dayIso = c.toISOString().slice(0,10);
+    let duration = 1.0;
+    const isLast = c.getTime() === e.getTime();
+    if(day === 0 && req.half_day_start && isLast && req.half_day_end) duration = 0.5;
+    else if(day === 0 && req.half_day_start) duration = 0.5;
+    else if(isLast && req.half_day_end) duration = 0.5;
+    upserts.push({hotel_id:req.hotel_id, employee_id:req.employee_id, day:dayIso, status:planCode, duration});
+    c.setDate(c.getDate()+1); day++;
+  }
+  await BE.savePlanning(req.hotel_id, upserts, []);
+}
+
+async function removeAbsenceFromPlanning(req) {
+  const planCode = req.absence_types?.planning_code || absenceTypes.find(t=>t.code===req.type_code)?.planning_code;
+  if(!planCode) return;
+  const deletes = [];
+  const s = new Date(req.start_date), e = new Date(req.end_date);
+  const c = new Date(s);
+  while(c <= e) {
+    deletes.push({hotel_id:req.hotel_id, employee_id:req.employee_id, day:c.toISOString().slice(0,10)});
+    c.setDate(c.getDate()+1);
+  }
+  await BE.savePlanning(req.hotel_id, [], deletes);
+}
+
+function canApproveAbsences() { return ['direction','admin_hotel'].includes(myRole); }
+
+let absFilterStatus = '';
+let absCalMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+let absBalYear = new Date().getFullYear();
+
+async function renderAbsences() {
+  const hName = hotels.find(h=>h.id===hotelId)?.name||'';
+  $('view').innerHTML = `<div class="page">
+    <div class="phead"><div><h1>Absences / CP-RTT</h1><div class="sub">${hName}</div></div>
+      <div class="actions" id="absActions"></div></div>
+    <div style="display:flex;gap:4px;margin-bottom:18px;border-bottom:1px solid var(--line)">
+      <button class="ctab ${absSubTab==='requests'?'on':''}" data-sub="requests"><i class="fa-regular fa-list-check"></i> Demandes</button>
+      <button class="ctab ${absSubTab==='calendar'?'on':''}" data-sub="calendar"><i class="fa-regular fa-calendar-days"></i> Calendrier</button>
+      <button class="ctab ${absSubTab==='balances'?'on':''}" data-sub="balances"><i class="fa-solid fa-scale-balanced"></i> Soldes CP/RTT</button>
+    </div>
+    <div id="absSub">Chargement…</div>
+  </div>`;
+  $('view').querySelectorAll('.ctab').forEach(b=>b.onclick=()=>{absSubTab=b.dataset.sub;renderAbsences();});
+  if(absSubTab==='requests')      renderAbsRequests();
+  else if(absSubTab==='calendar') renderAbsCalendar();
+  else                            renderAbsBalances();
+}
+
+async function renderAbsRequests() {
+  const sub = $('absSub'); if(!sub) return;
+  $('absActions').innerHTML = `<button class="btn p" id="absNewReq"><i class="fa-solid fa-plus"></i> Nouvelle demande</button>`;
+  $('absNewReq').onclick = () => openAbsenceRequestForm(null);
+
+  sub.innerHTML = `<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+    <select id="absStatFilter" style="font-size:13px;padding:7px 10px;border:1px solid var(--line);border-radius:8px">
+      <option value="">Toutes les demandes</option>
+      <option value="submitted" ${absFilterStatus==='submitted'?'selected':''}>En attente</option>
+      <option value="approved"  ${absFilterStatus==='approved'?'selected':''}>Approuvées</option>
+      <option value="rejected"  ${absFilterStatus==='rejected'?'selected':''}>Refusées</option>
+      <option value="cancelled" ${absFilterStatus==='cancelled'?'selected':''}>Annulées</option>
+    </select>
+    <span id="absReqCount" style="font-size:12px;color:var(--muted)">…</span>
+  </div>
+  <div id="absReqTable">Chargement…</div>`;
+  $('absStatFilter').onchange = e => { absFilterStatus=e.target.value; renderAbsRequests(); };
+
+  try {
+    const filters = absFilterStatus ? {status:absFilterStatus} : {};
+    const reqs = await BE.listAbsenceRequests(hotelId, filters);
+    $('absReqCount').textContent = `${reqs.length} demande(s)`;
+    if(!reqs.length) {
+      $('absReqTable').innerHTML = `<div class="empty"><i class="fa-regular fa-calendar-xmark"></i><div>Aucune demande d'absence</div><div style="font-size:13px;margin-top:6px">Cliquez sur « Nouvelle demande » pour en créer une.</div></div>`;
+      return;
+    }
+    const statusBadge = s => {
+      const m = {submitted:'<span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:5px;font-size:11px;font-weight:700">En attente</span>',
+        approved:'<span style="background:#dcfce7;color:#15803d;padding:2px 8px;border-radius:5px;font-size:11px;font-weight:700">Approuvée</span>',
+        rejected:'<span style="background:#fee2e2;color:#dc2626;padding:2px 8px;border-radius:5px;font-size:11px;font-weight:700">Refusée</span>',
+        cancelled:'<span style="background:#f1f5f9;color:#64748b;padding:2px 8px;border-radius:5px;font-size:11px;font-weight:700">Annulée</span>',
+        draft:'<span style="background:#f1f5f9;color:#64748b;padding:2px 8px;border-radius:5px;font-size:11px;font-weight:700">Brouillon</span>'};
+      return m[s]||s;
+    };
+    $('absReqTable').innerHTML = `<table class="tbl"><thead><tr>
+      <th>Collaborateur</th><th>Type</th><th>Dates</th><th>Jours</th><th>Statut</th><th>Actions</th>
+    </tr></thead><tbody>
+    ${reqs.map(r => {
+      const emp = staff.find(e=>e.id===r.employee_id);
+      const empName = emp ? `${emp.first_name} ${emp.last_name}` : '—';
+      const t = r.absence_types;
+      const typeBadge = t ? `<span style="background:${t.color_bg};color:${t.color_fg};padding:2px 8px;border-radius:5px;font-size:11px;font-weight:700">${t.label}</span>` : r.type_code;
+      const dates = r.start_date === r.end_date ? r.start_date
+        : `${r.start_date} → ${r.end_date}`;
+      const approveBtn = canApproveAbsences() && r.status==='submitted'
+        ? `<button data-approve="${r.id}" class="btn g" style="padding:4px 9px;font-size:11px"><i class="fa-solid fa-check"></i></button>
+           <button data-reject="${r.id}" class="btn d" style="padding:4px 9px;font-size:11px"><i class="fa-solid fa-xmark"></i></button>`
+        : '';
+      const cancelBtn = r.status==='approved' && canApproveAbsences()
+        ? `<button data-cancel="${r.id}" class="btn d" style="padding:4px 9px;font-size:11px"><i class="fa-solid fa-ban"></i></button>`
+        : '';
+      return `<tr data-rid="${r.id}">
+        <td><b>${empName}</b></td>
+        <td>${typeBadge}</td>
+        <td style="font-size:12px">${dates}</td>
+        <td><b>${r.days_count}</b></td>
+        <td>${statusBadge(r.status)}</td>
+        <td style="white-space:nowrap">
+          ${approveBtn}${cancelBtn}
+          <button data-hist="${r.id}" class="btn g" style="padding:4px 9px;font-size:11px" title="Historique"><i class="fa-solid fa-clock-rotate-left"></i></button>
+        </td>
+      </tr>`;
+    }).join('')}
+    </tbody></table>`;
+
+    $('absReqTable').querySelectorAll('[data-approve]').forEach(b => b.onclick = () => openApproveRejectModal(b.dataset.approve, 'approve'));
+    $('absReqTable').querySelectorAll('[data-reject]').forEach(b => b.onclick = () => openApproveRejectModal(b.dataset.reject, 'reject'));
+    $('absReqTable').querySelectorAll('[data-cancel]').forEach(b => b.onclick = () => openApproveRejectModal(b.dataset.cancel, 'cancel'));
+    $('absReqTable').querySelectorAll('[data-hist]').forEach(b => b.onclick = () => openAbsHistoryModal(b.dataset.hist));
+  } catch(e) {
+    $('absReqTable').innerHTML = `<div style="padding:20px;color:var(--red)">Erreur : ${e.message||e}</div>`;
+  }
+}
+
+async function renderAbsCalendar() {
+  const sub = $('absSub'); if(!sub) return;
+  const y = absCalMonth.getFullYear(), m = absCalMonth.getMonth(), nd = dim(y, m);
+  $('absActions').innerHTML = `
+    <div class="monthnav">
+      <button id="absCalPrev"><i class="fa-solid fa-chevron-left"></i></button>
+      <span class="m" id="absCalLabel">${MONTHS[m]} ${y}</span>
+      <button id="absCalNext"><i class="fa-solid fa-chevron-right"></i></button>
+    </div>`;
+  $('absCalPrev').onclick = () => { absCalMonth = new Date(y, m-1, 1); renderAbsCalendar(); };
+  $('absCalNext').onclick = () => { absCalMonth = new Date(y, m+1, 1); renderAbsCalendar(); };
+
+  sub.innerHTML = `<div style="overflow-x:auto"><div id="absCalGrid">Chargement…</div></div>`;
+
+  try {
+    const monthStr = `${y}-${String(m+1).padStart(2,'0')}`;
+    const reqs = await BE.listAbsenceRequests(hotelId, {month: monthStr});
+    const activeStaff = staff.filter(s=>s.active);
+
+    // Index: employee_id -> [{day, type, status, bg, fg, code}]
+    const absMap = {};
+    reqs.forEach(r => {
+      if(r.status === 'cancelled' || r.status === 'rejected') return;
+      const t = r.absence_types;
+      const bg = t?.color_bg || '#e0e0e0';
+      const fg = t?.color_fg || '#333';
+      const code = t?.planning_code || r.type_code;
+      const opacity = r.status === 'submitted' ? '0.55' : '1';
+      const s = new Date(r.start_date), e2 = new Date(r.end_date);
+      const c = new Date(s);
+      while(c <= e2) {
+        const dayIso = c.toISOString().slice(0, 10);
+        const [cy, cm] = dayIso.split('-').map(Number);
+        if(cy === y && cm-1 === m) {
+          if(!absMap[r.employee_id]) absMap[r.employee_id] = {};
+          absMap[r.employee_id][dayIso] = {bg, fg, code, opacity};
+        }
+        c.setDate(c.getDate()+1);
+      }
+    });
+
+    let h = `<table style="border-collapse:collapse;font-size:11.5px;min-width:100%">
+      <thead><tr>
+        <th style="text-align:left;padding:6px 12px;background:#fafafe;font-size:11px;color:var(--ink2);border-bottom:1px solid var(--line);min-width:160px;position:sticky;left:0;z-index:2">Collaborateur</th>`;
+    for(let d=1; d<=nd; d++) {
+      const wd = new Date(y,m,d).getDay();
+      const we = wd===0||wd===6;
+      h += `<th style="width:34px;min-width:34px;text-align:center;background:${we?'#eef2fb':'#fafafe'};font-size:10px;color:var(--ink2);border-bottom:1px solid var(--line);padding:4px 2px">${d}<br>${WD[wd]}</th>`;
+    }
+    h += `</tr></thead><tbody>`;
+
+    activeStaff.forEach(s => {
+      h += `<tr><td style="padding:6px 12px;border-bottom:1px solid var(--line);white-space:nowrap;position:sticky;left:0;background:#fff;z-index:1">
+        <b style="font-size:12px">${s.first_name} ${s.last_name}</b><br>
+        <span style="font-size:10.5px;color:var(--muted)">${s.role||'—'}</span></td>`;
+      for(let d=1; d<=nd; d++) {
+        const dayIso = iso(y, m, d);
+        const cell = absMap[s.id]?.[dayIso];
+        const wd = new Date(y,m,d).getDay();
+        const we = wd===0||wd===6;
+        if(cell) {
+          h += `<td style="text-align:center;background:${cell.bg};color:${cell.fg};font-weight:700;font-size:10px;border-bottom:1px solid var(--line);opacity:${cell.opacity}">${cell.code}</td>`;
+        } else {
+          h += `<td style="background:${we?'#f7f9fd':'#fff'};border-bottom:1px solid var(--line)"></td>`;
+        }
+      }
+      h += `</tr>`;
+    });
+
+    h += `</tbody></table>`;
+    $('absCalGrid').innerHTML = h;
+  } catch(e) {
+    $('absCalGrid').innerHTML = `<div style="padding:20px;color:var(--red)">Erreur : ${e.message||e}</div>`;
+  }
+}
+
+async function renderAbsBalances() {
+  const sub = $('absSub'); if(!sub) return;
+  const yearNow = new Date().getFullYear();
+  $('absActions').innerHTML = `
+    <select id="absYearSel" style="font-size:13px;padding:7px 10px;border:1px solid var(--line);border-radius:8px">
+      ${[yearNow-1, yearNow, yearNow+1].map(y=>`<option value="${y}" ${y===absBalYear?'selected':''}>${y}</option>`).join('')}
+    </select>`;
+  $('absYearSel').onchange = e => { absBalYear = parseInt(e.target.value); renderAbsBalances(); };
+
+  sub.innerHTML = `<div id="absBalTable">Chargement…</div>`;
+  try {
+    const balances = await BE.listAbsenceBalances(hotelId, absBalYear);
+    const byEmp = {};
+    balances.forEach(b => {
+      if(!byEmp[b.employee_id]) byEmp[b.employee_id] = {};
+      byEmp[b.employee_id][b.type_code] = b;
+    });
+    const activeStaff = staff.filter(s=>s.active).sort((a,b)=>a.last_name.localeCompare(b.last_name));
+    const balCell = (b, type) => {
+      const bal = (byEmp[b]||{})[type];
+      const entitled = bal?.entitled || 0;
+      const taken = bal?.taken || 0;
+      const adjusted = bal?.adjusted || 0;
+      const remaining = entitled - taken + adjusted;
+      const remColor = remaining < 0 ? 'var(--red)' : remaining < 2 ? '#d97706' : 'var(--green)';
+      return {entitled, taken, remaining, remColor};
+    };
+    $('absBalTable').innerHTML = `<table class="tbl"><thead><tr>
+      <th>Collaborateur</th>
+      <th style="text-align:center" colspan="3">CP ${absBalYear}</th>
+      <th style="text-align:center" colspan="3">RTT ${absBalYear}</th>
+      ${canApproveAbsences() ? '<th></th>' : ''}
+    </tr><tr>
+      <th></th>
+      <th style="text-align:center;font-size:10px">Acquis</th><th style="text-align:center;font-size:10px">Pris</th><th style="text-align:center;font-size:10px">Restant</th>
+      <th style="text-align:center;font-size:10px">Acquis</th><th style="text-align:center;font-size:10px">Pris</th><th style="text-align:center;font-size:10px">Restant</th>
+      ${canApproveAbsences() ? '<th></th>' : ''}
+    </tr></thead><tbody>
+    ${activeStaff.map(s => {
+      const cp = balCell(s.id, 'CP');
+      const rtt = balCell(s.id, 'RTT');
+      return `<tr>
+        <td><b>${s.first_name} ${s.last_name}</b><div style="font-size:11px;color:var(--muted)">${s.role||'—'}</div></td>
+        <td style="text-align:center">${cp.entitled}</td>
+        <td style="text-align:center">${cp.taken}</td>
+        <td style="text-align:center;font-weight:700;color:${cp.remColor}">${cp.remaining}</td>
+        <td style="text-align:center">${rtt.entitled}</td>
+        <td style="text-align:center">${rtt.taken}</td>
+        <td style="text-align:center;font-weight:700;color:${rtt.remColor}">${rtt.remaining}</td>
+        ${canApproveAbsences() ? `<td><button class="btn g" data-edbal="${s.id}" style="padding:4px 9px;font-size:11px" title="Modifier le solde"><i class="fa-solid fa-pen"></i></button></td>` : ''}
+      </tr>`;
+    }).join('')}
+    </tbody></table>`;
+    if(canApproveAbsences()) {
+      $('absBalTable').querySelectorAll('[data-edbal]').forEach(b => b.onclick = () => openBalanceEditModal(b.dataset.edbal));
+    }
+  } catch(e) {
+    $('absBalTable').innerHTML = `<div style="padding:20px;color:var(--red)">Erreur : ${e.message||e}</div>`;
+  }
+}
+
+function openBalanceEditModal(empId) {
+  const emp = staff.find(e=>e.id===empId); if(!emp) return;
+  $('modal').innerHTML = `
+    <div class="mh"><i class="fa-solid fa-scale-balanced" style="color:var(--violet);margin-right:8px"></i>Modifier les soldes — ${emp.first_name} ${emp.last_name}</div>
+    <div class="mb">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Année ${absBalYear}</div>
+      <div class="row2">
+        <div class="fld"><label>CP — Acquis</label><input type="number" id="bal_cp_e" step="0.5" min="0" value="0"></div>
+        <div class="fld"><label>CP — Ajustement</label><input type="number" id="bal_cp_a" step="0.5" value="0"></div>
+      </div>
+      <div class="row2">
+        <div class="fld"><label>RTT — Acquis</label><input type="number" id="bal_rtt_e" step="0.5" min="0" value="0"></div>
+        <div class="fld"><label>RTT — Ajustement</label><input type="number" id="bal_rtt_a" step="0.5" value="0"></div>
+      </div>
+    </div>
+    <div class="mact">
+      <button class="btn g" id="balCancel">Annuler</button>
+      <button class="btn p" id="balSave"><i class="fa-solid fa-check"></i> Enregistrer</button>
+    </div>`;
+  $('modalbg').classList.add('on');
+  $('balCancel').onclick = closeModal;
+  // Pre-fill
+  BE.listAbsenceBalances(hotelId, absBalYear).then(bals => {
+    const cp = bals.find(b=>b.employee_id===empId&&b.type_code==='CP');
+    const rtt = bals.find(b=>b.employee_id===empId&&b.type_code==='RTT');
+    if(cp) { $('bal_cp_e').value = cp.entitled; $('bal_cp_a').value = cp.adjusted; }
+    if(rtt) { $('bal_rtt_e').value = rtt.entitled; $('bal_rtt_a').value = rtt.adjusted; }
+  });
+  $('balSave').onclick = async () => {
+    try {
+      await BE.upsertAbsenceBalance(hotelId, empId, absBalYear, 'CP', {entitled:+$('bal_cp_e').value, adjusted:+$('bal_cp_a').value});
+      await BE.upsertAbsenceBalance(hotelId, empId, absBalYear, 'RTT', {entitled:+$('bal_rtt_e').value, adjusted:+$('bal_rtt_a').value});
+      closeModal(); flash('Soldes mis à jour'); renderAbsBalances();
+    } catch(e) { flash('Erreur : '+(e.message||e)); }
+  };
+}
+
+function openAbsenceRequestForm(existingReq) {
+  const activeStaff = staff.filter(s=>s.active).sort((a,b)=>a.last_name.localeCompare(b.last_name));
+  const empOpts = canApproveAbsences()
+    ? activeStaff.map(s=>`<option value="${s.id}">${s.first_name} ${s.last_name} · ${s.role||'—'}</option>`).join('')
+    : (()=>{ const me = activeStaff[0]; return me ? `<option value="${me.id}" selected>${me.first_name} ${me.last_name}</option>` : ''; })();
+  const typeOpts = absenceTypes.map(t=>`<option value="${t.code}">${t.label}</option>`).join('');
+
+  $('modal').innerHTML = mhHTML('fa-regular fa-calendar-xmark','Nouvelle demande d\'absence') + `
+  <div class="mb">
+    <div class="row2">
+      <div class="fld"><label>Collaborateur *</label>
+        <select id="abs_emp" ${!canApproveAbsences()?'disabled':''}><option value="">— choisir —</option>${empOpts}</select>
+      </div>
+      <div class="fld"><label>Type d'absence *</label>
+        <select id="abs_type"><option value="">— choisir —</option>${typeOpts}</select>
+      </div>
+    </div>
+    <div class="row2">
+      <div class="fld"><label>Date de début *</label><input type="date" id="abs_start"></div>
+      <div class="fld"><label>Date de fin *</label><input type="date" id="abs_end"></div>
+    </div>
+    <div style="display:flex;gap:22px;flex-wrap:wrap;font-size:13px;margin-bottom:14px;padding:10px 14px;background:#fafafe;border:1px solid var(--line);border-radius:10px">
+      <label style="display:inline-flex;gap:8px;align-items:center;cursor:pointer"><input type="checkbox" id="abs_hds"> <span>Demi-journée début</span>
+        <select id="abs_hds_p" style="display:none;margin-left:4px"><option value="matin">Matin</option><option value="après-midi">Après-midi</option></select>
+      </label>
+      <label style="display:inline-flex;gap:8px;align-items:center;cursor:pointer"><input type="checkbox" id="abs_hde"> <span>Demi-journée fin</span>
+        <select id="abs_hde_p" style="display:none;margin-left:4px"><option value="matin">Matin</option><option value="après-midi">Après-midi</option></select>
+      </label>
+    </div>
+    <div style="background:var(--violet-bg);border:1px solid #d4c9f9;border-radius:10px;padding:11px 16px;font-size:13px;margin-bottom:14px;display:flex;align-items:center;gap:10px">
+      <i class="fa-regular fa-clock" style="color:var(--violet-d)"></i>
+      <span style="color:var(--muted)">Nombre de jours :</span>
+      <b id="abs_days_preview" style="color:var(--violet-d)">—</b>
+      <span id="abs_bal_warn" style="color:#d97706;margin-left:6px;font-size:12px"></span>
+    </div>
+    <div class="fld"><label>Commentaire <span style="font-weight:400;color:var(--muted)">(facultatif)</span></label>
+      <textarea id="abs_note" rows="2" placeholder="Précisez si nécessaire…"></textarea>
+    </div>
+    <div class="fld" id="abs_file_wrap">
+      <label>Pièce jointe <span id="abs_file_req" style="color:var(--red);font-size:11px"></span></label>
+      ${dropzoneHTML('abs_file')}
+    </div>
+  </div>
+  <div class="mact">
+    <button class="btn g" id="abs_cancel">Annuler</button>
+    <button class="btn p" id="abs_submit"><i class="fa-solid fa-paper-plane"></i> Soumettre</button>
+  </div>`;
+  $('modalbg').classList.add('on');
+  $('abs_cancel').onclick = closeModal;
+
+  const updateDays = () => {
+    const s=$('abs_start').value, e=$('abs_end').value;
+    const hds=$('abs_hds').checked, hde=$('abs_hde').checked;
+    if(!s||!e||e<s){ $('abs_days_preview').textContent='—'; return; }
+    const d = countAbsenceDays(s,e,hds,hde);
+    $('abs_days_preview').textContent = d + ' jour(s)';
+    // Balance warning for CP/RTT
+    const typeCode = $('abs_type').value;
+    const t = absenceTypes.find(x=>x.code===typeCode);
+    if(t?.debit_balance) {
+      const empId = $('abs_emp').value;
+      if(empId) {
+        BE.listAbsenceBalances(hotelId, new Date().getFullYear()).then(bals => {
+          const b = bals.find(x=>x.employee_id===empId && x.type_code===typeCode);
+          const remaining = b ? (b.entitled - b.taken + b.adjusted) : 0;
+          const warn = $('abs_bal_warn');
+          if(warn) warn.textContent = d > remaining ? `⚠ Solde insuffisant (${remaining} j disponibles)` : '';
+        }).catch(()=>{});
+      }
+    } else { const w=$('abs_bal_warn'); if(w) w.textContent=''; }
+  };
+
+  wireDropzone('abs_file', ()=>{});
+
+  $('abs_hds').onchange = e => { $('abs_hds_p').style.display=e.target.checked?'':'none'; updateDays(); };
+  $('abs_hde').onchange = e => { $('abs_hde_p').style.display=e.target.checked?'':'none'; updateDays(); };
+  $('abs_start').onchange = updateDays;
+  $('abs_end').onchange = updateDays;
+  $('abs_type').onchange = () => {
+    const t = absenceTypes.find(x=>x.code===$('abs_type').value);
+    const req = $('abs_file_req');
+    if(req) req.textContent = t?.requires_attachment ? '(obligatoire)' : '(facultatif)';
+    updateDays();
+  };
+  $('abs_emp').onchange = updateDays;
+
+  $('abs_submit').onclick = async () => {
+    const empId = $('abs_emp').value;
+    const typeCode = $('abs_type').value;
+    const start = $('abs_start').value;
+    const end = $('abs_end').value;
+    if(!empId||!typeCode||!start||!end){ flash('Champs obligatoires manquants'); return; }
+    if(end < start){ flash('La date de fin doit être ≥ à la date de début'); return; }
+    const hds = $('abs_hds').checked, hde = $('abs_hde').checked;
+    const days = countAbsenceDays(start, end, hds, hde);
+    const payload = {
+      employee_id: empId,
+      type_code: typeCode,
+      start_date: start,
+      end_date: end,
+      half_day_start: hds,
+      half_day_start_period: hds ? $('abs_hds_p').value : null,
+      half_day_end: hde,
+      half_day_end_period: hde ? $('abs_hde_p').value : null,
+      days_count: days,
+      note: $('abs_note').value.trim() || null,
+    };
+    try {
+      $('abs_submit').disabled = true;
+      const req = await BE.createAbsenceRequest(hotelId, payload);
+      // Log submit action in history
+      try { await BE.listApprovalHistory(hotelId, req.id); } catch(e2) {} // read-only
+      // If direction/admin auto-approve
+      if(canApproveAbsences()) {
+        // option to auto-approve, but for now just submit
+      }
+      closeModal(); flash('Demande soumise'); renderAbsRequests();
+    } catch(e) { flash('Erreur : '+(e.message||e)); $('abs_submit').disabled=false; }
+  };
+}
+
+async function openApproveRejectModal(reqId, action) {
+  const allReqs = await BE.listAbsenceRequests(hotelId, {});
+  const req = allReqs.find(r=>r.id===reqId); if(!req) return;
+  const emp = staff.find(e=>e.id===req.employee_id);
+  const isApprove = action==='approve', isReject = action==='reject', isCancel = action==='cancel';
+  const title = isApprove ? 'Approuver la demande' : isReject ? 'Refuser la demande' : 'Annuler la demande';
+  const color = isApprove ? 'var(--green)' : 'var(--red)';
+  const icon = isApprove ? 'fa-check' : isReject ? 'fa-xmark' : 'fa-ban';
+
+  $('modal').innerHTML = `
+    <div class="mh">
+      <div class="mh-ic" style="background:${isApprove?'var(--green-bg)':isReject?'var(--red-bg)':'#fff3cd'};color:${color}"><i class="fa-solid ${icon}"></i></div>
+      <div class="mh-ti"><h2>${title}</h2></div>
+      <button class="mh-x" onclick="closeModal()" title="Fermer"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="mb">
+      <div style="background:#f8f9fb;border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:16px;font-size:13.5px">
+        <div style="font-weight:700;margin-bottom:4px">${emp ? emp.first_name+' '+emp.last_name : '—'}</div>
+        <div style="color:var(--ink2)">${req.absence_types?.label||req.type_code} · ${req.start_date}${req.end_date!==req.start_date?' → '+req.end_date:''} · <b>${req.days_count}</b> jour(s)</div>
+      </div>
+      <div class="fld">
+        <label>Commentaire${isReject?' <span style="color:var(--red)">*</span>':' <span style="font-weight:400;color:var(--muted)">(facultatif)</span>'}</label>
+        <textarea id="appr_comment" rows="3" placeholder="${isReject?'Motif du refus obligatoire':'Commentaire optionnel…'}"></textarea>
+        <div class="field-err" id="appr_comment_err">Le motif de refus est obligatoire.</div>
+      </div>
+    </div>
+    <div class="mact">
+      <button class="btn g" id="appr_cancel">Annuler</button>
+      <button class="btn" id="appr_confirm" style="background:${color};color:#fff"><i class="fa-solid ${icon}"></i> ${isApprove?'Approuver':isReject?'Refuser':'Annuler la demande'}</button>
+    </div>`;
+  $('modalbg').classList.add('on');
+  $('appr_cancel').onclick = closeModal;
+  $('appr_confirm').onclick = async () => {
+    const comment = $('appr_comment').value.trim();
+    if(isReject && !comment){ $('appr_comment_err')?.classList.add('on'); return; }
+    try {
+      $('appr_confirm').disabled = true;
+      const newStatus = isApprove ? 'approved' : isReject ? 'rejected' : 'cancelled';
+      await BE.updateAbsenceRequestStatus(reqId, newStatus, null, userEmail, comment||null, hotelId, req.employee_id);
+      if(isApprove) {
+        await syncAbsenceToPlanning(req);
+        // Debit balance if CP/RTT
+        const t = req.absence_types;
+        if(t?.debit_balance && t?.balance_type) {
+          const year = new Date(req.start_date).getFullYear();
+          const bals = await BE.listAbsenceBalances(hotelId, year);
+          const bal = bals.find(b=>b.employee_id===req.employee_id && b.type_code===t.balance_type);
+          const newTaken = (bal?.taken||0) + req.days_count;
+          await BE.upsertAbsenceBalance(hotelId, req.employee_id, year, t.balance_type, {taken: newTaken});
+          await BE.addBalanceMovement(hotelId, req.employee_id, t.balance_type, year, -req.days_count, `Approbation demande ${reqId}`, reqId, null);
+        }
+      }
+      if(isCancel) {
+        await removeAbsenceFromPlanning(req);
+        // Recredit balance
+        const t = req.absence_types;
+        if(t?.debit_balance && t?.balance_type) {
+          const year = new Date(req.start_date).getFullYear();
+          const bals = await BE.listAbsenceBalances(hotelId, year);
+          const bal = bals.find(b=>b.employee_id===req.employee_id && b.type_code===t.balance_type);
+          const newTaken = Math.max(0, (bal?.taken||0) - req.days_count);
+          await BE.upsertAbsenceBalance(hotelId, req.employee_id, year, t.balance_type, {taken: newTaken});
+          await BE.addBalanceMovement(hotelId, req.employee_id, t.balance_type, year, +req.days_count, `Annulation demande ${reqId}`, reqId, null);
+        }
+      }
+      closeModal(); flash(isApprove?'Demande approuvée':isReject?'Demande refusée':'Demande annulée');
+      renderAbsRequests();
+    } catch(e) { flash('Erreur : '+(e.message||e)); $('appr_confirm').disabled=false; }
+  };
+}
+
+async function openAbsHistoryModal(reqId) {
+  $('modal').innerHTML = `
+    <div class="mh"><i class="fa-solid fa-clock-rotate-left" style="color:var(--violet);margin-right:8px"></i>Historique de la demande</div>
+    <div class="mb" id="histContent">Chargement…</div>
+    <div class="mact"><button class="btn p" id="histClose">Fermer</button></div>`;
+  $('modalbg').classList.add('on');
+  $('histClose').onclick = closeModal;
+  try {
+    const hist = await BE.listApprovalHistory(hotelId, reqId);
+    if(!hist.length) { $('histContent').innerHTML = '<div style="color:var(--muted);font-style:italic">Aucun historique.</div>'; return; }
+    const actionLabel = {submit:'Soumission', approve:'Approbation', reject:'Refus', cancel:'Annulation'};
+    const actionColor = {submit:'#6b7280', approve:'var(--green)', reject:'var(--red)', cancel:'#9333ea'};
+    $('histContent').innerHTML = hist.map(h=>`<div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px dashed var(--line);font-size:13px">
+      <span style="background:${actionColor[h.action]||'#aaa'};color:#fff;padding:2px 8px;border-radius:5px;font-size:11px;font-weight:700;white-space:nowrap">${actionLabel[h.action]||h.action}</span>
+      <div style="flex:1">
+        <div style="font-weight:600">${h.actor_email||'—'}</div>
+        ${h.comment?`<div style="color:var(--muted);font-size:12px;margin-top:2px">${h.comment}</div>`:''}
+      </div>
+      <div style="color:var(--muted);font-size:11px;white-space:nowrap">${(h.created_at||'').slice(0,16).replace('T',' ')}</div>
+    </div>`).join('');
+  } catch(e) { $('histContent').innerHTML = `<div style="color:var(--red)">Erreur : ${e.message||e}</div>`; }
 }
 
 /* ===================== STUBS (modules à venir) ===================== */
@@ -1928,32 +2844,68 @@ async function drawEmployeeDocs(s){
 
 function openDocUploadForm(s){
   const typeOpts = DOC_TYPES.map(([code,label])=>`<option value="${code}">${label}</option>`).join('');
-  $('modal').innerHTML=`
-    <h3 style="margin-bottom:14px"><i class="fa-solid fa-upload" style="color:var(--violet);margin-right:8px"></i>Ajouter un document — ${s.first_name} ${s.last_name}</h3>
-    <div class="fld"><label>Type de document *</label><select id="du_type">${typeOpts}</select></div>
-    <div class="fld"><label>Fichier * <span style="font-weight:400;color:var(--muted);font-size:11px">(PDF, JPEG, PNG, max 10 Mo)</span></label><input type="file" id="du_file" accept=".pdf,.jpg,.jpeg,.png,.heic,.webp"></div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+  $('modal').innerHTML = mhHTML('fa-solid fa-cloud-arrow-up','Ajouter un document',`${s.first_name} ${s.last_name}`) + `
+  <div class="mb">
+    <div class="fld">
+      <label>Type de document *</label>
+      <select id="du_type"><option value="">— Choisir le type —</option>${typeOpts}</select>
+      <div class="field-err" id="du_type_err">Veuillez choisir un type de document.</div>
+    </div>
+    <div class="fld">
+      <label>Fichier *</label>
+      ${dropzoneHTML('du_file')}
+      <div class="field-err" id="du_file_err">Veuillez sélectionner un fichier.</div>
+      <div class="field-err" id="du_size_err">Fichier trop volumineux (max 10 Mo).</div>
+    </div>
+    <div class="row2">
       <div class="fld"><label>Date d'émission</label><input type="date" id="du_issued"></div>
       <div class="fld"><label>Date d'expiration</label><input type="date" id="du_expires"></div>
     </div>
-    <div class="fld"><label>Notes (facultatif)</label><input type="text" id="du_notes" placeholder="ex : copie certifiée conforme"></div>
-    <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
-      <button class="btn g" id="du_cancel">Annuler</button>
-      <button class="btn p" id="du_save"><i class="fa-solid fa-check"></i> Téléverser</button>
-    </div>`;
+    <div class="fld"><label>Notes <span style="font-weight:400;color:var(--muted)">(facultatif)</span></label>
+      <input type="text" id="du_notes" placeholder="ex : copie certifiée conforme"></div>
+  </div>
+  <div class="mact">
+    <button class="btn g" id="du_cancel">Annuler</button>
+    <button class="btn p" id="du_save" disabled><i class="fa-solid fa-cloud-arrow-up"></i> Téléverser</button>
+  </div>`;
   $('modalbg').classList.add('on');
-  $('du_cancel').onclick=closeModal;
-  $('du_save').onclick=async()=>{
-    const file=$('du_file').files[0]; const code=$('du_type').value;
-    if(!file){flash('Choisissez un fichier');return;}
-    if(file.size>10*1024*1024){flash('Fichier trop volumineux (max 10 Mo)');return;}
-    const btn=$('du_save'); btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Téléversement…';
+  $('du_cancel').onclick = closeModal;
+
+  let chosenFile = null;
+  const saveBtn = $('du_save');
+  const refreshSubmit = () => {
+    saveBtn.disabled = !($('du_type').value && chosenFile);
+  };
+  $('du_type').onchange = () => { $('du_type_err').classList.remove('on'); refreshSubmit(); };
+  wireDropzone('du_file', f => {
+    chosenFile = f;
+    $('du_file_err').classList.remove('on');
+    $('du_size_err').classList.remove('on');
+    if(f && f.size > 10*1024*1024){
+      $('du_size_err').classList.add('on');
+      chosenFile = null;
+    }
+    refreshSubmit();
+  });
+
+  saveBtn.onclick = async () => {
+    let ok = true;
+    if(!$('du_type').value){ $('du_type_err').classList.add('on'); ok=false; }
+    if(!chosenFile){ $('du_file_err').classList.add('on'); ok=false; }
+    if(!ok) return;
+    const code = $('du_type').value;
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Téléversement…';
     try{
-      const opts={issued_at:$('du_issued').value||null, expires_at:$('du_expires').value||null, notes:$('du_notes').value.trim()||null};
-      const rec=await BE.uploadEmployeeDocument(hotelId, s.id, code, file, opts);
-      await BE.logAudit('document_upload','employee_document',rec.id,s.id,{doc_type:code, file_size:file.size});
+      const opts = {issued_at:$('du_issued').value||null, expires_at:$('du_expires').value||null, notes:$('du_notes').value.trim()||null};
+      const rec = await BE.uploadEmployeeDocument(hotelId, s.id, code, chosenFile, opts);
+      await BE.logAudit('document_upload','employee_document',rec.id,s.id,{doc_type:code, file_size:chosenFile.size});
       closeModal(); flash('Document téléversé'); drawEmployeeDocs(s);
-    }catch(e){flash('Erreur : '+(e.message||e)); btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-check"></i> Téléverser';}
+    }catch(e){
+      flash('Erreur : '+(e.message||e));
+      saveBtn.disabled = false;
+      saveBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i> Téléverser';
+    }
   };
 }
 function closeFiche(){$('dbg').classList.remove('on');$('drawer').classList.remove('on');}
@@ -1964,7 +2916,11 @@ function openEmpForm(s){
   const isNew=!s;
   const restSel=d=>(s?.rest_days||[]).includes(d)?'checked':'';
   $('modal').innerHTML=`
-    <div class="mh">${isNew?'Nouveau collaborateur':'Modifier le collaborateur'}</div>
+    <div class="mh">
+      <div class="mh-ic"><i class="fa-regular fa-user"></i></div>
+      <div class="mh-ti"><h2>${isNew?'Nouveau collaborateur':'Modifier le collaborateur'}</h2></div>
+      <button class="mh-x" onclick="closeModal()" title="Fermer"><i class="fa-solid fa-xmark"></i></button>
+    </div>
     <div class="mb">
       <div class="row2">
         <div class="fld"><label>Prénom *</label><input type="text" id="ef" value="${s?.first_name||''}"></div>
@@ -2051,6 +3007,59 @@ function openEmpForm(s){
   };
 }
 function closeModal(){$('modalbg').classList.remove('on');}
+
+/* ---- Helper : en-tête standard de modale ----
+   icon    = classe Font Awesome  ex: 'fa-solid fa-upload'
+   title   = titre principal
+   sub     = sous-titre optionnel
+   Returns : HTML string pour .mh */
+function mhHTML(icon, title, sub=''){
+  return `<div class="mh">
+    <div class="mh-ic"><i class="${icon}"></i></div>
+    <div class="mh-ti"><h2>${title}</h2>${sub?`<small>${sub}</small>`:''}</div>
+    <button class="mh-x" onclick="closeModal()" title="Fermer"><i class="fa-solid fa-xmark"></i></button>
+  </div>`;
+}
+
+/* ---- Helper : file drop zone ----
+   inputId = id de l'input[type=file]
+   Returns : HTML string */
+function dropzoneHTML(inputId, label='Glissez-déposez un fichier ou cliquez pour parcourir', accept='.pdf,.jpg,.jpeg,.png,.heic,.webp'){
+  const hint=accept.includes('docx')?'DOCX · PDF — 20 Mo maximum':'PDF · JPEG · PNG — 10 Mo maximum';
+  return `<div class="dropzone" id="dz_${inputId}">
+    <input type="file" id="${inputId}" accept="${accept}">
+    <i class="fa-solid fa-cloud-arrow-up dz-ic"></i>
+    <div class="dz-label">${label}</div>
+    <div class="dz-hint">${hint}</div>
+  </div>
+  <div class="file-chosen" id="fc_${inputId}">
+    <div class="fc-ic"><i class="fa-regular fa-file"></i></div>
+    <span class="fc-name" id="fc_name_${inputId}"></span>
+    <span class="fc-size" id="fc_size_${inputId}"></span>
+    <button class="fc-rm" id="fc_rm_${inputId}" type="button" title="Retirer le fichier"><i class="fa-solid fa-xmark"></i></button>
+  </div>`;
+}
+
+/* ---- Helper : brancher la drop zone sur un input ---- */
+function wireDropzone(inputId, onFileChange){
+  const dz   = $('dz_'+inputId);
+  const inp  = $(inputId);
+  const fc   = $('fc_'+inputId);
+  const fcN  = $('fc_name_'+inputId);
+  const fcS  = $('fc_size_'+inputId);
+  const fcRm = $('fc_rm_'+inputId);
+  const fmtSz= b => b<1024*1024 ? (b/1024).toFixed(0)+' Ko' : (b/1024/1024).toFixed(1)+' Mo';
+  const setFile = f => {
+    if(!f){ fc.classList.remove('on'); inp.value=''; if(onFileChange) onFileChange(null); return; }
+    fcN.textContent=f.name; fcS.textContent=fmtSz(f.size); fc.classList.add('on');
+    if(onFileChange) onFileChange(f);
+  };
+  inp.onchange = e => setFile(e.target.files[0]||null);
+  fcRm.onclick = e => { e.stopPropagation(); setFile(null); };
+  dz.addEventListener('dragover',  e=>{ e.preventDefault(); dz.classList.add('drag-over'); });
+  dz.addEventListener('dragleave', ()=> dz.classList.remove('drag-over'));
+  dz.addEventListener('drop', e=>{ e.preventDefault(); dz.classList.remove('drag-over'); const f=e.dataTransfer.files[0]; if(f){ const dt=new DataTransfer(); dt.items.add(f); inp.files=dt.files; setFile(f); } });
+}
 $('modalbg').onclick=e=>{if(e.target.id==='modalbg')closeModal();};
 
 /* ===================== EXPORT EXCEL ===================== */
@@ -2323,6 +3332,10 @@ window.__rh={
   substituteVariables, buildContractContext,
   TEMPLATE_VARS, DOC_TYPES, CONTRACT_TYPES,
   setContractsSubTab:(t)=>{contractsSubTab=t;},
+  absenceTypes:()=>absenceTypes,
+  countAbsenceDays,
+  canApproveAbsences,
+  renderAbsences,
   BE:()=>BE
 };
 
