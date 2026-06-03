@@ -300,6 +300,11 @@ tr.totals td.lab{text-align:right;padding-right:10px;color:var(--violet-d)}
 .file-chosen .fc-ic{width:34px;height:34px;border-radius:8px;background:var(--violet);color:#fff;display:grid;place-items:center;font-size:13px;flex-shrink:0}
 .file-chosen .fc-name{flex:1;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .file-chosen .fc-size{font-size:11.5px;color:var(--muted);white-space:nowrap;flex-shrink:0}
+/* Planning — colonne du jour */
+th.tod{background:var(--violet-bg)!important;color:var(--violet-d)!important;font-weight:800!important;position:relative}
+td.day.tod:not(.sel){box-shadow:inset 0 0 0 1px rgba(139,92,246,.25)}
+td.day.tod:not([style*="background"]):not(.sel){background:rgba(139,92,246,.04)!important}
+.tod-dot{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--violet);vertical-align:middle;margin-right:2px;margin-bottom:1px}
 /* Planning row drag */
 .cDrag{width:24px;padding:0 4px!important;background:#fafaf8!important}
 /* Permission toggle */
@@ -601,7 +606,48 @@ async function makeRealBE(){
     async listApprovalHistory(h,request_id){
       const {data,error}=await sb.from('absence_approval_history').select('*').eq('hotel_id',h).eq('request_id',request_id).order('created_at');
       must(error,'Historique'); return data||[];
-    }
+    },
+    /* ---- Recrutement ---- */
+    async listJobPostings(h){const {data,error}=await sb.from('job_postings').select('*, staff_departments(name)').eq('hotel_id',h).order('created_at',{ascending:false});must(error,'Offres');return data||[];},
+    async saveJobPosting(h,p){const {data,error}=await sb.from('job_postings').insert({hotel_id:h,...p}).select('*').single();must(error,'Créer offre');return data;},
+    async updateJobPosting(id,p){const {error}=await sb.from('job_postings').update(p).eq('id',id);must(error,'MAJ offre');},
+    async listCandidates(h){const {data,error}=await sb.from('candidates').select('*, job_postings(title)').eq('hotel_id',h).order('created_at',{ascending:false});must(error,'Candidats');return data||[];},
+    async saveCandidate(h,p){const {data,error}=await sb.from('candidates').insert({hotel_id:h,...p}).select('*').single();must(error,'Créer candidat');return data;},
+    async updateCandidate(id,p){const {error}=await sb.from('candidates').update(p).eq('id',id);must(error,'MAJ candidat');},
+    async deleteCandidate(id){const {error}=await sb.from('candidates').delete().eq('id',id);must(error,'Supprimer candidat');},
+    async listCandidateNotes(h,cid){const {data,error}=await sb.from('candidate_notes').select('*, users(full_name,email)').eq('hotel_id',h).eq('candidate_id',cid).order('created_at');must(error,'Notes');return data||[];},
+    async addCandidateNote(h,cid,content){
+      const {data:{user}}=await sb.auth.getUser(); let author=null;
+      if(user){const {data:u}=await sb.from('users').select('id').eq('auth_id',user.id).maybeSingle();if(u)author=u.id;}
+      const {error}=await sb.from('candidate_notes').insert({hotel_id:h,candidate_id:cid,content,author_user_id:author});must(error,'Note');
+    },
+    /* ---- Formations ---- */
+    async listTrainingCatalog(h){const {data,error}=await sb.from('training_catalog').select('*').eq('hotel_id',h).order('title');must(error,'Catalogue');return data||[];},
+    async saveTrainingCatalog(h,p){const {data,error}=await sb.from('training_catalog').insert({hotel_id:h,...p}).select('*').single();must(error,'Créer formation');return data;},
+    async updateTrainingCatalog(id,p){const {error}=await sb.from('training_catalog').update(p).eq('id',id);must(error,'MAJ formation');},
+    async deleteTrainingCatalog(id){const {error}=await sb.from('training_catalog').delete().eq('id',id);must(error,'Supprimer formation');},
+    async listEmployeeTrainings(h){const {data,error}=await sb.from('employee_trainings').select('*, training_catalog(title,frequency_months,category), employees(first_name,last_name,department,role)').eq('hotel_id',h).order('expiry_date',{nullsFirst:false});must(error,'Formations emp');return data||[];},
+    async upsertEmployeeTraining(h,employee_id,training_id,patch){
+      const {error}=await sb.from('employee_trainings').upsert({hotel_id:h,employee_id,training_id,...patch},{onConflict:'hotel_id,employee_id,training_id'});must(error,'Upsert formation');
+    },
+    /* ---- Visites médicales ---- */
+    async listMedicalVisits(h){const {data,error}=await sb.from('medical_visits').select('*, employees(first_name,last_name,department,role)').eq('hotel_id',h).order('next_visit_date',{nullsFirst:false});must(error,'Visites');return data||[];},
+    async saveMedicalVisit(h,p){
+      const {data:{user}}=await sb.auth.getUser(); let cb=null;
+      if(user){const {data:u}=await sb.from('users').select('id').eq('auth_id',user.id).maybeSingle();if(u)cb=u.id;}
+      const {data,error}=await sb.from('medical_visits').insert({hotel_id:h,...p,created_by:cb}).select('*').single();must(error,'Créer visite');return data;
+    },
+    async updateMedicalVisit(id,p){const {error}=await sb.from('medical_visits').update(p).eq('id',id);must(error,'MAJ visite');},
+    async deleteMedicalVisit(id){const {error}=await sb.from('medical_visits').delete().eq('id',id);must(error,'Supprimer visite');},
+    /* ---- Matériel ---- */
+    async listEquipment(h){const {data,error}=await sb.from('equipment_items').select('*, employees(first_name,last_name,department)').eq('hotel_id',h).order('given_date',{ascending:false});must(error,'Matériel');return data||[];},
+    async saveEquipment(h,p){
+      const {data:{user}}=await sb.auth.getUser(); let cb=null;
+      if(user){const {data:u}=await sb.from('users').select('id').eq('auth_id',user.id).maybeSingle();if(u)cb=u.id;}
+      const {data,error}=await sb.from('equipment_items').insert({hotel_id:h,...p,created_by:cb}).select('*').single();must(error,'Créer équipement');return data;
+    },
+    async updateEquipment(id,p){const {error}=await sb.from('equipment_items').update(p).eq('id',id);must(error,'MAJ équipement');},
+    async deleteEquipment(id){const {error}=await sb.from('equipment_items').delete().eq('id',id);must(error,'Supprimer équipement');}
   };
 }
 
@@ -621,6 +667,9 @@ function makeTestBE(){
   ];
   let planning=[]; let docs=[]; let clockings=[]; let templates=[];
   let absenceRequests=[]; let absenceBalances=[]; let absenceMovements=[]; let absenceHistory=[];
+  let jobPostings=[]; let candidates=[]; let candidateNotes=[];
+  let trainingCatalog=[]; let employeeTrainings=[];
+  let medicalVisits=[]; let equipmentItems=[];
   const k=(eid,day)=>eid+'|'+day;
   return {isTest:true,
     async listHotels(){return hotels;},
@@ -753,6 +802,37 @@ function makeTestBE(){
     async listApprovalHistory(h,request_id){
       return absenceHistory.filter(x=>x.hotel_id===h && x.request_id===request_id).sort((a,b)=>a.created_at.localeCompare(b.created_at));
     },
+    /* ---- Recrutement ---- */
+    async listJobPostings(h){return jobPostings.filter(x=>x.hotel_id===h);},
+    async saveJobPosting(h,p){const r={id:'jp'+Date.now(),hotel_id:h,...p,created_at:new Date().toISOString(),updated_at:new Date().toISOString()};jobPostings.push(r);return r;},
+    async updateJobPosting(id,p){Object.assign(jobPostings.find(x=>x.id===id)||{},p,{updated_at:new Date().toISOString()});},
+    async listCandidates(h){return candidates.filter(x=>x.hotel_id===h).map(c=>({...c,job_postings:jobPostings.find(j=>j.id===c.job_posting_id)||null}));},
+    async saveCandidate(h,p){const r={id:'c'+Date.now(),hotel_id:h,...p,created_at:new Date().toISOString(),updated_at:new Date().toISOString()};candidates.push(r);return r;},
+    async updateCandidate(id,p){Object.assign(candidates.find(x=>x.id===id)||{},p,{updated_at:new Date().toISOString()});},
+    async deleteCandidate(id){const i=candidates.findIndex(x=>x.id===id);if(i>=0)candidates.splice(i,1);},
+    async listCandidateNotes(h,cid){return candidateNotes.filter(x=>x.hotel_id===h&&x.candidate_id===cid);},
+    async addCandidateNote(h,cid,content){candidateNotes.push({id:'cn'+Date.now(),hotel_id:h,candidate_id:cid,content,author_user_id:null,created_at:new Date().toISOString()});},
+    /* ---- Formations ---- */
+    async listTrainingCatalog(h){return trainingCatalog.filter(x=>x.hotel_id===h);},
+    async saveTrainingCatalog(h,p){const r={id:'tr'+Date.now(),hotel_id:h,...p,active:p.active!==false,created_at:new Date().toISOString(),updated_at:new Date().toISOString()};trainingCatalog.push(r);return r;},
+    async updateTrainingCatalog(id,p){Object.assign(trainingCatalog.find(x=>x.id===id)||{},p,{updated_at:new Date().toISOString()});},
+    async deleteTrainingCatalog(id){const i=trainingCatalog.findIndex(x=>x.id===id);if(i>=0)trainingCatalog.splice(i,1);},
+    async listEmployeeTrainings(h){return employeeTrainings.filter(x=>x.hotel_id===h).map(et=>({...et,training_catalog:trainingCatalog.find(t=>t.id===et.training_id)||null,employees:emps.find(e=>e.id===et.employee_id)||null}));},
+    async upsertEmployeeTraining(h,employee_id,training_id,patch){
+      const i=employeeTrainings.findIndex(x=>x.hotel_id===h&&x.employee_id===employee_id&&x.training_id===training_id);
+      if(i>=0) Object.assign(employeeTrainings[i],patch,{updated_at:new Date().toISOString()});
+      else employeeTrainings.push({id:'et'+Date.now(),hotel_id:h,employee_id,training_id,...patch,status:patch.status||'todo',created_at:new Date().toISOString(),updated_at:new Date().toISOString()});
+    },
+    /* ---- Visites médicales ---- */
+    async listMedicalVisits(h){return medicalVisits.filter(x=>x.hotel_id===h).map(v=>({...v,employees:emps.find(e=>e.id===v.employee_id)||null}));},
+    async saveMedicalVisit(h,p){const r={id:'mv'+Date.now(),hotel_id:h,...p,created_at:new Date().toISOString(),updated_at:new Date().toISOString()};medicalVisits.push(r);return r;},
+    async updateMedicalVisit(id,p){Object.assign(medicalVisits.find(x=>x.id===id)||{},p,{updated_at:new Date().toISOString()});},
+    async deleteMedicalVisit(id){const i=medicalVisits.findIndex(x=>x.id===id);if(i>=0)medicalVisits.splice(i,1);},
+    /* ---- Matériel ---- */
+    async listEquipment(h){return equipmentItems.filter(x=>x.hotel_id===h).map(eq=>({...eq,employees:emps.find(e=>e.id===eq.employee_id)||null}));},
+    async saveEquipment(h,p){const r={id:'eq'+Date.now(),hotel_id:h,...p,created_at:new Date().toISOString(),updated_at:new Date().toISOString()};equipmentItems.push(r);return r;},
+    async updateEquipment(id,p){Object.assign(equipmentItems.find(x=>x.id===id)||{},p,{updated_at:new Date().toISOString()});},
+    async deleteEquipment(id){const i=equipmentItems.findIndex(x=>x.id===id);if(i>=0)equipmentItems.splice(i,1);},
 
     _emps:emps,_planning:()=>planning,
     _absenceRequests:()=>absenceRequests, _absenceBalances:()=>absenceBalances,
@@ -828,15 +908,15 @@ const ROLE_LABELS = {
   maintenance:'Maintenance', breakfast:'Petit-déjeuner', femme_de_chambre:'Femme de chambre'
 };
 const PERMS = {
-  direction:        { tabs:'all',                                                                                               ficheFull:true,  manageUsers:true  },
-  admin_hotel:      { tabs:'all',                                                                                               ficheFull:true,  manageUsers:true  },
-  comptabilite:     { tabs:['dashboard','reporting','personnel','contracts','absences','pointage','tracking','payroll'],        ficheFull:true,  manageUsers:false },
-  revenue_manager:  { tabs:['dashboard','reporting'],                                                                           ficheFull:false, manageUsers:false },
-  reception:        { tabs:['dashboard','planning','personnel','absences'],                                                     ficheFull:false, manageUsers:false },
-  gouvernante:      { tabs:['dashboard','planning','personnel','absences'],                                                     ficheFull:false, manageUsers:false },
-  maintenance:      { tabs:['dashboard','planning','personnel','absences'],                                                     ficheFull:false, manageUsers:false },
-  breakfast:        { tabs:['dashboard','planning','personnel','absences'],                                                     ficheFull:false, manageUsers:false },
-  femme_de_chambre: { tabs:['dashboard','planning'],                                                                            ficheFull:false, manageUsers:false }
+  direction:        { tabs:'all',                                                                                                                                              ficheFull:true,  manageUsers:true  },
+  admin_hotel:      { tabs:'all',                                                                                                                                              ficheFull:true,  manageUsers:true  },
+  comptabilite:     { tabs:['dashboard','reporting','personnel','contracts','absences','pointage','tracking','payroll','equipment'],                                           ficheFull:true,  manageUsers:false },
+  revenue_manager:  { tabs:['dashboard','reporting'],                                                                                                                          ficheFull:false, manageUsers:false },
+  reception:        { tabs:['dashboard','planning','personnel','absences'],                                                                                                    ficheFull:false, manageUsers:false },
+  gouvernante:      { tabs:['dashboard','planning','personnel','absences'],                                                                                                    ficheFull:false, manageUsers:false },
+  maintenance:      { tabs:['dashboard','planning','personnel','absences'],                                                                                                    ficheFull:false, manageUsers:false },
+  breakfast:        { tabs:['dashboard','planning','personnel','absences'],                                                                                                    ficheFull:false, manageUsers:false },
+  femme_de_chambre: { tabs:['dashboard','planning'],                                                                                                                           ficheFull:false, manageUsers:false }
 };
 function canSee(tab){if(!myRole)return false;const p=PERMS[myRole];if(!p)return false;if(p.tabs==='all')return true;return p.tabs.includes(tab);}
 function canFicheFull(){return PERMS[myRole]?.ficheFull===true;}
@@ -860,7 +940,13 @@ const TABS=[
     ['payroll', 'Paie',           'fa-solid fa-coins',     true],
   ]],
   ['Acquisition',[
-    ['recruitment','Recrutement','fa-solid fa-user-plus', true],
+    ['recruitment','Recrutement','fa-solid fa-user-plus'],
+  ]],
+  ['RH Avancé',[
+    ['training','Formations','fa-solid fa-graduation-cap'],
+    ['medical','Visites médicales','fa-solid fa-stethoscope'],
+    ['equipment','Matériel remis','fa-solid fa-boxes-stacked'],
+    ['orgchart','Organigramme','fa-solid fa-sitemap'],
   ]],
   ['Réglages',[
     ['config','Paramètres','fa-solid fa-gear'],
@@ -918,15 +1004,13 @@ function goView(v){
   $('nav').querySelectorAll('.it').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
   const r={dashboard:renderDashboard, planning:renderPlanning, reporting:renderReporting,
            personnel:renderPersonnel, contracts:renderContracts, documents:renderDocuments,
-           config:renderConfig,
-           absences:renderAbsences,
-           pointage:renderPointage,
-           tracking:()=>renderStub('Suivi du temps','fa-solid fa-stopwatch','Consolidation des heures réelles travaillées par collaborateur, par semaine et par mois.',
-             ['Calcul automatique des heures réalisées vs planifiées','Détection des écarts','Validation et signature des relevés','Export Excel / PDF']),
-           payroll:()=>renderStub('Paie','fa-solid fa-coins','Préparation des éléments variables de paie à partir du planning, des absences et du pointage.',
-             ['Calcul des heures supplémentaires et majorations','Décomptes CP, RTT, maladie','Indemnités et primes','Export vers le logiciel de paie ou DSN']),
-           recruitment:()=>renderStub('Recrutement','fa-solid fa-user-plus','Gestion du pipeline de candidatures jusqu\'à l\'embauche.',
-             ['Multi-diffusion d\'annonces','Pipeline candidats par poste','Entretiens et évaluations','Conversion automatique en fiche collaborateur'])};
+           config:renderConfig, absences:renderAbsences, pointage:renderPointage,
+           recruitment:renderRecruitment, training:renderTraining,
+           medical:renderMedical, equipment:renderEquipment, orgchart:renderOrgChart,
+           tracking:()=>renderStub('Suivi du temps','fa-solid fa-stopwatch','Consolidation des heures réelles.',
+             ['Calcul heures réalisées vs planifiées','Détection des écarts','Export Excel/PDF']),
+           payroll:()=>renderStub('Paie','fa-solid fa-coins','Éléments variables de paie.',
+             ['Calcul heures supp.','Décomptes CP/RTT','Export logiciel de paie'])};
   (r[v]||r.dashboard)();
 }
 /* ===================== VUE PLANNING ===================== */
@@ -1022,6 +1106,7 @@ function render(){
   const g=$('grid'); if(!g) return; // hors vue planning
   const y=cur.getFullYear(),m=cur.getMonth(),nd=dim(y,m);
   $('mlabel').textContent=`${MONTHS[m]} ${y}`;
+  const now=new Date(), isThisMonth=(now.getFullYear()===y&&now.getMonth()===m), toDay=now.getDate();
   visibleRows=staff.filter(s=>{
     if(fStatus==='actif' && !s.active) return false;
     if(fStatus==='parti' && s.active)  return false;
@@ -1058,10 +1143,10 @@ function render(){
   let h='<thead><tr><th class="stickL cDrag" rowspan="2" style="width:24px;padding:0"></th>'
        +'<th class="stickL cEmp" rowspan="2" style="text-align:left">Collaborateur</th>'
        +'<th class="stickL cRole" rowspan="2" style="text-align:left">Rôle</th>';
-  for(let d=1;d<=nd;d++){const wd=new Date(y,m,d).getDay();h+=`<th class="dcol ${wd===0||wd===6?'we':''}">${d}</th>`;}
+  for(let d=1;d<=nd;d++){const wd=new Date(y,m,d).getDay();const tod=isThisMonth&&d===toDay;h+=`<th class="dcol ${wd===0||wd===6?'we':''}${tod?' tod':''}">${tod?`<span class="tod-dot"></span>`:''}${d}</th>`;}
   sums.forEach(s=>h+=`<th class="sumh" rowspan="2">${s}</th>`);
   h+='</tr><tr>';
-  for(let d=1;d<=nd;d++){const wd=new Date(y,m,d).getDay();h+=`<th class="wd dcol ${wd===0||wd===6?'we':''}">${WD[wd]}</th>`;}
+  for(let d=1;d<=nd;d++){const wd=new Date(y,m,d).getDay();const tod=isThisMonth&&d===toDay;h+=`<th class="wd dcol ${wd===0||wd===6?'we':''}${tod?' tod':''}">${WD[wd]}</th>`;}
   h+='</tr></thead><tbody>';
   let lastDept=null;
   visibleRows.forEach((s,ri)=>{
@@ -1079,7 +1164,8 @@ function render(){
     let trav=0,cp=0,abs=0,rep=0;
     for(let d=1;d<=nd;d++){const k=s.id+'|'+iso(y,m,d);const code=effective(k);const c=code?CMAP[code]:null;
       const wd=new Date(y,m,d).getDay(),we=wd===0||wd===6;
-      const cls='day'+(we?' we':'')+(selection.has(k)?' sel':'')+(pending.has(k)&&pending.get(k)!==committedCode(k)?' pend':'');
+      const tod=isThisMonth&&d===toDay;
+      const cls='day'+(we?' we':'')+(tod?' tod':'')+(selection.has(k)?' sel':'')+(pending.has(k)&&pending.get(k)!==committedCode(k)?' pend':'');
       const st=c?`background:${c.bg};color:${c.fg}`:'';
       h+=`<td class="${cls}" data-k="${k}" data-r="${ri}" data-d="${d}" style="${st}">${code||''}</td>`;
       if(c){if(c.cat==='worked')trav++;else if(c.cat==='paid')cp++;else if(c.cat==='abs')abs++;} else rep++;}
@@ -2831,6 +2917,659 @@ async function openAbsHistoryModal(reqId) {
       <div style="color:var(--muted);font-size:11px;white-space:nowrap">${(h.created_at||'').slice(0,16).replace('T',' ')}</div>
     </div>`).join('');
   } catch(e) { $('histContent').innerHTML = `<div style="color:var(--red)">Erreur : ${e.message||e}</div>`; }
+}
+
+/* =====================================================================
+   MODULE RECRUTEMENT
+   ===================================================================== */
+const RECRUIT_STAGES=[
+  {key:'nouveau',    label:'Nouveau',       bg:'#EEF2FF',fg:'#4338CA'},
+  {key:'preselection',label:'Pré-sélection',bg:'#FEF3C7',fg:'#92400E'},
+  {key:'entretien',  label:'Entretien',     bg:'#DBEAFE',fg:'#1D4ED8'},
+  {key:'offre',      label:'Offre',         bg:'#F0FDF4',fg:'#166534'},
+  {key:'embauche',   label:'Embauché ✓',    bg:'#C6EFCE',fg:'#0F5132'},
+  {key:'refuse',     label:'Refusé',        bg:'#FFD9D9',fg:'#7B0000'},
+];
+const RECRUIT_STAGES_MAP=Object.fromEntries(RECRUIT_STAGES.map(s=>[s.key,s]));
+
+async function renderRecruitment(){
+  const hName=hotels.find(h=>h.id===hotelId)?.name||'';
+  $('view').innerHTML=`<div class="page">
+    <div class="phead">
+      <div><h1>Recrutement</h1><div class="sub">${hName}</div></div>
+      <div class="actions">
+        <button class="btn p" id="recNewCand"><i class="fa-solid fa-user-plus"></i> Nouveau candidat</button>
+      </div></div>
+    <div id="recBoard" style="overflow-x:auto;padding-bottom:8px">Chargement…</div>
+  </div>`;
+  $('recNewCand').onclick=()=>openCandidateForm(null);
+  await drawRecruitBoard();
+}
+
+async function drawRecruitBoard(){
+  const bd=$('recBoard'); if(!bd)return;
+  try{
+    const [cands,postings]=await Promise.all([BE.listCandidates(hotelId),BE.listJobPostings(hotelId)]);
+    bd.innerHTML=`<div style="display:flex;gap:14px;min-width:max-content;padding-bottom:8px">
+      ${RECRUIT_STAGES.map(st=>{
+        const col=cands.filter(c=>c.stage===st.key);
+        return `<div style="width:240px;flex-shrink:0">
+          <div style="background:${st.bg};color:${st.fg};padding:7px 12px;border-radius:10px 10px 0 0;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:space-between">
+            ${st.label}<span style="background:rgba(0,0,0,.1);border-radius:20px;padding:1px 8px;font-size:11px">${col.length}</span></div>
+          <div style="background:#f9f9fb;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 10px 10px;min-height:120px;padding:8px;display:flex;flex-direction:column;gap:8px" data-stage="${st.key}">
+            ${col.map(c=>recruitCard(c)).join('')}
+            ${st.key!=='embauche'&&st.key!=='refuse'?`<button class="btn g" data-addstage="${st.key}" style="font-size:11px;padding:5px 8px;margin-top:4px;opacity:.7"><i class="fa-solid fa-plus"></i> Ajouter</button>`:''}
+          </div></div>`;
+      }).join('')}
+    </div>`;
+    bd.querySelectorAll('[data-cid]').forEach(el=>el.onclick=()=>openCandidateFiche(el.dataset.cid,cands.find(c=>c.id===el.dataset.cid)));
+    bd.querySelectorAll('[data-addstage]').forEach(btn=>btn.onclick=()=>openCandidateForm(null,btn.dataset.addstage));
+  }catch(e){bd.innerHTML=`<div style="padding:20px;color:var(--red)">Erreur : ${e.message||e}</div>`;}
+}
+
+function recruitCard(c){
+  const st=RECRUIT_STAGES_MAP[c.stage]||RECRUIT_STAGES_MAP['nouveau'];
+  return `<div class="card" data-cid="${c.id}" style="cursor:pointer;padding:10px 12px">
+    <div style="font-weight:700;font-size:13px;margin-bottom:2px">${c.first_name||''} ${c.last_name||''}</div>
+    ${c.job_postings?.title?`<div style="font-size:11.5px;color:var(--ink2);margin-bottom:4px">${c.job_postings.title}</div>`:''}
+    ${c.email?`<div style="font-size:11px;color:var(--muted)">${c.email}</div>`:''}
+    <div style="margin-top:6px;font-size:11px;color:var(--muted)">${c.created_at?.slice(0,10)||''}</div>
+  </div>`;
+}
+
+function openCandidateForm(c,defaultStage){
+  const stOpts=RECRUIT_STAGES.map(s=>`<option value="${s.key}" ${(c?.stage||defaultStage||'nouveau')===s.key?'selected':''}>${s.label}</option>`).join('');
+  const empOpts=staff.filter(e=>e.active).sort((a,b)=>a.last_name.localeCompare(b.last_name)).map(e=>`<option value="${e.id}" ${c?.converted_employee_id===e.id?'selected':''}>${e.first_name} ${e.last_name}</option>`).join('');
+  $('modal').innerHTML=mhHTML('fa-solid fa-user-plus',c?'Modifier le candidat':'Nouveau candidat')+`
+  <div class="mb">
+    <div class="row3">
+      <div class="fld"><label>Prénom *</label><input id="cf_fn" value="${c?.first_name||''}" placeholder="Prénom"></div>
+      <div class="fld"><label>Nom *</label><input id="cf_ln" value="${c?.last_name||''}" placeholder="Nom"></div>
+      <div class="fld"><label>Étape</label><select id="cf_st">${stOpts}</select></div>
+    </div>
+    <div class="row3">
+      <div class="fld"><label>E-mail</label><input id="cf_em" type="email" value="${c?.email||''}" placeholder="email@…"></div>
+      <div class="fld"><label>Téléphone</label><input id="cf_ph" value="${c?.phone||''}" placeholder="06…"></div>
+      <div class="fld"><label>Poste visé</label><input id="cf_jt" value="${c?.job_title||''}" placeholder="ex : Réceptionniste"></div>
+    </div>
+    <div class="fld"><label>Notes</label><textarea id="cf_no" rows="3" style="min-height:70px">${c?.notes||''}</textarea></div>
+  </div>
+  <div class="mact">
+    <button class="btn g" id="cf_cancel">Annuler</button>
+    ${c?`<button class="btn d" id="cf_del"><i class="fa-solid fa-trash"></i> Supprimer</button>`:''}
+    <button class="btn p" id="cf_save"><i class="fa-solid fa-check"></i> ${c?'Enregistrer':'Créer'}</button>
+  </div>`;
+  $('modalbg').classList.add('on');
+  $('cf_cancel').onclick=closeModal;
+  if(c) $('cf_del').onclick=async()=>{if(!confirm('Supprimer ce candidat ?'))return;await BE.deleteCandidate(c.id);closeModal();await drawRecruitBoard();};
+  $('cf_save').onclick=async()=>{
+    const fn=$('cf_fn').value.trim(),ln=$('cf_ln').value.trim();
+    if(!fn&&!ln){flash('Prénom ou nom requis');return;}
+    const p={first_name:fn,last_name:ln,email:$('cf_em').value.trim()||null,phone:$('cf_ph').value.trim()||null,job_title:$('cf_jt').value.trim()||null,notes:$('cf_no').value||null,stage:$('cf_st').value};
+    try{
+      if(c) await BE.updateCandidate(c.id,p);
+      else await BE.saveCandidate(hotelId,p);
+      closeModal(); await drawRecruitBoard();
+    }catch(e){flash('Erreur : '+(e.message||e));}
+  };
+}
+
+async function openCandidateFiche(cid,c){
+  if(!c) return;
+  const notes=await BE.listCandidateNotes(hotelId,cid);
+  const stOpts=RECRUIT_STAGES.map(s=>`<option value="${s.key}" ${c.stage===s.key?'selected':''}>${s.label}</option>`).join('');
+  const st=RECRUIT_STAGES_MAP[c.stage]||RECRUIT_STAGES_MAP['nouveau'];
+  $('modal').innerHTML=mhHTML('fa-solid fa-user',`${c.first_name||''} ${c.last_name||''}`,c.job_postings?.title||c.job_title||'')+`
+  <div class="mb">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
+      <span style="background:${st.bg};color:${st.fg};padding:4px 12px;border-radius:20px;font-weight:700;font-size:12px">${st.label}</span>
+      <select id="cf_stq" style="font-size:12.5px;padding:6px 10px">${stOpts}</select>
+      <button class="btn g" id="cf_stok" style="padding:6px 12px"><i class="fa-solid fa-check"></i> Appliquer</button>
+      ${c.stage!=='embauche'?`<button class="btn p" id="cf_convert" style="margin-left:auto"><i class="fa-solid fa-user-check"></i> Convertir en salarié</button>`:''}
+    </div>
+    <div class="row3">
+      ${c.email?`<div class="fld"><label>E-mail</label><div style="padding:8px;font-size:13px">${c.email}</div></div>`:''}
+      ${c.phone?`<div class="fld"><label>Téléphone</label><div style="padding:8px;font-size:13px">${c.phone}</div></div>`:''}
+    </div>
+    ${c.notes?`<div class="fld"><label>Notes</label><div style="padding:10px;background:#f9f9fb;border-radius:8px;font-size:13px;white-space:pre-wrap">${c.notes}</div></div>`:''}
+    <div class="fld" style="margin-top:12px"><label>Commentaires (${notes.length})</label>
+      <div id="cnotes" style="max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;margin-bottom:8px">
+        ${notes.map(n=>`<div style="background:#f4f2fd;padding:8px 12px;border-radius:8px;font-size:12.5px"><div>${n.content}</div><div style="font-size:11px;color:var(--muted);margin-top:3px">${n.created_at?.slice(0,16)||''}</div></div>`).join('')||'<div style="color:var(--muted);font-size:12px">Aucun commentaire.</div>'}
+      </div>
+      <div style="display:flex;gap:8px"><textarea id="cnote_inp" rows="2" placeholder="Ajouter un commentaire…" style="flex:1;min-height:50px"></textarea>
+        <button class="btn p" id="cnote_add" style="align-self:flex-end"><i class="fa-solid fa-paper-plane"></i></button></div>
+    </div>
+  </div>
+  <div class="mact">
+    <button class="btn g" id="cf_edit_btn">Modifier</button>
+    <button class="btn g" onclick="closeModal()">Fermer</button>
+  </div>`;
+  $('modalbg').classList.add('on');
+  $('cf_stok').onclick=async()=>{
+    const ns=$('cf_stq').value;
+    await BE.updateCandidate(cid,{stage:ns});
+    flash('Étape mise à jour'); closeModal(); await drawRecruitBoard();
+  };
+  $('cf_edit_btn').onclick=()=>{closeModal();openCandidateForm(c);};
+  $('cnote_add').onclick=async()=>{
+    const txt=$('cnote_inp').value.trim(); if(!txt)return;
+    await BE.addCandidateNote(hotelId,cid,txt);
+    $('cnote_inp').value='';
+    const notes2=await BE.listCandidateNotes(hotelId,cid);
+    $('cnotes').innerHTML=notes2.map(n=>`<div style="background:#f4f2fd;padding:8px 12px;border-radius:8px;font-size:12.5px"><div>${n.content}</div><div style="font-size:11px;color:var(--muted);margin-top:3px">${n.created_at?.slice(0,16)||''}</div></div>`).join('');
+  };
+  const cvBtn=$('cf_convert'); if(cvBtn) cvBtn.onclick=()=>openConvertCandidateForm(c);
+}
+
+function openConvertCandidateForm(c){
+  const depOpts=deps.map(d=>`<option value="${d.name}">${d.name}</option>`).join('');
+  const roleOpts=rols.map(r=>`<option>${r.name}</option>`).join('');
+  $('modal').innerHTML=mhHTML('fa-solid fa-user-check',`Convertir en salarié : ${c.first_name||''} ${c.last_name||''}`)+`
+  <div class="mb">
+    <div style="background:#e8f5e9;border-radius:10px;padding:10px 14px;font-size:13px;color:#1b5e20;margin-bottom:14px"><i class="fa-solid fa-circle-info"></i> Ceci va créer une fiche collaborateur pré-remplie. Vous pourrez compléter les informations ensuite.</div>
+    <div class="row3">
+      <div class="fld"><label>Service</label><select id="cc_dep"><option value="">— choisir —</option>${depOpts}</select></div>
+      <div class="fld"><label>Rôle / Poste</label><select id="cc_rol"><option value="">— choisir —</option>${roleOpts}</select></div>
+      <div class="fld"><label>Type de contrat</label><select id="cc_ct">${CONTRACT_TYPES.map(t=>`<option>${t}</option>`).join('')}</select></div>
+    </div>
+    <div class="fld"><label>Date d'embauche</label><input type="date" id="cc_hd" value="${new Date().toISOString().slice(0,10)}"></div>
+  </div>
+  <div class="mact">
+    <button class="btn g" onclick="closeModal()">Annuler</button>
+    <button class="btn p" id="cc_ok"><i class="fa-solid fa-user-check"></i> Créer le collaborateur</button>
+  </div>`;
+  $('cc_ok').onclick=async()=>{
+    const payload={hotel_id:hotelId,first_name:c.first_name||'',last_name:c.last_name||'',email:c.email||null,phone:c.phone||null,
+      department:$('cc_dep').value||null,role:$('cc_rol').value||null,contract_type:$('cc_ct').value,hire_date:$('cc_hd').value||null,
+      rest_days:[],active:true};
+    try{
+      const emp=await BE.addEmployee(hotelId,payload);
+      staff.push(emp);
+      await BE.updateCandidate(c.id,{stage:'embauche',converted_employee_id:emp.id});
+      flash('Collaborateur créé !'); closeModal(); await drawRecruitBoard();
+    }catch(e){flash('Erreur : '+(e.message||e));}
+  };
+}
+
+/* =====================================================================
+   MODULE FORMATIONS
+   ===================================================================== */
+let trainingSubTab='catalog'; // catalog | matrix
+
+async function renderTraining(){
+  const hName=hotels.find(h=>h.id===hotelId)?.name||'';
+  $('view').innerHTML=`<div class="page">
+    <div class="phead"><div><h1>Formations obligatoires</h1><div class="sub">${hName}</div></div></div>
+    <div style="display:flex;gap:4px;margin-bottom:18px;border-bottom:1px solid var(--line)">
+      <button class="ctab ${trainingSubTab==='catalog'?'on':''}" data-sub="catalog"><i class="fa-solid fa-book"></i> Catalogue</button>
+      <button class="ctab ${trainingSubTab==='matrix'?'on':''}" data-sub="matrix"><i class="fa-solid fa-table"></i> Matrice collaborateurs</button>
+    </div>
+    <div id="trainsub"></div>
+  </div>`;
+  $('view').querySelectorAll('.ctab').forEach(b=>b.onclick=()=>{trainingSubTab=b.dataset.sub;renderTraining();});
+  if(trainingSubTab==='catalog') await renderTrainingCatalog();
+  else await renderTrainingMatrix();
+}
+
+async function renderTrainingCatalog(){
+  const el=$('trainsub'); if(!el)return;
+  el.innerHTML=`<div style="display:flex;justify-content:flex-end;margin-bottom:12px">
+    <button class="btn p" id="trainNew"><i class="fa-solid fa-plus"></i> Nouvelle formation</button></div>
+    <div id="trainList">Chargement…</div>`;
+  $('trainNew').onclick=()=>openTrainingForm(null);
+  try{
+    const list=await BE.listTrainingCatalog(hotelId);
+    if(!list.length){$('trainList').innerHTML='<div style="padding:30px;text-align:center;color:var(--muted)">Aucune formation. Créez la première.</div>';return;}
+    $('trainList').innerHTML=`<table class="tbl"><thead><tr><th>Formation</th><th>Catégorie</th><th>Fréquence</th><th>Tous postes</th><th>Statut</th><th></th></tr></thead><tbody>
+      ${list.map(t=>`<tr><td><b>${t.title}</b>${t.description?`<br><span style="font-size:11px;color:var(--muted)">${t.description}</span>`:''}</td>
+        <td>${t.category||'—'}</td>
+        <td>${t.frequency_months===12?'Annuelle':t.frequency_months===24?'Biennale':t.frequency_months===36?'Triennale':t.frequency_months+' mois'}</td>
+        <td>${t.required_for_all?'<span class="ok">Oui</span>':'Non'}</td>
+        <td>${t.active?'<span class="ok">Active</span>':'<span class="ko">Archivée</span>'}</td>
+        <td><button data-edit="${t.id}" title="Modifier"><i class="fa-solid fa-pen"></i></button>
+            <button data-del="${t.id}" title="Supprimer" style="color:var(--red)"><i class="fa-solid fa-trash"></i></button></td>
+      </tr>`).join('')}
+    </tbody></table>`;
+    $('trainList').querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openTrainingForm(list.find(t=>t.id===b.dataset.edit)));
+    $('trainList').querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{
+      if(!confirm('Supprimer cette formation ?'))return;
+      try{await BE.deleteTrainingCatalog(b.dataset.del);flash('Supprimé');await renderTrainingCatalog();}catch(e){flash('Erreur : '+e.message);}
+    });
+  }catch(e){$('trainList').innerHTML=`<div style="padding:20px;color:var(--red)">Erreur : ${e.message}</div>`;}
+}
+
+function openTrainingForm(t){
+  $('modal').innerHTML=mhHTML('fa-solid fa-graduation-cap',t?'Modifier la formation':'Nouvelle formation')+`
+  <div class="mb">
+    <div class="fld"><label>Titre *</label><input id="tf_ti" value="${t?.title||''}" placeholder="ex : Sécurité incendie"></div>
+    <div class="row3">
+      <div class="fld"><label>Catégorie</label><input id="tf_ca" value="${t?.category||''}" placeholder="Sécurité, Hygiène…"></div>
+      <div class="fld"><label>Fréquence (mois)</label><select id="tf_fr">
+        ${[6,12,24,36,60].map(v=>`<option value="${v}" ${(t?.frequency_months||12)===v?'selected':''}>${v===12?'12 — Annuelle':v===24?'24 — Biennale':v===36?'36 — Triennale':v+' mois'}</option>`).join('')}
+      </select></div>
+      <div class="fld"><label>Tous postes obligatoires</label><select id="tf_rall">
+        <option value="false" ${!t?.required_for_all?'selected':''}>Non</option>
+        <option value="true" ${t?.required_for_all?'selected':''}>Oui</option>
+      </select></div>
+    </div>
+    <div class="fld"><label>Description</label><textarea id="tf_de" rows="2">${t?.description||''}</textarea></div>
+    ${t?`<div class="fld"><label>Statut</label><select id="tf_ac">
+      <option value="true" ${t.active?'selected':''}>Active</option>
+      <option value="false" ${!t.active?'selected':''}>Archivée</option>
+    </select></div>`:''}</div>
+  <div class="mact">
+    <button class="btn g" onclick="closeModal()">Annuler</button>
+    <button class="btn p" id="tf_save"><i class="fa-solid fa-check"></i> ${t?'Enregistrer':'Créer'}</button>
+  </div>`;
+  $('modalbg').classList.add('on');
+  $('tf_save').onclick=async()=>{
+    const p={title:$('tf_ti').value.trim(),category:$('tf_ca').value.trim()||null,frequency_months:+$('tf_fr').value,
+      required_for_all:$('tf_rall').value==='true',description:$('tf_de').value.trim()||null,
+      active:t?($('tf_ac').value==='true'):true};
+    if(!p.title){flash('Titre obligatoire');return;}
+    try{t?await BE.updateTrainingCatalog(t.id,p):await BE.saveTrainingCatalog(hotelId,p);
+      flash(t?'Mis à jour':'Formation créée');closeModal();await renderTrainingCatalog();}
+    catch(e){flash('Erreur : '+e.message);}
+  };
+}
+
+async function renderTrainingMatrix(){
+  const el=$('trainsub'); if(!el)return;
+  el.innerHTML='Chargement…';
+  try{
+    const [catalog,ets,actStaff]=await Promise.all([BE.listTrainingCatalog(hotelId),BE.listEmployeeTrainings(hotelId),Promise.resolve(staff.filter(s=>s.active))]);
+    const activeCatalog=catalog.filter(t=>t.active);
+    if(!activeCatalog.length){el.innerHTML='<div style="padding:30px;text-align:center;color:var(--muted)">Aucune formation active. Créez des formations dans le catalogue.</div>';return;}
+    const today=new Date().toISOString().slice(0,10);
+    const etMap=new Map(); ets.forEach(e=>etMap.set(e.employee_id+'|'+e.training_id,e));
+    el.innerHTML=`<div style="overflow-x:auto"><table class="tbl" style="font-size:11.5px">
+      <thead><tr><th style="white-space:nowrap">Collaborateur</th>${activeCatalog.map(t=>`<th style="max-width:90px;word-break:break-word;text-align:center" title="${t.title}">${t.title}<br><span style="font-weight:400;color:var(--muted)">${t.frequency_months} mois</span></th>`).join('')}</tr></thead>
+      <tbody>${actStaff.sort((a,b)=>a.last_name.localeCompare(b.last_name)).map(emp=>`<tr>
+        <td style="white-space:nowrap"><b>${emp.first_name} ${emp.last_name}</b><br><span style="font-size:10.5px;color:var(--muted)">${emp.role||''}</span></td>
+        ${activeCatalog.map(t=>{
+          const et=etMap.get(emp.id+'|'+t.id);
+          const expired=et?.expiry_date&&et.expiry_date<today;
+          const warning=et?.expiry_date&&!expired&&et.expiry_date<new Date(Date.now()+60*86400000).toISOString().slice(0,10);
+          const cls=!et?'':'done';
+          const ic=!et?'<i class="fa-regular fa-circle" style="color:#ccc"></i>':expired?'<i class="fa-solid fa-circle-exclamation" style="color:var(--red)"></i>':warning?'<i class="fa-solid fa-clock" style="color:#d97706"></i>':'<i class="fa-solid fa-circle-check" style="color:var(--green)"></i>';
+          const lbl=!et?'':et.completed_date?et.completed_date.slice(0,10):'';
+          return `<td style="text-align:center;cursor:pointer" data-eid="${emp.id}" data-tid="${t.id}" data-cat="${t.title}" title="${et?.expiry_date?'Expire : '+et.expiry_date:''}">${ic}<br><span style="font-size:10px;color:var(--muted)">${lbl}</span></td>`;
+        }).join('')}
+      </tr>`).join('')}
+    </tbody></table></div>
+    <div style="margin-top:10px;font-size:11.5px;color:var(--muted)"><i class="fa-solid fa-circle-check" style="color:var(--green)"></i> À jour &nbsp; <i class="fa-solid fa-clock" style="color:#d97706"></i> Expire bientôt &nbsp; <i class="fa-solid fa-circle-exclamation" style="color:var(--red)"></i> Expiré &nbsp; <i class="fa-regular fa-circle" style="color:#ccc"></i> Non renseigné</div>`;
+    el.querySelectorAll('td[data-eid]').forEach(td=>td.onclick=()=>{
+      const et=etMap.get(td.dataset.eid+'|'+td.dataset.tid);
+      const tr=activeCatalog.find(t=>t.id===td.dataset.tid);
+      const emp=staff.find(e=>e.id===td.dataset.eid);
+      openEmployeeTrainingForm(emp,tr,et,()=>renderTrainingMatrix());
+    });
+  }catch(e){el.innerHTML=`<div style="padding:20px;color:var(--red)">Erreur : ${e.message}</div>`;}
+}
+
+function openEmployeeTrainingForm(emp,training,et,onSave){
+  $('modal').innerHTML=mhHTML('fa-solid fa-graduation-cap',`${emp.first_name} ${emp.last_name}`,training.title)+`
+  <div class="mb">
+    <div class="row3">
+      <div class="fld"><label>Statut</label><select id="etf_st">
+        <option value="todo" ${(!et||et.status==='todo')?'selected':''}>À faire</option>
+        <option value="done" ${et?.status==='done'?'selected':''}>Effectuée</option>
+        <option value="expired" ${et?.status==='expired'?'selected':''}>Expirée</option>
+        <option value="na" ${et?.status==='na'?'selected':''}>Non applicable</option>
+      </select></div>
+      <div class="fld"><label>Date réalisation</label><input type="date" id="etf_cd" value="${et?.completed_date||''}"></div>
+      <div class="fld"><label>Date expiration</label><input type="date" id="etf_ed" value="${et?.expiry_date||''}"></div>
+    </div>
+    <div class="fld"><label>Notes</label><textarea id="etf_no" rows="2">${et?.notes||''}</textarea></div>
+  </div>
+  <div class="mact">
+    <button class="btn g" onclick="closeModal()">Annuler</button>
+    <button class="btn p" id="etf_save"><i class="fa-solid fa-check"></i> Enregistrer</button>
+  </div>`;
+  $('modalbg').classList.add('on');
+  $('etf_save').onclick=async()=>{
+    const p={status:$('etf_st').value,completed_date:$('etf_cd').value||null,expiry_date:$('etf_ed').value||null,notes:$('etf_no').value||null};
+    // auto-compute expiry if done and no expiry
+    if(p.status==='done'&&p.completed_date&&!p.expiry_date){
+      const d=new Date(p.completed_date); d.setMonth(d.getMonth()+training.frequency_months);
+      p.expiry_date=d.toISOString().slice(0,10);
+    }
+    try{await BE.upsertEmployeeTraining(hotelId,emp.id,training.id,p);flash('Enregistré');closeModal();onSave&&onSave();}
+    catch(e){flash('Erreur : '+e.message);}
+  };
+}
+
+/* =====================================================================
+   MODULE VISITES MÉDICALES
+   ===================================================================== */
+const MED_TYPES={embauche:{label:"Visite d'embauche",color:'#DBEAFE',fg:'#1D4ED8',months:null},
+  periodique:{label:'Visite périodique',color:'#F0FDF4',fg:'#166534',months:24},
+  reprise:{label:'Visite de reprise',color:'#FEF3C7',fg:'#92400E',months:null}};
+const APT_LABELS={apte:'Apte',apte_amenagement:'Apte avec aménagement',inapte:'Inapte'};
+
+async function renderMedical(){
+  const hName=hotels.find(h=>h.id===hotelId)?.name||'';
+  $('view').innerHTML=`<div class="page">
+    <div class="phead">
+      <div><h1>Visites médicales</h1><div class="sub">${hName}</div></div>
+      <div class="actions"><button class="btn p" id="medNew"><i class="fa-solid fa-plus"></i> Nouvelle visite</button></div></div>
+    <div id="medAlerts"></div>
+    <div id="medList">Chargement…</div>
+  </div>`;
+  $('medNew').onclick=()=>openMedicalForm(null);
+  await drawMedicalList();
+}
+
+async function drawMedicalList(){
+  const el=$('medList'); if(!el)return;
+  try{
+    const visits=await BE.listMedicalVisits(hotelId);
+    const today=new Date().toISOString().slice(0,10);
+    const soon=new Date(Date.now()+60*86400000).toISOString().slice(0,10);
+    // Alerts
+    const alerts=visits.filter(v=>v.next_visit_date&&v.next_visit_date<=soon&&!v.returned_date);
+    const alertsEl=$('medAlerts');
+    if(alertsEl&&alerts.length){
+      alertsEl.innerHTML=`<div style="background:#fef3c7;border-radius:10px;padding:12px 16px;margin-bottom:14px;font-size:13px;color:#92400e">
+        <i class="fa-solid fa-triangle-exclamation"></i> <b>${alerts.length} visite(s)</b> à planifier dans les 60 prochains jours.
+        ${alerts.map(v=>{const e=v.employees;return `<span style="margin-left:8px;background:rgba(0,0,0,.08);padding:2px 8px;border-radius:6px">${e?e.first_name+' '+e.last_name:v.employee_id} (${v.next_visit_date})</span>`;}).join('')}
+      </div>`;
+    }
+    if(!visits.length){el.innerHTML='<div style="padding:30px;text-align:center;color:var(--muted)">Aucune visite enregistrée.</div>';return;}
+    el.innerHTML=`<table class="tbl"><thead><tr><th>Collaborateur</th><th>Service</th><th>Type</th><th>Date visite</th><th>Prochaine visite</th><th>Aptitude</th><th>Médecin</th><th></th></tr></thead><tbody>
+      ${visits.map(v=>{const mt=MED_TYPES[v.visit_type]||{label:v.visit_type,color:'#f4f4f4',fg:'#666'};
+        const e=v.employees; const overdue=v.next_visit_date&&v.next_visit_date<today;
+        return `<tr>
+          <td><b>${e?e.first_name+' '+e.last_name:'—'}</b></td>
+          <td style="font-size:12px">${e?.department||'—'}</td>
+          <td><span style="background:${mt.color};color:${mt.fg};padding:2px 8px;border-radius:6px;font-size:11.5px;font-weight:600">${mt.label}</span></td>
+          <td>${v.visit_date}</td>
+          <td style="color:${overdue?'var(--red)':v.next_visit_date&&v.next_visit_date<=soon?'#d97706':'inherit'}">${v.next_visit_date||'—'}${overdue?' <i class="fa-solid fa-triangle-exclamation"></i>':''}</td>
+          <td><span style="font-size:12px">${APT_LABELS[v.aptitude]||v.aptitude}</span></td>
+          <td style="font-size:12px">${v.doctor||'—'}</td>
+          <td><button data-edit="${v.id}" title="Modifier"><i class="fa-solid fa-pen"></i></button>
+              <button data-del="${v.id}" title="Supprimer" style="color:var(--red)"><i class="fa-solid fa-trash"></i></button></td>
+        </tr>`;}).join('')}
+    </tbody></table>`;
+    el.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openMedicalForm(visits.find(v=>v.id===b.dataset.edit)));
+    el.querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{
+      if(!confirm('Supprimer cette visite ?'))return;
+      try{await BE.deleteMedicalVisit(b.dataset.del);flash('Supprimé');await drawMedicalList();}catch(e){flash('Erreur : '+e.message);}
+    });
+  }catch(e){el.innerHTML=`<div style="padding:20px;color:var(--red)">Erreur : ${e.message}</div>`;}
+}
+
+function openMedicalForm(v){
+  const empOpts=staff.filter(s=>s.active).sort((a,b)=>a.last_name.localeCompare(b.last_name))
+    .map(e=>`<option value="${e.id}" ${v?.employee_id===e.id?'selected':''}>${e.first_name} ${e.last_name}</option>`).join('');
+  $('modal').innerHTML=mhHTML('fa-solid fa-stethoscope',v?'Modifier la visite':'Nouvelle visite médicale')+`
+  <div class="mb">
+    <div class="row3">
+      <div class="fld"><label>Collaborateur *</label><select id="mf_emp"><option value="">— choisir —</option>${empOpts}</select></div>
+      <div class="fld"><label>Type de visite</label><select id="mf_ty">
+        ${Object.entries(MED_TYPES).map(([k,mt])=>`<option value="${k}" ${v?.visit_type===k?'selected':''}>${mt.label}</option>`).join('')}
+      </select></div>
+      <div class="fld"><label>Date visite *</label><input type="date" id="mf_vd" value="${v?.visit_date||new Date().toISOString().slice(0,10)}"></div>
+    </div>
+    <div class="row3">
+      <div class="fld"><label>Prochaine visite</label><input type="date" id="mf_nd" value="${v?.next_visit_date||''}"></div>
+      <div class="fld"><label>Aptitude</label><select id="mf_ap">
+        ${Object.entries(APT_LABELS).map(([k,l])=>`<option value="${k}" ${(v?.aptitude||'apte')===k?'selected':''}>${l}</option>`).join('')}
+      </select></div>
+      <div class="fld"><label>Médecin</label><input id="mf_dr" value="${v?.doctor||''}" placeholder="Dr …"></div>
+    </div>
+    <div class="fld"><label>Établissement</label><input id="mf_cl" value="${v?.clinic||''}" placeholder="Nom du cabinet / centre"></div>
+    <div class="fld"><label>Notes</label><textarea id="mf_no" rows="2">${v?.notes||''}</textarea></div>
+  </div>
+  <div class="mact">
+    <button class="btn g" onclick="closeModal()">Annuler</button>
+    <button class="btn p" id="mf_save"><i class="fa-solid fa-check"></i> ${v?'Enregistrer':'Créer'}</button>
+  </div>`;
+  $('modalbg').classList.add('on');
+  // Auto-compute next visit date based on type
+  const autoNext=()=>{
+    const ty=$('mf_ty').value, vd=$('mf_vd').value;
+    const months=MED_TYPES[ty]?.months;
+    if(months&&vd&&!$('mf_nd').value){
+      const d=new Date(vd); d.setMonth(d.getMonth()+months);
+      $('mf_nd').value=d.toISOString().slice(0,10);
+    }
+  };
+  $('mf_ty').onchange=autoNext; $('mf_vd').onchange=autoNext;
+  $('mf_save').onclick=async()=>{
+    const eid=$('mf_emp').value; if(!eid){flash('Collaborateur requis');return;}
+    const vd=$('mf_vd').value; if(!vd){flash('Date requise');return;}
+    const p={employee_id:eid,visit_type:$('mf_ty').value,visit_date:vd,next_visit_date:$('mf_nd').value||null,
+      aptitude:$('mf_ap').value,doctor:$('mf_dr').value||null,clinic:$('mf_cl').value||null,notes:$('mf_no').value||null};
+    try{v?await BE.updateMedicalVisit(v.id,p):await BE.saveMedicalVisit(hotelId,p);
+      flash(v?'Mis à jour':'Visite créée');closeModal();await drawMedicalList();}
+    catch(e){flash('Erreur : '+e.message);}
+  };
+}
+
+/* =====================================================================
+   MODULE MATÉRIEL REMIS
+   ===================================================================== */
+const EQ_TYPES={badge:'Badge',cle:'Clé',uniforme:'Uniforme',telephone:'Téléphone',
+  ordinateur:'Ordinateur',tablette:'Tablette',vehicule:'Véhicule',autre:'Autre'};
+const EQ_COND={neuf:'Neuf',bon:'Bon état',usage:'Usagé',abime:'Abîmé',perdu:'Perdu'};
+
+async function renderEquipment(){
+  const hName=hotels.find(h=>h.id===hotelId)?.name||'';
+  $('view').innerHTML=`<div class="page">
+    <div class="phead">
+      <div><h1>Matériel remis</h1><div class="sub">${hName}</div></div>
+      <div class="actions">
+        <button class="btn p" id="eqNew"><i class="fa-solid fa-plus"></i> Remettre du matériel</button>
+      </div></div>
+    <div id="eqList">Chargement…</div>
+  </div>`;
+  $('eqNew').onclick=()=>openEquipmentForm(null);
+  await drawEquipmentList();
+}
+
+async function drawEquipmentList(){
+  const el=$('eqList'); if(!el)return;
+  try{
+    const items=await BE.listEquipment(hotelId);
+    const active=items.filter(i=>!i.returned_date);
+    const returned=items.filter(i=>i.returned_date);
+    if(!items.length){el.innerHTML='<div style="padding:30px;text-align:center;color:var(--muted)">Aucun matériel enregistré.</div>';return;}
+    const tblRow=i=>{const e=i.employees;return `<tr>
+      <td><b>${e?e.first_name+' '+e.last_name:'—'}</b><br><span style="font-size:11px;color:var(--muted)">${e?.department||''}</span></td>
+      <td><span style="background:#EEF2FF;color:#4338CA;padding:2px 8px;border-radius:6px;font-size:11.5px;font-weight:600">${EQ_TYPES[i.item_type]||i.item_type}</span></td>
+      <td style="font-size:12px">${i.item_code||'—'}</td>
+      <td style="font-size:12px">${i.description||'—'}</td>
+      <td>${i.given_date}</td>
+      <td>${i.returned_date||'<span style="color:var(--green);font-weight:600">En cours</span>'}</td>
+      <td style="font-size:12px">${EQ_COND[i.condition_given]||i.condition_given}</td>
+      <td style="white-space:nowrap">
+        ${!i.returned_date?`<button data-ret="${i.id}" title="Enregistrer la restitution" style="color:var(--green)"><i class="fa-solid fa-rotate-left"></i></button>`:''}
+        <button data-edit="${i.id}" title="Modifier"><i class="fa-solid fa-pen"></i></button>
+        <button data-del="${i.id}" title="Supprimer" style="color:var(--red)"><i class="fa-solid fa-trash"></i></button>
+        <button data-pdf="${i.id}" title="Décharge PDF"><i class="fa-regular fa-file-pdf"></i></button>
+      </td>
+    </tr>`;};
+    el.innerHTML=`
+      <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr));margin-bottom:14px">
+        <div class="kpi"><div class="val">${active.length}</div><div class="lab">En cours</div></div>
+        <div class="kpi"><div class="val">${returned.length}</div><div class="lab">Restitués</div></div>
+        <div class="kpi"><div class="val">${Object.values(EQ_TYPES).filter((_,i)=>active.some(a=>a.item_type===Object.keys(EQ_TYPES)[i])).length}</div><div class="lab">Types actifs</div></div>
+      </div>
+      ${active.length?`<h4 style="margin:0 0 8px;font-size:13px;font-weight:700">Matériel actuellement remis (${active.length})</h4>
+        <div class="box" style="padding:0;margin-bottom:16px"><table class="tbl">
+          <thead><tr><th>Collaborateur</th><th>Type</th><th>Code</th><th>Description</th><th>Date remise</th><th>Restitution</th><th>État remise</th><th></th></tr></thead>
+          <tbody>${active.map(tblRow).join('')}</tbody></table></div>`:''}
+      ${returned.length?`<h4 style="margin:0 0 8px;font-size:13px;font-weight:700;color:var(--muted)">Historique restitutions (${returned.length})</h4>
+        <div class="box" style="padding:0;opacity:.7"><table class="tbl">
+          <thead><tr><th>Collaborateur</th><th>Type</th><th>Code</th><th>Description</th><th>Date remise</th><th>Restitution</th><th>État remise</th><th></th></tr></thead>
+          <tbody>${returned.map(tblRow).join('')}</tbody></table></div>`:''}`;
+    el.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openEquipmentForm(items.find(i=>i.id===b.dataset.edit)));
+    el.querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{
+      if(!confirm('Supprimer cet enregistrement ?'))return;
+      try{await BE.deleteEquipment(b.dataset.del);flash('Supprimé');await drawEquipmentList();}catch(e){flash('Erreur : '+e.message);}
+    });
+    el.querySelectorAll('[data-ret]').forEach(b=>b.onclick=()=>{
+      const item=items.find(i=>i.id===b.dataset.ret);
+      openEquipmentReturnForm(item);
+    });
+    el.querySelectorAll('[data-pdf]').forEach(b=>b.onclick=()=>{
+      const item=items.find(i=>i.id===b.dataset.pdf);
+      generateDischargePDF(item);
+    });
+  }catch(e){el.innerHTML=`<div style="padding:20px;color:var(--red)">Erreur : ${e.message}</div>`;}
+}
+
+function openEquipmentForm(eq){
+  const empOpts=staff.filter(s=>s.active).sort((a,b)=>a.last_name.localeCompare(b.last_name))
+    .map(e=>`<option value="${e.id}" ${eq?.employee_id===e.id?'selected':''}>${e.first_name} ${e.last_name}</option>`).join('');
+  const typeOpts=Object.entries(EQ_TYPES).map(([k,l])=>`<option value="${k}" ${eq?.item_type===k?'selected':''}>${l}</option>`).join('');
+  const condOpts=Object.entries({neuf:'Neuf',bon:'Bon état',usage:'Usagé'}).map(([k,l])=>`<option value="${k}" ${(eq?.condition_given||'bon')===k?'selected':''}>${l}</option>`).join('');
+  $('modal').innerHTML=mhHTML('fa-solid fa-boxes-stacked',eq?'Modifier le matériel':'Remise de matériel')+`
+  <div class="mb">
+    <div class="row3">
+      <div class="fld"><label>Collaborateur *</label><select id="ef_emp"><option value="">— choisir —</option>${empOpts}</select></div>
+      <div class="fld"><label>Type *</label><select id="ef_ty">${typeOpts}</select></div>
+      <div class="fld"><label>Code / N° série</label><input id="ef_co" value="${eq?.item_code||''}" placeholder="ex : BADGE-042"></div>
+    </div>
+    <div class="row3">
+      <div class="fld"><label>Description</label><input id="ef_de" value="${eq?.description||''}" placeholder="Détail facultatif"></div>
+      <div class="fld"><label>Date de remise *</label><input type="date" id="ef_gd" value="${eq?.given_date||new Date().toISOString().slice(0,10)}"></div>
+      <div class="fld"><label>État à la remise</label><select id="ef_cg">${condOpts}</select></div>
+    </div>
+    <div class="fld"><label>Notes</label><textarea id="ef_no" rows="2">${eq?.notes||''}</textarea></div>
+  </div>
+  <div class="mact">
+    <button class="btn g" onclick="closeModal()">Annuler</button>
+    <button class="btn p" id="ef_save"><i class="fa-solid fa-check"></i> ${eq?'Enregistrer':'Créer'}</button>
+  </div>`;
+  $('modalbg').classList.add('on');
+  $('ef_save').onclick=async()=>{
+    const eid=$('ef_emp').value; if(!eid){flash('Collaborateur requis');return;}
+    const gd=$('ef_gd').value; if(!gd){flash('Date requise');return;}
+    const p={employee_id:eid,item_type:$('ef_ty').value,item_code:$('ef_co').value||null,
+      description:$('ef_de').value||null,given_date:gd,condition_given:$('ef_cg').value,notes:$('ef_no').value||null};
+    try{eq?await BE.updateEquipment(eq.id,p):await BE.saveEquipment(hotelId,p);
+      flash(eq?'Mis à jour':'Matériel enregistré');closeModal();await drawEquipmentList();}
+    catch(e){flash('Erreur : '+e.message);}
+  };
+}
+
+function openEquipmentReturnForm(eq){
+  const condOpts=Object.entries(EQ_COND).map(([k,l])=>`<option value="${k}">${l}</option>`).join('');
+  const emp=staff.find(e=>e.id===eq.employee_id);
+  $('modal').innerHTML=mhHTML('fa-solid fa-rotate-left','Restitution de matériel',`${EQ_TYPES[eq.item_type]||eq.item_type}${eq.item_code?' — '+eq.item_code:''} · ${emp?emp.first_name+' '+emp.last_name:''}`)+`
+  <div class="mb">
+    <div class="row3">
+      <div class="fld"><label>Date de restitution *</label><input type="date" id="er_rd" value="${new Date().toISOString().slice(0,10)}"></div>
+      <div class="fld"><label>État à la restitution</label><select id="er_cr">${condOpts}</select></div>
+    </div>
+    <div class="fld"><label>Notes</label><textarea id="er_no" rows="2"></textarea></div>
+  </div>
+  <div class="mact">
+    <button class="btn g" onclick="closeModal()">Annuler</button>
+    <button class="btn p" id="er_ok"><i class="fa-solid fa-check"></i> Valider la restitution</button>
+  </div>`;
+  $('modalbg').classList.add('on');
+  $('er_ok').onclick=async()=>{
+    const rd=$('er_rd').value; if(!rd){flash('Date requise');return;}
+    try{await BE.updateEquipment(eq.id,{returned_date:rd,condition_returned:$('er_cr').value,notes:$('er_no').value||eq.notes||null});
+      flash('Restitution enregistrée');closeModal();await drawEquipmentList();}
+    catch(e){flash('Erreur : '+e.message);}
+  };
+}
+
+async function generateDischargePDF(eq){
+  const emp=staff.find(e=>e.id===eq.employee_id);
+  const hotel=hotels.find(h=>h.id===hotelId);
+  const html=`<html><body style="font-family:Arial,sans-serif;max-width:700px;margin:40px auto;font-size:14px">
+    <h2 style="text-align:center;margin-bottom:4px">DÉCHARGE DE REMISE DE MATÉRIEL</h2>
+    <p style="text-align:center;color:#666;margin-bottom:30px">${hotel?.name||''}</p>
+    <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
+      <tr><td style="padding:6px;width:50%"><b>Collaborateur :</b></td><td>${emp?emp.first_name+' '+emp.last_name:''}</td></tr>
+      <tr><td style="padding:6px"><b>Poste :</b></td><td>${emp?.role||''} — ${emp?.department||''}</td></tr>
+      <tr><td style="padding:6px"><b>Type de matériel :</b></td><td>${EQ_TYPES[eq.item_type]||eq.item_type}</td></tr>
+      ${eq.item_code?`<tr><td style="padding:6px"><b>Code / Référence :</b></td><td>${eq.item_code}</td></tr>`:''}
+      ${eq.description?`<tr><td style="padding:6px"><b>Description :</b></td><td>${eq.description}</td></tr>`:''}
+      <tr><td style="padding:6px"><b>État à la remise :</b></td><td>${EQ_COND[eq.condition_given]||eq.condition_given}</td></tr>
+      <tr><td style="padding:6px"><b>Date de remise :</b></td><td>${eq.given_date}</td></tr>
+      ${eq.returned_date?`<tr><td style="padding:6px"><b>Date de restitution :</b></td><td>${eq.returned_date}</td></tr><tr><td style="padding:6px"><b>État à la restitution :</b></td><td>${EQ_COND[eq.condition_returned]||eq.condition_returned||''}</td></tr>`:''}
+    </table>
+    ${eq.notes?`<p><b>Remarques :</b> ${eq.notes}</p>`:''}
+    <div style="margin-top:60px;display:flex;justify-content:space-between">
+      <div><p>Signature de l'employeur :</p><div style="border-bottom:1px solid #000;width:200px;margin-top:30px"></div></div>
+      <div><p>Signature du collaborateur :</p><div style="border-bottom:1px solid #000;width:200px;margin-top:30px"></div></div>
+    </div>
+    <p style="margin-top:20px;color:#666;font-size:12px">Fait en double exemplaire le ${new Date().toLocaleDateString('fr-FR')}</p>
+  </body></html>`;
+  try{
+    const blob=await renderHtmlToPdfBlob(html,`décharge_${EQ_TYPES[eq.item_type]||eq.item_type}_${emp?.last_name||''}`);
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+    a.download=`decharge_${eq.item_type}_${(emp?.last_name||'').toLowerCase()}_${eq.given_date}.pdf`;
+    a.click();
+  }catch(e){flash('Erreur PDF : '+e.message);}
+}
+
+/* =====================================================================
+   MODULE ORGANIGRAMME
+   ===================================================================== */
+async function renderOrgChart(){
+  const hName=hotels.find(h=>h.id===hotelId)?.name||'';
+  $('view').innerHTML=`<div class="page">
+    <div class="phead">
+      <div><h1>Organigramme</h1><div class="sub">${hName}</div></div>
+      <div class="actions">
+        <button class="btn g" id="orgExport"><i class="fa-solid fa-file-image"></i> Exporter PNG</button>
+      </div></div>
+    <div id="orgTree" style="overflow:auto;padding:10px">Chargement…</div>
+  </div>`;
+  $('orgExport').onclick=()=>exportOrgPNG();
+  await drawOrgTree();
+}
+
+async function drawOrgTree(){
+  const el=$('orgTree'); if(!el)return;
+  const actStaff=staff.filter(s=>s.active);
+  // Build tree from manager_id
+  const roots=actStaff.filter(s=>!s.manager_id||!actStaff.find(e=>e.id===s.manager_id));
+  const byMgr=new Map();
+  actStaff.forEach(s=>{if(s.manager_id){if(!byMgr.has(s.manager_id))byMgr.set(s.manager_id,[]);byMgr.get(s.manager_id).push(s);}});
+  // Group roots by dept if no manager hierarchy
+  const deptGroups=new Map();
+  roots.forEach(s=>{const d=s.department||'Sans service';if(!deptGroups.has(d))deptGroups.set(d,[]);deptGroups.get(d).push(s);});
+  function nodeCard(s,depth){
+    const reports=byMgr.get(s.id)||[];
+    return `<div style="display:inline-flex;flex-direction:column;align-items:center;margin:0 8px">
+      <div class="card" data-emp="${s.id}" style="cursor:pointer;width:140px;text-align:center;padding:10px 8px;border:2px solid ${depth===0?'var(--violet)':'var(--line)'};border-radius:12px;background:#fff">
+        <div class="av" style="width:34px;height:34px;border-radius:50%;background:${avColor(s.last_name)};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;margin:0 auto 6px">${initials(s.first_name,s.last_name)}</div>
+        <div style="font-weight:700;font-size:12px;line-height:1.2">${s.first_name}<br>${s.last_name}</div>
+        <div style="font-size:10.5px;color:var(--muted);margin-top:3px">${s.role||'—'}</div>
+      </div>
+      ${reports.length?`<div style="border-left:2px solid var(--line);height:20px"></div>
+        <div style="display:flex;border-top:2px solid var(--line)">
+          ${reports.map(r=>nodeCard(r,depth+1)).join('')}
+        </div>`:''}
+    </div>`;
+  }
+  if(!actStaff.length){el.innerHTML='<div style="padding:30px;text-align:center;color:var(--muted)">Aucun collaborateur actif.</div>';return;}
+  let html='<div id="orgInner" style="padding:20px">';
+  deptGroups.forEach((emps,dept)=>{
+    html+=`<div style="margin-bottom:30px"><div style="font-size:11px;font-weight:700;color:var(--violet-d);text-transform:uppercase;letter-spacing:.05em;margin-bottom:12px;padding:4px 10px;background:var(--violet-bg);border-radius:8px;display:inline-block">${dept}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:16px">${emps.map(s=>nodeCard(s,0)).join('')}</div></div>`;
+  });
+  html+='</div>';
+  el.innerHTML=html;
+  el.querySelectorAll('[data-emp]').forEach(c=>c.onclick=()=>openFiche(c.dataset.emp));
+}
+
+async function exportOrgPNG(){
+  const el=$('orgInner'); if(!el){flash('Organigramme non chargé');return;}
+  try{
+    if(!window.html2canvas) await loadScript('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js');
+    const canvas=await window.html2canvas(el,{backgroundColor:'#ffffff',scale:2});
+    const a=document.createElement('a'); a.download='organigramme.png'; a.href=canvas.toDataURL('image/png'); a.click();
+    flash('PNG exporté');
+  }catch(e){flash('Erreur export : '+e.message);}
 }
 
 /* ===================== STUBS (modules à venir) ===================== */
