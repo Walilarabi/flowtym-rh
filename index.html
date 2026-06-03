@@ -551,6 +551,7 @@ function makeTestBE(){
     {id:'e6',hotel_id:'h1',first_name:'Ancien',last_name:'Bouchard',role:'Réceptionniste',department:'Réception',contract_type:'CDD',hire_date:'2019-01-01',rest_days:[],phone:'',email:'',address:'',emergency_contact:'',active:false,departure_date:(()=>{const d=new Date();return new Date(d.getFullYear(),d.getMonth()-2,15).toISOString().slice(0,10);})()},
   ];
   let planning=[]; let docs=[]; let clockings=[]; let templates=[];
+  let absenceRequests=[]; let absenceBalances=[]; let absenceMovements=[]; let absenceHistory=[];
   const k=(eid,day)=>eid+'|'+day;
   return {isTest:true,
     async listHotels(){return hotels;},
@@ -624,7 +625,69 @@ function makeTestBE(){
     },
     async logAudit(){/* no-op en test */},
     async listAuditLogs(h,limit){return [];},
-    _emps:emps,_planning:()=>planning
+
+    /* --- ABSENCES (test) --- */
+    async listAbsenceTypes(){
+      return [
+        {code:'CP',   label:'Congé payé',          planning_code:'CP',   debit_balance:true,  balance_type:'CP',  requires_attachment:false, sort_order:10,  color_bg:'#C6EFCE', color_fg:'#0F5132', active:true},
+        {code:'RTT',  label:'RTT',                  planning_code:'RTT',  debit_balance:true,  balance_type:'RTT', requires_attachment:false, sort_order:20,  color_bg:'#BDD7EE', color_fg:'#1F4E78', active:true},
+        {code:'MAL',  label:'Maladie',              planning_code:'MAL',  debit_balance:false, balance_type:null,  requires_attachment:true,  sort_order:30,  color_bg:'#FFC7CE', color_fg:'#9C0006', active:true},
+        {code:'MAT',  label:'Maternité',            planning_code:'MAT',  debit_balance:false, balance_type:null,  requires_attachment:false, sort_order:40,  color_bg:'#E1D5F0', color_fg:'#5B2A86', active:true},
+        {code:'PAT',  label:'Paternité',            planning_code:'PAT',  debit_balance:false, balance_type:null,  requires_attachment:false, sort_order:50,  color_bg:'#E8E0F5', color_fg:'#4A2080', active:true},
+        {code:'ABS',  label:'Absence injustifiée',  planning_code:'ABS',  debit_balance:false, balance_type:null,  requires_attachment:false, sort_order:60,  color_bg:'#FFD9D9', color_fg:'#7B0000', active:true},
+        {code:'REC',  label:'Récupération',         planning_code:'REC',  debit_balance:false, balance_type:null,  requires_attachment:false, sort_order:70,  color_bg:'#D4F0FC', color_fg:'#0C4A6E', active:true},
+        {code:'REPOS',label:'Repos compensateur',   planning_code:null,   debit_balance:false, balance_type:null,  requires_attachment:false, sort_order:80,  color_bg:'#F5F5F5', color_fg:'#6B7280', active:true},
+        {code:'FORM', label:'Formation',            planning_code:'FORM', debit_balance:false, balance_type:null,  requires_attachment:false, sort_order:90,  color_bg:'#FEF3C7', color_fg:'#92400E', active:true},
+        {code:'AUT',  label:'Autre',                planning_code:'AE',   debit_balance:false, balance_type:null,  requires_attachment:false, sort_order:100, color_bg:'#FFE699', color_fg:'#7F6000', active:true},
+      ];
+    },
+    async listAbsenceRequests(h,filters){
+      let list=absenceRequests.filter(r=>r.hotel_id===h);
+      if(filters?.status) list=list.filter(r=>r.status===filters.status);
+      if(filters?.employee_id) list=list.filter(r=>r.employee_id===filters.employee_id);
+      if(filters?.month){
+        list=list.filter(r=>r.start_date>=filters.month+'-01' && r.start_date<=filters.month+'-31');
+      }
+      const types=await this.listAbsenceTypes();
+      return list.sort((a,b)=>b.start_date.localeCompare(a.start_date)).map(r=>{
+        const t=types.find(x=>x.code===r.type_code);
+        return {...r, absence_types:t||null};
+      });
+    },
+    async createAbsenceRequest(h,payload){
+      const id='ar'+Date.now()+Math.random().toString(36).slice(2,6);
+      const types=await this.listAbsenceTypes();
+      const t=types.find(x=>x.code===payload.type_code);
+      const rec={id,hotel_id:h,...payload,status:'submitted',created_at:new Date().toISOString(),updated_at:new Date().toISOString(), absence_types:t||null};
+      absenceRequests.push(rec);
+      return rec;
+    },
+    async updateAbsenceRequestStatus(id,status,actorUserId,actorEmail,comment,hotelId,employeeId){
+      const r=absenceRequests.find(x=>x.id===id); if(!r) throw new Error('not found');
+      r.status=status; r.updated_at=new Date().toISOString();
+      absenceHistory.push({id:'ah'+Date.now(),hotel_id:hotelId,request_id:id,employee_id:employeeId,
+        action:status==='approved'?'approve':status==='rejected'?'reject':'cancel',
+        actor_user_id:actorUserId,actor_email:actorEmail,comment:comment||null,created_at:new Date().toISOString()});
+      return r;
+    },
+    async listAbsenceBalances(h,year){
+      return absenceBalances.filter(b=>b.hotel_id===h && b.year===year);
+    },
+    async upsertAbsenceBalance(h,employee_id,year,type_code,patch){
+      const i=absenceBalances.findIndex(b=>b.hotel_id===h&&b.employee_id===employee_id&&b.year===year&&b.type_code===type_code);
+      if(i>=0) Object.assign(absenceBalances[i],patch,{updated_at:new Date().toISOString()});
+      else absenceBalances.push({id:'ab'+Date.now(),hotel_id:h,employee_id,year,type_code,entitled:0,taken:0,adjusted:0,...patch,created_at:new Date().toISOString(),updated_at:new Date().toISOString()});
+    },
+    async addBalanceMovement(h,employee_id,type_code,year,delta,reason,request_id,created_by){
+      absenceMovements.push({id:'am'+Date.now(),hotel_id:h,employee_id,type_code,year,delta,reason,request_id:request_id||null,created_by:created_by||null,created_at:new Date().toISOString()});
+    },
+    async listApprovalHistory(h,request_id){
+      return absenceHistory.filter(x=>x.hotel_id===h && x.request_id===request_id).sort((a,b)=>a.created_at.localeCompare(b.created_at));
+    },
+
+    _emps:emps,_planning:()=>planning,
+    _absenceRequests:()=>absenceRequests, _absenceBalances:()=>absenceBalances,
+    _absenceMovements:()=>absenceMovements, _absenceHistory:()=>absenceHistory
   };
 }
 
@@ -1857,6 +1920,518 @@ function openClockingForm(c, presetEmpId){
   };
 }
 
+/* ===================== VUE ABSENCES ===================== */
+
+function countAbsenceDays(startDate, endDate, halfDayStart, halfDayEnd) {
+  const s = new Date(startDate), e = new Date(endDate);
+  let days = 0;
+  const c = new Date(s);
+  while(c <= e) { days++; c.setDate(c.getDate()+1); }
+  if(halfDayStart) days -= 0.5;
+  if(halfDayEnd) days -= 0.5;
+  return Math.max(days, 0.5);
+}
+
+async function syncAbsenceToPlanning(req) {
+  const planCode = req.absence_types?.planning_code || absenceTypes.find(t=>t.code===req.type_code)?.planning_code;
+  if(!planCode) return;
+  const upserts = [];
+  const s = new Date(req.start_date), e = new Date(req.end_date);
+  const c = new Date(s); let day = 0;
+  while(c <= e) {
+    const dayIso = c.toISOString().slice(0,10);
+    let duration = 1.0;
+    const isLast = c.getTime() === e.getTime();
+    if(day === 0 && req.half_day_start && isLast && req.half_day_end) duration = 0.5;
+    else if(day === 0 && req.half_day_start) duration = 0.5;
+    else if(isLast && req.half_day_end) duration = 0.5;
+    upserts.push({hotel_id:req.hotel_id, employee_id:req.employee_id, day:dayIso, status:planCode, duration});
+    c.setDate(c.getDate()+1); day++;
+  }
+  await BE.savePlanning(req.hotel_id, upserts, []);
+}
+
+async function removeAbsenceFromPlanning(req) {
+  const planCode = req.absence_types?.planning_code || absenceTypes.find(t=>t.code===req.type_code)?.planning_code;
+  if(!planCode) return;
+  const deletes = [];
+  const s = new Date(req.start_date), e = new Date(req.end_date);
+  const c = new Date(s);
+  while(c <= e) {
+    deletes.push({hotel_id:req.hotel_id, employee_id:req.employee_id, day:c.toISOString().slice(0,10)});
+    c.setDate(c.getDate()+1);
+  }
+  await BE.savePlanning(req.hotel_id, [], deletes);
+}
+
+function canApproveAbsences() { return ['direction','admin_hotel'].includes(myRole); }
+
+let absFilterStatus = '';
+let absCalMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+let absBalYear = new Date().getFullYear();
+
+async function renderAbsences() {
+  const hName = hotels.find(h=>h.id===hotelId)?.name||'';
+  $('view').innerHTML = `<div class="page">
+    <div class="phead"><div><h1>Absences / CP-RTT</h1><div class="sub">${hName}</div></div>
+      <div class="actions" id="absActions"></div></div>
+    <div style="display:flex;gap:4px;margin-bottom:18px;border-bottom:1px solid var(--line)">
+      <button class="ctab ${absSubTab==='requests'?'on':''}" data-sub="requests"><i class="fa-regular fa-list-check"></i> Demandes</button>
+      <button class="ctab ${absSubTab==='calendar'?'on':''}" data-sub="calendar"><i class="fa-regular fa-calendar-days"></i> Calendrier</button>
+      <button class="ctab ${absSubTab==='balances'?'on':''}" data-sub="balances"><i class="fa-solid fa-scale-balanced"></i> Soldes CP/RTT</button>
+    </div>
+    <div id="absSub">Chargement…</div>
+  </div>`;
+  $('view').querySelectorAll('.ctab').forEach(b=>b.onclick=()=>{absSubTab=b.dataset.sub;renderAbsences();});
+  if(absSubTab==='requests')      renderAbsRequests();
+  else if(absSubTab==='calendar') renderAbsCalendar();
+  else                            renderAbsBalances();
+}
+
+async function renderAbsRequests() {
+  const sub = $('absSub'); if(!sub) return;
+  $('absActions').innerHTML = `<button class="btn p" id="absNewReq"><i class="fa-solid fa-plus"></i> Nouvelle demande</button>`;
+  $('absNewReq').onclick = () => openAbsenceRequestForm(null);
+
+  sub.innerHTML = `<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+    <select id="absStatFilter" style="font-size:13px;padding:7px 10px;border:1px solid var(--line);border-radius:8px">
+      <option value="">Toutes les demandes</option>
+      <option value="submitted" ${absFilterStatus==='submitted'?'selected':''}>En attente</option>
+      <option value="approved"  ${absFilterStatus==='approved'?'selected':''}>Approuvées</option>
+      <option value="rejected"  ${absFilterStatus==='rejected'?'selected':''}>Refusées</option>
+      <option value="cancelled" ${absFilterStatus==='cancelled'?'selected':''}>Annulées</option>
+    </select>
+    <span id="absReqCount" style="font-size:12px;color:var(--muted)">…</span>
+  </div>
+  <div id="absReqTable">Chargement…</div>`;
+  $('absStatFilter').onchange = e => { absFilterStatus=e.target.value; renderAbsRequests(); };
+
+  try {
+    const filters = absFilterStatus ? {status:absFilterStatus} : {};
+    const reqs = await BE.listAbsenceRequests(hotelId, filters);
+    $('absReqCount').textContent = `${reqs.length} demande(s)`;
+    if(!reqs.length) {
+      $('absReqTable').innerHTML = `<div class="empty"><i class="fa-regular fa-calendar-xmark"></i><div>Aucune demande d'absence</div><div style="font-size:13px;margin-top:6px">Cliquez sur « Nouvelle demande » pour en créer une.</div></div>`;
+      return;
+    }
+    const statusBadge = s => {
+      const m = {submitted:'<span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:5px;font-size:11px;font-weight:700">En attente</span>',
+        approved:'<span style="background:#dcfce7;color:#15803d;padding:2px 8px;border-radius:5px;font-size:11px;font-weight:700">Approuvée</span>',
+        rejected:'<span style="background:#fee2e2;color:#dc2626;padding:2px 8px;border-radius:5px;font-size:11px;font-weight:700">Refusée</span>',
+        cancelled:'<span style="background:#f1f5f9;color:#64748b;padding:2px 8px;border-radius:5px;font-size:11px;font-weight:700">Annulée</span>',
+        draft:'<span style="background:#f1f5f9;color:#64748b;padding:2px 8px;border-radius:5px;font-size:11px;font-weight:700">Brouillon</span>'};
+      return m[s]||s;
+    };
+    $('absReqTable').innerHTML = `<table class="tbl"><thead><tr>
+      <th>Collaborateur</th><th>Type</th><th>Dates</th><th>Jours</th><th>Statut</th><th>Actions</th>
+    </tr></thead><tbody>
+    ${reqs.map(r => {
+      const emp = staff.find(e=>e.id===r.employee_id);
+      const empName = emp ? `${emp.first_name} ${emp.last_name}` : '—';
+      const t = r.absence_types;
+      const typeBadge = t ? `<span style="background:${t.color_bg};color:${t.color_fg};padding:2px 8px;border-radius:5px;font-size:11px;font-weight:700">${t.label}</span>` : r.type_code;
+      const dates = r.start_date === r.end_date ? r.start_date
+        : `${r.start_date} → ${r.end_date}`;
+      const approveBtn = canApproveAbsences() && r.status==='submitted'
+        ? `<button data-approve="${r.id}" class="btn g" style="padding:4px 9px;font-size:11px"><i class="fa-solid fa-check"></i></button>
+           <button data-reject="${r.id}" class="btn d" style="padding:4px 9px;font-size:11px"><i class="fa-solid fa-xmark"></i></button>`
+        : '';
+      const cancelBtn = r.status==='approved' && canApproveAbsences()
+        ? `<button data-cancel="${r.id}" class="btn d" style="padding:4px 9px;font-size:11px"><i class="fa-solid fa-ban"></i></button>`
+        : '';
+      return `<tr data-rid="${r.id}">
+        <td><b>${empName}</b></td>
+        <td>${typeBadge}</td>
+        <td style="font-size:12px">${dates}</td>
+        <td><b>${r.days_count}</b></td>
+        <td>${statusBadge(r.status)}</td>
+        <td style="white-space:nowrap">
+          ${approveBtn}${cancelBtn}
+          <button data-hist="${r.id}" class="btn g" style="padding:4px 9px;font-size:11px" title="Historique"><i class="fa-solid fa-clock-rotate-left"></i></button>
+        </td>
+      </tr>`;
+    }).join('')}
+    </tbody></table>`;
+
+    $('absReqTable').querySelectorAll('[data-approve]').forEach(b => b.onclick = () => openApproveRejectModal(b.dataset.approve, 'approve'));
+    $('absReqTable').querySelectorAll('[data-reject]').forEach(b => b.onclick = () => openApproveRejectModal(b.dataset.reject, 'reject'));
+    $('absReqTable').querySelectorAll('[data-cancel]').forEach(b => b.onclick = () => openApproveRejectModal(b.dataset.cancel, 'cancel'));
+    $('absReqTable').querySelectorAll('[data-hist]').forEach(b => b.onclick = () => openAbsHistoryModal(b.dataset.hist));
+  } catch(e) {
+    $('absReqTable').innerHTML = `<div style="padding:20px;color:var(--red)">Erreur : ${e.message||e}</div>`;
+  }
+}
+
+async function renderAbsCalendar() {
+  const sub = $('absSub'); if(!sub) return;
+  const y = absCalMonth.getFullYear(), m = absCalMonth.getMonth(), nd = dim(y, m);
+  $('absActions').innerHTML = `
+    <div class="monthnav">
+      <button id="absCalPrev"><i class="fa-solid fa-chevron-left"></i></button>
+      <span class="m" id="absCalLabel">${MONTHS[m]} ${y}</span>
+      <button id="absCalNext"><i class="fa-solid fa-chevron-right"></i></button>
+    </div>`;
+  $('absCalPrev').onclick = () => { absCalMonth = new Date(y, m-1, 1); renderAbsCalendar(); };
+  $('absCalNext').onclick = () => { absCalMonth = new Date(y, m+1, 1); renderAbsCalendar(); };
+
+  sub.innerHTML = `<div style="overflow-x:auto"><div id="absCalGrid">Chargement…</div></div>`;
+
+  try {
+    const monthStr = `${y}-${String(m+1).padStart(2,'0')}`;
+    const reqs = await BE.listAbsenceRequests(hotelId, {month: monthStr});
+    const activeStaff = staff.filter(s=>s.active);
+
+    // Index: employee_id -> [{day, type, status, bg, fg, code}]
+    const absMap = {};
+    reqs.forEach(r => {
+      if(r.status === 'cancelled' || r.status === 'rejected') return;
+      const t = r.absence_types;
+      const bg = t?.color_bg || '#e0e0e0';
+      const fg = t?.color_fg || '#333';
+      const code = t?.planning_code || r.type_code;
+      const opacity = r.status === 'submitted' ? '0.55' : '1';
+      const s = new Date(r.start_date), e2 = new Date(r.end_date);
+      const c = new Date(s);
+      while(c <= e2) {
+        const dayIso = c.toISOString().slice(0, 10);
+        const [cy, cm] = dayIso.split('-').map(Number);
+        if(cy === y && cm-1 === m) {
+          if(!absMap[r.employee_id]) absMap[r.employee_id] = {};
+          absMap[r.employee_id][dayIso] = {bg, fg, code, opacity};
+        }
+        c.setDate(c.getDate()+1);
+      }
+    });
+
+    let h = `<table style="border-collapse:collapse;font-size:11.5px;min-width:100%">
+      <thead><tr>
+        <th style="text-align:left;padding:6px 12px;background:#fafafe;font-size:11px;color:var(--ink2);border-bottom:1px solid var(--line);min-width:160px;position:sticky;left:0;z-index:2">Collaborateur</th>`;
+    for(let d=1; d<=nd; d++) {
+      const wd = new Date(y,m,d).getDay();
+      const we = wd===0||wd===6;
+      h += `<th style="width:34px;min-width:34px;text-align:center;background:${we?'#eef2fb':'#fafafe'};font-size:10px;color:var(--ink2);border-bottom:1px solid var(--line);padding:4px 2px">${d}<br>${WD[wd]}</th>`;
+    }
+    h += `</tr></thead><tbody>`;
+
+    activeStaff.forEach(s => {
+      h += `<tr><td style="padding:6px 12px;border-bottom:1px solid var(--line);white-space:nowrap;position:sticky;left:0;background:#fff;z-index:1">
+        <b style="font-size:12px">${s.first_name} ${s.last_name}</b><br>
+        <span style="font-size:10.5px;color:var(--muted)">${s.role||'—'}</span></td>`;
+      for(let d=1; d<=nd; d++) {
+        const dayIso = iso(y, m, d);
+        const cell = absMap[s.id]?.[dayIso];
+        const wd = new Date(y,m,d).getDay();
+        const we = wd===0||wd===6;
+        if(cell) {
+          h += `<td style="text-align:center;background:${cell.bg};color:${cell.fg};font-weight:700;font-size:10px;border-bottom:1px solid var(--line);opacity:${cell.opacity}">${cell.code}</td>`;
+        } else {
+          h += `<td style="background:${we?'#f7f9fd':'#fff'};border-bottom:1px solid var(--line)"></td>`;
+        }
+      }
+      h += `</tr>`;
+    });
+
+    h += `</tbody></table>`;
+    $('absCalGrid').innerHTML = h;
+  } catch(e) {
+    $('absCalGrid').innerHTML = `<div style="padding:20px;color:var(--red)">Erreur : ${e.message||e}</div>`;
+  }
+}
+
+async function renderAbsBalances() {
+  const sub = $('absSub'); if(!sub) return;
+  const yearNow = new Date().getFullYear();
+  $('absActions').innerHTML = `
+    <select id="absYearSel" style="font-size:13px;padding:7px 10px;border:1px solid var(--line);border-radius:8px">
+      ${[yearNow-1, yearNow, yearNow+1].map(y=>`<option value="${y}" ${y===absBalYear?'selected':''}>${y}</option>`).join('')}
+    </select>`;
+  $('absYearSel').onchange = e => { absBalYear = parseInt(e.target.value); renderAbsBalances(); };
+
+  sub.innerHTML = `<div id="absBalTable">Chargement…</div>`;
+  try {
+    const balances = await BE.listAbsenceBalances(hotelId, absBalYear);
+    const byEmp = {};
+    balances.forEach(b => {
+      if(!byEmp[b.employee_id]) byEmp[b.employee_id] = {};
+      byEmp[b.employee_id][b.type_code] = b;
+    });
+    const activeStaff = staff.filter(s=>s.active).sort((a,b)=>a.last_name.localeCompare(b.last_name));
+    const balCell = (b, type) => {
+      const bal = (byEmp[b]||{})[type];
+      const entitled = bal?.entitled || 0;
+      const taken = bal?.taken || 0;
+      const adjusted = bal?.adjusted || 0;
+      const remaining = entitled - taken + adjusted;
+      const remColor = remaining < 0 ? 'var(--red)' : remaining < 2 ? '#d97706' : 'var(--green)';
+      return {entitled, taken, remaining, remColor};
+    };
+    $('absBalTable').innerHTML = `<table class="tbl"><thead><tr>
+      <th>Collaborateur</th>
+      <th style="text-align:center" colspan="3">CP ${absBalYear}</th>
+      <th style="text-align:center" colspan="3">RTT ${absBalYear}</th>
+      ${canApproveAbsences() ? '<th></th>' : ''}
+    </tr><tr>
+      <th></th>
+      <th style="text-align:center;font-size:10px">Acquis</th><th style="text-align:center;font-size:10px">Pris</th><th style="text-align:center;font-size:10px">Restant</th>
+      <th style="text-align:center;font-size:10px">Acquis</th><th style="text-align:center;font-size:10px">Pris</th><th style="text-align:center;font-size:10px">Restant</th>
+      ${canApproveAbsences() ? '<th></th>' : ''}
+    </tr></thead><tbody>
+    ${activeStaff.map(s => {
+      const cp = balCell(s.id, 'CP');
+      const rtt = balCell(s.id, 'RTT');
+      return `<tr>
+        <td><b>${s.first_name} ${s.last_name}</b><div style="font-size:11px;color:var(--muted)">${s.role||'—'}</div></td>
+        <td style="text-align:center">${cp.entitled}</td>
+        <td style="text-align:center">${cp.taken}</td>
+        <td style="text-align:center;font-weight:700;color:${cp.remColor}">${cp.remaining}</td>
+        <td style="text-align:center">${rtt.entitled}</td>
+        <td style="text-align:center">${rtt.taken}</td>
+        <td style="text-align:center;font-weight:700;color:${rtt.remColor}">${rtt.remaining}</td>
+        ${canApproveAbsences() ? `<td><button class="btn g" data-edbal="${s.id}" style="padding:4px 9px;font-size:11px" title="Modifier le solde"><i class="fa-solid fa-pen"></i></button></td>` : ''}
+      </tr>`;
+    }).join('')}
+    </tbody></table>`;
+    if(canApproveAbsences()) {
+      $('absBalTable').querySelectorAll('[data-edbal]').forEach(b => b.onclick = () => openBalanceEditModal(b.dataset.edbal));
+    }
+  } catch(e) {
+    $('absBalTable').innerHTML = `<div style="padding:20px;color:var(--red)">Erreur : ${e.message||e}</div>`;
+  }
+}
+
+function openBalanceEditModal(empId) {
+  const emp = staff.find(e=>e.id===empId); if(!emp) return;
+  $('modal').innerHTML = `
+    <div class="mh"><i class="fa-solid fa-scale-balanced" style="color:var(--violet);margin-right:8px"></i>Modifier les soldes — ${emp.first_name} ${emp.last_name}</div>
+    <div class="mb">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Année ${absBalYear}</div>
+      <div class="row2">
+        <div class="fld"><label>CP — Acquis</label><input type="number" id="bal_cp_e" step="0.5" min="0" value="0"></div>
+        <div class="fld"><label>CP — Ajustement</label><input type="number" id="bal_cp_a" step="0.5" value="0"></div>
+      </div>
+      <div class="row2">
+        <div class="fld"><label>RTT — Acquis</label><input type="number" id="bal_rtt_e" step="0.5" min="0" value="0"></div>
+        <div class="fld"><label>RTT — Ajustement</label><input type="number" id="bal_rtt_a" step="0.5" value="0"></div>
+      </div>
+    </div>
+    <div class="mact">
+      <button class="btn g" id="balCancel">Annuler</button>
+      <button class="btn p" id="balSave"><i class="fa-solid fa-check"></i> Enregistrer</button>
+    </div>`;
+  $('modalbg').classList.add('on');
+  $('balCancel').onclick = closeModal;
+  // Pre-fill
+  BE.listAbsenceBalances(hotelId, absBalYear).then(bals => {
+    const cp = bals.find(b=>b.employee_id===empId&&b.type_code==='CP');
+    const rtt = bals.find(b=>b.employee_id===empId&&b.type_code==='RTT');
+    if(cp) { $('bal_cp_e').value = cp.entitled; $('bal_cp_a').value = cp.adjusted; }
+    if(rtt) { $('bal_rtt_e').value = rtt.entitled; $('bal_rtt_a').value = rtt.adjusted; }
+  });
+  $('balSave').onclick = async () => {
+    try {
+      await BE.upsertAbsenceBalance(hotelId, empId, absBalYear, 'CP', {entitled:+$('bal_cp_e').value, adjusted:+$('bal_cp_a').value});
+      await BE.upsertAbsenceBalance(hotelId, empId, absBalYear, 'RTT', {entitled:+$('bal_rtt_e').value, adjusted:+$('bal_rtt_a').value});
+      closeModal(); flash('Soldes mis à jour'); renderAbsBalances();
+    } catch(e) { flash('Erreur : '+(e.message||e)); }
+  };
+}
+
+function openAbsenceRequestForm(existingReq) {
+  const activeStaff = staff.filter(s=>s.active).sort((a,b)=>a.last_name.localeCompare(b.last_name));
+  const empOpts = canApproveAbsences()
+    ? activeStaff.map(s=>`<option value="${s.id}">${s.first_name} ${s.last_name} · ${s.role||'—'}</option>`).join('')
+    : (()=>{ const me = activeStaff[0]; return me ? `<option value="${me.id}" selected>${me.first_name} ${me.last_name}</option>` : ''; })();
+  const typeOpts = absenceTypes.map(t=>`<option value="${t.code}">${t.label}</option>`).join('');
+
+  $('modal').innerHTML = `
+    <div class="mh"><i class="fa-regular fa-calendar-xmark" style="color:var(--violet);margin-right:8px"></i>Nouvelle demande d'absence</div>
+    <div class="mb">
+      <div class="fld"><label>Collaborateur *</label>
+        <select id="abs_emp" ${!canApproveAbsences()?'disabled':''}><option value="">— choisir —</option>${empOpts}</select>
+      </div>
+      <div class="fld"><label>Type d'absence *</label><select id="abs_type"><option value="">— choisir —</option>${typeOpts}</select></div>
+      <div class="row2">
+        <div class="fld"><label>Date de début *</label><input type="date" id="abs_start"></div>
+        <div class="fld"><label>Date de fin *</label><input type="date" id="abs_end"></div>
+      </div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:13px;margin-bottom:10px">
+        <label style="display:inline-flex;gap:7px;align-items:center"><input type="checkbox" id="abs_hds"> Demi-journée début
+          <select id="abs_hds_p" style="display:none"><option value="matin">Matin</option><option value="après-midi">Après-midi</option></select>
+        </label>
+        <label style="display:inline-flex;gap:7px;align-items:center"><input type="checkbox" id="abs_hde"> Demi-journée fin
+          <select id="abs_hde_p" style="display:none"><option value="matin">Matin</option><option value="après-midi">Après-midi</option></select>
+        </label>
+      </div>
+      <div style="background:#f4f2fd;border-radius:8px;padding:10px 14px;font-size:13px;margin-bottom:10px">
+        <span style="color:var(--muted)">Nombre de jours : </span><b id="abs_days_preview" style="color:var(--violet-d)">—</b>
+        <span id="abs_bal_warn" style="color:#d97706;margin-left:10px;font-size:12px"></span>
+      </div>
+      <div class="fld"><label>Commentaire</label><textarea id="abs_note" rows="2" placeholder="Facultatif"></textarea></div>
+      <div class="fld" id="abs_file_wrap"><label>Pièce jointe</label><input type="file" id="abs_file" accept=".pdf,.jpg,.jpeg,.png"></div>
+    </div>
+    <div class="mact">
+      <button class="btn g" id="abs_cancel">Annuler</button>
+      <button class="btn p" id="abs_submit"><i class="fa-solid fa-paper-plane"></i> Soumettre</button>
+    </div>`;
+  $('modalbg').classList.add('on');
+  $('abs_cancel').onclick = closeModal;
+
+  const updateDays = () => {
+    const s=$('abs_start').value, e=$('abs_end').value;
+    const hds=$('abs_hds').checked, hde=$('abs_hde').checked;
+    if(!s||!e||e<s){ $('abs_days_preview').textContent='—'; return; }
+    const d = countAbsenceDays(s,e,hds,hde);
+    $('abs_days_preview').textContent = d + ' jour(s)';
+    // Balance warning for CP/RTT
+    const typeCode = $('abs_type').value;
+    const t = absenceTypes.find(x=>x.code===typeCode);
+    if(t?.debit_balance) {
+      const empId = $('abs_emp').value;
+      if(empId) {
+        BE.listAbsenceBalances(hotelId, new Date().getFullYear()).then(bals => {
+          const b = bals.find(x=>x.employee_id===empId && x.type_code===typeCode);
+          const remaining = b ? (b.entitled - b.taken + b.adjusted) : 0;
+          const warn = $('abs_bal_warn');
+          if(warn) warn.textContent = d > remaining ? `⚠ Solde insuffisant (${remaining} j disponibles)` : '';
+        }).catch(()=>{});
+      }
+    } else { const w=$('abs_bal_warn'); if(w) w.textContent=''; }
+  };
+
+  $('abs_hds').onchange = e => { $('abs_hds_p').style.display=e.target.checked?'':'none'; updateDays(); };
+  $('abs_hde').onchange = e => { $('abs_hde_p').style.display=e.target.checked?'':'none'; updateDays(); };
+  $('abs_start').onchange = updateDays;
+  $('abs_end').onchange = updateDays;
+  $('abs_type').onchange = () => {
+    const t = absenceTypes.find(x=>x.code===$('abs_type').value);
+    $('abs_file_wrap').style.display = t?.requires_attachment ? '' : '';
+    updateDays();
+  };
+  $('abs_emp').onchange = updateDays;
+
+  $('abs_submit').onclick = async () => {
+    const empId = $('abs_emp').value;
+    const typeCode = $('abs_type').value;
+    const start = $('abs_start').value;
+    const end = $('abs_end').value;
+    if(!empId||!typeCode||!start||!end){ flash('Champs obligatoires manquants'); return; }
+    if(end < start){ flash('La date de fin doit être ≥ à la date de début'); return; }
+    const hds = $('abs_hds').checked, hde = $('abs_hde').checked;
+    const days = countAbsenceDays(start, end, hds, hde);
+    const payload = {
+      employee_id: empId,
+      type_code: typeCode,
+      start_date: start,
+      end_date: end,
+      half_day_start: hds,
+      half_day_start_period: hds ? $('abs_hds_p').value : null,
+      half_day_end: hde,
+      half_day_end_period: hde ? $('abs_hde_p').value : null,
+      days_count: days,
+      note: $('abs_note').value.trim() || null,
+    };
+    try {
+      $('abs_submit').disabled = true;
+      const req = await BE.createAbsenceRequest(hotelId, payload);
+      // Log submit action in history
+      try { await BE.listApprovalHistory(hotelId, req.id); } catch(e2) {} // read-only
+      // If direction/admin auto-approve
+      if(canApproveAbsences()) {
+        // option to auto-approve, but for now just submit
+      }
+      closeModal(); flash('Demande soumise'); renderAbsRequests();
+    } catch(e) { flash('Erreur : '+(e.message||e)); $('abs_submit').disabled=false; }
+  };
+}
+
+async function openApproveRejectModal(reqId, action) {
+  const allReqs = await BE.listAbsenceRequests(hotelId, {});
+  const req = allReqs.find(r=>r.id===reqId); if(!req) return;
+  const emp = staff.find(e=>e.id===req.employee_id);
+  const isApprove = action==='approve', isReject = action==='reject', isCancel = action==='cancel';
+  const title = isApprove ? 'Approuver la demande' : isReject ? 'Refuser la demande' : 'Annuler la demande';
+  const color = isApprove ? 'var(--green)' : 'var(--red)';
+  const icon = isApprove ? 'fa-check' : isReject ? 'fa-xmark' : 'fa-ban';
+
+  $('modal').innerHTML = `
+    <div class="mh"><i class="fa-solid ${icon}" style="color:${color};margin-right:8px"></i>${title}</div>
+    <div class="mb">
+      <div style="background:#f8f9fb;border-radius:10px;padding:12px;margin-bottom:12px;font-size:13px">
+        <b>${emp ? emp.first_name+' '+emp.last_name : '—'}</b> · ${req.absence_types?.label||req.type_code}<br>
+        <span style="color:var(--muted)">${req.start_date} → ${req.end_date} · ${req.days_count} jour(s)</span>
+      </div>
+      <div class="fld"><label>Commentaire ${isReject?'*':''}</label>
+        <textarea id="appr_comment" rows="3" placeholder="${isReject?'Motif du refus obligatoire':'Commentaire facultatif'}"></textarea>
+      </div>
+    </div>
+    <div class="mact">
+      <button class="btn g" id="appr_cancel">Annuler</button>
+      <button class="btn" id="appr_confirm" style="background:${color};color:#fff"><i class="fa-solid ${icon}"></i> ${isApprove?'Approuver':isReject?'Refuser':'Annuler la demande'}</button>
+    </div>`;
+  $('modalbg').classList.add('on');
+  $('appr_cancel').onclick = closeModal;
+  $('appr_confirm').onclick = async () => {
+    const comment = $('appr_comment').value.trim();
+    if(isReject && !comment){ flash('Le motif de refus est obligatoire'); return; }
+    try {
+      $('appr_confirm').disabled = true;
+      const newStatus = isApprove ? 'approved' : isReject ? 'rejected' : 'cancelled';
+      await BE.updateAbsenceRequestStatus(reqId, newStatus, null, userEmail, comment||null, hotelId, req.employee_id);
+      if(isApprove) {
+        await syncAbsenceToPlanning(req);
+        // Debit balance if CP/RTT
+        const t = req.absence_types;
+        if(t?.debit_balance && t?.balance_type) {
+          const year = new Date(req.start_date).getFullYear();
+          const bals = await BE.listAbsenceBalances(hotelId, year);
+          const bal = bals.find(b=>b.employee_id===req.employee_id && b.type_code===t.balance_type);
+          const newTaken = (bal?.taken||0) + req.days_count;
+          await BE.upsertAbsenceBalance(hotelId, req.employee_id, year, t.balance_type, {taken: newTaken});
+          await BE.addBalanceMovement(hotelId, req.employee_id, t.balance_type, year, -req.days_count, `Approbation demande ${reqId}`, reqId, null);
+        }
+      }
+      if(isCancel) {
+        await removeAbsenceFromPlanning(req);
+        // Recredit balance
+        const t = req.absence_types;
+        if(t?.debit_balance && t?.balance_type) {
+          const year = new Date(req.start_date).getFullYear();
+          const bals = await BE.listAbsenceBalances(hotelId, year);
+          const bal = bals.find(b=>b.employee_id===req.employee_id && b.type_code===t.balance_type);
+          const newTaken = Math.max(0, (bal?.taken||0) - req.days_count);
+          await BE.upsertAbsenceBalance(hotelId, req.employee_id, year, t.balance_type, {taken: newTaken});
+          await BE.addBalanceMovement(hotelId, req.employee_id, t.balance_type, year, +req.days_count, `Annulation demande ${reqId}`, reqId, null);
+        }
+      }
+      closeModal(); flash(isApprove?'Demande approuvée':isReject?'Demande refusée':'Demande annulée');
+      renderAbsRequests();
+    } catch(e) { flash('Erreur : '+(e.message||e)); $('appr_confirm').disabled=false; }
+  };
+}
+
+async function openAbsHistoryModal(reqId) {
+  $('modal').innerHTML = `
+    <div class="mh"><i class="fa-solid fa-clock-rotate-left" style="color:var(--violet);margin-right:8px"></i>Historique de la demande</div>
+    <div class="mb" id="histContent">Chargement…</div>
+    <div class="mact"><button class="btn p" id="histClose">Fermer</button></div>`;
+  $('modalbg').classList.add('on');
+  $('histClose').onclick = closeModal;
+  try {
+    const hist = await BE.listApprovalHistory(hotelId, reqId);
+    if(!hist.length) { $('histContent').innerHTML = '<div style="color:var(--muted);font-style:italic">Aucun historique.</div>'; return; }
+    const actionLabel = {submit:'Soumission', approve:'Approbation', reject:'Refus', cancel:'Annulation'};
+    const actionColor = {submit:'#6b7280', approve:'var(--green)', reject:'var(--red)', cancel:'#9333ea'};
+    $('histContent').innerHTML = hist.map(h=>`<div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px dashed var(--line);font-size:13px">
+      <span style="background:${actionColor[h.action]||'#aaa'};color:#fff;padding:2px 8px;border-radius:5px;font-size:11px;font-weight:700;white-space:nowrap">${actionLabel[h.action]||h.action}</span>
+      <div style="flex:1">
+        <div style="font-weight:600">${h.actor_email||'—'}</div>
+        ${h.comment?`<div style="color:var(--muted);font-size:12px;margin-top:2px">${h.comment}</div>`:''}
+      </div>
+      <div style="color:var(--muted);font-size:11px;white-space:nowrap">${(h.created_at||'').slice(0,16).replace('T',' ')}</div>
+    </div>`).join('');
+  } catch(e) { $('histContent').innerHTML = `<div style="color:var(--red)">Erreur : ${e.message||e}</div>`; }
+}
+
 /* ===================== STUBS (modules à venir) ===================== */
 function renderStub(title, icon, desc, bullets){
   $('view').innerHTML=`<div class="page"><div class="stub">
@@ -2383,6 +2958,10 @@ window.__rh={
   substituteVariables, buildContractContext,
   TEMPLATE_VARS, DOC_TYPES, CONTRACT_TYPES,
   setContractsSubTab:(t)=>{contractsSubTab=t;},
+  absenceTypes:()=>absenceTypes,
+  countAbsenceDays,
+  canApproveAbsences,
+  renderAbsences,
   BE:()=>BE
 };
 
