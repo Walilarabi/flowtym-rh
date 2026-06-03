@@ -1,0 +1,1248 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flowtym RH</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<style>
+:root{
+  --violet:#8B5CF6;--violet-d:#7C3AED;--violet-bg:#ede9fe;
+  --ink:#1e2330;--ink2:#5b6172;--muted:#9aa0ad;--line:#eceef3;--bg:#f6f7f9;--card:#fff;
+  --green:#16a34a;--green-bg:#dcfce7;--red:#ef4444;--red-bg:#fee2e2;
+  --shadow:0 2px 8px rgba(0,0,0,.04);--shadow-h:0 12px 32px rgba(124,58,237,.14);--r:16px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--ink);font-size:14px;-webkit-font-smoothing:antialiased;overflow:hidden}
+button,select,input,textarea{font-family:inherit}
+#root{height:100vh;display:flex;flex-direction:column}
+
+/* ---- nouvelle structure : topbar + sidebar + contenu ---- */
+.main{flex:1;display:flex;overflow:hidden}
+.sidebar{width:232px;background:#fff;border-right:1px solid var(--line);display:flex;flex-direction:column;flex-shrink:0;transition:width .25s ease}
+.sidebar.collapsed{width:64px}
+.sbhead{padding:10px 14px;border-bottom:1px solid var(--line);display:flex;justify-content:flex-end;flex-shrink:0}
+.sidebar.collapsed .sbhead{justify-content:center;padding:10px 0}
+.sbtog{width:28px;height:28px;border-radius:8px;border:0;background:#f4f2fd;color:var(--violet-d);cursor:pointer;display:grid;place-items:center;font-size:11px;transition:.2s}
+.sbtog:hover{background:var(--violet-bg)}
+.sidebar.collapsed .sbtog i{transform:rotate(180deg)}
+.sidebar .menu{flex:1;padding:14px 10px;overflow-y:auto;overflow-x:hidden}
+.sidebar.collapsed .menu{padding:14px 6px}
+.sidebar .menu .grp{font-size:10.5px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:14px 12px 6px;white-space:nowrap;overflow:hidden}
+.sidebar .menu .grp:first-child{padding-top:4px}
+.sidebar.collapsed .menu .grp{height:1px;padding:8px 0 0;visibility:hidden;border-top:1px solid var(--line);margin:8px 8px 0;overflow:hidden}
+.sidebar .menu .it{display:flex;align-items:center;gap:11px;padding:10px 12px;border-radius:10px;color:var(--ink2);font-weight:500;cursor:pointer;font-size:13.5px;margin-bottom:2px;border:0;background:transparent;width:100%;text-align:left;font-family:inherit;white-space:nowrap;overflow:hidden}
+.sidebar.collapsed .menu .it{justify-content:center;padding:11px 0;gap:0}
+.sidebar.collapsed .menu .it .lbl,.sidebar.collapsed .menu .it .soon{display:none}
+.sidebar .menu .it:hover{background:#f4f2fd;color:var(--violet-d)}
+.sidebar .menu .it.on{background:var(--violet);color:#fff;font-weight:600}
+.sidebar .menu .it .ic{width:20px;text-align:center;font-size:13px;flex-shrink:0}
+.sidebar .menu .it .soon{margin-left:auto;font-size:9.5px;background:#fef3c7;color:#92400e;padding:2px 6px;border-radius:5px;font-weight:700}
+.sidebar .menu .it.on .soon{background:rgba(255,255,255,.18);color:#fff}
+.sidebar .me{padding:12px 14px;border-top:1px solid var(--line);display:flex;align-items:center;gap:10px;font-size:12px;color:var(--ink2)}
+.sidebar.collapsed .me{justify-content:center;padding:12px 0}
+.sidebar.collapsed .me .mail{display:none}
+.sidebar .me .av{width:30px;height:30px;border-radius:8px;flex-shrink:0}
+.sidebar .me .mail{flex:1;overflow:hidden;text-overflow:ellipsis;font-weight:600;color:var(--ink);white-space:nowrap}
+.content{flex:1;overflow:hidden;display:flex;flex-direction:column;min-width:0}
+#view{flex:1;overflow:hidden;display:flex;flex-direction:column;min-height:0}
+
+/* ---- pages standard (hors planning) ---- */
+.page{flex:1;overflow-y:auto;padding:22px 26px 60px;background:var(--bg)}
+.phead{display:flex;align-items:center;gap:14px;margin-bottom:18px;flex-wrap:wrap}
+.phead h1{font-size:22px;font-weight:800;letter-spacing:-.01em}
+.phead .sub{color:var(--ink2);font-size:13px}
+.phead .actions{margin-left:auto;display:flex;gap:8px}
+
+/* ---- KPI cards ---- */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-bottom:22px}
+.kpi{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px 20px;box-shadow:var(--shadow);transition:.15s}
+.kpi:hover{box-shadow:var(--shadow-h);transform:translateY(-2px)}
+.kpi .ic{width:42px;height:42px;border-radius:12px;display:grid;place-items:center;font-size:17px;margin-bottom:14px}
+.kpi.v .ic{background:var(--violet-bg);color:var(--violet)}
+.kpi.g .ic{background:var(--green-bg);color:var(--green)}
+.kpi.b .ic{background:#dbeafe;color:#2563eb}
+.kpi.a .ic{background:#fef3c7;color:#d97706}
+.kpi .n{font-size:28px;font-weight:800;letter-spacing:-.02em}
+.kpi .l{color:var(--ink2);font-size:13px;font-weight:600;margin-top:2px}
+
+/* ---- cartes / blocs / tableaux ---- */
+.cols2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:1100px){.cols2{grid-template-columns:1fr}}
+.box{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px;box-shadow:var(--shadow)}
+.box h3{font-size:14px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+.box h3 i{color:var(--violet)}
+.tlist{font-size:13px}
+.tlist .it{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px dashed var(--line)}
+.tlist .it:last-child{border:0}
+.tlist .it .av{width:32px;height:32px;border-radius:9px;font-size:11px}
+.tlist .it .nm{font-weight:600}.tlist .it .sub{font-size:11.5px;color:var(--muted)}
+.tlist .it .right{margin-left:auto;text-align:right;font-size:12px;color:var(--ink2)}
+
+/* grille de cartes personnel */
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px}
+.card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px;cursor:pointer;transition:.15s}
+.card:hover{box-shadow:var(--shadow-h);transform:translateY(-2px)}
+.card .head{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.card .head .av{width:40px;height:40px;font-size:13px}
+.card .head .nm{font-weight:700;font-size:14px}
+.card .head .role{font-size:11.5px;color:var(--muted)}
+.card .meta{display:flex;flex-wrap:wrap;gap:6px;font-size:11px}
+.tag{background:#f4f2fd;color:var(--violet-d);padding:3px 8px;border-radius:999px;font-weight:600}
+.tag.red{background:var(--red-bg);color:var(--red)}
+.tag.green{background:var(--green-bg);color:var(--green)}
+.tag.gray{background:#f1f1f5;color:var(--ink2)}
+
+/* tables */
+.tbl{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.tbl th,.tbl td{padding:11px 14px;text-align:left;border-bottom:1px solid var(--line);font-size:13px}
+.tbl th{background:#fafafe;font-weight:700;color:var(--ink2);font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+.tbl tr:last-child td{border-bottom:0}
+.tbl tr:hover{background:#fafaff}
+.tbl .ok{color:var(--green)}.tbl .ko{color:var(--red)}
+.tbl button{border:0;background:transparent;cursor:pointer;color:var(--violet);padding:3px 6px;border-radius:6px}
+.tbl button:hover{background:var(--violet-bg)}
+
+/* matrice documents */
+.docmx{width:100%;border-collapse:separate;border-spacing:0;background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden;font-size:12px}
+.docmx th,.docmx td{padding:9px 10px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);text-align:center}
+.docmx th{background:#fafafe;font-weight:700;color:var(--ink2);font-size:10.5px}
+.docmx th:first-child,.docmx td:first-child{text-align:left;font-weight:600}
+.docmx td.cell{cursor:pointer;font-weight:700}
+.docmx td.cell.ok{background:var(--green-bg);color:var(--green)}
+.docmx td.cell.ko{background:var(--red-bg);color:var(--red)}
+.docmx td.cell.pending{background:#fef3c7;color:#d97706}
+
+/* reporting bars */
+.barchart .b{display:flex;align-items:center;gap:10px;margin:8px 0}
+.barchart .b-lab{width:160px;font-size:12px;color:var(--ink2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex-shrink:0}
+.barchart .b-track{flex:1;background:#f1f1f5;border-radius:7px;height:22px;overflow:hidden}
+.barchart .b-fill{height:100%;border-radius:7px;display:flex;align-items:center;justify-content:flex-end;padding-right:8px;color:#fff;font-size:11px;font-weight:700;min-width:30px}
+
+/* stub modules */
+.stub{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:80px 30px;text-align:center;color:var(--ink2)}
+.stub .badge-soon{background:#fef3c7;color:#92400e;padding:6px 14px;border-radius:999px;font-size:11.5px;font-weight:700;margin-bottom:20px}
+.stub i.big{font-size:54px;color:var(--violet);margin-bottom:18px}
+.stub h2{font-size:22px;font-weight:800;color:var(--ink);margin-bottom:10px}
+.stub p{font-size:13.5px;max-width:480px;line-height:1.6}
+.stub ul{margin-top:14px;text-align:left;font-size:13px;color:var(--ink2);list-style:none}
+.stub ul li{padding:5px 0;display:flex;gap:8px;align-items:center}
+.stub ul li i{color:var(--violet);font-size:11px}
+
+/* toolbar planning (à l'intérieur de la vue) */
+.ptbar{padding:11px 18px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex-shrink:0}
+
+/* login */
+.login{height:100vh;display:grid;place-items:center;background:linear-gradient(135deg,#f6f7f9,#ede9fe)}
+.lcard{background:#fff;border-radius:20px;padding:32px;width:380px;box-shadow:0 24px 60px rgba(20,20,40,.08)}
+.lcard .mk{width:46px;height:46px;border-radius:12px;background:linear-gradient(135deg,var(--violet),var(--violet-d));display:grid;place-items:center;color:#fff;font-size:18px;margin-bottom:18px}
+.lcard h1{font-size:20px;font-weight:800;margin-bottom:4px}
+.lcard .sub{color:var(--ink2);font-size:13px;margin-bottom:22px}
+.fld{margin-bottom:13px}.fld label{display:block;font-size:11.5px;font-weight:600;color:var(--ink2);margin-bottom:5px}
+.fld input{width:100%;padding:11px 13px;border:1px solid var(--line);border-radius:10px;font-size:14px}
+.fld input:focus{outline:none;border-color:var(--violet);box-shadow:0 0 0 3px var(--violet-bg)}
+.err{color:var(--red);font-size:12.5px;margin-top:10px;min-height:18px}
+
+/* topbar */
+.top{background:#fff;border-bottom:1px solid var(--line);flex-shrink:0}
+.top-in{display:flex;align-items:center;gap:12px;padding:10px 18px;flex-wrap:wrap}
+.logo{display:flex;align-items:center;gap:9px;font-weight:800;font-size:15px}
+.logo .mk{width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,var(--violet),var(--violet-d));display:grid;place-items:center;color:#fff;font-size:13px}
+.logo small{color:var(--muted);font-weight:500}
+.spacer{flex:1}
+select,input[type=text],input[type=email],input[type=tel],input[type=date]{padding:8px 11px;border:1px solid var(--line);border-radius:10px;background:#fff;font-size:13px;color:var(--ink)}
+select:focus,input:focus{outline:none;border-color:var(--violet);box-shadow:0 0 0 3px var(--violet-bg)}
+.hotelSel{font-weight:600;min-width:200px}
+.btn{border:0;border-radius:10px;padding:8px 13px;font-weight:600;font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:7px;transition:.15s;white-space:nowrap}
+.btn.p{background:var(--violet);color:#fff}.btn.p:hover{background:var(--violet-d)}
+.btn.g{background:#f4f2fd;color:var(--violet-d)}.btn.g:hover{background:var(--violet-bg)}
+.btn.d{background:var(--red-bg);color:var(--red)}.btn.d:hover{background:#fbcaca}
+.btn.on{background:var(--violet);color:#fff;box-shadow:0 0 0 3px var(--violet-bg)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.monthnav{display:flex;align-items:center;gap:4px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:3px}
+.monthnav button{border:0;background:transparent;width:30px;height:30px;border-radius:8px;cursor:pointer;color:var(--ink2)}
+.monthnav button:hover{background:var(--violet-bg);color:var(--violet-d)}
+.monthnav .m{font-weight:700;min-width:150px;text-align:center;text-transform:capitalize;font-size:13.5px}
+.search{position:relative}.search i{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:12px}
+.search input{padding-left:32px;min-width:180px}
+
+/* legend + hint */
+.legend{display:flex;flex-wrap:wrap;gap:7px;padding:9px 18px;background:#fff;border-bottom:1px solid var(--line);flex-shrink:0}
+.lc{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--ink2);border:1px solid var(--line);padding:3px 9px;border-radius:999px}
+.lc b{width:13px;height:13px;border-radius:4px;border:1px solid rgba(0,0,0,.06)}
+.hint{padding:7px 18px;font-size:11.5px;color:var(--muted);background:#fff;border-bottom:1px solid var(--line);flex-shrink:0}
+.empty{padding:60px 22px;text-align:center;color:var(--muted)}
+.empty i{font-size:34px;margin-bottom:14px;display:block;color:var(--violet)}
+
+/* grid */
+.gridwrap{flex:1;overflow:auto;position:relative}
+table{border-collapse:separate;border-spacing:0;width:100%;white-space:nowrap;font-size:12px}
+th,td{border-bottom:1px solid var(--line);border-right:1px solid var(--line)}
+thead th{position:sticky;top:0;background:#fafafe;z-index:6;font-weight:600;color:var(--ink2);padding:6px 4px;text-align:center;font-size:11px}
+thead th.wd{top:27px;font-size:9px;color:var(--muted);font-weight:500;z-index:6}
+thead th.we{background:#eef2fb}
+.stickL{position:sticky;background:#fff;z-index:4}
+thead .stickL{z-index:8;background:#fafafe}
+.cEmp{left:0;text-align:left;padding:6px 14px 6px 10px;white-space:nowrap}
+.cRole{text-align:left;padding:6px 14px 6px 8px;color:var(--ink2);white-space:nowrap}
+.emp{display:flex;align-items:center;gap:9px;cursor:pointer}
+.emp:hover .nm{color:var(--violet-d)}
+.av{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;color:#fff;font-weight:700;font-size:11px;flex-shrink:0}
+.emp .nm{font-weight:600;font-size:12.5px;line-height:1.15}
+.emp .sub{font-size:10.5px;color:var(--muted)}
+td.day{width:44px;min-width:44px;text-align:center;font-weight:700;font-size:11px;user-select:none;cursor:pointer;position:relative}
+.dcol{width:44px;min-width:44px}
+td.day.we{background:#f7f9fd}
+td.day.sel{box-shadow:inset 0 0 0 2px var(--violet);background:var(--violet-bg)!important}
+td.day.pend::after{content:"";position:absolute;top:2px;right:2px;width:6px;height:6px;border-radius:50%;background:var(--violet);box-shadow:0 0 0 1.5px #fff}
+td.sum{text-align:center;background:#fcfcff;font-weight:600;font-variant-numeric:tabular-nums;min-width:38px}
+th.sumh{background:#f3f1fb;color:var(--violet-d)}
+tr.totals td{background:#f6f4fd;font-weight:700;border-top:2px solid var(--violet-bg);position:sticky;bottom:0;z-index:3}
+tr.totals .stickL{background:#f6f4fd}
+tr.totals td.lab{text-align:right;padding-right:10px;color:var(--violet-d)}
+
+/* action bar + save bar */
+.actionbar{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(40px);background:#15233b;color:#fff;border-radius:14px;padding:9px 12px;display:none;align-items:center;gap:8px;box-shadow:0 16px 40px rgba(0,0,0,.3);z-index:50;opacity:0;transition:.2s}
+.actionbar.on{display:flex;opacity:1;transform:translateX(-50%) translateY(0)}
+.actionbar .cnt{font-size:12px;font-weight:700;background:rgba(255,255,255,.14);padding:5px 10px;border-radius:8px}
+.actionbar .codes{display:flex;gap:5px}
+.actionbar .cbtn{border:0;border-radius:8px;padding:6px 9px;font-weight:700;font-size:11.5px;cursor:pointer}
+.actionbar .clr{background:rgba(255,255,255,.14);color:#fff}
+.actionbar .x{background:transparent;border:0;color:#cbd5e1;cursor:pointer;font-size:14px;padding:4px 6px}
+.savebar{position:fixed;right:22px;bottom:22px;background:#fff;border:1px solid var(--line);border-radius:14px;padding:10px 14px;display:none;align-items:center;gap:12px;box-shadow:var(--shadow-h);z-index:49}
+.savebar.on{display:flex}
+.savebar .info{font-size:13px;font-weight:600}.savebar .info b{color:var(--violet-d)}
+
+/* drawer + modal */
+.dbg{position:fixed;inset:0;background:rgba(20,20,40,.4);opacity:0;pointer-events:none;transition:.25s;z-index:60}
+.dbg.on{opacity:1;pointer-events:auto}
+.drawer{position:fixed;top:0;right:0;height:100%;width:460px;max-width:96vw;background:#fff;z-index:61;transform:translateX(100%);transition:.3s cubic-bezier(.4,0,.2,1);overflow-y:auto;box-shadow:-12px 0 40px rgba(0,0,0,.14)}
+.drawer.on{transform:none}
+.dh{padding:22px 22px 16px;border-bottom:1px solid var(--line);position:relative}
+.dh .close{position:absolute;top:16px;right:16px;width:32px;height:32px;border-radius:9px;border:0;background:#f4f4f6;cursor:pointer;color:var(--ink2)}
+.dh .av{width:54px;height:54px;font-size:17px;margin-bottom:10px}
+.dh h2{font-size:20px;font-weight:800}.dh .role{color:var(--ink2);font-size:13px;margin-top:3px}
+.sec{padding:16px 22px;border-bottom:1px solid var(--line)}
+.sec h4{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:11px;font-weight:700}
+.fr{display:flex;justify-content:space-between;gap:12px;padding:5px 0;font-size:13px}
+.fr .k{color:var(--ink2)}.fr .v{font-weight:600;text-align:right}
+.doc{display:flex;align-items:center;gap:9px;padding:8px 0;font-size:13px;border-bottom:1px dashed var(--line);cursor:pointer}
+.doc:last-child{border:0}.doc .nm{flex:1}.doc:hover{background:#fafaff}
+.docok{color:var(--green);font-weight:700;font-size:12px}.docko{color:var(--red);font-weight:700;font-size:12px}
+.badge{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700}
+.badge.cdi{background:var(--green-bg);color:var(--green)}.badge.cdd{background:#fff3cd;color:#92633a}.badge.ext{background:var(--violet-bg);color:var(--violet-d)}
+
+.modalbg{position:fixed;inset:0;background:rgba(20,20,40,.4);display:none;z-index:70;align-items:center;justify-content:center}
+.modalbg.on{display:flex}
+.modal{background:#fff;border-radius:16px;width:520px;max-width:96vw;max-height:90vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,.2)}
+.modal .mh{padding:18px 22px;border-bottom:1px solid var(--line);font-size:17px;font-weight:800}
+.modal .mb{padding:18px 22px}
+.modal .mb .fld{margin-bottom:12px}
+.modal .mb .fld label{font-size:11px}.modal .mb .fld input,.modal .mb .fld select{width:100%}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.mact{padding:14px 22px;border-top:1px solid var(--line);display:flex;gap:10px;justify-content:flex-end}
+
+/* popover */
+.pop{position:fixed;z-index:80;background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 36px rgba(0,0,0,.18);padding:8px;display:none;width:220px}
+.pop.on{display:block}
+.pop .pg{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.pop .pc{display:flex;align-items:center;gap:7px;padding:7px 9px;border-radius:9px;cursor:pointer;font-size:12px;font-weight:700}
+.pop .pc b{width:12px;height:12px;border-radius:4px;border:1px solid rgba(0,0,0,.08)}
+.toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#15233b;color:#fff;padding:10px 16px;border-radius:10px;font-size:13px;font-weight:600;z-index:90;opacity:0;transition:.25s;pointer-events:none}
+.toast.on{opacity:1}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<div class="actionbar" id="actionbar"></div>
+<div class="savebar" id="savebar">
+  <div class="info"><b id="pendCount">0</b> cellule(s) modifiée(s)</div>
+  <button class="btn g" id="cancelBtn"><i class="fa-solid fa-rotate-left"></i> Annuler</button>
+  <button class="btn p" id="saveBtn"><i class="fa-solid fa-check"></i> Enregistrer</button>
+</div>
+<div class="dbg" id="dbg"></div>
+<aside class="drawer" id="drawer"></aside>
+<div class="modalbg" id="modalbg"><div class="modal" id="modal"></div></div>
+<div class="pop" id="pop"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* =====================================================================
+   Flowtym RH — Étape 2 : application live branchée sur Supabase
+   Tables : employees, employee_contracts, employee_documents,
+            staff_planning, staff_absences, staff_roles, staff_departments
+   ===================================================================== */
+const SUPABASE_URL = "https://hzrzkvdebaadditvbqis.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh6cnprdmRlYmFhZGRpdHZicWlzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxMjEwMTQsImV4cCI6MjA5MjY5NzAxNH0.IDFFWHNNIeBReWRTeVj8RlRpyz5J4XaStFhGVEYEBU8";
+const TEST_MODE = new URLSearchParams(location.search).has('test');
+
+/* ---------- gestionnaire d'erreurs visible ---------- */
+function showFatal(err){
+  console.error(err);
+  const r=document.getElementById('root');
+  if(r&&!r.dataset.ok)r.innerHTML=`<div style="max-width:640px;margin:60px auto;background:#fff;border:1px solid #eceef3;border-radius:16px;padding:28px;font-family:Inter,sans-serif">
+    <h2 style="color:#b23b3b;margin-bottom:8px">Erreur de chargement</h2>
+    <p style="color:#5b6172;margin-bottom:10px">${(err&&err.message)||err}</p>
+    <p style="color:#9aa0ad;font-size:13px">Ouvrez l'app via un serveur HTTP (ex. <code>python3 -m http.server</code>) et vérifiez la connexion réseau.</p></div>`;
+}
+window.addEventListener('error',e=>showFatal(e.error||e.message));
+window.addEventListener('unhandledrejection',e=>showFatal(e.reason));
+
+/* ---------- constantes ---------- */
+const CODES=[
+  ['P','Présent','#E8F5E9','#1b5e20','worked'],
+  ['CP','Congé payé','#C6EFCE','#0F5132','paid'],
+  ['RTT','RTT','#BDD7EE','#1F4E78','abs'],
+  ['MAL','Maladie','#FFC7CE','#9C0006','abs'],
+  ['MAT','Mat./Pat.','#E1D5F0','#5B2A86','abs'],
+  ['CSS','Sans solde','#D9D9D9','#3F3F3F','abs'],
+  ['AE','Except.','#FFE699','#7F6000','abs'],
+  ['F','Férié','#EDEDED','#6b7280','holiday'],
+];
+const CMAP={}; CODES.forEach(c=>CMAP[c[0]]={code:c[0],label:c[1],bg:c[2],fg:c[3],cat:c[4]});
+const MONTHS=['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+const WD=['D','L','Ma','Me','J','V','S'];
+const CONTRACTS=['CDI','CDD','Extra','Stage','Interim','Apprentissage'];
+const DOC_TYPES=[['cni','CNI / Passeport'],['sejour','Titre de séjour'],['rib','RIB'],['domicile','Justif. de domicile'],['hebergement','Attestation d\'hébergement'],['contrat','Contrat signé'],['autre','Autre document']];
+const dim=(y,m)=>new Date(y,m+1,0).getDate();
+const iso=(y,m,d)=>`${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+const initials=(f,l)=>((f?.[0]||'')+(l?.[0]||'')).toUpperCase();
+const AVC=['#8B5CF6','#3b82f6','#16a34a','#d97706','#ef4444','#0ea5e9','#db2777','#0d9488'];
+const avColor=s=>{let h=0;for(const c of (s||''))h=(h*31+c.charCodeAt(0))%AVC.length;return AVC[h];};
+const $=id=>document.getElementById(id);
+
+/* ===================== BACKEND ===================== */
+async function makeRealBE(){
+  const {createClient}=await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm');
+  const sb=createClient(SUPABASE_URL,SUPABASE_ANON_KEY,{auth:{persistSession:true}});
+  const must=(error,msg)=>{ if(error){ console.error(msg,error); throw new Error(msg+' : '+error.message); } };
+  return {
+    sb, isTest:false,
+    async listHotels(){
+      const {data:{user}}=await sb.auth.getUser(); if(!user)return [];
+      const {data:u,error:e1}=await sb.from('users').select('id').eq('auth_id',user.id).maybeSingle();
+      must(e1,"Lecture du profil utilisateur");
+      if(!u){return [];}
+      const {data,error}=await sb.from('user_hotels')
+        .select('hotel_id, hotels(id,name,city)').eq('user_id',u.id);
+      must(error,"Lecture des hôtels accessibles");
+      return (data||[]).map(x=>x.hotels).filter(Boolean);
+    },
+    async setActiveHotel(hotelId){
+      const {data:{user}}=await sb.auth.getUser(); if(!user)return;
+      const {data:u}=await sb.from('users').select('id').eq('auth_id',user.id).maybeSingle();
+      if(!u)return;
+      await sb.from('user_active_hotel').upsert({user_id:u.id,hotel_id:hotelId},{onConflict:'user_id'});
+    },
+    async listDepartments(h){const {data,error}=await sb.from('staff_departments').select('id,name,sort_order').eq('hotel_id',h).order('sort_order');must(error,"Départements");return data||[];},
+    async listRoles(h){const {data,error}=await sb.from('staff_roles').select('id,name,department_id').eq('hotel_id',h).order('name');must(error,"Rôles");return data||[];},
+    async listEmployees(h){const {data,error}=await sb.from('employees').select('*').eq('hotel_id',h).order('active',{ascending:false}).order('last_name');must(error,"Collaborateurs");return data||[];},
+    async addEmployee(h,p){const {data,error}=await sb.from('employees').insert({hotel_id:h,...p}).select('*').single();must(error,"Création collaborateur");return data;},
+    async addEmployeesBulk(h,list){
+      if(!list.length)return [];
+      const rows=list.map(p=>({hotel_id:h,...p}));
+      const {data,error}=await sb.from('employees').insert(rows).select('*');
+      must(error,"Création collaborateurs en lot"); return data||[];
+    },
+    async updateEmployee(id,p){const {error}=await sb.from('employees').update(p).eq('id',id);must(error,"Mise à jour collaborateur");},
+    async deleteEmployee(id){const {error}=await sb.from('employees').update({active:false}).eq('id',id);must(error,"Suppression collaborateur");},
+    async listMonthPlanning(h,y,m){
+      const s=iso(y,m,1), e=iso(y,m,dim(y,m));
+      const {data,error}=await sb.from('staff_planning').select('employee_id,day,status,duration').eq('hotel_id',h).gte('day',s).lte('day',e);
+      must(error,"Lecture du planning"); return data||[];
+    },
+    async savePlanning(h,upserts,deletes){
+      if(upserts.length){const {error}=await sb.from('staff_planning').upsert(upserts,{onConflict:'hotel_id,employee_id,day'});must(error,"Enregistrement planning");}
+      if(deletes.length){await Promise.all(deletes.map(d=>sb.from('staff_planning').delete().match(d)));}
+    },
+    async listDocuments(h,eid){const {data,error}=await sb.from('employee_documents').select('doc_type,status,expires_at').eq('hotel_id',h).eq('employee_id',eid);must(error,"Documents");return data||[];},
+    async listAllDocuments(h){const {data,error}=await sb.from('employee_documents').select('employee_id,doc_type,status').eq('hotel_id',h);must(error,"Documents");return data||[];},
+    async setDocument(h,eid,doc_type,status){
+      const {error}=await sb.from('employee_documents').upsert({hotel_id:h,employee_id:eid,doc_type,status},{onConflict:'hotel_id,employee_id,doc_type'});
+      must(error,"Mise à jour document");
+    },
+    async addDepartment(h,name){const {data,error}=await sb.from('staff_departments').insert({hotel_id:h,name}).select('*').single();must(error,"Création département");return data;},
+    async deleteDepartment(id){const {error}=await sb.from('staff_departments').delete().eq('id',id);must(error,"Suppression département");},
+    async addRole(h,name,department_id){const {data,error}=await sb.from('staff_roles').insert({hotel_id:h,name,department_id:department_id||null}).select('*').single();must(error,"Création rôle");return data;},
+    async deleteRole(id){const {error}=await sb.from('staff_roles').delete().eq('id',id);must(error,"Suppression rôle");},
+    async signOut(){await sb.auth.signOut();}
+  };
+}
+
+/* ----- Backend en mémoire (mode test) ----- */
+function makeTestBE(){
+  const hotels=[{id:'h1',name:'Folkestone Opéra',city:'Paris'},{id:'h2',name:'Le Grand Bleu',city:'Nice'}];
+  const depts={h1:[{id:'d1',name:'Réception',sort_order:1},{id:'d2',name:'Étage',sort_order:2},{id:'d3',name:'Restauration',sort_order:3}],
+               h2:[{id:'d4',name:'Réception',sort_order:1},{id:'d5',name:'Étage',sort_order:2}]};
+  const roles={h1:[{id:'r1',name:'Réceptionniste',department_id:'d1'},{id:'r2',name:'Gouvernante',department_id:'d2'}],h2:[]};
+  const emps=[
+    {id:'e1',hotel_id:'h1',first_name:'Ghani',last_name:'Amrani',role:'Chef de réception',department:'Réception',contract_type:'CDI',hire_date:'2021-03-01',rest_days:[0,6],phone:'06 12 34 56 78',email:'g.amrani@folkestone.fr',address:'Paris',emergency_contact:'Sofia',active:true},
+    {id:'e2',hotel_id:'h1',first_name:'Lyes',last_name:'Imzi',role:'Réceptionniste',department:'Réception',contract_type:'CDI',hire_date:'2022-06-15',rest_days:[2,3],phone:'',email:'',address:'',emergency_contact:'',active:true},
+    {id:'e3',hotel_id:'h1',first_name:'Katia',last_name:'Tripkovic',role:'Gouvernante',department:'Étage',contract_type:'CDI',hire_date:'2019-04-12',rest_days:[0,6],phone:'',email:'',address:'',emergency_contact:'',active:true},
+    {id:'e4',hotel_id:'h1',first_name:'Fatma',last_name:'Tlidjane',role:'Femme de chambre',department:'Étage',contract_type:'CDD',hire_date:'2023-07-03',rest_days:[3,4],phone:'',email:'',address:'',emergency_contact:'',active:true},
+    {id:'e5',hotel_id:'h2',first_name:'Marie',last_name:'Dubois',role:'Réceptionniste',department:'Réception',contract_type:'CDI',hire_date:'2020-05-01',rest_days:[0,6],phone:'',email:'',address:'',emergency_contact:'',active:true},
+    {id:'e6',hotel_id:'h1',first_name:'Ancien',last_name:'Bouchard',role:'Réceptionniste',department:'Réception',contract_type:'CDD',hire_date:'2019-01-01',rest_days:[],phone:'',email:'',address:'',emergency_contact:'',active:false,departure_date:(()=>{const d=new Date();return new Date(d.getFullYear(),d.getMonth()-2,15).toISOString().slice(0,10);})()},
+  ];
+  let planning=[]; let docs=[];
+  const k=(eid,day)=>eid+'|'+day;
+  return {isTest:true,
+    async listHotels(){return hotels;},
+    async setActiveHotel(){}, async signOut(){},
+    async listDepartments(h){return depts[h]||[];},
+    async listRoles(h){return roles[h]||[];},
+    async listEmployees(h){return emps.filter(e=>e.hotel_id===h);},
+    async addEmployee(h,p){const e={id:'n'+Date.now()+Math.random(),hotel_id:h,active:true,rest_days:[],...p};emps.push(e);return e;},
+    async addEmployeesBulk(h,list){const out=list.map(p=>{const e={id:'n'+Date.now()+Math.random(),hotel_id:h,active:true,rest_days:[],...p};emps.push(e);return e;});return out;},
+    async updateEmployee(id,p){Object.assign(emps.find(e=>e.id===id)||{},p);},
+    async deleteEmployee(id){const e=emps.find(x=>x.id===id);if(e)e.active=false;},
+    async listMonthPlanning(h,y,m){const s=iso(y,m,1),end=iso(y,m,dim(y,m));return planning.filter(p=>p.hotel_id===h&&p.day>=s&&p.day<=end);},
+    async savePlanning(h,ups,dels){
+      ups.forEach(u=>{const i=planning.findIndex(p=>p.hotel_id===u.hotel_id&&p.employee_id===u.employee_id&&p.day===u.day);
+        if(i>=0)planning[i]={...planning[i],...u};else planning.push({...u});});
+      dels.forEach(d=>{planning=planning.filter(p=>!(p.hotel_id===d.hotel_id&&p.employee_id===d.employee_id&&p.day===d.day));});
+    },
+    async listDocuments(h,eid){return docs.filter(d=>d.hotel_id===h&&d.employee_id===eid);},
+    async listAllDocuments(h){return docs.filter(d=>d.hotel_id===h);},
+    async setDocument(h,eid,doc_type,status){const i=docs.findIndex(d=>d.hotel_id===h&&d.employee_id===eid&&d.doc_type===doc_type);
+      if(i>=0)docs[i].status=status;else docs.push({hotel_id:h,employee_id:eid,doc_type,status});},
+    async addDepartment(h,name){const d={id:'d'+Date.now(),hotel_id:h,name,sort_order:99};(depts[h]||(depts[h]=[])).push(d);return d;},
+    async deleteDepartment(id){Object.keys(depts).forEach(h=>{depts[h]=depts[h].filter(d=>d.id!==id);});},
+    async addRole(h,name,department_id){const r={id:'r'+Date.now(),hotel_id:h,name,department_id:department_id||null};(roles[h]||(roles[h]=[])).push(r);return r;},
+    async deleteRole(id){Object.keys(roles).forEach(h=>{roles[h]=roles[h].filter(r=>r.id!==id);});},
+    _emps:emps,_planning:()=>planning
+  };
+}
+
+/* ===================== ÉTAT ===================== */
+let BE=null;
+let hotels=[],hotelId=null,deps=[],rols=[],staff=[],cur=new Date();
+let committed=new Map();        // 'eid|YYYY-MM-DD' -> {status, duration}
+const pending=new Map();        // 'eid|YYYY-MM-DD' -> code  ('' = repos/supprimer)
+let editMode=false, fSearch='', fRole='', fDept='', fStatus='actif';
+const selection=new Set();
+let dragging=false, anchor=null, baseSel=new Set(), lastAnchor=null;
+let cellMap={}, visibleRows=[];
+
+const effective=k=>pending.has(k)?pending.get(k):(committed.get(k)?.status||'');
+const committedCode=k=>committed.get(k)?.status||'';
+
+/* ===================== LOGIN ===================== */
+function renderLogin(err){
+  $('root').dataset.ok='1';
+  $('root').innerHTML=`<div class="login"><div class="lcard">
+    <div class="mk"><i class="fa-solid fa-hotel"></i></div>
+    <h1>Flowtym RH</h1><div class="sub">Connectez-vous pour accéder au planning du personnel.</div>
+    <div class="fld"><label>E-mail</label><input type="email" id="le" autocomplete="email"></div>
+    <div class="fld"><label>Mot de passe</label><input type="password" id="lp" autocomplete="current-password"></div>
+    <button class="btn p" id="lb" style="width:100%;justify-content:center;padding:11px">Se connecter</button>
+    <div class="err" id="lerr">${err||''}</div></div></div>`;
+  $('lb').onclick=async()=>{
+    const e=$('le').value.trim(),p=$('lp').value;
+    if(!e||!p){$('lerr').textContent='E-mail et mot de passe requis.';return;}
+    $('lb').disabled=true; $('lerr').textContent='';
+    const {error}=await BE.sb.auth.signInWithPassword({email:e,password:p});
+    $('lb').disabled=false;
+    if(error)$('lerr').textContent=error.message; else start();
+  };
+}
+
+/* ===================== SHELL ===================== */
+async function start(){
+  try{
+    hotels=await BE.listHotels();
+    if(!hotels.length){renderLogin('Aucun hôtel accessible avec ce compte.');return;}
+    hotelId=hotels[0].id;
+    if(!BE.isTest){try{const {data:{user}}=await BE.sb.auth.getUser();if(user)userEmail=user.email||userEmail;}catch(e){}}
+    else userEmail='demo@flowtym.local';
+    $('saveBtn').onclick=saveChanges;
+    $('cancelBtn').onclick=cancelChanges;
+    renderShell();
+    await loadHotel();
+  }catch(e){showFatal(e);}
+}
+/* ===================== ÉTAT MULTI-VUES ===================== */
+let view='planning';
+let userEmail='—';
+const LS={get(k){try{return localStorage.getItem(k);}catch(e){return null;}},set(k,v){try{localStorage.setItem(k,v);}catch(e){}}};
+let sidebarCollapsed = LS.get('rh_sidebar')==='1';
+
+const TABS=[
+  ['Pilotage',[
+    ['dashboard','Tableau de bord','fa-solid fa-table-columns'],
+    ['planning', 'Planning',        'fa-regular fa-calendar'],
+    ['reporting','Reporting',       'fa-solid fa-chart-line'],
+  ]],
+  ['Équipe',[
+    ['personnel','Personnel', 'fa-regular fa-user'],
+    ['contracts','Contrats',  'fa-regular fa-file-lines'],
+    ['documents','Documents', 'fa-regular fa-folder-open'],
+  ]],
+  ['Temps',[
+    ['pointage','Pointage',       'fa-regular fa-clock', true],
+    ['tracking','Suivi du temps', 'fa-solid fa-stopwatch', true],
+    ['payroll', 'Paie',           'fa-solid fa-coins',     true],
+  ]],
+  ['Acquisition',[
+    ['recruitment','Recrutement','fa-solid fa-user-plus', true],
+  ]],
+  ['Réglages',[
+    ['config','Paramètres','fa-solid fa-gear'],
+  ]],
+];
+
+function renderShell(){
+  $('root').dataset.ok='1';
+  $('root').innerHTML=`
+    <header class="top"><div class="top-in">
+      <div class="logo"><div class="mk"><i class="fa-solid fa-hotel"></i></div>Flowtym <small>RH</small></div>
+      <select class="hotelSel" id="hotelSel">${hotels.map(h=>`<option value="${h.id}" ${h.id===hotelId?'selected':''}>${h.name}${h.city?' · '+h.city:''}</option>`).join('')}</select>
+      <div class="spacer"></div>
+      ${BE.isTest?'':'<button class="btn g" id="logout"><i class="fa-solid fa-arrow-right-from-bracket"></i> Déconnexion</button>'}
+    </div></header>
+    <div class="main">
+      <aside class="sidebar ${sidebarCollapsed?'collapsed':''}" id="sb">
+        <div class="sbhead"><button class="sbtog" id="sbtog" title="Réduire la barre latérale"><i class="fa-solid fa-chevron-left"></i></button></div>
+        <nav class="menu" id="nav">
+          ${TABS.map(([grp,items])=>`<div class="grp">${grp}</div>`
+            +items.map(([k,lab,ic,soon])=>`<button class="it ${k===view?'on':''}" data-v="${k}" title="${lab}">
+              <i class="ic ${ic}"></i><span class="lbl">${lab}</span>${soon?'<span class="soon">à venir</span>':''}</button>`).join('')
+          ).join('')}
+        </nav>
+        <div class="me" title="${userEmail}">
+          <div class="av" style="background:${avColor(userEmail)};color:#fff;display:grid;place-items:center;font-weight:700;font-size:11px">${initials(userEmail.split('@')[0]||'?', '')}</div>
+          <div class="mail">${userEmail}</div>
+        </div>
+      </aside>
+      <section class="content"><div id="view"></div></section>
+    </div>`;
+  $('hotelSel').onchange=async e=>{hotelId=e.target.value;pending.clear();selection.clear();await loadHotel();};
+  const lo=$('logout'); if(lo) lo.onclick=async()=>{await BE.signOut();renderLogin();};
+  $('nav').onclick=e=>{const b=e.target.closest('.it');if(b)goView(b.dataset.v);};
+  $('sbtog').onclick=()=>{sidebarCollapsed=!sidebarCollapsed;$('sb').classList.toggle('collapsed',sidebarCollapsed);
+    $('sbtog').title=sidebarCollapsed?'Étendre la barre latérale':'Réduire la barre latérale';
+    LS.set('rh_sidebar',sidebarCollapsed?'1':'0');
+    // recaler la grille planning (colonnes figées) après la transition
+    setTimeout(()=>{if(typeof applyStickyWidths==='function')applyStickyWidths();},280);};
+  goView(view);
+}
+
+function goView(v){
+  view=v;
+  $('nav').querySelectorAll('.it').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
+  const r={dashboard:renderDashboard, planning:renderPlanning, reporting:renderReporting,
+           personnel:renderPersonnel, contracts:renderContracts, documents:renderDocuments,
+           config:renderConfig,
+           pointage:()=>renderStub('Pointage','fa-regular fa-clock','Saisie des heures d\'arrivée et de départ des collaborateurs, en temps réel, par scan QR ou validation manuelle.',
+             ['Check-in / Check-out instantané','Détection des retards et heures supplémentaires','Synchronisation automatique avec le planning prévu','Export vers la paie']),
+           tracking:()=>renderStub('Suivi du temps','fa-solid fa-stopwatch','Consolidation des heures réelles travaillées par collaborateur, par semaine et par mois.',
+             ['Calcul automatique des heures réalisées vs planifiées','Détection des écarts','Validation et signature des relevés','Export Excel / PDF']),
+           payroll:()=>renderStub('Paie','fa-solid fa-coins','Préparation des éléments variables de paie à partir du planning, des absences et du pointage.',
+             ['Calcul des heures supplémentaires et majorations','Décomptes CP, RTT, maladie','Indemnités et primes','Export vers le logiciel de paie ou DSN']),
+           recruitment:()=>renderStub('Recrutement','fa-solid fa-user-plus','Gestion du pipeline de candidatures jusqu\'à l\'embauche.',
+             ['Multi-diffusion d\'annonces','Pipeline candidats par poste','Entretiens et évaluations','Conversion automatique en fiche collaborateur'])};
+  (r[v]||r.dashboard)();
+}
+/* ===================== VUE PLANNING ===================== */
+function renderPlanning(){
+  $('view').innerHTML=`
+    <div style="display:flex;flex-direction:column;height:100%;min-height:0">
+      <div class="ptbar">
+        <div class="monthnav"><button id="prev"><i class="fa-solid fa-chevron-left"></i></button>
+          <span class="m" id="mlabel"></span><button id="next"><i class="fa-solid fa-chevron-right"></i></button></div>
+        <div class="search"><i class="fa-solid fa-magnifying-glass"></i><input type="text" id="search" placeholder="Rechercher…" value="${fSearch}"></div>
+        <select id="fRole"></select>
+        <select id="fDept"></select>
+        <select id="fStatus">
+          <option value="actif" ${fStatus==='actif'?'selected':''}>Statut : Actifs</option>
+          <option value="parti" ${fStatus==='parti'?'selected':''}>Partis</option>
+          <option value="tous"  ${fStatus==='tous' ?'selected':''}>Tous</option>
+        </select>
+        <div class="spacer" style="flex:1"></div>
+        <button class="btn g ${editMode?'on':''}" id="editToggle"><i class="fa-solid fa-pen-to-square"></i> Édition en masse</button>
+        <button class="btn g" id="importXlsx"><i class="fa-solid fa-file-import"></i> Importer Excel</button>
+        <input type="file" id="xlsxFile" accept=".xlsx,.xls" style="display:none">
+        <button class="btn p" id="addEmp"><i class="fa-solid fa-user-plus"></i> Collaborateur</button>
+      </div>
+      <div class="legend" id="legend"></div>
+      <div class="hint" id="hint"></div>
+      <div class="gridwrap"><table id="grid"></table></div>
+    </div>`;
+  $('legend').innerHTML=CODES.map(c=>`<span class="lc"><b style="background:${c[2]}"></b>${c[0]} · ${c[1]}</span>`).join('')
+    +`<span class="lc"><b style="background:#fff;border-style:dashed"></b>Vide · Repos</span>`;
+  $('prev').onclick=()=>{cur=new Date(cur.getFullYear(),cur.getMonth()-1,1);loadMonth();};
+  $('next').onclick=()=>{cur=new Date(cur.getFullYear(),cur.getMonth()+1,1);loadMonth();};
+  $('search').oninput=e=>{fSearch=e.target.value.toLowerCase();render();};
+  $('fRole').onchange=e=>{fRole=e.target.value;render();};
+  $('fDept').onchange=e=>{fDept=e.target.value;render();};
+  $('fStatus').onchange=e=>{fStatus=e.target.value;render();};
+  $('editToggle').onclick=()=>{editMode=!editMode;$('editToggle').classList.toggle('on',editMode);clearSelection();updateHint();};
+  $('addEmp').onclick=()=>openEmpForm(null);
+  $('importXlsx').onclick=()=>$('xlsxFile').click();
+  $('xlsxFile').onchange=e=>{const f=e.target.files[0]; if(f) handleImport(f); e.target.value='';};
+  $('grid').addEventListener('mousedown',gridMouseDown);
+  $('grid').addEventListener('mouseover',gridMouseOver);
+  fillFilters(); updateHint(); render();
+}
+
+function updateHint(){
+  const h=$('hint'); if(!h)return;
+  h.innerHTML = editMode
+    ? `<i class="fa-solid fa-circle-info"></i> Édition en masse : <b>glissez</b> pour sélectionner une zone · <b>Ctrl/Cmd-clic</b> pour ajouter · <b>Maj-clic</b> pour étendre · choisissez ensuite un statut.`
+    : `<i class="fa-regular fa-hand-pointer"></i> Cliquez une cellule pour définir un statut · cliquez un nom pour ouvrir la fiche · activez « Édition en masse » pour modifier plusieurs cellules.`;
+}
+function fillFilters(){
+  const r=$('fRole'),d=$('fDept'); if(!r||!d) return;
+  r.innerHTML=`<option value="">Rôle : tous</option>`+rols.map(x=>`<option ${fRole===x.name?'selected':''}>${x.name}</option>`).join('');
+  d.innerHTML=`<option value="">Service : tous</option>`+deps.map(x=>`<option ${fDept===x.name?'selected':''}>${x.name}</option>`).join('');
+}
+
+async function loadHotel(){
+  if(!BE.isTest) await BE.setActiveHotel(hotelId);
+  [deps,rols,staff]=await Promise.all([BE.listDepartments(hotelId),BE.listRoles(hotelId),BE.listEmployees(hotelId)]);
+  fillFilters();
+  await loadMonth();
+}
+async function loadMonth(){
+  pending.clear(); selection.clear();
+  const rows=await BE.listMonthPlanning(hotelId,cur.getFullYear(),cur.getMonth());
+  committed=new Map(rows.map(r=>[r.employee_id+'|'+r.day,{status:r.status,duration:Number(r.duration)}]));
+  render();
+}
+
+/* ===================== RENDU GRILLE ===================== */
+function render(){
+  const g=$('grid'); if(!g) return; // hors vue planning
+  const y=cur.getFullYear(),m=cur.getMonth(),nd=dim(y,m);
+  $('mlabel').textContent=`${MONTHS[m]} ${y}`;
+  visibleRows=staff.filter(s=>{
+    if(fStatus==='actif' && !s.active) return false;
+    if(fStatus==='parti' && s.active)  return false;
+    // Parti : caché à partir du mois suivant la date de départ
+    if(!s.active && s.departure_date){
+      const dd=new Date(s.departure_date);
+      const monthAfter=new Date(dd.getFullYear(), dd.getMonth()+1, 1);
+      if(cur >= monthAfter) return false;
+    }
+    if(fRole&&s.role!==fRole)return false;
+    if(fDept&&s.department!==fDept)return false;
+    if(fSearch&&!(`${s.first_name} ${s.last_name} ${s.role||''} ${s.department||''}`.toLowerCase().includes(fSearch)))return false;
+    return true;});
+  if(!visibleRows.length){
+    $('grid').innerHTML='';
+    const wrap=$('grid').parentElement;
+    if(!wrap.querySelector('.empty')){
+      const e=document.createElement('div'); e.className='empty';
+      e.innerHTML='<i class="fa-regular fa-user"></i><div>Aucun collaborateur</div><div style="font-size:13px;margin-top:6px">Cliquez sur « Collaborateur » pour ajouter votre premier employé.</div>';
+      wrap.appendChild(e);}
+    updateSaveBar(); applyStickyWidths(); return;
+  } else { const e=$('grid').parentElement.querySelector('.empty'); if(e)e.remove(); }
+
+  const sums=['Trav.','CP','Abs.','Repos'];
+  let h='<thead><tr><th class="stickL cEmp" rowspan="2" style="text-align:left">Collaborateur</th>'
+       +'<th class="stickL cRole" rowspan="2" style="text-align:left">Rôle</th>';
+  for(let d=1;d<=nd;d++){const wd=new Date(y,m,d).getDay();h+=`<th class="dcol ${wd===0||wd===6?'we':''}">${d}</th>`;}
+  sums.forEach(s=>h+=`<th class="sumh" rowspan="2">${s}</th>`);
+  h+='</tr><tr>';
+  for(let d=1;d<=nd;d++){const wd=new Date(y,m,d).getDay();h+=`<th class="wd dcol ${wd===0||wd===6?'we':''}">${WD[wd]}</th>`;}
+  h+='</tr></thead><tbody>';
+  visibleRows.forEach((s,ri)=>{
+    h+=`<tr${!s.active?' style="opacity:.55"':''}><td class="stickL cEmp"><div class="emp" data-emp="${s.id}"><div class="av" style="background:${avColor(s.last_name)}">${initials(s.first_name,s.last_name)}</div>`
+      +`<div><div class="nm">${s.first_name} ${s.last_name}${!s.active?' <span style="font-size:9.5px;color:var(--red);font-weight:700;background:var(--red-bg);padding:1px 5px;border-radius:5px;margin-left:4px">PARTI</span>':''}</div><div class="sub">${s.department||'—'} · ${s.contract_type||'CDI'}</div></div></div></td>`
+      +`<td class="stickL cRole">${s.role||'—'}</td>`;
+    let trav=0,cp=0,abs=0,rep=0;
+    for(let d=1;d<=nd;d++){const k=s.id+'|'+iso(y,m,d);const code=effective(k);const c=code?CMAP[code]:null;
+      const wd=new Date(y,m,d).getDay(),we=wd===0||wd===6;
+      const cls='day'+(we?' we':'')+(selection.has(k)?' sel':'')+(pending.has(k)&&pending.get(k)!==committedCode(k)?' pend':'');
+      const st=c?`background:${c.bg};color:${c.fg}`:'';
+      h+=`<td class="${cls}" data-k="${k}" data-r="${ri}" data-d="${d}" style="${st}">${code||''}</td>`;
+      if(c){if(c.cat==='worked')trav++;else if(c.cat==='paid')cp++;else if(c.cat==='abs')abs++;} else rep++;}
+    h+=`<td class="sum">${trav}</td><td class="sum">${cp}</td><td class="sum">${abs}</td><td class="sum">${rep}</td></tr>`;
+  });
+  const rows=[['Présents',k=>CMAP[effective(k)]?.cat==='worked'],
+              ['Absents', k=>{const c=CMAP[effective(k)];return c&&c.cat!=='worked'&&c.cat!=='holiday';}],
+              ['CP',      k=>CMAP[effective(k)]?.cat==='paid']];
+  rows.forEach(([lab,test])=>{h+=`<tr class="totals"><td class="stickL cEmp lab" style="left:0">${lab} / jour</td><td class="stickL cRole" style="background:#f6f4fd"></td>`;
+    for(let d=1;d<=nd;d++){let n=0;visibleRows.forEach(s=>{if(test(s.id+'|'+iso(y,m,d)))n++;});h+=`<td>${n||''}</td>`;}
+    h+=`<td colspan="4"></td></tr>`;});
+  h+='</tbody>';
+  const gw=$('grid').parentElement,sl=gw.scrollLeft,stp=gw.scrollTop;
+  $('grid').innerHTML=h; gw.scrollLeft=sl; gw.scrollTop=stp;
+  cellMap={}; $('grid').querySelectorAll('td.day').forEach(td=>cellMap[td.dataset.k]=td);
+  $('grid').querySelectorAll('[data-emp]').forEach(el=>el.onclick=()=>openFiche(el.dataset.emp));
+  applyStickyWidths(); updateSaveBar();
+}
+function applyStickyWidths(){
+  const g=$('grid'); if(!g)return;
+  const th=g.querySelector('thead .cEmp'); if(!th)return;
+  const w=Math.ceil(th.getBoundingClientRect().width);
+  if(w>0) g.querySelectorAll('.cRole').forEach(td=>{td.style.left=w+'px';});
+}
+window.addEventListener('resize',applyStickyWidths);
+
+/* ===================== SÉLECTION / ÉDITION EN MASSE ===================== */
+function rc(td){return {r:+td.dataset.r,d:+td.dataset.d};}
+function keyOf(r,d){const s=visibleRows[r];return s?s.id+'|'+iso(cur.getFullYear(),cur.getMonth(),d):null;}
+function rect(a,b){const ks=[];const r0=Math.min(a.r,b.r),r1=Math.max(a.r,b.r),d0=Math.min(a.d,b.d),d1=Math.max(a.d,b.d);
+  for(let r=r0;r<=r1;r++)for(let d=d0;d<=d1;d++){const k=keyOf(r,d);if(k)ks.push(k);}return ks;}
+function applySelVis(){
+  for(const k in cellMap){const has=selection.has(k);const td=cellMap[k];
+    if(has&&!td.classList.contains('sel'))td.classList.add('sel');
+    else if(!has&&td.classList.contains('sel'))td.classList.remove('sel');}
+  showActionBar();
+}
+function clearSelection(){selection.clear();applySelVis();}
+function gridMouseDown(e){
+  const td=e.target.closest('td.day'); if(!td)return;
+  if(!editMode){openPop(td);return;}
+  e.preventDefault();
+  const k=td.dataset.k, a=rc(td);
+  if(e.metaKey||e.ctrlKey){ if(selection.has(k))selection.delete(k); else selection.add(k);
+    baseSel=new Set(selection); anchor=a; dragging=true; }
+  else if(e.shiftKey&&lastAnchor){ baseSel=new Set(selection); anchor=lastAnchor; dragging=true;
+    rect(lastAnchor,a).forEach(x=>selection.add(x)); }
+  else { selection.clear(); baseSel=new Set(); anchor=a; dragging=true; selection.add(k); }
+  lastAnchor=a; applySelVis();
+}
+function gridMouseOver(e){
+  if(!dragging)return; const td=e.target.closest('td.day'); if(!td)return;
+  const cur2=rc(td); selection.clear(); baseSel.forEach(x=>selection.add(x));
+  rect(anchor,cur2).forEach(x=>selection.add(x)); applySelVis();
+}
+document.addEventListener('mouseup',()=>{dragging=false;});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){clearSelection();closePop();closeFiche();closeModal();}});
+
+function showActionBar(){
+  const bar=$('actionbar');
+  if(editMode&&selection.size>0){
+    bar.innerHTML=`<span class="cnt">${selection.size} sélectionnée(s)</span><div class="codes">`
+      +CODES.map(c=>`<button class="cbtn" data-code="${c[0]}" style="background:${c[2]};color:${c[3]}">${c[0]}</button>`).join('')
+      +`</div><button class="cbtn clr" data-code=""><i class="fa-solid fa-eraser"></i> Repos</button>`
+      +`<button class="x" id="abx"><i class="fa-solid fa-xmark"></i></button>`;
+    bar.classList.add('on');
+    bar.querySelectorAll('.cbtn').forEach(b=>b.onclick=()=>applyToSelection(b.dataset.code));
+    $('abx').onclick=clearSelection;
+  } else bar.classList.remove('on');
+}
+function applyToSelection(code){
+  selection.forEach(k=>setPending(k,code));
+  render(); flash(`${selection.size} cellule(s) → ${code||'Repos'}`);
+}
+function setPending(k,code){ if(code===committedCode(k)) pending.delete(k); else pending.set(k,code); }
+
+function updateSaveBar(){
+  const n=[...pending.keys()].filter(k=>pending.get(k)!==committedCode(k)).length;
+  $('pendCount').textContent=n; $('savebar').classList.toggle('on',n>0);
+  $('pendCount').dataset.count=n;
+}
+async function saveChanges(){
+  $('saveBtn').disabled=true;
+  try{
+    const ups=[],dels=[];
+    for(const [k,v] of pending){
+      const [eid,day]=k.split('|');
+      if(v===''){ if(committed.has(k)) dels.push({hotel_id:hotelId,employee_id:eid,day}); }
+      else ups.push({hotel_id:hotelId,employee_id:eid,day,status:v,duration:1.0});
+    }
+    await BE.savePlanning(hotelId,ups,dels);
+    // intégrer dans committed
+    pending.forEach((v,k)=>{ if(v==='')committed.delete(k); else committed.set(k,{status:v,duration:1}); });
+    pending.clear(); render(); flash('Modifications enregistrées');
+  }catch(e){flash('Erreur : '+e.message); console.error(e);}
+  finally{$('saveBtn').disabled=false;}
+}
+function cancelChanges(){pending.clear(); render(); flash('Modifications annulées');}
+
+/* ===================== VUE TABLEAU DE BORD ===================== */
+function aggCommitted(){let trav=0,cp=0,abs=0;const counts={};
+  committed.forEach(v=>{if(!v.status)return;counts[v.status]=(counts[v.status]||0)+Number(v.duration||1);
+    const c=CMAP[v.status];if(!c)return;
+    if(c.cat==='worked')trav+=Number(v.duration||1);
+    else if(c.cat==='paid')cp+=Number(v.duration||1);
+    else if(c.cat==='abs')abs+=Number(v.duration||1);});
+  return {trav,cp,abs,counts};}
+
+function renderDashboard(){
+  const m=cur.getMonth(),y=cur.getFullYear();
+  const actifs=staff.filter(s=>s.active).length;
+  const partis=staff.filter(s=>!s.active).length;
+  const {trav,cp,abs}=aggCommitted();
+  // employés sans contact d'urgence (alerte simple)
+  const alerts=staff.filter(s=>s.active && !s.emergency_contact).length;
+  // équipe (premiers actifs)
+  const team=staff.filter(s=>s.active).slice(0,7);
+  // activité : derniers jours du mois courant
+  const recent=[];committed.forEach((v,k)=>{const [eid,day]=k.split('|');const s=staff.find(x=>x.id===eid);
+    if(s)recent.push({day, name:`${s.first_name} ${s.last_name}`, status:v.status});});
+  recent.sort((a,b)=>b.day.localeCompare(a.day));
+  $('view').innerHTML=`<div class="page">
+    <div class="phead"><div><h1>Tableau de bord</h1><div class="sub">${hotels.find(h=>h.id===hotelId)?.name||''} · ${MONTHS[m]} ${y}</div></div>
+      <div class="actions"><button class="btn p" id="goPlan"><i class="fa-regular fa-calendar"></i> Ouvrir le planning</button></div></div>
+    <div class="kpis">
+      <div class="kpi v"><div class="ic"><i class="fa-solid fa-users"></i></div><div class="n">${actifs}</div><div class="l">Collaborateurs actifs</div></div>
+      <div class="kpi g"><div class="ic"><i class="fa-regular fa-clock"></i></div><div class="n">${Math.round(trav)}</div><div class="l">Jours travaillés ce mois</div></div>
+      <div class="kpi b"><div class="ic"><i class="fa-regular fa-plane"></i></div><div class="n">${Math.round(cp)}</div><div class="l">CP pris ce mois</div></div>
+      <div class="kpi a"><div class="ic"><i class="fa-solid fa-triangle-exclamation"></i></div><div class="n">${alerts}</div><div class="l">Fiches incomplètes</div></div>
+    </div>
+    <div class="cols2">
+      <div class="box"><h3><i class="fa-regular fa-user"></i>Équipe active</h3><div class="tlist">
+        ${team.length?team.map(s=>`<div class="it"><div class="av" style="background:${avColor(s.last_name)};color:#fff;display:grid;place-items:center;font-weight:700">${initials(s.first_name,s.last_name)}</div>
+          <div><div class="nm">${s.first_name} ${s.last_name}</div><div class="sub">${s.role||'—'} · ${s.department||'—'}</div></div>
+          <div class="right">${s.contract_type||'CDI'}</div></div>`).join(''):'<div style="padding:14px;color:var(--muted)">Aucun collaborateur — ajoutez-en depuis Personnel.</div>'}
+      </div></div>
+      <div class="box"><h3><i class="fa-regular fa-rectangle-list"></i>Activité récente du mois</h3><div class="tlist">
+        ${recent.slice(0,7).map(r=>{const c=CMAP[r.status];return `<div class="it"><span class="tag" style="background:${c?.bg};color:${c?.fg}">${r.status}</span>
+          <div><div class="nm">${r.name}</div><div class="sub">${r.day}</div></div></div>`;}).join('')||'<div style="padding:14px;color:var(--muted)">Aucune saisie pour le mois.</div>'}
+      </div></div>
+    </div>
+    ${partis?`<div class="box" style="margin-top:14px"><h3><i class="fa-regular fa-circle-question"></i>Partis</h3>
+      <div style="font-size:13px;color:var(--ink2)">${partis} collaborateur(s) ne sont plus actifs. Allez dans Personnel + filtre « Partis » pour les consulter ou les réactiver.</div></div>`:''}
+  </div>`;
+  $('goPlan').onclick=()=>goView('planning');
+}
+
+/* ===================== VUE REPORTING ===================== */
+function barRows(rows,color){if(!rows.length)return '<div style="padding:14px;color:var(--muted);font-size:13px">Aucune donnée.</div>';
+  const max=Math.max(...rows.map(r=>r[1]),1);
+  return rows.map(([lab,v])=>`<div class="b"><div class="b-lab" title="${lab}">${lab}</div>
+    <div class="b-track"><div class="b-fill" style="width:${Math.max(v/max*100,5)}%;background:${color}">${v}</div></div></div>`).join('');}
+
+function renderReporting(){
+  const {counts}=aggCommitted();
+  const svc={};staff.filter(s=>s.active).forEach(s=>{const k=s.department||'—';svc[k]=(svc[k]||0)+1;});
+  const perRole={};staff.filter(s=>s.active).forEach(s=>{const k=s.role||'—';perRole[k]=(perRole[k]||0)+1;});
+  // top jours travaillés (mois courant)
+  const workEmp={};committed.forEach((v,k)=>{if(v.status!=='P')return;const eid=k.split('|')[0];workEmp[eid]=(workEmp[eid]||0)+Number(v.duration||1);});
+  const top=Object.entries(workEmp).map(([eid,n])=>{const s=staff.find(x=>x.id===eid);return [s?`${s.first_name} ${s.last_name}`:'?',n];})
+    .sort((a,b)=>b[1]-a[1]).slice(0,8);
+  const cpEmp={};committed.forEach((v,k)=>{if(v.status!=='CP')return;const eid=k.split('|')[0];cpEmp[eid]=(cpEmp[eid]||0)+Number(v.duration||1);});
+  const topCp=Object.entries(cpEmp).map(([eid,n])=>{const s=staff.find(x=>x.id===eid);return [s?`${s.first_name} ${s.last_name}`:'?',n];})
+    .sort((a,b)=>b[1]-a[1]).slice(0,8);
+  const codeRows=CODES.map(c=>[c[0]+' · '+c[1], counts[c[0]]||0]).filter(r=>r[1]>0);
+  $('view').innerHTML=`<div class="page">
+    <div class="phead"><div><h1>Reporting</h1><div class="sub">${MONTHS[cur.getMonth()]} ${cur.getFullYear()} · ${hotels.find(h=>h.id===hotelId)?.name||''}</div></div></div>
+    <div class="cols2">
+      <div class="box barchart"><h3><i class="fa-solid fa-building"></i>Effectif par service</h3>${barRows(Object.entries(svc).sort((a,b)=>b[1]-a[1]),'#8B5CF6')}</div>
+      <div class="box barchart"><h3><i class="fa-solid fa-id-badge"></i>Effectif par rôle</h3>${barRows(Object.entries(perRole).sort((a,b)=>b[1]-a[1]).slice(0,8),'#3b82f6')}</div>
+    </div>
+    <div class="cols2" style="margin-top:14px">
+      <div class="box barchart"><h3><i class="fa-regular fa-clock"></i>Top jours travaillés ce mois</h3>${barRows(top,'#16a34a')}</div>
+      <div class="box barchart"><h3><i class="fa-regular fa-plane"></i>Top CP pris ce mois</h3>${barRows(topCp,'#d97706')}</div>
+    </div>
+    <div class="box barchart" style="margin-top:14px"><h3><i class="fa-solid fa-chart-pie"></i>Répartition par statut (mois)</h3>${barRows(codeRows,'#8B5CF6')}</div>
+  </div>`;
+}
+
+/* ===================== VUE PERSONNEL ===================== */
+let pSearch='', pStatus='actif';
+function renderPersonnel(){
+  $('view').innerHTML=`<div class="page">
+    <div class="phead"><div><h1>Personnel</h1><div class="sub">${hotels.find(h=>h.id===hotelId)?.name||''}</div></div>
+      <div class="actions">
+        <div class="search"><i class="fa-solid fa-magnifying-glass"></i><input type="text" id="pq" placeholder="Rechercher…" value="${pSearch}"></div>
+        <select id="pst">
+          <option value="actif" ${pStatus==='actif'?'selected':''}>Actifs</option>
+          <option value="parti" ${pStatus==='parti'?'selected':''}>Partis</option>
+          <option value="tous" ${pStatus==='tous'?'selected':''}>Tous</option>
+        </select>
+        <button class="btn p" id="pAdd"><i class="fa-solid fa-user-plus"></i> Collaborateur</button>
+      </div></div>
+    <div class="cards" id="pcards"></div></div>`;
+  const draw=()=>{const list=staff.filter(s=>{
+      if(pStatus==='actif'&&!s.active)return false;
+      if(pStatus==='parti'&&s.active)return false;
+      const q=pSearch.toLowerCase();
+      if(q&&!(`${s.first_name} ${s.last_name} ${s.role||''} ${s.department||''}`.toLowerCase().includes(q)))return false;
+      return true;}).sort((a,b)=>(b.active?1:0)-(a.active?1:0));
+    $('pcards').innerHTML=list.map(s=>`<div class="card" data-emp="${s.id}" ${!s.active?'style="opacity:.6"':''}>
+      <div class="head"><div class="av" style="background:${avColor(s.last_name)}">${initials(s.first_name,s.last_name)}</div>
+        <div><div class="nm">${s.first_name} ${s.last_name}${!s.active?' <span class="tag red">PARTI</span>':''}</div><div class="role">${s.role||'—'} · ${s.department||'—'}</div></div></div>
+      <div class="meta">
+        <span class="tag ${s.contract_type==='CDI'?'green':'gray'}">${s.contract_type||'CDI'}</span>
+        ${s.hire_date?`<span class="tag gray">depuis ${s.hire_date}</span>`:''}
+        ${!s.active&&s.departure_date?`<span class="tag red">parti ${s.departure_date}</span>`:''}
+      </div></div>`).join('')||'<div style="padding:30px;text-align:center;color:var(--muted);grid-column:1/-1">Aucun collaborateur ne correspond.</div>';
+    $('pcards').querySelectorAll('.card').forEach(c=>c.onclick=()=>openFiche(c.dataset.emp));};
+  $('pq').oninput=e=>{pSearch=e.target.value;draw();};
+  $('pst').onchange=e=>{pStatus=e.target.value;draw();};
+  $('pAdd').onclick=()=>openEmpForm(null);
+  draw();
+}
+
+/* ===================== VUE CONTRATS ===================== */
+function renderContracts(){
+  const list=staff.slice().sort((a,b)=>a.last_name.localeCompare(b.last_name));
+  $('view').innerHTML=`<div class="page">
+    <div class="phead"><div><h1>Contrats</h1><div class="sub">${list.length} collaborateur(s) · ${hotels.find(h=>h.id===hotelId)?.name||''}</div></div></div>
+    <table class="tbl"><thead><tr>
+      <th>Collaborateur</th><th>Rôle</th><th>Service</th><th>Contrat</th><th>Entrée</th><th>Départ</th><th>Statut</th><th></th>
+    </tr></thead><tbody>
+    ${list.map(s=>`<tr data-emp="${s.id}">
+      <td><b>${s.first_name} ${s.last_name}</b></td>
+      <td>${s.role||'—'}</td><td>${s.department||'—'}</td>
+      <td><span class="tag ${s.contract_type==='CDI'?'green':'gray'}">${s.contract_type||'CDI'}</span></td>
+      <td>${s.hire_date||'—'}</td>
+      <td>${s.departure_date||'—'}</td>
+      <td>${s.active?'<span class="ok">Actif</span>':'<span class="ko">Parti</span>'}</td>
+      <td><button title="Voir la fiche"><i class="fa-regular fa-eye"></i></button></td>
+    </tr>`).join('')||'<tr><td colspan="8" style="padding:24px;text-align:center;color:var(--muted)">Aucun collaborateur enregistré.</td></tr>'}
+    </tbody></table>
+    <div style="margin-top:14px;color:var(--muted);font-size:12px"><i class="fa-solid fa-circle-info"></i> La table <code>employee_contracts</code> permet d'enregistrer un historique multi-période par collaborateur (renouvellements, avenants). Le formulaire d'ajout/édition de contrats détaillés sera ouvert depuis ces fiches.</div>
+  </div>`;
+  $('view').querySelectorAll('tr[data-emp]').forEach(tr=>tr.onclick=()=>openFiche(tr.dataset.emp));
+}
+
+/* ===================== VUE DOCUMENTS ===================== */
+async function renderDocuments(){
+  $('view').innerHTML=`<div class="page">
+    <div class="phead"><div><h1>Documents RH</h1><div class="sub">Matrice complète · cliquez sur une case pour basculer Fourni / Manquant</div></div></div>
+    <div id="dxbox">Chargement…</div></div>`;
+  const all=await BE.listAllDocuments(hotelId);
+  const map={};all.forEach(d=>{(map[d.employee_id]=map[d.employee_id]||{})[d.doc_type]=d.status;});
+  const list=staff.filter(s=>s.active).sort((a,b)=>a.last_name.localeCompare(b.last_name));
+  $('dxbox').innerHTML=`<table class="docmx"><thead><tr><th>Collaborateur</th>
+    ${DOC_TYPES.map(([,lab])=>`<th>${lab}</th>`).join('')}</tr></thead><tbody>
+    ${list.map(s=>`<tr><td><b>${s.first_name} ${s.last_name}</b><br><span style="font-size:10.5px;color:var(--muted);font-weight:500">${s.role||'—'}</span></td>
+      ${DOC_TYPES.map(([k])=>{const st=(map[s.id]||{})[k]||'missing';const cls=st==='provided'?'ok':st==='pending'?'pending':'ko';
+        const ic=st==='provided'?'check':st==='pending'?'circle':'xmark';
+        return `<td class="cell ${cls}" data-emp="${s.id}" data-dt="${k}"><i class="fa-solid fa-${ic}"></i></td>`;}).join('')}
+    </tr>`).join('')||`<tr><td colspan="${DOC_TYPES.length+1}" style="padding:24px;text-align:center;color:var(--muted)">Aucun collaborateur actif.</td></tr>`}
+    </tbody></table>`;
+  $('dxbox').querySelectorAll('td.cell').forEach(td=>td.onclick=async()=>{
+    const next=td.classList.contains('ok')?'missing':'provided';
+    await BE.setDocument(hotelId,td.dataset.emp,td.dataset.dt,next);
+    td.className='cell '+(next==='provided'?'ok':'ko');
+    td.innerHTML='<i class="fa-solid fa-'+(next==='provided'?'check':'xmark')+'"></i>';});
+}
+
+/* ===================== VUE CONFIGURATION ===================== */
+async function renderConfig(){
+  $('view').innerHTML=`<div class="page">
+    <div class="phead"><div><h1>Paramètres</h1><div class="sub">Référentiels par hôtel · ${hotels.find(h=>h.id===hotelId)?.name||''}</div></div></div>
+    <div class="cols2">
+      <div class="box"><h3><i class="fa-solid fa-layer-group"></i>Services</h3>
+        <div id="depList"></div>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <input type="text" id="newDep" placeholder="Nouveau service" style="flex:1">
+          <button class="btn p" id="addDep"><i class="fa-solid fa-plus"></i></button>
+        </div></div>
+      <div class="box"><h3><i class="fa-solid fa-id-badge"></i>Rôles</h3>
+        <div id="rolList"></div>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <input type="text" id="newRol" placeholder="Nouveau rôle" style="flex:1">
+          <select id="newRolDep" style="min-width:120px"></select>
+          <button class="btn p" id="addRol"><i class="fa-solid fa-plus"></i></button>
+        </div></div>
+    </div>
+    <div class="box" style="margin-top:14px"><h3><i class="fa-solid fa-shield-halved"></i>Sécurité & multi-hôtel</h3>
+      <div style="font-size:13px;color:var(--ink2);line-height:1.6">
+        Toutes les tables RH disposent d'une RLS active. Vous ne voyez et ne modifiez que les données de l'hôtel sélectionné. Les codes de statut du planning (P, CP, RTT, MAL, MAT, CSS, AE, F) sont fixes et partagés.
+      </div></div>
+  </div>`;
+  const drawDeps=()=>{$('depList').innerHTML=deps.map(d=>`<div style="display:flex;align-items:center;padding:7px 0;border-bottom:1px dashed var(--line);font-size:13px">
+    <span style="flex:1">${d.name}</span>
+    <button class="btn d" data-deldep="${d.id}" style="padding:4px 9px;font-size:11px"><i class="fa-solid fa-trash"></i></button></div>`).join('')||'<div style="color:var(--muted);font-size:12px">Aucun service défini.</div>';
+    $('newRolDep').innerHTML='<option value="">— Service —</option>'+deps.map(d=>`<option value="${d.id}">${d.name}</option>`).join('');
+    $('depList').querySelectorAll('[data-deldep]').forEach(b=>b.onclick=async()=>{if(!confirm('Supprimer ce service ?'))return;
+      try{await BE.deleteDepartment(b.dataset.deldep);deps=deps.filter(x=>x.id!==b.dataset.deldep);drawDeps();}catch(e){flash('Erreur : '+e.message);}});};
+  const drawRols=()=>{$('rolList').innerHTML=rols.map(r=>{const dp=deps.find(d=>d.id===r.department_id);
+    return `<div style="display:flex;align-items:center;padding:7px 0;border-bottom:1px dashed var(--line);font-size:13px">
+    <span style="flex:1">${r.name}${dp?` <span class="tag gray">${dp.name}</span>`:''}</span>
+    <button class="btn d" data-delrol="${r.id}" style="padding:4px 9px;font-size:11px"><i class="fa-solid fa-trash"></i></button></div>`;}).join('')||'<div style="color:var(--muted);font-size:12px">Aucun rôle défini.</div>';
+    $('rolList').querySelectorAll('[data-delrol]').forEach(b=>b.onclick=async()=>{if(!confirm('Supprimer ce rôle ?'))return;
+      try{await BE.deleteRole(b.dataset.delrol);rols=rols.filter(x=>x.id!==b.dataset.delrol);drawRols();}catch(e){flash('Erreur : '+e.message);}});};
+  drawDeps(); drawRols();
+  $('addDep').onclick=async()=>{const v=$('newDep').value.trim();if(!v)return;
+    try{const d=await BE.addDepartment(hotelId,v);deps.push(d);$('newDep').value='';drawDeps();flash('Service ajouté');}catch(e){flash('Erreur : '+e.message);}};
+  $('addRol').onclick=async()=>{const v=$('newRol').value.trim();if(!v)return;
+    try{const r=await BE.addRole(hotelId,v,$('newRolDep').value||null);rols.push(r);$('newRol').value='';drawRols();flash('Rôle ajouté');}catch(e){flash('Erreur : '+e.message);}};
+}
+
+/* ===================== STUBS (modules à venir) ===================== */
+function renderStub(title, icon, desc, bullets){
+  $('view').innerHTML=`<div class="page"><div class="stub">
+    <span class="badge-soon"><i class="fa-solid fa-hourglass-half"></i> Module à venir</span>
+    <i class="${icon} big"></i>
+    <h2>${title}</h2>
+    <p>${desc}</p>
+    <ul>${bullets.map(b=>`<li><i class="fa-solid fa-check"></i> ${b}</li>`).join('')}</ul>
+    <div style="margin-top:22px;color:var(--muted);font-size:12px">Cet onglet figure dans la navigation pour montrer la roadmap. La logique métier et les tables associées seront ajoutées dans une prochaine itération.</div>
+  </div></div>`;
+}
+
+/* ===================== POPOVER (édition simple) ===================== */
+const pop=$('pop'); let popK=null;
+function openPop(td){ popK=td.dataset.k;
+  pop.innerHTML='<div class="pg">'+CODES.map(c=>`<div class="pc" data-code="${c[0]}" style="background:${c[2]};color:${c[3]}"><b style="background:${c[2]}"></b>${c[0]}</div>`).join('')
+    +`<div class="pc" data-code="" style="grid-column:span 2;justify-content:center;background:#f4f4f6;color:#5b6172"><i class="fa-solid fa-eraser"></i> Vide / Repos</div></div>`;
+  pop.querySelectorAll('.pc').forEach(el=>el.onclick=()=>{setPending(popK,el.dataset.code);closePop();render();});
+  const r=td.getBoundingClientRect();
+  pop.style.left=Math.min(r.left,innerWidth-232)+'px';
+  pop.style.top=Math.min(r.bottom+6,innerHeight-250)+'px'; pop.classList.add('on');
+}
+function closePop(){pop.classList.remove('on');popK=null;}
+document.addEventListener('mousedown',e=>{if(!pop.contains(e.target)&&!e.target.closest('td.day'))closePop();});
+
+/* ===================== FICHE (drawer) ===================== */
+async function openFiche(eid){
+  const s=staff.find(x=>x.id===eid); if(!s)return;
+  const badge=s.contract_type==='CDI'?'cdi':s.contract_type==='CDD'?'cdd':'ext';
+  const restNames=(s.rest_days||[]).map(d=>['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'][d]).join(', ')||'—';
+  $('drawer').innerHTML=`
+    <div class="dh"><button class="close" data-x><i class="fa-solid fa-xmark"></i></button>
+      <div class="av" style="background:${avColor(s.last_name)}">${initials(s.first_name,s.last_name)}</div>
+      <h2>${s.first_name} ${s.last_name}</h2><div class="role">${s.role||'—'} · ${s.department||'—'} <span class="badge ${badge}">${s.contract_type||'CDI'}</span></div></div>
+    <div class="sec"><h4>Informations</h4>
+      <div class="fr"><span class="k">Statut</span><span class="v" style="${s.active?'color:var(--green)':'color:var(--red)'}">${s.active?'Actif':'Parti'}</span></div>
+      ${!s.active&&s.departure_date?`<div class="fr"><span class="k">Date de départ</span><span class="v">${s.departure_date}</span></div>`:''}
+      <div class="fr"><span class="k">Date d'entrée</span><span class="v">${s.hire_date||'—'}</span></div>
+      <div class="fr"><span class="k">Jours de repos</span><span class="v">${restNames}</span></div>
+      <div class="fr"><span class="k">Téléphone</span><span class="v">${s.phone||'—'}</span></div>
+      <div class="fr"><span class="k">E-mail</span><span class="v">${s.email||'—'}</span></div>
+      <div class="fr"><span class="k">Adresse</span><span class="v">${s.address||'—'}</span></div>
+      <div class="fr"><span class="k">Contact d'urgence</span><span class="v">${s.emergency_contact||'—'}</span></div></div>
+    <div class="sec"><h4>Documents RH</h4><div id="docs">Chargement…</div></div>
+    <div class="sec" style="display:flex;gap:10px"><button class="btn g" data-edit style="flex:1;justify-content:center"><i class="fa-solid fa-pen"></i> Modifier</button>
+      ${s.active
+        ? '<button class="btn d" data-del style="flex:1;justify-content:center"><i class="fa-solid fa-trash"></i> Marquer comme parti</button>'
+        : '<button class="btn p" data-react style="flex:1;justify-content:center"><i class="fa-solid fa-rotate-left"></i> Réactiver</button>'}</div>`;
+  $('dbg').classList.add('on'); $('drawer').classList.add('on');
+  $('drawer').querySelector('[data-x]').onclick=closeFiche;
+  $('drawer').querySelector('[data-edit]').onclick=()=>{closeFiche();openEmpForm(s);};
+  const dl=$('drawer').querySelector('[data-del]');
+  if(dl) dl.onclick=async()=>{
+    const today=new Date().toISOString().slice(0,10);
+    const d=prompt(`Date de départ pour ${s.first_name} ${s.last_name} ? (format AAAA-MM-JJ, par défaut aujourd'hui)`, today);
+    if(d===null) return; // annulé
+    const date=d.trim()||today;
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(date)){flash('Format de date invalide (AAAA-MM-JJ)');return;}
+    await BE.updateEmployee(s.id, {active:false, departure_date:date});
+    s.active=false; s.departure_date=date;
+    closeFiche(); render(); flash('Collaborateur marqué comme parti');};
+  const rc=$('drawer').querySelector('[data-react]');
+  if(rc) rc.onclick=async()=>{
+    await BE.updateEmployee(s.id, {active:true, departure_date:null});
+    s.active=true; s.departure_date=null;
+    closeFiche(); render(); flash('Collaborateur réactivé');};
+  // documents : checklist
+  const list=await BE.listDocuments(hotelId,eid);
+  const map={}; list.forEach(d=>map[d.doc_type]=d.status);
+  $('docs').innerHTML=DOC_TYPES.map(([k,lab])=>{const st=map[k]||'missing';const ok=st==='provided';
+    return `<div class="doc" data-d="${k}"><span class="nm">${lab}</span>${ok?'<span class="docok"><i class="fa-solid fa-circle-check"></i> Fourni</span>':'<span class="docko"><i class="fa-solid fa-circle-exclamation"></i> Manquant</span>'}</div>`;}).join('');
+  $('docs').querySelectorAll('.doc').forEach(d=>d.onclick=async()=>{
+    const k=d.dataset.d, ok=d.querySelector('.docok'); const next=ok?'missing':'provided';
+    await BE.setDocument(hotelId,eid,k,next);
+    d.innerHTML=`<span class="nm">${DOC_TYPES.find(x=>x[0]===k)[1]}</span>${next==='provided'?'<span class="docok"><i class="fa-solid fa-circle-check"></i> Fourni</span>':'<span class="docko"><i class="fa-solid fa-circle-exclamation"></i> Manquant</span>'}`;
+  });
+}
+function closeFiche(){$('dbg').classList.remove('on');$('drawer').classList.remove('on');}
+$('dbg').onclick=()=>{closeFiche();closeModal();};
+
+/* ===================== FORM AJOUT / ÉDITION ===================== */
+function openEmpForm(s){
+  const isNew=!s;
+  const restSel=d=>(s?.rest_days||[]).includes(d)?'checked':'';
+  $('modal').innerHTML=`
+    <div class="mh">${isNew?'Nouveau collaborateur':'Modifier le collaborateur'}</div>
+    <div class="mb">
+      <div class="row2">
+        <div class="fld"><label>Prénom *</label><input type="text" id="ef" value="${s?.first_name||''}"></div>
+        <div class="fld"><label>Nom *</label><input type="text" id="el" value="${s?.last_name||''}"></div>
+      </div>
+      <div class="row2">
+        <div class="fld"><label>Service</label><select id="ed"><option value="">—</option>${deps.map(d=>`<option ${s?.department===d.name?'selected':''}>${d.name}</option>`).join('')}</select></div>
+        <div class="fld"><label>Rôle</label><select id="er"><option value="">—</option>${rols.map(r=>`<option ${s?.role===r.name?'selected':''}>${r.name}</option>`).join('')}</select></div>
+      </div>
+      <div class="row2">
+        <div class="fld"><label>Type de contrat</label><select id="ec">${CONTRACTS.map(c=>`<option ${(s?.contract_type||'CDI')===c?'selected':''}>${c}</option>`).join('')}</select></div>
+        <div class="fld"><label>Date d'entrée</label><input type="date" id="eh" value="${s?.hire_date||''}"></div>
+      </div>
+      <div class="row2">
+        <div class="fld"><label>Statut</label><select id="estatus">
+          <option value="actif" ${s?.active===false?'':'selected'}>Actif</option>
+          <option value="parti" ${s?.active===false?'selected':''}>Parti</option>
+        </select></div>
+        <div class="fld" id="edepWrap" style="${s?.active===false?'':'display:none'}"><label>Date de départ</label><input type="date" id="edep" value="${s?.departure_date||''}"></div>
+      </div>
+      <div class="fld"><label>Jours de repos habituels</label>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--ink2)">
+          ${['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'].map((n,i)=>`<label style="display:inline-flex;gap:5px;align-items:center"><input type="checkbox" data-rest="${i}" ${restSel(i)}> ${n}</label>`).join('')}
+        </div></div>
+      <div class="row2">
+        <div class="fld"><label>Téléphone</label><input type="tel" id="ep" value="${s?.phone||''}"></div>
+        <div class="fld"><label>E-mail</label><input type="email" id="em" value="${s?.email||''}"></div>
+      </div>
+      <div class="fld"><label>Adresse</label><input type="text" id="ea" value="${s?.address||''}"></div>
+      <div class="fld"><label>Contact d'urgence</label><input type="text" id="eu" value="${s?.emergency_contact||''}"></div>
+    </div>
+    <div class="mact">
+      <button class="btn g" id="ecancel">Annuler</button>
+      <button class="btn p" id="esave"><i class="fa-solid fa-check"></i> Enregistrer</button>
+    </div>`;
+  $('modalbg').classList.add('on');
+  $('ecancel').onclick=closeModal;
+  $('estatus').onchange=e=>{$('edepWrap').style.display=e.target.value==='parti'?'':'none';};
+  $('esave').onclick=async()=>{
+    const isLeft=$('estatus').value==='parti';
+    const dep=$('edep').value;
+    if(isLeft && !dep){flash('Date de départ requise pour un collaborateur Parti');return;}
+    const p={
+      first_name:$('ef').value.trim(), last_name:$('el').value.trim(),
+      department:$('ed').value||null, role:$('er').value||null,
+      contract_type:$('ec').value, hire_date:$('eh').value||null,
+      rest_days:[...$('modal').querySelectorAll('input[data-rest]:checked')].map(c=>+c.dataset.rest),
+      phone:$('ep').value.trim()||null, email:$('em').value.trim()||null,
+      address:$('ea').value.trim()||null, emergency_contact:$('eu').value.trim()||null,
+      active:!isLeft, departure_date: isLeft?dep:null,
+    };
+    if(!p.first_name||!p.last_name){flash('Prénom et nom requis');return;}
+    $('esave').disabled=true;
+    try{
+      if(isNew){const created=await BE.addEmployee(hotelId,p); staff.push(created);}
+      else {await BE.updateEmployee(s.id,p); Object.assign(s,p);}
+      closeModal(); render(); flash(isNew?'Collaborateur ajouté':'Collaborateur mis à jour');
+    }catch(e){flash('Erreur : '+e.message);console.error(e);}
+    finally{$('esave').disabled=false;}
+  };
+}
+function closeModal(){$('modalbg').classList.remove('on');}
+$('modalbg').onclick=e=>{if(e.target.id==='modalbg')closeModal();};
+
+/* ===================== IMPORT EXCEL ===================== */
+const _strip=s=>(s==null?'':String(s)).normalize('NFKD').replace(/[\u0300-\u036f]/g,'');
+function normName(raw){return _strip(raw).replace(/\([^)]*\)/g,' ').toUpperCase().replace(/[^A-Z0-9 ]/g,' ').replace(/\s+/g,' ').trim();}
+function _tok(n){return n.split(' ').filter(x=>x.length>=3);}
+function levRatio(a,b){const m=a.length,n=b.length;if(!m||!n)return 0;
+  const d=Array.from({length:m+1},(_,i)=>{const r=Array(n+1).fill(0);r[0]=i;return r;});
+  for(let j=0;j<=n;j++)d[0][j]=j;
+  for(let i=1;i<=m;i++)for(let j=1;j<=n;j++)d[i][j]=Math.min(d[i-1][j]+1,d[i][j-1]+1,d[i-1][j-1]+(a[i-1]===b[j-1]?0:1));
+  return 1-d[m][n]/Math.max(m,n);}
+function sameName(a,b){if(!a||!b)return false;if(a===b)return true;
+  const ta=_tok(a),tb=_tok(b),pa=a.split(' ')[0],pb=b.split(' ')[0];
+  const A=new Set(ta),B=new Set(tb);
+  const subset=ta.length&&tb.length&&([...A].every(x=>B.has(x))||[...B].every(x=>A.has(x)));
+  if(subset&&pa===pb)return true;
+  return levRatio(a,b)>=0.88;}
+function mapCode(raw){
+  if(raw==null)return null;
+  if(typeof raw==='number'){if(raw<=0)return null;return {code:'P',dur:Math.abs(raw-0.5)<1e-9?0.5:1};}
+  let s=String(raw).trim();if(!s||s==='.'||s==='²'||s==='-')return null;
+  if(s==='1/2'||s==='0,5'||s==='0.5')return {code:'P',dur:0.5};
+  if(/^1\s*\+$/.test(s))return {code:'P',dur:1};
+  const num=s.replace(',','.');if(/^\d+(\.\d+)?$/.test(num)){const v=parseFloat(num);if(v<=0)return null;return {code:'P',dur:Math.abs(v-0.5)<1e-9?0.5:1};}
+  const c=_strip(s).replace(/\([^)]*\)/g,'').trim().toUpperCase().replace(/\s+/g,'');
+  const M={P:'P',CP:'CP',AR:'MAL',MAL:'MAL',F:'F',AB:'AE',HV:'P',RTT:'RTT',MAT:'MAT',CSS:'CSS',AE:'AE',GHH:'AE'};
+  if(M[c])return {code:M[c],dur:1};
+  if(['RECEPTION','ETAGE','TECH','DIRE','DIRECTION'].includes(c))return null;
+  return {code:'__IGN__',dur:0};
+}
+let pendingImport=null;
+function showImportMsg(html, withRun){
+  $('modal').innerHTML=`<div class="mh">Import Excel</div><div class="mb">${html}</div>`
+    +(withRun?`<div class="mact"><button class="btn g" id="iclose">Annuler</button><button class="btn p" id="irun"><i class="fa-solid fa-file-import"></i> Importer</button></div>`
+              :`<div class="mact"><div class="spacer"></div><button class="btn p" id="iclose">OK</button></div>`);
+  $('modalbg').classList.add('on');
+  $('iclose').onclick=closeModal;
+  if(withRun) $('irun').onclick=runImport;
+}
+async function handleImport(file){
+  showImportMsg(`<i class="fa-solid fa-spinner fa-spin" style="color:var(--violet)"></i> Analyse du fichier…`, false);
+  let XLSX; try{XLSX=await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm');}
+  catch(e){return showImportMsg('Erreur de chargement du lecteur Excel : '+e.message, false);}
+  const wb=XLSX.read(await file.arrayBuffer(),{type:'array',cellDates:true});
+  const found={}; let ignored=0;
+  wb.SheetNames.forEach(sn=>{
+    const ws=wb.Sheets[sn];const rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:true,blankrows:false});
+    if(rows.length<3)return;
+    const dateRow=rows[1]||[];const dayCols=[];
+    dateRow.forEach((v,i)=>{if(v instanceof Date&&!isNaN(v))dayCols.push([i,v]);});
+    if(!dayCols.length)return;
+    const yr=dayCols[0][1].getFullYear();if(yr!==2025&&yr!==2026)return;
+    let svc='';
+    for(let r=2;r<rows.length;r++){const row=rows[r]||[];const nameRaw=row[1];
+      if(row[0]!=null&&String(row[0]).trim()!=='')svc=String(row[0]).trim();
+      if(nameRaw==null||String(nameRaw).trim()==='')continue;
+      const nm=normName(nameRaw);if(!nm)continue;
+      if(/RATIO|CHAMBRE|FEMME CHAMBRE|RESTE A VENDRE|A FAIRE|EN EXTRA|PROGRAM|TOTAL|OCCUPATION/.test(nm))continue;
+      let key=Object.keys(found).find(k=>sameName(k,nm));
+      if(!key){key=nm;const clean=String(nameRaw).replace(/\([^)]*\)/g,'').replace(/\s+/g,' ').trim();const p=clean.split(' ');
+        found[key]={first:p[0]||clean,last:p.slice(1).join(' '),role:svc,dept:svc,days:{}};}
+      dayCols.forEach(([ci,dt])=>{const m=mapCode(row[ci]);if(!m)return;if(m.code==='__IGN__'){ignored++;return;}
+        const iso=`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+        found[key].days[iso]={code:m.code,dur:m.dur};});
+    }
+  });
+  const collabs=Object.values(found);
+  const nEntries=collabs.reduce((s,c)=>s+Object.keys(c.days).length,0);
+  if(!collabs.length||!nEntries) return showImportMsg('Aucune donnée 2025–2026 détectée dans ce fichier.', false);
+  pendingImport={collabs,nEntries,ignored};
+  const hotelName=hotels.find(h=>h.id===hotelId)?.name||'';
+  showImportMsg(
+    `<div style="font-size:14px;line-height:1.7">
+      <b>${collabs.length}</b> collaborateurs · <b>${nEntries}</b> saisies (2025–2026)
+      ${ignored?`· <b>${ignored}</b> cellules ignorées`:''}
+      <div style="margin-top:10px;color:var(--ink2)">Importer dans : <b>${hotelName}</b></div>
+      <div style="margin-top:8px;color:var(--muted);font-size:12px">Les collaborateurs déjà présents seront réutilisés (correspondance par nom). Les jours existants seront remplacés par les valeurs du fichier.</div>
+    </div>`, true);
+}
+async function runImport(){
+  const {collabs}=pendingImport;
+  showImportMsg(`<i class="fa-solid fa-spinner fa-spin" style="color:var(--violet)"></i> Import en cours…`, false);
+  try{
+    // matcher avec les employés existants (par nom normalisé)
+    const existing=staff.map(s=>({s,nm:normName(`${s.first_name} ${s.last_name}`)}));
+    const toCreate=[],mapEmp={};
+    collabs.forEach(c=>{const nm=normName(`${c.first} ${c.last}`);
+      const hit=existing.find(e=>sameName(e.nm,nm));
+      if(hit) mapEmp[nm]=hit.s.id;
+      else toCreate.push({first_name:c.first,last_name:c.last,role:c.role||null,department:c.dept||null,contract_type:'CDI',active:true});});
+    if(toCreate.length){
+      const created=await BE.addEmployeesBulk(hotelId,toCreate);
+      created.forEach(row=>{mapEmp[normName(`${row.first_name} ${row.last_name}`)]=row.id;});
+    }
+    // construire les upserts staff_planning
+    const ups=[];
+    collabs.forEach(c=>{const eid=mapEmp[normName(`${c.first} ${c.last}`)];if(!eid)return;
+      Object.entries(c.days).forEach(([iso,v])=>{ups.push({hotel_id:hotelId,employee_id:eid,day:iso,status:v.code,duration:v.dur});});});
+    // envoi par paquets (limite Supabase ≈ 1000/req)
+    const CHUNK=500;
+    for(let i=0;i<ups.length;i+=CHUNK){await BE.savePlanning(hotelId,ups.slice(i,i+CHUNK),[]);}
+    // recharger
+    staff=await BE.listEmployees(hotelId); await loadMonth();
+    showImportMsg(`<i class="fa-solid fa-circle-check" style="color:var(--green)"></i> Import terminé — <b>${collabs.length}</b> collaborateurs, <b>${ups.length}</b> entrées.`, false);
+  }catch(e){showImportMsg('Erreur d\'import : '+(e.message||e), false); console.error(e);}
+}
+
+/* ===================== UTILS ===================== */
+let toastT=null;
+function flash(msg){const t=$('toast');t.textContent=msg;t.classList.add('on');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('on'),1800);}
+
+/* ===================== API DE TEST ===================== */
+window.__rh={
+  selSize:()=>selection.size, pendSize:()=>pending.size, rowsCount:()=>visibleRows.length,
+  setEdit:v=>{editMode=v;$('editToggle')?.classList.toggle('on',v);updateHint();},
+  selectRange:(r0,d0,r1,d1)=>{selection.clear();rect({r:r0,d:d0},{r:r1,d:d1}).forEach(k=>selection.add(k));applySelVis();},
+  apply:applyToSelection, save:saveChanges, cancel:cancelChanges,
+  effective, committedCode, render, setSearch:q=>{fSearch=q.toLowerCase();$('search').value=q;render();},
+  setStatus:v=>{fStatus=v;$('fStatus').value=v;render();},
+  setMonth:(y,m)=>{cur=new Date(y,m,1);loadMonth();},
+  mapCode, sameName, normName,
+  BE:()=>BE
+};
+
+/* ===================== BOOT ===================== */
+async function boot(){
+  try{
+    if(TEST_MODE){ BE=makeTestBE(); await start(); return; }
+    BE=await makeRealBE();
+    const {data:{session}}=await BE.sb.auth.getSession();
+    if(!session) renderLogin(); else await start();
+  }catch(e){showFatal(e);}
+}
+boot();
+</script>
+</body>
+</html>
