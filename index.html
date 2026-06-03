@@ -331,6 +331,10 @@ const CODES=[
   ['CSS','Sans solde','#D9D9D9','#3F3F3F','abs'],
   ['AE','Except.','#FFE699','#7F6000','abs'],
   ['F','Férié','#EDEDED','#6b7280','holiday'],
+  ['PAT','Paternité','#E8E0F5','#4A2080','abs'],
+  ['ABS','Abs. injust.','#FFD9D9','#7B0000','abs'],
+  ['REC','Récupération','#D4F0FC','#0C4A6E','abs'],
+  ['FORM','Formation','#FEF3C7','#92400E','abs'],
 ];
 const CMAP={}; CODES.forEach(c=>CMAP[c[0]]={code:c[0],label:c[1],bg:c[2],fg:c[3],cat:c[4]});
 const MONTHS=['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -481,7 +485,54 @@ async function makeRealBE(){
       }catch(e){console.warn('audit failed',e);}
     },
     async listAuditLogs(h, limit){const {data,error}=await sb.from('hr_document_audit_logs').select('*').eq('hotel_id',h).order('created_at',{ascending:false}).limit(limit||50);must(error,'Audit');return data||[];},
-    async signOut(){await sb.auth.signOut();}
+    async signOut(){await sb.auth.signOut();},
+    /* --- ABSENCES --- */
+    async listAbsenceTypes(){
+      const {data,error}=await sb.from('absence_types').select('*').eq('active',true).order('sort_order');
+      must(error,'Types absences'); return data||[];
+    },
+    async listAbsenceRequests(h,filters){
+      let q=sb.from('absence_requests')
+        .select('*, absence_types(label,color_bg,color_fg,planning_code,debit_balance,balance_type)')
+        .eq('hotel_id',h).order('start_date',{ascending:false});
+      if(filters?.status) q=q.eq('status',filters.status);
+      if(filters?.employee_id) q=q.eq('employee_id',filters.employee_id);
+      if(filters?.month){ q=q.gte('start_date',filters.month+'-01').lte('start_date',filters.month+'-31'); }
+      const {data,error}=await q; must(error,'Demandes absences'); return data||[];
+    },
+    async createAbsenceRequest(h,payload){
+      const {data:{user}}=await sb.auth.getUser();
+      let created_by=null;
+      if(user){const {data:u}=await sb.from('users').select('id').eq('auth_id',user.id).maybeSingle();if(u)created_by=u.id;}
+      const {data,error}=await sb.from('absence_requests')
+        .insert({hotel_id:h,...payload,created_by,updated_by:created_by,status:'submitted'})
+        .select('*, absence_types(label,color_bg,color_fg,planning_code,debit_balance,balance_type)').single();
+      must(error,'Création demande'); return data;
+    },
+    async updateAbsenceRequestStatus(id,status,actorUserId,actorEmail,comment,hotelId,employeeId){
+      const {data,error}=await sb.from('absence_requests').update({status,updated_by:actorUserId}).eq('id',id).select('*').single();
+      must(error,'MAJ statut');
+      await sb.from('absence_approval_history').insert({hotel_id:hotelId,request_id:id,employee_id:employeeId,
+        action:status==='approved'?'approve':status==='rejected'?'reject':'cancel',
+        actor_user_id:actorUserId,actor_email:actorEmail,comment:comment||null});
+      return data;
+    },
+    async listAbsenceBalances(h,year){
+      const {data,error}=await sb.from('absence_balances').select('*').eq('hotel_id',h).eq('year',year).order('employee_id');
+      must(error,'Soldes'); return data||[];
+    },
+    async upsertAbsenceBalance(h,employee_id,year,type_code,patch){
+      const {error}=await sb.from('absence_balances').upsert({hotel_id:h,employee_id,year,type_code,...patch},{onConflict:'hotel_id,employee_id,year,type_code'});
+      must(error,'MAJ solde');
+    },
+    async addBalanceMovement(h,employee_id,type_code,year,delta,reason,request_id,created_by){
+      const {error}=await sb.from('absence_balance_movements').insert({hotel_id:h,employee_id,type_code,year,delta,reason,request_id:request_id||null,created_by:created_by||null});
+      must(error,'Mouvement solde');
+    },
+    async listApprovalHistory(h,request_id){
+      const {data,error}=await sb.from('absence_approval_history').select('*').eq('hotel_id',h).eq('request_id',request_id).order('created_at');
+      must(error,'Historique'); return data||[];
+    }
   };
 }
 
@@ -580,6 +631,8 @@ function makeTestBE(){
 /* ===================== ÉTAT ===================== */
 let BE=null;
 let hotels=[],hotelId=null,deps=[],rols=[],staff=[],cur=new Date();
+let absenceTypes=[];
+let absSubTab='requests'; // requests | calendar | balances
 let committed=new Map();        // 'eid|YYYY-MM-DD' -> {status, duration}
 const pending=new Map();        // 'eid|YYYY-MM-DD' -> code  ('' = repos/supprimer)
 let editMode=false, fSearch='', fRole='', fDept='', fStatus='actif';
@@ -643,15 +696,15 @@ const ROLE_LABELS = {
   maintenance:'Maintenance', breakfast:'Petit-déjeuner', femme_de_chambre:'Femme de chambre'
 };
 const PERMS = {
-  direction:        { tabs:'all',                                                                                ficheFull:true,  manageUsers:true  },
-  admin_hotel:      { tabs:'all',                                                                                ficheFull:true,  manageUsers:true  },
-  comptabilite:     { tabs:['dashboard','reporting','personnel','contracts','pointage','tracking','payroll'],    ficheFull:true,  manageUsers:false },
-  revenue_manager:  { tabs:['dashboard','reporting'],                                                            ficheFull:false, manageUsers:false },
-  reception:        { tabs:['dashboard','planning','personnel'],                                                 ficheFull:false, manageUsers:false },
-  gouvernante:      { tabs:['dashboard','planning','personnel'],                                                 ficheFull:false, manageUsers:false },
-  maintenance:      { tabs:['dashboard','planning','personnel'],                                                 ficheFull:false, manageUsers:false },
-  breakfast:        { tabs:['dashboard','planning','personnel'],                                                 ficheFull:false, manageUsers:false },
-  femme_de_chambre: { tabs:['dashboard','planning'],                                                             ficheFull:false, manageUsers:false }
+  direction:        { tabs:'all',                                                                                               ficheFull:true,  manageUsers:true  },
+  admin_hotel:      { tabs:'all',                                                                                               ficheFull:true,  manageUsers:true  },
+  comptabilite:     { tabs:['dashboard','reporting','personnel','contracts','absences','pointage','tracking','payroll'],        ficheFull:true,  manageUsers:false },
+  revenue_manager:  { tabs:['dashboard','reporting'],                                                                           ficheFull:false, manageUsers:false },
+  reception:        { tabs:['dashboard','planning','personnel','absences'],                                                     ficheFull:false, manageUsers:false },
+  gouvernante:      { tabs:['dashboard','planning','personnel','absences'],                                                     ficheFull:false, manageUsers:false },
+  maintenance:      { tabs:['dashboard','planning','personnel','absences'],                                                     ficheFull:false, manageUsers:false },
+  breakfast:        { tabs:['dashboard','planning','personnel','absences'],                                                     ficheFull:false, manageUsers:false },
+  femme_de_chambre: { tabs:['dashboard','planning'],                                                                            ficheFull:false, manageUsers:false }
 };
 function canSee(tab){if(!myRole)return false;const p=PERMS[myRole];if(!p)return false;if(p.tabs==='all')return true;return p.tabs.includes(tab);}
 function canFicheFull(){return PERMS[myRole]?.ficheFull===true;}
@@ -669,6 +722,7 @@ const TABS=[
     ['documents','Documents', 'fa-regular fa-folder-open'],
   ]],
   ['Temps',[
+    ['absences','Absences',       'fa-regular fa-calendar-xmark'],
     ['pointage','Pointage',       'fa-regular fa-clock'],
     ['tracking','Suivi du temps', 'fa-solid fa-stopwatch', true],
     ['payroll', 'Paie',           'fa-solid fa-coins',     true],
@@ -733,6 +787,7 @@ function goView(v){
   const r={dashboard:renderDashboard, planning:renderPlanning, reporting:renderReporting,
            personnel:renderPersonnel, contracts:renderContracts, documents:renderDocuments,
            config:renderConfig,
+           absences:renderAbsences,
            pointage:renderPointage,
            tracking:()=>renderStub('Suivi du temps','fa-solid fa-stopwatch','Consolidation des heures réelles travaillées par collaborateur, par semaine et par mois.',
              ['Calcul automatique des heures réalisées vs planifiées','Détection des écarts','Validation et signature des relevés','Export Excel / PDF']),
@@ -803,7 +858,12 @@ function fillFilters(){
 async function loadHotel(){
   if(!BE.isTest) await BE.setActiveHotel(hotelId);
   await loadMyRole();
-  [deps, rols, staff] = await Promise.all([BE.listDepartments(hotelId), BE.listRoles(hotelId), BE.listEmployees(hotelId)]);
+  [deps, rols, staff, absenceTypes] = await Promise.all([
+    BE.listDepartments(hotelId),
+    BE.listRoles(hotelId),
+    BE.listEmployees(hotelId),
+    BE.listAbsenceTypes()
+  ]);
   fillFilters();
   await loadMonth();
 }
