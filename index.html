@@ -565,6 +565,8 @@ function renderPlanning(){
         <button class="btn g ${editMode?'on':''}" id="editToggle"><i class="fa-solid fa-pen-to-square"></i> Édition en masse</button>
         <button class="btn g" id="importXlsx"><i class="fa-solid fa-file-import"></i> Importer Excel</button>
         <input type="file" id="xlsxFile" accept=".xlsx,.xls" style="display:none">
+        <button class="btn g" id="exportXlsx" title="Exporter le planning au format Excel"><i class="fa-solid fa-file-excel"></i> Excel</button>
+        <button class="btn g" id="exportPdf" title="Exporter le planning en PDF (paysage, pleine page)"><i class="fa-regular fa-file-pdf"></i> PDF</button>
         <button class="btn p" id="addEmp"><i class="fa-solid fa-user-plus"></i> Collaborateur</button>
       </div>
       <div class="legend" id="legend"></div>
@@ -583,6 +585,8 @@ function renderPlanning(){
   $('addEmp').onclick=()=>openEmpForm(null);
   $('importXlsx').onclick=()=>$('xlsxFile').click();
   $('xlsxFile').onchange=e=>{const f=e.target.files[0]; if(f) handleImport(f); e.target.value='';};
+  $('exportXlsx').onclick=exportExcel;
+  $('exportPdf').onclick=exportPDF;
   $('grid').addEventListener('mousedown',gridMouseDown);
   $('grid').addEventListener('mouseover',gridMouseOver);
   fillFilters(); updateHint(); render();
@@ -1111,6 +1115,148 @@ function openEmpForm(s){
 function closeModal(){$('modalbg').classList.remove('on');}
 $('modalbg').onclick=e=>{if(e.target.id==='modalbg')closeModal();};
 
+/* ===================== EXPORT EXCEL ===================== */
+async function exportExcel(){
+  try{
+    const XLSX=await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm');
+    const y=cur.getFullYear(),m=cur.getMonth(),nd=dim(y,m);
+    const hotelName=hotels.find(h=>h.id===hotelId)?.name||'';
+    const safe=s=>(s||'').replace(/[^\w\-]+/g,'_');
+
+    // En-tête : Collaborateur, Rôle, Service, jours, puis totaux
+    const header=['Collaborateur','Rôle','Service'];
+    for(let d=1;d<=nd;d++){const wd=new Date(y,m,d).getDay();header.push(`${d} ${WD[wd]}`);}
+    header.push('Travaillés','CP','Absences','Repos');
+
+    const rows=[header];
+    visibleRows.forEach(s=>{
+      const row=[`${s.first_name} ${s.last_name}`,s.role||'',s.department||''];
+      let trav=0,cp=0,abs=0,rep=0;
+      for(let d=1;d<=nd;d++){
+        const k=s.id+'|'+iso(y,m,d);const code=effective(k);row.push(code||'');
+        const c=code?CMAP[code]:null;
+        if(c){if(c.cat==='worked')trav+=1;else if(c.cat==='paid')cp+=1;else if(c.cat==='abs')abs+=1;} else rep+=1;
+      }
+      row.push(trav,cp,abs,rep);
+      rows.push(row);
+    });
+
+    // 3 lignes de totaux par jour
+    const totaux=[['Présents / jour',k=>CMAP[effective(k)]?.cat==='worked'],
+                  ['Absents / jour', k=>{const c=CMAP[effective(k)];return c&&c.cat!=='worked'&&c.cat!=='holiday';}],
+                  ['CP / jour',      k=>CMAP[effective(k)]?.cat==='paid']];
+    totaux.forEach(([lab,test])=>{const row=[lab,'',''];
+      for(let d=1;d<=nd;d++){let n=0;visibleRows.forEach(s=>{if(test(s.id+'|'+iso(y,m,d)))n+=1;});row.push(n||'');}
+      row.push('','','','');rows.push(row);});
+
+    const ws=XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols']=[{wch:24},{wch:18},{wch:14}].concat(Array(nd).fill({wch:6}),[{wch:11},{wch:6},{wch:10},{wch:7}]);
+    ws['!freeze']={xSplit:3,ySplit:1}; // figer la première ligne et les 3 colonnes de gauche (Excel/Calc)
+
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,ws,`${MONTHS[m]} ${y}`.slice(0,31));
+    XLSX.writeFile(wb,`planning_${safe(hotelName)}_${MONTHS[m]}_${y}.xlsx`);
+    flash('Excel exporté');
+  }catch(e){flash('Erreur export Excel : '+(e.message||e));console.error(e);}
+}
+
+/* ===================== EXPORT PDF (paysage, pleine page) ===================== */
+function loadScript(src){return new Promise((res,rej)=>{
+  if(document.querySelector(`script[data-src="${src}"]`)) return res();
+  const s=document.createElement('script');s.src=src;s.dataset.src=src;
+  s.onload=()=>res();s.onerror=()=>rej(new Error('Échec de chargement : '+src));
+  document.head.appendChild(s);
+});}
+
+async function exportPDF(){
+  try{
+    // Chargement UMD : plus fiable que +esm pour ce duo jspdf + jspdf-autotable
+    if(!(window.jspdf && window.jspdf.jsPDF)){
+      await loadScript('https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js');
+    }
+    const { jsPDF } = window.jspdf;
+    if(!jsPDF.API.autoTable){
+      await loadScript('https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js');
+    }
+
+    const doc=new jsPDF({orientation:'landscape',unit:'mm',format:'a4'});
+    const pageW=doc.internal.pageSize.getWidth();   // 297 mm
+    const pageH=doc.internal.pageSize.getHeight();  // 210 mm
+    const margin=5;
+
+    const y=cur.getFullYear(),m=cur.getMonth(),nd=dim(y,m);
+    const hotelName=hotels.find(h=>h.id===hotelId)?.name||'';
+    const safe=s=>(s||'').replace(/[^\w\-]+/g,'_');
+
+    // Titre
+    doc.setFontSize(11); doc.setFont(undefined,'bold');
+    doc.text(`Planning · ${hotelName} · ${MONTHS[m]} ${y}`, margin, 7);
+    doc.setFontSize(8); doc.setFont(undefined,'normal');
+    doc.text(`${visibleRows.length} collaborateur(s) · exporté le ${new Date().toLocaleString('fr-FR')}`, margin, 11);
+
+    const head=[['Collaborateur','Rôle']];
+    for(let d=1;d<=nd;d++){const wd=new Date(y,m,d).getDay();head[0].push(`${d}\n${WD[wd]}`);}
+    head[0].push('Trav.','CP','Abs.');
+
+    const body=visibleRows.map(s=>{
+      const r=[`${s.first_name} ${s.last_name}`,s.role||''];
+      let trav=0,cp=0,abs=0;
+      for(let d=1;d<=nd;d++){const k=s.id+'|'+iso(y,m,d);const code=effective(k);r.push(code||'');
+        const c=code?CMAP[code]:null;
+        if(c){if(c.cat==='worked')trav+=1;else if(c.cat==='paid')cp+=1;else if(c.cat==='abs')abs+=1;}}
+      r.push(trav||'',cp||'',abs||'');
+      return r;
+    });
+
+    // Hauteur de cellule calculée pour remplir la page
+    const titleZone=14;
+    const avail=pageH-margin-titleZone;
+    const targetRows=Math.max(visibleRows.length+1, 24);
+    const minH=Math.min(Math.max(avail/targetRows, 4.5), 12);
+
+    const hex2rgb=h=>{const v=h.replace('#','');return [parseInt(v.substr(0,2),16),parseInt(v.substr(2,2),16),parseInt(v.substr(4,2),16)];};
+    const we=(d)=>{const wd=new Date(y,m,d).getDay();return wd===0||wd===6;};
+
+    doc.autoTable({
+      head, body,
+      startY: titleZone,
+      margin: {left:margin, right:margin, top:titleZone, bottom:margin},
+      tableWidth: pageW - 2*margin,
+      styles: {fontSize:6.5, cellPadding:0.8, lineWidth:0.1, lineColor:[220,220,225], halign:'center', valign:'middle', minCellHeight:minH, overflow:'linebreak'},
+      headStyles: {fillColor:[139,92,246], textColor:255, fontStyle:'bold', fontSize:6.5, minCellHeight:minH*0.9},
+      columnStyles: {
+        0: {halign:'left', cellWidth:30, fontStyle:'bold', fontSize:7},
+        1: {halign:'left', cellWidth:22, fontSize:6.5}
+      },
+      didParseCell: (data)=>{
+        if(data.section==='body' && data.column.index>=2 && data.column.index<2+nd){
+          const dayNum=data.column.index-1;
+          const code=data.cell.raw;
+          const c=code?CMAP[code]:null;
+          if(c){data.cell.styles.fillColor=hex2rgb(c.bg);data.cell.styles.textColor=hex2rgb(c.fg);data.cell.styles.fontStyle='bold';}
+          else if(we(dayNum)) data.cell.styles.fillColor=[247,249,253];
+        }
+        if(data.section==='head' && data.column.index>=2 && data.column.index<2+nd){
+          const dayNum=data.column.index-1;
+          if(we(dayNum)) data.cell.styles.fillColor=[100,80,200];
+        }
+        if(data.section==='body' && data.column.index>=2+nd){
+          data.cell.styles.fillColor=[252,252,255];
+          data.cell.styles.fontStyle='bold';
+        }
+      },
+      didDrawPage: (data)=>{
+        const n=doc.internal.getNumberOfPages();
+        doc.setFontSize(7); doc.setTextColor(140);
+        doc.text(`Page ${data.pageNumber}/${n}`, pageW-margin-12, pageH-2);
+      }
+    });
+
+    doc.save(`planning_${safe(hotelName)}_${MONTHS[m]}_${y}.pdf`);
+    flash('PDF exporté');
+  }catch(e){flash('Erreur export PDF : '+(e.message||e));console.error(e);}
+}
+
 /* ===================== IMPORT EXCEL ===================== */
 const _strip=s=>(s==null?'':String(s)).normalize('NFKD').replace(/[\u0300-\u036f]/g,'');
 function normName(raw){return _strip(raw).replace(/\([^)]*\)/g,' ').toUpperCase().replace(/[^A-Z0-9 ]/g,' ').replace(/\s+/g,' ').trim();}
@@ -1230,6 +1376,7 @@ window.__rh={
   setStatus:v=>{fStatus=v;$('fStatus').value=v;render();},
   setMonth:(y,m)=>{cur=new Date(y,m,1);loadMonth();},
   mapCode, sameName, normName,
+  exportExcel, exportPDF,
   BE:()=>BE
 };
 
