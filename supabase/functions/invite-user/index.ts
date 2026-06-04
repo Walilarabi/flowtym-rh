@@ -91,7 +91,7 @@ Deno.serve(async (req) => {
       hotel_id, actor_user_id: cu.id, actor_email: user.email,
       action:'create_user_access', entity_type:'user', entity_id: userId,
       details:{email, role, already_existed: alreadyExisted},
-    }).maybeSingle().catch(()=>{});
+    }).catch(()=>{});
 
     return json({ success:true, user_id: userId, already_existed: alreadyExisted });
 
