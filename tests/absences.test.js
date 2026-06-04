@@ -56,16 +56,18 @@ describe('Workflow complet demande d\'absence', () => {
   beforeEach(() => { be = makeTestBE(); });
 
   test('créer → approuver → balance débitée', async () => {
-    await be.upsertAbsenceBalance(H, E1, 2025, 'CP', 25, 0);
+    // Signature réelle : upsertAbsenceBalance(h, employee_id, year, type_code, patch)
+    await be.upsertAbsenceBalance(H, E1, 2025, 'CP', { acquired: 25, taken: 0 });
     const r = await be.createAbsenceRequest(H, { employee_id: E1, type_code: 'CP', start_date: '2025-06-01', end_date: '2025-06-05', days_count: 5 });
     expect(r.status).toBe('submitted');
 
     await be.updateAbsenceRequestStatus(r.id, 'approved', 'u-admin', 'admin@hotel.fr', null);
-    await be.upsertAbsenceBalance(H, E1, 2025, 'CP', 25, 5);
-    await be.addBalanceMovement(H, E1, null, r.id, 'CP', -5, 'Approbation CP', 'admin@hotel.fr');
+    await be.upsertAbsenceBalance(H, E1, 2025, 'CP', { acquired: 25, taken: 5 });
+    // Signature réelle : addBalanceMovement(h, employee_id, type_code, year, delta, reason, request_id, created_by)
+    await be.addBalanceMovement(H, E1, 'CP', 2025, -5, 'Approbation CP', r.id, null);
 
     const bal = await be.listAbsenceBalances(H, 2025);
-    const cp = bal.find(b => b.balance_type === 'CP');
+    const cp = bal.find(b => b.type_code === 'CP');
     expect(cp.taken).toBe(5);
     expect(cp.remaining).toBe(20);
   });

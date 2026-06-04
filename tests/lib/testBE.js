@@ -86,15 +86,21 @@ function makeTestBE() {
     async listAbsenceBalances(h, year) {
       return absenceBalances.filter(b => b.hotel_id === h && b.year === year);
     },
-    async upsertAbsenceBalance(h, employee_id, year, balance_type, acquired, taken) {
-      let b = absenceBalances.find(x => x.hotel_id === h && x.employee_id === employee_id && x.year === year && x.balance_type === balance_type);
-      if (b) { b.acquired = acquired; b.taken = taken; }
-      else { b = { id: 'bal-' + Date.now(), hotel_id: h, employee_id, year, balance_type, acquired, taken, remaining: acquired - taken }; absenceBalances.push(b); }
-      b.remaining = b.acquired - b.taken;
+    // Signature réelle : upsertAbsenceBalance(h, employee_id, year, type_code, patch)
+    // patch = { acquired, taken } ou sous-ensemble
+    async upsertAbsenceBalance(h, employee_id, year, type_code, patch) {
+      let b = absenceBalances.find(x => x.hotel_id === h && x.employee_id === employee_id && x.year === year && x.type_code === type_code);
+      if (b) { Object.assign(b, patch); }
+      else {
+        b = { id: 'bal-' + Date.now(), hotel_id: h, employee_id, year, type_code, acquired: 0, taken: 0, ...patch };
+        absenceBalances.push(b);
+      }
+      b.remaining = (b.acquired || 0) - (b.taken || 0);
       return b;
     },
-    async addBalanceMovement(h, employee_id, balance_id, request_id, balance_type, delta, reason, actor_email) {
-      const mv = { id: 'mv-' + Date.now(), hotel_id: h, employee_id, balance_id, request_id, balance_type, delta, reason, actor_email, created_at: new Date().toISOString() };
+    // Signature réelle : addBalanceMovement(h, employee_id, type_code, year, delta, reason, request_id, created_by)
+    async addBalanceMovement(h, employee_id, type_code, year, delta, reason, request_id, created_by) {
+      const mv = { id: 'mv-' + Date.now(), hotel_id: h, employee_id, type_code, year, delta, reason, request_id: request_id || null, created_by: created_by || null, created_at: new Date().toISOString() };
       balanceMovements.push(mv);
       return mv;
     },

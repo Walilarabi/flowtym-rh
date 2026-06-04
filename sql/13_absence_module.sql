@@ -105,22 +105,24 @@ CREATE POLICY "absence_balances_hotel" ON public.absence_balances
   USING (hotel_id IN (SELECT public.pl_my_hotels()));
 
 -- ── 5. Mouvements de solde ───────────────────────────────────────────────────
+-- Nom réel de la table dans la base : absence_balance_movements
+-- Colonnes calées sur le schéma existant (type_code, year au lieu de balance_type)
 
-CREATE TABLE IF NOT EXISTS public.balance_movements (
+CREATE TABLE IF NOT EXISTS public.absence_balance_movements (
   id           uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
   hotel_id     uuid        NOT NULL REFERENCES public.hotels(id) ON DELETE CASCADE,
   employee_id  uuid        NOT NULL REFERENCES public.employees(id) ON DELETE CASCADE,
-  balance_id   uuid        REFERENCES public.absence_balances(id),
-  request_id   uuid        REFERENCES public.absence_requests(id),
-  balance_type text        NOT NULL,
-  delta        numeric(6,2) NOT NULL,   -- positif = crédit, négatif = débit
+  type_code    text        NOT NULL,   -- code du type d'absence (CP, RTT…)
+  year         integer     NOT NULL,
+  delta        numeric(6,2) NOT NULL,  -- positif = crédit, négatif = débit
   reason       text,
-  actor_email  text,
+  request_id   uuid        REFERENCES public.absence_requests(id),
+  created_by   uuid        REFERENCES public.users(id),
   created_at   timestamptz NOT NULL DEFAULT now()
 );
 
-ALTER TABLE public.balance_movements ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.absence_balance_movements ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS "balance_movements_hotel" ON public.balance_movements;
-CREATE POLICY "balance_movements_hotel" ON public.balance_movements
+DROP POLICY IF EXISTS "absence_balance_movements_hotel" ON public.absence_balance_movements;
+CREATE POLICY "absence_balance_movements_hotel" ON public.absence_balance_movements
   USING (hotel_id IN (SELECT public.pl_my_hotels()));
