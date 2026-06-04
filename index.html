@@ -105,6 +105,15 @@ button,select,input,textarea{font-family:inherit}
 .tbl .ok{color:var(--green)}.tbl .ko{color:var(--red)}
 .tbl button{border:0;background:transparent;cursor:pointer;color:var(--violet);padding:3px 6px;border-radius:6px}
 .tbl button:hover{background:var(--violet-bg)}
+/* Tableau suivi temps & paie */
+.rtable{width:100%;border-collapse:collapse;background:#fff}
+.rtable thead tr{border-bottom:2px solid var(--line)}
+.rtable th{padding:12px 16px;font-size:11.5px;font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:.04em;background:#fafafe;white-space:nowrap}
+.rtable td{padding:13px 16px;font-size:13px;border-bottom:1px solid #f1f0f8;vertical-align:middle}
+.rtable tbody tr:last-child td{border-bottom:0}
+.rtable tbody tr:hover td{background:#fafaff}
+.rtable tbody tr:nth-child(even) td{background:#fdfcff}
+.rtable tbody tr:nth-child(even):hover td{background:#f6f4fd}
 
 /* matrice documents */
 .docmx{width:100%;border-collapse:separate;border-spacing:0;background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden;font-size:12px}
@@ -363,6 +372,7 @@ tr.dept-sep td{pointer-events:none}
 </head>
 <body>
 <div id="root"></div>
+<input type="file" id="xlsxFile" accept=".xlsx,.xls" style="display:none">
 
 <div class="actionbar" id="actionbar"></div>
 <div class="savebar" id="savebar">
@@ -1150,9 +1160,7 @@ function renderPlanning(){
           <option value="tous"  ${fStatus==='tous' ?'selected':''}>Tous</option>
         </select>
         <div class="spacer" style="flex:1"></div>
-        <button class="btn g ${editMode?'on':''}" id="editToggle"><i class="fa-solid fa-pen-to-square"></i> Édition en masse</button>
-        <button class="btn g" id="importXlsx"><i class="fa-solid fa-file-import"></i> Importer Excel</button>
-        <input type="file" id="xlsxFile" accept=".xlsx,.xls" style="display:none">
+        <button class="btn g ${editMode?'on':''}" id="editToggle"><i class="fa-solid fa-pen-to-square"></i> Édition</button>
         <button class="btn g" id="exportXlsx" title="Exporter le planning au format Excel"><i class="fa-solid fa-file-excel"></i> Excel</button>
         <button class="btn g" id="exportPdf" title="Exporter le planning en PDF (paysage, pleine page)"><i class="fa-regular fa-file-pdf"></i> PDF</button>
         <button class="btn p" id="addEmp"><i class="fa-solid fa-user-plus"></i> Collaborateur</button>
@@ -1171,8 +1179,6 @@ function renderPlanning(){
   $('fStatus').onchange=e=>{fStatus=e.target.value;renderCurrentPlanView();};
   $('editToggle').onclick=()=>{editMode=!editMode;$('editToggle').classList.toggle('on',editMode);clearSelection();updateHint();};
   $('addEmp').onclick=()=>openEmpForm(null);
-  $('importXlsx').onclick=()=>$('xlsxFile').click();
-  $('xlsxFile').onchange=e=>{const f=e.target.files[0]; if(f) handleImport(f); e.target.value='';};
   $('exportXlsx').onclick=exportExcel;
   $('exportPdf').onclick=exportPDF;
   $('grid').addEventListener('mousedown',gridMouseDown);
@@ -2568,6 +2574,11 @@ async function renderConfig(){
   $('view').innerHTML=`<div class="page">
     <div class="phead"><div><h1>Paramètres</h1><div class="sub">Référentiels et accès · ${hotels.find(h=>h.id===hotelId)?.name||''}</div></div></div>
 
+    <div class="box" style="margin-bottom:14px"><h3><i class="fa-solid fa-file-import"></i>Import planning Excel</h3>
+      <div style="font-size:13px;color:var(--ink2);margin-bottom:14px;line-height:1.6">Importez un fichier <b>.xlsx / .xls</b> exporté depuis Flowtym pour pré-remplir le planning du mois courant. Les cellules déjà saisies ne sont pas écrasées.</div>
+      <button class="btn g" id="importXlsxSettings"><i class="fa-solid fa-file-import"></i> Importer un fichier Excel</button>
+    </div>
+
     <div class="box" style="margin-bottom:14px"><h3><i class="fa-solid fa-user-shield"></i>Accès et permissions</h3>
       <div id="accBox">Chargement…</div>
       <div style="margin-top:18px">
@@ -2635,6 +2646,9 @@ async function renderConfig(){
     }
   };
   drawPermMatrix();
+
+  // === Import Excel (depuis Paramètres) ===
+  $('importXlsxSettings').onclick=()=>$('xlsxFile').click();
 
   // === Grille couleurs statuts ===
   const DEFAULT_COLORS={};
@@ -4502,7 +4516,7 @@ async function drawPayroll(){
         {icon:'fa-plus-circle',label:'Heures supplémentaires',val:Math.round(totSup*100)/100+'h'},
       ].map(k=>`<div class="kc"><div class="kv">${k.val}</div><div class="kl"><i class="fa-solid ${k.icon}"></i> ${k.label}</div></div>`).join('');
     }
-    el.innerHTML=`<table class="rtable" style="font-size:12px">
+    el.innerHTML=`<table class="rtable">
       <thead><tr>
         <th>Collaborateur</th><th>Service</th><th>Contrat</th>
         <th title="Présent" style="text-align:center">P</th>
@@ -5218,6 +5232,8 @@ window.__rh={
 
 /* ===================== BOOT ===================== */
 async function boot(){
+  // Brancher le file input Excel une seule fois (présent dans le DOM global)
+  $('xlsxFile').onchange=e=>{const f=e.target.files[0]; if(f) handleImport(f); e.target.value='';};
   try{
     if(TEST_MODE){ BE=makeTestBE(); await start(); return; }
     BE=await makeRealBE();
