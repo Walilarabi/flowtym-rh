@@ -4217,9 +4217,15 @@ function openInviteForm(onSuccess){
     if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){$('invErr').textContent='Format e-mail invalide.';return;}
     $('invSend').disabled=true; $('invSend').innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Envoi…';
     try{
-      await BE.inviteUser(hotelId,email,full_name,role);
+      const res=await BE.inviteUser(hotelId,email,full_name,role);
       closeModal();
-      flash(`Invitation envoyée à ${email}`);
+      if(res?.already_existed){
+        flash(res?.email_sent
+          ? `Accès accordé à ${email} — lien de connexion envoyé (vérifier spams)`
+          : `Accès accordé à ${email} — compte existant, demandez-lui de se connecter sur rh.flowtym.com`);
+      } else {
+        flash(`Invitation envoyée à ${email} — vérifier les spams si non reçue dans 5 min`);
+      }
       if(onSuccess) onSuccess();
     }catch(e){
       $('invErr').textContent='Erreur : '+(e.message||e);
