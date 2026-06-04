@@ -239,13 +239,18 @@ tr.totals .stickL{background:#f6f4fd}
 tr.totals td.lab{text-align:right;padding-right:10px;color:var(--violet-d)}
 
 /* action bar + save bar */
-.actionbar{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(40px);background:#15233b;color:#fff;border-radius:14px;padding:9px 12px;display:none;align-items:center;gap:8px;box-shadow:0 16px 40px rgba(0,0,0,.3);z-index:50;opacity:0;transition:.2s}
+.actionbar{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(40px);background:#15233b;color:#fff;border-radius:14px;padding:9px 12px;display:none;flex-direction:column;gap:6px;box-shadow:0 16px 40px rgba(0,0,0,.3);z-index:50;opacity:0;transition:.2s;max-width:90vw}
 .actionbar.on{display:flex;opacity:1;transform:translateX(-50%) translateY(0)}
+.actionbar .top-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .actionbar .cnt{font-size:12px;font-weight:700;background:rgba(255,255,255,.14);padding:5px 10px;border-radius:8px}
-.actionbar .codes{display:flex;gap:5px}
+.actionbar .codes{display:flex;gap:5px;flex-wrap:wrap;align-items:center}
+.actionbar .shifts-row{border-top:1px solid rgba(255,255,255,.12);padding-top:5px;margin-top:2px}
+.actionbar .shift-lbl{font-size:11px;color:#94a3b8;font-weight:600;white-space:nowrap}
 .actionbar .cbtn{border:0;border-radius:8px;padding:6px 9px;font-weight:700;font-size:11.5px;cursor:pointer}
+.actionbar .sbtn{font-size:10.5px;padding:4px 7px;border:1px solid rgba(255,255,255,.2)}
 .actionbar .clr{background:rgba(255,255,255,.14);color:#fff}
 .actionbar .x{background:transparent;border:0;color:#cbd5e1;cursor:pointer;font-size:14px;padding:4px 6px}
+.sbadge{display:inline-block;margin-left:2px;font-size:8.5px;font-weight:700;background:rgba(0,0,0,.18);border-radius:4px;padding:0 3px;vertical-align:middle;line-height:14px}
 .savebar{position:fixed;right:22px;bottom:22px;background:#fff;border:1px solid var(--line);border-radius:14px;padding:10px 14px;display:none;align-items:center;gap:12px;box-shadow:var(--shadow-h);z-index:49}
 .savebar.on{display:flex}
 .savebar .info{font-size:13px;font-weight:600}.savebar .info b{color:var(--violet-d)}
@@ -408,6 +413,15 @@ const CODES=[
   ['ABS','Abs. injust.',  '#FFD9D9','#7B0000','abs'],
   ['REC','Récupération',  '#D4F0FC','#0C4A6E','abs'],
   ['FORM','Formation',    '#FEF3C7','#92400E','abs'],
+];
+const SHIFT_CODES=[
+  ['M',  'Matin',          '#DBEAFE','#1e40af'],
+  ['S',  'Soir',           '#EDE9FE','#5b21b6'],
+  ['N',  'Nuit',           '#1e293b','#e2e8f0'],
+  ['J',  'Journée',        '#D1FAE5','#065f46'],
+  ['PD', 'Petit-déj.',     '#FEF9C3','#854d0e'],
+  ['C',  'Coupure',        '#FFE4E6','#9f1239'],
+  ['custom','Sur mesure',  '#F3F4F6','#374151'],
 ];
 // Apply localStorage color overrides (called after hotel selection)
 function applyCustomColors(hid){
@@ -940,6 +954,7 @@ let absenceTypes=[];
 let absSubTab='requests'; // requests | calendar | balances
 let committed=new Map();        // 'eid|YYYY-MM-DD' -> {status, duration}
 const pending=new Map();        // 'eid|YYYY-MM-DD' -> code  ('' = repos/supprimer)
+const pendingShifts=new Map(); // 'eid|YYYY-MM-DD' -> shift_label ('' = effacer shift)
 let editMode=false, fSearch='', fRole='', fDept='', fStatus='actif';
 const selection=new Set();
 let dragging=false, anchor=null, baseSel=new Set(), lastAnchor=null;
@@ -1513,9 +1528,11 @@ function render(){
     for(let d=1;d<=nd;d++){const k=s.id+'|'+iso(y,m,d);const code=effective(k);const c=code?CMAP[code]:null;
       const wd=new Date(y,m,d).getDay(),we=wd===0||wd===6;
       const tod=isThisMonth&&d===toDay;
-      const cls='day'+(we?' we':'')+(tod?' tod':'')+(selection.has(k)?' sel':'')+(pending.has(k)&&pending.get(k)!==committedCode(k)?' pend':'');
+      const cls='day'+(we?' we':'')+(tod?' tod':'')+(selection.has(k)?' sel':'')+(pending.has(k)&&pending.get(k)!==committedCode(k)?' pend':'')+(pendingShifts.has(k)?' pend':'');
       const st=c?`background:${c.bg};color:${c.fg}`:'';
-      h+=`<td class="${cls}" data-k="${k}" data-r="${ri}" data-d="${d}" style="${st}">${code||''}</td>`;
+      const effShift=pendingShifts.has(k)?pendingShifts.get(k):(planningRows.find(r=>r.employee_id===s.id&&r.day===iso(y,m,d))?.shift_label||'');
+      const shBadge=effShift?`<span class="sbadge">${effShift}</span>`:'';
+      h+=`<td class="${cls}" data-k="${k}" data-r="${ri}" data-d="${d}" style="${st}">${code||''}${shBadge}</td>`;
       if(c){if(c.cat==='worked')trav++;else if(c.cat==='paid')cp++;else if(c.cat==='abs')abs++;} else rep++;}
     h+=`<td class="sum">${trav}</td><td class="sum">${cp}</td><td class="sum">${abs}</td><td class="sum">${rep}</td></tr>`;
   });
@@ -1646,23 +1663,39 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'){clearSelection();cl
 function showActionBar(){
   const bar=$('actionbar');
   if(editMode&&selection.size>0){
-    bar.innerHTML=`<span class="cnt">${selection.size} sélectionnée(s)</span><div class="codes">`
+    bar.innerHTML=`<div class="top-row">`
+      +`<span class="cnt">${selection.size} sélectionnée(s)</span>`
+      +`<div class="codes">`
       +CODES.map(c=>`<button class="cbtn" data-code="${c[0]}" style="background:${c[2]};color:${c[3]}">${c[0]}</button>`).join('')
-      +`</div><button class="cbtn clr" data-code=""><i class="fa-solid fa-eraser"></i> Repos</button>`
-      +`<button class="x" id="abx"><i class="fa-solid fa-xmark"></i></button>`;
+      +`<button class="cbtn clr" data-code=""><i class="fa-solid fa-eraser"></i> Repos</button>`
+      +`</div>`
+      +`<button class="x" id="abx"><i class="fa-solid fa-xmark"></i></button>`
+      +`</div>`
+      +`<div class="codes shifts-row">`
+      +`<span class="shift-lbl">Shift :</span>`
+      +SHIFT_CODES.map(s=>`<button class="cbtn sbtn" data-shift="${s[0]}" style="background:${s[2]};color:${s[3]}">${s[0]}</button>`).join('')
+      +`<button class="cbtn sbtn clr" data-shift=""><i class="fa-solid fa-eraser"></i> effacer</button>`
+      +`</div>`;
     bar.classList.add('on');
-    bar.querySelectorAll('.cbtn').forEach(b=>b.onclick=()=>applyToSelection(b.dataset.code));
+    bar.querySelectorAll('.cbtn:not(.sbtn)').forEach(b=>b.onclick=()=>applyToSelection(b.dataset.code));
+    bar.querySelectorAll('.sbtn').forEach(b=>b.onclick=()=>applyShiftToSelection(b.dataset.shift));
     $('abx').onclick=clearSelection;
   } else bar.classList.remove('on');
 }
 function applyToSelection(code){
-  selection.forEach(k=>setPending(k,code));
-  render(); flash(`${selection.size} cellule(s) → ${code||'Repos'}`);
+  selection.forEach(k=>{ setPending(k,code); if(code===''||CMAP[code]?.cat!=='worked') pendingShifts.delete(k); });
+  renderCurrentPlanView(); flash(`${selection.size} cellule(s) → ${code||'Repos'}`);
+}
+function applyShiftToSelection(shift){
+  const eligible=[...selection].filter(k=>{ const c=pending.has(k)?pending.get(k):(committed.get(k)?.status||''); return c==='P'||c==='PE'; });
+  if(!eligible.length){ flash('Shift applicable uniquement aux cellules Présent (P/PE)'); return; }
+  eligible.forEach(k=>{ if(shift==='') pendingShifts.delete(k); else pendingShifts.set(k,shift); });
+  renderCurrentPlanView(); flash(`${eligible.length} cellule(s) → shift ${shift||'effacé'}`);
 }
 function setPending(k,code){ if(code===committedCode(k)) pending.delete(k); else pending.set(k,code); }
 
 function updateSaveBar(){
-  const n=[...pending.keys()].filter(k=>pending.get(k)!==committedCode(k)).length;
+  const n=[...pending.keys()].filter(k=>pending.get(k)!==committedCode(k)).length+pendingShifts.size;
   $('pendCount').textContent=n; $('savebar').classList.toggle('on',n>0);
   $('pendCount').dataset.count=n;
 }
@@ -1673,16 +1706,29 @@ async function saveChanges(){
     for(const [k,v] of pending){
       const [eid,day]=k.split('|');
       if(v===''){ if(committed.has(k)) dels.push({hotel_id:hotelId,employee_id:eid,day}); }
-      else ups.push({hotel_id:hotelId,employee_id:eid,day,status:v,duration:1.0});
+      else {
+        const row={hotel_id:hotelId,employee_id:eid,day,status:v,duration:1.0};
+        // porter le shift en attente si présent sur cette cellule
+        if(pendingShifts.has(k)) row.shift_label=pendingShifts.get(k)||null;
+        ups.push(row);
+      }
+    }
+    // shifts sur cellules déjà committées (status non modifié)
+    for(const [k,sh] of pendingShifts){
+      if(pending.has(k)) continue; // déjà traité ci-dessus
+      const [eid,day]=k.split('|');
+      const cur=committed.get(k);
+      if(!cur) continue;
+      ups.push({hotel_id:hotelId,employee_id:eid,day,status:cur.status,duration:cur.duration||1.0,shift_label:sh||null});
     }
     await BE.savePlanning(hotelId,ups,dels);
-    // intégrer dans committed
     pending.forEach((v,k)=>{ if(v==='')committed.delete(k); else committed.set(k,{status:v,duration:1}); });
-    pending.clear(); render(); flash('Modifications enregistrées');
+    pendingShifts.forEach((sh,k)=>{ const c=committed.get(k); if(c) c.shift_label=sh||null; });
+    pending.clear(); pendingShifts.clear(); renderCurrentPlanView(); flash('Modifications enregistrées');
   }catch(e){flash('Erreur : '+e.message); console.error(e);}
   finally{$('saveBtn').disabled=false;}
 }
-function cancelChanges(){pending.clear(); render(); flash('Modifications annulées');}
+function cancelChanges(){pending.clear(); pendingShifts.clear(); renderCurrentPlanView(); flash('Modifications annulées');}
 
 /* ===================== VUE TABLEAU DE BORD ===================== */
 function aggCommitted(){let trav=0,cp=0,abs=0;const counts={};
