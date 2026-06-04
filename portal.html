@@ -701,6 +701,9 @@ async function renderClock(){
       <button class="btn btn-g btn-full" onclick="openQrScan()" style="margin-bottom:8px">
         <i class="fa-solid fa-qrcode"></i> Scanner un QR Code
       </button>
+      <button class="btn btn-g btn-full" onclick="openNfcClock()" id="nfcBtn" style="margin-bottom:8px;display:none">
+        <i class="fa-solid fa-wifi"></i> Badge NFC
+      </button>
     </div>
     <div class="card">
       <div class="card-title"><i class="fa-solid fa-list-check"></i>Pointages du jour</div>
@@ -715,6 +718,7 @@ async function renderClock(){
   clearInterval(clockTick);
   clockTick=setInterval(tickClock,1000);
   tickClock();
+  if('NDEFReader' in window){ const nb=$('nfcBtn'); if(nb) nb.style.display=''; }
   await loadClockings();
 }
 
@@ -814,6 +818,35 @@ window.handleClockAction=async()=>{
     await loadClockings();
   }catch(e){flash('Erreur : '+e.message);}
   finally{btn.disabled=false;}
+};
+
+// ── NFC Pointage (Web NFC API — Chrome Android 89+) ──────────────────────────
+window.openNfcClock=async()=>{
+  if(!('NDEFReader' in window)){
+    flash('NFC non supporté sur cet appareil — utilisez le QR Code');
+    return;
+  }
+  try{
+    const ndef = new NDEFReader();
+    await ndef.scan();
+    flash('NFC actif — approchez le badge du terminal…', 5000);
+    ndef.addEventListener('reading', async({message})=>{
+      for(const record of message.records){
+        if(record.recordType==='text'||record.recordType==='url'){
+          const decoder=new TextDecoder(record.encoding||'utf-8');
+          const raw=decoder.decode(record.data);
+          await submitQrCode(raw); // même logique que QR
+          return;
+        }
+      }
+      flash('Badge non reconnu');
+    });
+    ndef.addEventListener('readingerror', ()=>flash('Erreur lecture NFC'));
+  }catch(e){
+    if(e.name==='NotAllowedError') flash('Permission NFC refusée — activez-la dans les paramètres');
+    else if(e.name==='NotSupportedError') flash('NFC non disponible sur cet appareil');
+    else flash('Erreur NFC : '+e.message);
+  }
 };
 
 window.openQrScan=async()=>{
@@ -1429,6 +1462,10 @@ window.closeModal=e=>{
 $('modal').addEventListener('click',e=>e.stopPropagation());
 
 // ── Démarrage ─────────────────────────────────────────────────────────────────
+// Service Worker PWA
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('/sw.js').catch(()=>{});
+}
 boot();
 </script>
 </body>
