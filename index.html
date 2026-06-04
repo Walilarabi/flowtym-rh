@@ -357,11 +357,13 @@ tr.dept-sep td{pointer-events:none}
 .pvswitch button.on{background:#fff;color:var(--violet-d);box-shadow:0 1px 3px rgba(0,0,0,.12)}
 /* ── Planning — tables vues alternatives ─────────────────────────────────── */
 .plan-alt-wrap{flex:1;overflow:auto;position:relative}
-.plan-alt-table{border-collapse:collapse;font-size:12px}
+.plan-alt-table{border-collapse:collapse;font-size:12px;table-layout:fixed}
 .plan-alt-table th{background:#f8f7ff;border:1px solid var(--line);padding:7px 10px;font-weight:700;text-align:center;position:sticky;top:0;z-index:5;white-space:nowrap}
 .plan-alt-table td{border:1px solid var(--line);padding:5px 8px;text-align:center;vertical-align:middle}
-.plan-alt-table .emp-col{text-align:left;white-space:nowrap;padding:5px 14px;background:#fff;position:sticky;left:0;z-index:3;min-width:160px}
+.plan-alt-table .emp-col{text-align:left;padding:5px 12px;background:#fff;position:sticky;left:0;z-index:3;width:170px;min-width:170px;max-width:170px;overflow:hidden}
 .plan-alt-table th.emp-col{z-index:6;background:#f8f7ff;text-align:left}
+.plan-alt-table .emp-col .nm-line{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px}
+.plan-alt-table .emp-col .sub-line{font-size:10px;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px}
 .plan-alt-table td.wknd,.plan-alt-table th.wknd{background:#f7f9fd}
 .plan-shift-bd{display:inline-flex;align-items:center;justify-content:center;min-width:24px;height:20px;border-radius:4px;font-size:10px;font-weight:800;padding:0 4px}
 .plan-cov-row td{background:#f6f4fd;font-size:11px;font-weight:700;border-top:2px solid var(--line);color:var(--violet-d)}
@@ -1298,7 +1300,7 @@ function renderWeekGrid(){
     visibleRows.forEach(s=>{
       const dept=s.department||'';
       if(dept!==lastDept){lastDept=dept;h+=`<tr class="plan-dept-row"><td colspan="8">${dept||'Sans service'}</td></tr>`;}
-      h+=`<tr><td class="emp-col"><div style="font-weight:600">${s.first_name} ${s.last_name}</div><div style="font-size:10px;color:var(--ink2)">${s.role||''}</div></td>`;
+      h+=`<tr><td class="emp-col"><div class="nm-line">${s.first_name} ${s.last_name}</div><div class="sub-line">${s.role||''}</div></td>`;
       dayStrs.forEach((ds,i)=>{
         const wend=i>=5;
         const row=rowLk.get(s.id+'|'+ds);
@@ -1351,7 +1353,7 @@ function renderDayGrid(){
       const times=(row?.shift_start&&row?.shift_end)?`${String(row.shift_start).slice(0,5)}–${String(row.shift_end).slice(0,5)}`:'—';
       const brk=row?.break_minutes?`${row.break_minutes} min`:'—';
       h+=`<tr>
-        <td class="emp-col"><div style="font-weight:600">${s.first_name} ${s.last_name}</div><div style="font-size:10px;color:var(--ink2)">${s.role||''}</div></td>
+        <td class="emp-col"><div class="nm-line">${s.first_name} ${s.last_name}</div><div class="sub-line">${s.role||''}</div></td>
         <td>${stBadge}</td>
         <td style="font-size:11px">${sTxt}${sBadge}</td>
         <td style="font-size:11px;font-variant-numeric:tabular-nums">${times}</td>
@@ -1395,8 +1397,8 @@ function renderServiceGrid(){
     </div>`;
     return;
   }
-  let h=`<div class="plan-alt-wrap"><table class="plan-alt-table" style="min-width:${700+nd*36}px"><thead><tr>`;
-  h+=`<th class="emp-col" style="min-width:200px">Département / Shift</th>`;
+  let h=`<div class="plan-alt-wrap"><table class="plan-alt-table" style="min-width:${700+nd*36}px;table-layout:auto"><thead><tr>`;
+  h+=`<th class="emp-col" style="width:200px;min-width:200px;max-width:200px">Département / Shift</th>`;
   for(let d=1;d<=nd;d++){
     const wd=new Date(y,m,d).getDay(),wend=wd===0||wd===6,ds=iso(y,m,d),isToday=ds===todayStr;
     h+=`<th class="${wend?'wknd':''}" style="${isToday?'background:var(--violet-bg)!important;color:var(--violet-d);':''}font-size:11px">${d}</th>`;
