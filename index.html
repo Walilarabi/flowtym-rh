@@ -481,6 +481,7 @@ const DOC_TYPES=[
 const CONTRACT_TYPES = ['CDI','CDD','Extra','Saisonnier','Stage','Apprentissage','Interim'];
 const dim=(y,m)=>new Date(y,m+1,0).getDate();
 const iso=(y,m,d)=>`${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const initials=(f,l)=>((f?.[0]||'')+(l?.[0]||'')).toUpperCase();
 const AVC=['#8B5CF6','#3b82f6','#16a34a','#d97706','#ef4444','#0ea5e9','#db2777','#0d9488'];
 const avColor=s=>{let h=0;for(const c of (s||''))h=(h*31+c.charCodeAt(0))%AVC.length;return AVC[h];};
@@ -1163,12 +1164,15 @@ function renderPlanning(){
         </select>
         <div class="spacer" style="flex:1"></div>
         <button class="btn g ${editMode?'on':''}" id="editToggle"><i class="fa-solid fa-pen-to-square"></i> Édition</button>
+        <button class="btn g" id="copyWeekBtn" title="Copier la semaine sur la suivante" style="display:none"><i class="fa-solid fa-copy"></i> Copier sem.</button>
+        <button class="btn g" id="dupMonthBtn" title="Dupliquer le mois précédent" style="display:none"><i class="fa-solid fa-calendar-plus"></i> Dup. mois</button>
         <button class="btn g" id="exportXlsx" title="Exporter le planning au format Excel"><i class="fa-solid fa-file-excel"></i> Excel</button>
         <button class="btn g" id="exportPdf" title="Exporter le planning en PDF (paysage, pleine page)"><i class="fa-regular fa-file-pdf"></i> PDF</button>
         <button class="btn p" id="addEmp"><i class="fa-solid fa-user-plus"></i> Collaborateur</button>
       </div>
       <div class="legend" id="legend"></div>
       <div class="hint" id="hint"></div>
+      <div id="legalAlertsBar" style="display:none"></div>
       <div class="gridwrap"><table id="grid"></table></div>
     </div>`;
   $('legend').innerHTML=CODES.map(c=>`<span class="lc"><b style="background:${c[2]}"></b>${c[0]} · ${c[1]}</span>`).join('')
@@ -1183,6 +1187,8 @@ function renderPlanning(){
   $('addEmp').onclick=()=>openEmpForm(null);
   $('exportXlsx').onclick=exportExcel;
   $('exportPdf').onclick=exportPDF;
+  $('copyWeekBtn').onclick=()=>openCopyWeekModal();
+  $('dupMonthBtn').onclick=()=>openDupMonthModal();
   $('grid').addEventListener('mousedown',gridMouseDown);
   $('grid').addEventListener('mouseover',gridMouseOver);
   document.querySelectorAll('.pvswitch button').forEach(b=>b.onclick=()=>switchPlanView(b.dataset.pv));
@@ -1255,7 +1261,14 @@ async function switchPlanView(v){
     const dy=curDayDate.getFullYear(),dm=curDayDate.getMonth();
     if(dy!==cur.getFullYear()||dm!==cur.getMonth()){cur=new Date(dy,dm,1);await loadMonth();return;}
   }
+  updatePlanToolbarBtns(v);
   renderCurrentPlanView(); updateNavLabel();
+}
+
+function updatePlanToolbarBtns(v){
+  const cw=$('copyWeekBtn'),dm=$('dupMonthBtn'); if(!cw||!dm) return;
+  cw.style.display=(v==='week')?'':'none';
+  dm.style.display=(v==='month')?'':'none';
 }
 
 async function advanceWeek(delta){
@@ -1272,6 +1285,109 @@ async function advanceDay(delta){
   const dy=curDayDate.getFullYear(),dm=curDayDate.getMonth();
   if(dy!==cur.getFullYear()||dm!==cur.getMonth()){cur=new Date(dy,dm,1);await loadMonth();return;}
   renderDayGrid(); updateNavLabel();
+}
+
+/* ── Copie semaine ──────────────────────────────────────────────────── */
+function openCopyWeekModal(){
+  if(!curWeekStart){flash('Aucune semaine sélectionnée');return;}
+  const src=new Date(curWeekStart);
+  const srcDays=[];for(let i=0;i<7;i++){const d=new Date(src);d.setDate(d.getDate()+i);srcDays.push(d.toISOString().slice(0,10));}
+  const dst=new Date(src);dst.setDate(dst.getDate()+7);
+  const dstDays=[];for(let i=0;i<7;i++){const d=new Date(dst);d.setDate(d.getDate()+i);dstDays.push(d.toISOString().slice(0,10));}
+  const fmt=d=>new Date(d+'T00:00:00').toLocaleDateString('fr-FR',{weekday:'short',day:'numeric',month:'short'});
+  showModal(`<div style="padding:24px;max-width:520px">
+    <div style="font-size:17px;font-weight:700;margin-bottom:8px"><i class="fa-solid fa-copy" style="color:var(--violet);margin-right:8px"></i>Copier la semaine</div>
+    <p style="font-size:13px;color:var(--ink2);margin-bottom:16px">Copie les statuts et shifts de la semaine source vers la semaine cible. Les absences existantes dans la cible ne seront pas écrasées sauf si vous cochez l'option ci-dessous.</p>
+    <div style="background:var(--bg2);padding:12px 16px;border-radius:10px;margin-bottom:12px;font-size:13px">
+      <div><b>Source :</b> ${fmt(srcDays[0])} → ${fmt(srcDays[6])}</div>
+      <div style="margin-top:4px"><b>Cible :</b> ${fmt(dstDays[0])} → ${fmt(dstDays[6])}</div>
+    </div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:20px;cursor:pointer">
+      <input type="checkbox" id="copyOverwriteAbs"> Écraser les absences existantes dans la cible
+    </label>
+    <div style="display:flex;gap:10px">
+      <button class="btn p" onclick="executeCopyWeek(${JSON.stringify(srcDays)},${JSON.stringify(dstDays)})"><i class="fa-solid fa-check"></i> Copier</button>
+      <button class="btn g" onclick="closeModal()">Annuler</button>
+    </div>
+  </div>`);
+}
+
+async function executeCopyWeek(srcDays,dstDays){
+  const overwriteAbs=$('copyOverwriteAbs')?.checked||false;
+  const ABS_CATS=new Set(['abs','paid','holiday']);
+  let copied=0,skipped=0;
+  staff.forEach(s=>{
+    srcDays.forEach((srcDay,i)=>{
+      const dstDay=dstDays[i];
+      const srcKey=s.id+'|'+srcDay, dstKey=s.id+'|'+dstDay;
+      const srcRow=committed.get(srcKey);
+      if(!srcRow||!srcRow.status)return; // source vide → rien à copier
+      const dstRow=committed.get(dstKey);
+      const dstCat=dstRow?CMAP[dstRow.status]?.cat:'';
+      // Ne pas écraser une absence existante sauf si option cochée
+      if(!overwriteAbs&&dstCat&&ABS_CATS.has(dstCat)){skipped++;return;}
+      pending.set(dstKey,srcRow.status);
+      if(srcRow.shift_label) pendingShifts.set(dstKey,srcRow.shift_label);
+      else pendingShifts.delete(dstKey);
+      copied++;
+    });
+  });
+  closeModal();
+  if(copied){flash(`${copied} cellule${copied>1?'s':''} copiée${copied>1?'s':''}${skipped?` · ${skipped} absence${skipped>1?'s':''} conservée${skipped>1?'s':''}`:''}`);render();}
+  else flash('Rien à copier');
+}
+
+/* ── Duplication mois précédent ───────────────────────────────────── */
+function openDupMonthModal(){
+  const y=cur.getFullYear(),m=cur.getMonth();
+  const prevDate=new Date(y,m-1,1);
+  const prevLabel=`${MONTHS[prevDate.getMonth()]} ${prevDate.getFullYear()}`;
+  const curLabel=`${MONTHS[m]} ${y}`;
+  showModal(`<div style="padding:24px;max-width:520px">
+    <div style="font-size:17px;font-weight:700;margin-bottom:8px"><i class="fa-solid fa-calendar-plus" style="color:var(--violet);margin-right:8px"></i>Dupliquer le mois précédent</div>
+    <p style="font-size:13px;color:var(--ink2);margin-bottom:16px">Reproduit le planning de <b>${prevLabel}</b> sur <b>${curLabel}</b> pour tous les collaborateurs visibles.</p>
+    <div style="margin-bottom:16px">
+      <label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px">Mode de remplissage</label>
+      <label style="display:flex;gap:8px;align-items:center;font-size:13px;margin-bottom:6px;cursor:pointer"><input type="radio" name="dupMode" value="fill" checked> Remplir uniquement les jours vides</label>
+      <label style="display:flex;gap:8px;align-items:center;font-size:13px;margin-bottom:6px;cursor:pointer"><input type="radio" name="dupMode" value="replace"> Remplacer tout (écrase les données existantes)</label>
+      <label style="display:flex;gap:8px;align-items:center;font-size:13px;cursor:pointer"><input type="radio" name="dupMode" value="keep_abs"> Remplacer sauf les absences existantes</label>
+    </div>
+    <div style="display:flex;gap:10px">
+      <button class="btn p" onclick="executeDupMonth()"><i class="fa-solid fa-check"></i> Dupliquer</button>
+      <button class="btn g" onclick="closeModal()">Annuler</button>
+    </div>
+  </div>`);
+}
+
+async function executeDupMonth(){
+  const mode=document.querySelector('[name="dupMode"]:checked')?.value||'fill';
+  const y=cur.getFullYear(),m=cur.getMonth();
+  const prevY=m===0?y-1:y, prevM=m===0?11:m-1;
+  const nd=dim(y,m), pnd=dim(prevY,prevM);
+  const ABS_CATS=new Set(['abs','paid','holiday']);
+  let copied=0,skipped=0;
+  staff.forEach(s=>{
+    for(let d=1;d<=nd;d++){
+      const dstDay=iso(y,m,d);
+      // Source : même numéro de jour dans le mois précédent (plafonné)
+      const srcD=Math.min(d,pnd);
+      const srcDay=iso(prevY,prevM,srcD);
+      const srcKey=s.id+'|'+srcDay, dstKey=s.id+'|'+dstDay;
+      const srcRow=committed.get(srcKey);
+      if(!srcRow||!srcRow.status)continue;
+      const dstRow=committed.get(dstKey);
+      const dstCat=dstRow?CMAP[dstRow.status]?.cat:'';
+      if(mode==='fill'&&dstRow&&dstRow.status){skipped++;continue;}
+      if(mode==='keep_abs'&&dstCat&&ABS_CATS.has(dstCat)){skipped++;continue;}
+      pending.set(dstKey,srcRow.status);
+      if(srcRow.shift_label) pendingShifts.set(dstKey,srcRow.shift_label);
+      else pendingShifts.delete(dstKey);
+      copied++;
+    }
+  });
+  closeModal();
+  if(copied){flash(`${copied} jour${copied>1?'s':''} dupliqué${copied>1?'s':''}${skipped?` · ${skipped} conservé${skipped>1?'s':''}`:''}`);render();}
+  else flash('Rien à dupliquer (source vide ou tout déjà rempli)');
 }
 
 function renderWeekGrid(){
@@ -1557,6 +1673,7 @@ function render(){
   $('grid').querySelectorAll('[data-emp]').forEach(el=>el.onclick=()=>openFiche(el.dataset.emp));
   wirePlanningRowDrag();
   applyStickyWidths(); updateSaveBar();
+  renderLegalAlertsBar();
 }
 function applyStickyWidths(){
   const g=$('grid'); if(!g)return;
@@ -1706,6 +1823,85 @@ function updateSaveBar(){
   const n=[...pending.keys()].filter(k=>pending.get(k)!==committedCode(k)).length+pendingShifts.size;
   $('pendCount').textContent=n; $('savebar').classList.toggle('on',n>0);
   $('pendCount').dataset.count=n;
+}
+
+/* ── Contrôles légaux (inline depuis tests/lib/planningLogic.js) ── */
+function computeLegalAlerts(rows,y,m,{cmap,dimFn,isoFn}){
+  const alerts=[];const nd=dimFn(y,m);
+  const byEmp=new Map();
+  rows.forEach(r=>{if(!byEmp.has(r.employee_id))byEmp.set(r.employee_id,new Map());byEmp.get(r.employee_id).set(r.day,r);});
+  byEmp.forEach((dayMap,eid)=>{
+    let streak=0,streakStart=null;
+    for(let d=1;d<=nd;d++){const day=isoFn(y,m,d);const row=dayMap.get(day);const cat=row?(cmap[row.status]?.cat||''):'';
+      if(cat==='worked'){streak++;if(streak===1)streakStart=day;if(streak===7)alerts.push({employee_id:eid,day:streakStart,type:'7_consecutive',message:'7 jours consécutifs travaillés'});}
+      else{streak=0;streakStart=null;}}
+    dayMap.forEach((row,day)=>{const cat=cmap[row.status]?.cat||'';if((cat==='abs'||cat==='paid')&&row.shift_label)alerts.push({employee_id:eid,day,type:'shift_on_absence',message:`Shift ${row.shift_label} incompatible avec ${row.status}`});});
+    dayMap.forEach((row,day)=>{if(row.status!=='P'||!row.shift_start||!row.shift_end)return;const[sh,sm]=String(row.shift_start).split(':').map(Number);const[eh,em]=String(row.shift_end).split(':').map(Number);let dm=(eh*60+em)-(sh*60+sm);if(dm<0)dm+=1440;dm-=(row.break_minutes||0);if(dm>600)alerts.push({employee_id:eid,day,type:'excessive_duration',message:`Durée excessive : ${Math.round(dm/6)/10}h`});});
+  });
+  return alerts;
+}
+
+function computeCoverageAlerts(rows,coverageRules,staffDeptMap,y,m,{dimFn,isoFn}){
+  const alerts=[];const nd=dimFn(y,m);
+  const activeRules=coverageRules.filter(r=>r.active!==false);
+  activeRules.forEach(rule=>{
+    for(let d=1;d<=nd;d++){const wd=new Date(y,m,d).getDay();const wdMon=wd===0?6:wd-1;
+      if(rule.day_of_week!=null&&rule.day_of_week!==wdMon)continue;
+      const day=isoFn(y,m,d);
+      const count=rows.filter(r=>r.day===day&&r.status==='P'&&r.shift_label===rule.shift_label&&staffDeptMap.get(r.employee_id)===rule.department).length;
+      if(count<rule.min_staff_base)alerts.push({day,department:rule.department,shift:rule.shift_label,required:rule.min_staff_base,actual:count,type:'understaffed'});}
+  });
+  return alerts;
+}
+
+function renderLegalAlertsBar(){
+  const bar=$('legalAlertsBar'); if(!bar) return;
+  if(planView!=='month'){bar.style.display='none';return;}
+  const y=cur.getFullYear(),m=cur.getMonth();
+  // build rows from committed map
+  const rows=[];
+  committed.forEach((v,k)=>{const[eid,day]=k.split('|');rows.push({employee_id:eid,day,status:v.status,shift_label:v.shift_label||null,shift_start:v.shift_start||null,shift_end:v.shift_end||null,break_minutes:v.break_minutes||0});});
+  // also pending
+  pending.forEach((status,k)=>{if(!status)return;const[eid,day]=k.split('|');const existing=rows.find(r=>r.employee_id===eid&&r.day===day);if(existing){existing.status=status;}else rows.push({employee_id:eid,day,status,shift_label:pendingShifts.get(k)||null,shift_start:null,shift_end:null,break_minutes:0});});
+  const legalAlerts=computeLegalAlerts(rows,y,m,{cmap:CMAP,dimFn:dim,isoFn:iso});
+  // coverage alerts
+  let coverAlerts=[];
+  if(coverageCache&&coverageCache.length){
+    const deptMap=new Map(staff.map(s=>[s.id,s.department||'']));
+    coverAlerts=computeCoverageAlerts(rows,coverageCache,deptMap,y,m,{dimFn:dim,isoFn:iso});
+  }
+  const total=legalAlerts.length+coverAlerts.length;
+  if(!total){bar.style.display='none';return;}
+  bar.style.display='';
+  const byType={};
+  legalAlerts.forEach(a=>{byType[a.type]=(byType[a.type]||0)+1;});
+  coverAlerts.forEach(()=>{byType['understaffed']=(byType['understaffed']||0)+1;});
+  const TYPE_INFO={'7_consecutive':{icon:'fa-rotate',color:'#d97706',label:'7j consécutifs'},'shift_on_absence':{icon:'fa-triangle-exclamation',color:'#dc2626',label:'Shift sur absence'},'excessive_duration':{icon:'fa-clock',color:'#b45309',label:'Durée > 10h'},'understaffed':{icon:'fa-users',color:'#7c3aed',label:'Sous-effectif'}};
+  bar.innerHTML=`<div style="display:flex;align-items:center;gap:8px;padding:8px 16px;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;margin:4px 0;flex-wrap:wrap">
+    <i class="fa-solid fa-shield-halved" style="color:#d97706;font-size:14px"></i>
+    <span style="font-size:12px;font-weight:600;color:#92400e">${total} alerte${total>1?'s':''} légale${total>1?'s':''}</span>
+    ${Object.entries(byType).map(([t,n])=>{const ti=TYPE_INFO[t]||{icon:'fa-circle-exclamation',color:'#9ca3af',label:t};return `<span title="${ti.label}" style="background:${ti.color}18;color:${ti.color};font-size:11px;font-weight:600;padding:2px 8px;border-radius:12px;cursor:pointer" onclick="showLegalAlertsDetail()"><i class="fa-solid ${ti.icon}" style="margin-right:3px"></i>${n} ${ti.label}</span>`;}).join('')}
+    <button onclick="showLegalAlertsDetail()" style="margin-left:auto;font-size:11px;color:#d97706;background:none;border:none;cursor:pointer;text-decoration:underline">Voir le détail</button>
+  </div>`;
+  bar._legalAlerts=legalAlerts;
+  bar._coverAlerts=coverAlerts;
+}
+
+function showLegalAlertsDetail(){
+  const bar=$('legalAlertsBar'); if(!bar) return;
+  const legalAlerts=bar._legalAlerts||[];
+  const coverAlerts=bar._coverAlerts||[];
+  const rows=[
+    ...legalAlerts.map(a=>{const emp=staff.find(s=>s.id===a.employee_id);const name=emp?`${emp.last_name} ${emp.first_name}`:'?';const col={'7_consecutive':'#d97706','shift_on_absence':'#dc2626','excessive_duration':'#b45309'}[a.type]||'#9ca3af';return `<tr><td style="padding:6px 10px">${esc(name)}</td><td style="padding:6px 10px">${a.day}</td><td style="padding:6px 10px"><span style="color:${col};font-weight:600">${esc(a.message)}</span></td></tr>`;}),
+    ...coverAlerts.map(a=>`<tr><td style="padding:6px 10px;color:var(--ink2)">—</td><td style="padding:6px 10px">${a.day}</td><td style="padding:6px 10px"><span style="color:#7c3aed;font-weight:600">Sous-effectif : ${esc(a.department||'?')} shift ${esc(a.shift||'?')} (${a.actual}/${a.required})</span></td></tr>`)
+  ];
+  showModal(`<div style="padding:24px;min-width:340px;max-width:640px"><div style="font-size:17px;font-weight:700;margin-bottom:16px"><i class="fa-solid fa-shield-halved" style="color:#d97706;margin-right:8px"></i>Alertes légales</div>
+    <div style="overflow:auto;max-height:400px"><table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="background:var(--bg2)"><th style="padding:6px 10px;text-align:left">Collaborateur</th><th style="padding:6px 10px;text-align:left">Date</th><th style="padding:6px 10px;text-align:left">Alerte</th></tr></thead>
+      <tbody>${rows.join('')}</tbody>
+    </table></div>
+    <div style="margin-top:16px;text-align:right"><button class="btn g" onclick="closeModal()">Fermer</button></div>
+  </div>`);
 }
 async function saveChanges(){
   $('saveBtn').disabled=true;
@@ -4900,6 +5096,7 @@ function openEmpForm(s){
   };
 }
 function closeModal(){$('modalbg').classList.remove('on');}
+function showModal(html){$('modal').innerHTML=html;$('modalbg').classList.add('on');}
 
 /* ---- Helper : en-tête standard de modale ----
    icon    = classe Font Awesome  ex: 'fa-solid fa-upload'
