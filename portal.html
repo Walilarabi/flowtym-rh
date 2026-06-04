@@ -1,0 +1,1569 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#4f46e5">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Flowtym">
+<title>Flowtym · Mon espace</title>
+<!-- PWA Manifest inline -->
+<script>
+const manifest = {
+  name: "Flowtym — Mon espace",
+  short_name: "Flowtym",
+  start_url: "/portal.html",
+  display: "standalone",
+  background_color: "#ffffff",
+  theme_color: "#4f46e5",
+  orientation: "portrait",
+  icons: [
+    { src: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%234f46e5'/><text y='.9em' font-size='72' x='12'>🏨</text></svg>", sizes: "any", type: "image/svg+xml" }
+  ]
+};
+const blob = new Blob([JSON.stringify(manifest)], {type:'application/json'});
+const link = document.createElement('link');
+link.rel = 'manifest';
+link.href = URL.createObjectURL(blob);
+document.head.appendChild(link);
+</script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" crossorigin="anonymous">
+<style>
+/* ── Variables ─────────────────────────────────────────────────────────── */
+:root{
+  --vi:#4f46e5;--vi-d:#3730a3;--vi-l:#eef2ff;--vi-m:#6366f1;
+  --ink:#111827;--ink2:#6b7280;--line:#e5e7eb;
+  --bg:#f9fafb;--white:#fff;
+  --green:#16a34a;--green-bg:#f0fdf4;
+  --red:#dc2626;--red-bg:#fef2f2;
+  --amber:#d97706;--amber-bg:#fffbeb;
+  --nav-h:64px;
+  --safe-b:env(safe-area-inset-bottom,0px);
+  --radius:16px;--shadow:0 2px 12px rgba(0,0,0,.08);
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;background:var(--bg);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:var(--ink);overscroll-behavior:none}
+
+/* ── Layout ─────────────────────────────────────────────────────────────── */
+#app{display:flex;flex-direction:column;height:100%;max-width:480px;margin:0 auto;position:relative;background:var(--white);box-shadow:0 0 0 1px var(--line)}
+#topbar{background:var(--vi);color:#fff;padding:12px 16px;padding-top:calc(12px + env(safe-area-inset-top,0px));display:flex;align-items:center;gap:10px;flex-shrink:0;min-height:56px}
+#topbar .logo{font-weight:800;font-size:17px;flex:1}
+#topbar .logo small{font-weight:400;opacity:.7;font-size:13px;margin-left:4px}
+#topbar .avatar{width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,.25);display:grid;place-items:center;font-weight:700;font-size:14px;cursor:pointer;flex-shrink:0}
+#view{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:calc(var(--nav-h) + var(--safe-b) + 8px)}
+#nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:480px;height:calc(var(--nav-h) + var(--safe-b));background:var(--white);border-top:1px solid var(--line);display:flex;align-items:flex-start;padding-top:6px;padding-bottom:var(--safe-b);z-index:100;box-shadow:0 -4px 16px rgba(0,0,0,.06)}
+.nav-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer;padding:6px 4px;border:0;background:transparent;color:var(--ink2);font-size:10px;font-family:inherit;transition:.15s;position:relative}
+.nav-item.on{color:var(--vi)}
+.nav-item i{font-size:20px;transition:.15s}
+.nav-item.on i{transform:scale(1.1)}
+.nav-badge{position:absolute;top:3px;right:calc(50% - 18px);background:var(--red);color:#fff;border-radius:50%;width:16px;height:16px;font-size:9px;font-weight:700;display:grid;place-items:center;line-height:1}
+
+/* ── Composants ──────────────────────────────────────────────────────────── */
+.page{padding:16px 16px 0}
+.page-title{font-size:20px;font-weight:800;color:var(--ink);margin-bottom:4px}
+.page-sub{font-size:13px;color:var(--ink2);margin-bottom:20px}
+.card{background:var(--white);border:1px solid var(--line);border-radius:var(--radius);padding:16px;margin-bottom:12px;box-shadow:var(--shadow)}
+.card-title{font-size:13px;font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px;display:flex;align-items:center;gap:6px}
+.card-title i{color:var(--vi)}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:10px 16px;border-radius:10px;font-weight:600;font-size:14px;border:0;cursor:pointer;transition:.15s;font-family:inherit;white-space:nowrap}
+.btn-p{background:var(--vi);color:#fff}.btn-p:hover{background:var(--vi-d)}
+.btn-p:active{transform:scale(.97)}
+.btn-g{background:var(--bg);color:var(--ink);border:1px solid var(--line)}.btn-g:active{transform:scale(.97)}
+.btn-red{background:var(--red-bg);color:var(--red)}.btn-red:active{transform:scale(.97)}
+.btn-full{width:100%;justify-content:center}
+.tag{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:20px;font-size:11.5px;font-weight:600}
+.tag-pending{background:#fef9c3;color:#854d0e}
+.tag-approved{background:var(--green-bg);color:var(--green)}
+.tag-rejected{background:var(--red-bg);color:var(--red)}
+.tag-cancelled{background:#f3f4f6;color:#6b7280}
+.divider{height:1px;background:var(--line);margin:14px 0}
+.field{margin-bottom:14px}
+.field label{display:block;font-size:12px;font-weight:600;color:var(--ink2);margin-bottom:4px;text-transform:uppercase;letter-spacing:.04em}
+.field input,.field textarea,.field select{width:100%;padding:11px 13px;border:1.5px solid var(--line);border-radius:10px;font-size:14px;font-family:inherit;background:var(--white);color:var(--ink);outline:none;transition:.15s;-webkit-appearance:none}
+.field input:focus,.field textarea:focus,.field select:focus{border-color:var(--vi);box-shadow:0 0 0 3px var(--vi-l)}
+.field textarea{resize:vertical;min-height:80px;max-height:200px}
+.info-box{background:var(--vi-l);border-radius:10px;padding:12px 14px;font-size:13px;color:var(--vi-d);margin-bottom:14px;display:flex;gap:8px}
+.info-box i{flex-shrink:0;margin-top:1px}
+.warn-box{background:var(--amber-bg);border-radius:10px;padding:12px 14px;font-size:13px;color:var(--amber);margin-bottom:14px;display:flex;gap:8px}
+.err-box{background:var(--red-bg);border-radius:10px;padding:12px 14px;font-size:13px;color:var(--red);margin-bottom:14px;display:flex;gap:8px}
+.loading{display:flex;align-items:center;justify-content:center;padding:48px 16px;color:var(--ink2);gap:10px;flex-direction:column}
+.spinner{width:28px;height:28px;border:3px solid var(--line);border-top-color:var(--vi);border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.empty{text-align:center;padding:48px 16px;color:var(--ink2)}
+.empty i{font-size:36px;margin-bottom:12px;color:var(--line)}
+
+/* ── Toast ───────────────────────────────────────────────────────────────── */
+#toast{position:fixed;top:calc(env(safe-area-inset-top,0px) + 64px);left:50%;transform:translateX(-50%) translateY(-10px);background:#1a2035;color:#fff;padding:10px 18px;border-radius:10px;font-size:13.5px;font-weight:500;z-index:9999;opacity:0;transition:.25s;pointer-events:none;max-width:90vw;text-align:center}
+#toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* ── Auth screens ─────────────────────────────────────────────────────────── */
+.auth-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%);padding:24px}
+.auth-card{background:var(--white);border-radius:24px;padding:28px 24px;width:100%;max-width:380px;box-shadow:0 24px 60px rgba(0,0,0,.2)}
+.auth-logo{display:flex;align-items:center;gap:10px;margin-bottom:24px}
+.auth-logo .mk{width:44px;height:44px;background:var(--vi-l);border-radius:12px;display:grid;place-items:center;font-size:22px}
+.auth-logo .name{font-weight:800;font-size:20px}
+.auth-logo .name small{display:block;font-weight:400;font-size:12px;color:var(--ink2)}
+.auth-title{font-size:18px;font-weight:700;margin-bottom:6px}
+.auth-sub{font-size:13px;color:var(--ink2);margin-bottom:22px;line-height:1.5}
+.otp-inputs{display:flex;gap:8px;justify-content:center;margin:16px 0}
+.otp-inputs input{width:44px;height:52px;text-align:center;font-size:22px;font-weight:700;border:2px solid var(--line);border-radius:10px;outline:none;background:var(--bg)}
+.otp-inputs input:focus{border-color:var(--vi);background:var(--vi-l)}
+.gdpr-consent{background:var(--bg);border-radius:10px;padding:12px;font-size:12px;color:var(--ink2);line-height:1.6;margin-bottom:16px}
+.gdpr-consent a{color:var(--vi);text-decoration:none}
+
+/* ── Planning ────────────────────────────────────────────────────────────── */
+.month-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.month-nav .lbl{font-weight:700;font-size:16px}
+.month-nav button{background:var(--bg);border:1px solid var(--line);border-radius:8px;width:34px;height:34px;cursor:pointer;font-size:16px;display:grid;place-items:center}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-bottom:16px}
+.cal-head{font-size:10px;font-weight:700;text-align:center;color:var(--ink2);padding:4px 0;text-transform:uppercase}
+.cal-day{aspect-ratio:1;border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:11.5px;font-weight:600;cursor:default;position:relative}
+.cal-day .dn{font-size:12px;font-weight:700}
+.cal-day .sb{font-size:8px;font-weight:800;border-radius:3px;padding:0 3px;margin-top:1px;line-height:14px}
+.cal-day.today{box-shadow:inset 0 0 0 2px var(--vi)}
+.cal-day.weekend{opacity:.6}
+.cal-day.other-month{opacity:.25}
+.cal-legend{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px}
+.cal-legend span{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--ink2)}
+.cal-legend b{width:12px;height:12px;border-radius:3px;display:inline-block}
+
+/* ── Pointage ────────────────────────────────────────────────────────────── */
+.clock-card{text-align:center;padding:28px 16px}
+.clock-time{font-size:52px;font-weight:800;letter-spacing:-1px;color:var(--vi);margin:8px 0;font-variant-numeric:tabular-nums}
+.clock-date{font-size:14px;color:var(--ink2);margin-bottom:24px}
+.clock-btn{width:120px;height:120px;border-radius:50%;border:0;cursor:pointer;font-size:15px;font-weight:700;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;margin:0 auto 24px;box-shadow:0 8px 24px rgba(79,70,229,.3);transition:.15s}
+.clock-btn i{font-size:32px}
+.clock-btn.in{background:var(--vi);color:#fff}
+.clock-btn.out{background:var(--green);color:#fff;box-shadow:0 8px 24px rgba(22,163,74,.3)}
+.clock-btn:active{transform:scale(.94)}
+.clock-history .row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line)}
+.clock-history .row:last-child{border-bottom:0}
+
+/* ── QR Scanner ──────────────────────────────────────────────────────────── */
+.qr-wrap{position:relative;border-radius:16px;overflow:hidden;background:#000;aspect-ratio:1;margin-bottom:16px}
+.qr-wrap video{width:100%;height:100%;object-fit:cover;display:block}
+.qr-overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
+.qr-frame{width:220px;height:220px;border:3px solid rgba(255,255,255,.8);border-radius:16px;box-shadow:0 0 0 9999px rgba(0,0,0,.5)}
+
+/* ── Documents ───────────────────────────────────────────────────────────── */
+.doc-row{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}
+.doc-row:last-child{border-bottom:0}
+.doc-icon{width:40px;height:40px;border-radius:10px;display:grid;place-items:center;font-size:18px;flex-shrink:0}
+.doc-icon.pdf{background:#fef2f2;color:#dc2626}
+.doc-icon.img{background:#f0fdf4;color:#16a34a}
+.doc-icon.other{background:var(--vi-l);color:var(--vi)}
+.doc-info{flex:1;min-width:0}
+.doc-name{font-weight:600;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.doc-meta{font-size:11.5px;color:var(--ink2);margin-top:1px}
+.doc-actions{display:flex;gap:6px;flex-shrink:0}
+.doc-btn{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:6px 8px;cursor:pointer;font-size:12px;color:var(--ink2)}
+
+/* ── Demandes ────────────────────────────────────────────────────────────── */
+.req-row{padding:14px 0;border-bottom:1px solid var(--line);display:flex;align-items:flex-start;gap:12px}
+.req-row:last-child{border-bottom:0}
+.req-icon{width:36px;height:36px;border-radius:10px;background:var(--vi-l);color:var(--vi);display:grid;place-items:center;flex-shrink:0;font-size:16px}
+.req-body{flex:1;min-width:0}
+.req-type{font-weight:700;font-size:13.5px}
+.req-date{font-size:12px;color:var(--ink2);margin:2px 0}
+.fab{position:fixed;right:20px;bottom:calc(var(--nav-h) + var(--safe-b) + 16px);width:56px;height:56px;border-radius:50%;background:var(--vi);color:#fff;border:0;font-size:22px;cursor:pointer;box-shadow:0 6px 20px rgba(79,70,229,.4);display:grid;place-items:center;z-index:99;transition:.15s}
+.fab:active{transform:scale(.92)}
+
+/* ── Messagerie ──────────────────────────────────────────────────────────── */
+.msg-thread{display:flex;flex-direction:column;gap:10px;padding:0 0 8px}
+.msg-bubble{max-width:82%;padding:10px 13px;border-radius:14px;font-size:13.5px;line-height:1.5}
+.msg-bubble.me{align-self:flex-end;background:var(--vi);color:#fff;border-bottom-right-radius:4px}
+.msg-bubble.them{align-self:flex-start;background:#f3f4f6;color:var(--ink);border-bottom-left-radius:4px}
+.msg-meta{font-size:10.5px;opacity:.7;margin-top:3px;text-align:right}
+.msg-bubble.them .msg-meta{text-align:left}
+.msg-input-bar{position:sticky;bottom:0;background:var(--white);border-top:1px solid var(--line);padding:10px 12px calc(10px + var(--safe-b));display:flex;gap:8px;align-items:flex-end}
+.msg-input-bar textarea{flex:1;resize:none;border:1.5px solid var(--line);border-radius:10px;padding:9px 12px;font-size:14px;font-family:inherit;outline:none;max-height:100px;line-height:1.4}
+.msg-input-bar textarea:focus{border-color:var(--vi)}
+.msg-input-bar button{background:var(--vi);color:#fff;border:0;border-radius:10px;width:40px;height:40px;font-size:16px;cursor:pointer;flex-shrink:0;display:grid;place-items:center}
+
+/* ── Profil ──────────────────────────────────────────────────────────────── */
+.profile-hero{background:linear-gradient(135deg,var(--vi),var(--vi-m));padding:28px 20px 40px;margin:-16px -16px 0;color:#fff;text-align:center}
+.profile-av{width:72px;height:72px;border-radius:50%;border:3px solid rgba(255,255,255,.5);margin:0 auto 10px;display:grid;place-items:center;font-size:28px;font-weight:800;background:rgba(255,255,255,.2)}
+.profile-name{font-size:20px;font-weight:800;margin-bottom:2px}
+.profile-role{font-size:13px;opacity:.8}
+.kpi-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;margin-top:-24px}
+.kpi{background:var(--white);border-radius:14px;padding:14px;text-align:center;box-shadow:var(--shadow);border:1px solid var(--line)}
+.kpi .val{font-size:24px;font-weight:800;color:var(--vi)}
+.kpi .lbl{font-size:11px;color:var(--ink2);margin-top:2px}
+
+/* ── Modal ───────────────────────────────────────────────────────────────── */
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200;display:none;align-items:flex-end}
+.modal-bg.on{display:flex}
+.modal{background:var(--white);border-radius:24px 24px 0 0;padding:20px 16px calc(20px + var(--safe-b));width:100%;max-height:92vh;overflow-y:auto;animation:slideUp .25s ease}
+.modal.modal-fullscreen{border-radius:0;padding:0;max-height:100vh;height:100vh}
+@keyframes slideUp{from{transform:translateY(60px);opacity:0}to{transform:translateY(0);opacity:1}}
+.modal-handle{width:36px;height:4px;background:var(--line);border-radius:2px;margin:0 auto 16px}
+.modal-title{font-size:17px;font-weight:800;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+
+/* ── Upload dropzone ─────────────────────────────────────────────────────── */
+.dropzone{border:2px dashed var(--line);border-radius:12px;padding:24px 16px;text-align:center;color:var(--ink2);cursor:pointer;transition:.15s;font-size:13px}
+.dropzone:hover,.dropzone.drag{border-color:var(--vi);background:var(--vi-l);color:var(--vi)}
+.dropzone i{font-size:28px;margin-bottom:8px;display:block}
+
+/* ── Scrollbar (desktop) ─────────────────────────────────────────────────── */
+#view::-webkit-scrollbar{width:4px}
+#view::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}
+</style>
+</head>
+<body>
+<div id="toast"></div>
+<div id="app">
+  <header id="topbar" style="display:none">
+    <div class="logo">Flowtym <small>Mon espace</small></div>
+    <div id="bellWrap" style="position:relative;cursor:pointer" onclick="goTo('messages')">
+      <i class="fa-regular fa-bell" style="font-size:20px;opacity:.9"></i>
+      <span id="bellBadge" style="display:none;position:absolute;top:-4px;right:-4px;width:16px;height:16px;background:#dc2626;color:#fff;border-radius:50%;font-size:9px;font-weight:700;line-height:16px;text-align:center"></span>
+    </div>
+    <div class="avatar" id="topAvatar" onclick="goTo('profile')">?</div>
+  </header>
+  <!-- Écran auth statique — remplacé par JS dès que Supabase est chargé -->
+  <div id="view">
+    <div class="auth-wrap" id="staticAuth">
+      <div class="auth-card">
+        <div class="auth-logo">
+          <div class="mk">🏨</div>
+          <div class="name">Flowtym<small>Mon espace salarié</small></div>
+        </div>
+        <h2 class="auth-title">Connexion</h2>
+        <p class="auth-sub">Entrez l'adresse email associée à votre dossier RH. Vous recevrez un lien de connexion.</p>
+        <div class="field"><label>Adresse e-mail</label>
+          <input type="email" id="authEmail" placeholder="prenom.nom@hotel.fr" autocomplete="email" inputmode="email">
+        </div>
+        <div class="gdpr-consent">
+          <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer">
+            <input type="checkbox" id="gdprCheck" style="margin-top:2px;flex-shrink:0">
+            <span>J'accepte que mes données soient traitées pour la gestion RH. <a href="#" onclick="event.preventDefault()">En savoir plus</a></span>
+          </label>
+        </div>
+        <button class="btn btn-p btn-full" id="authSend" disabled>
+          <div class="spinner" style="width:16px;height:16px;border-width:2px"></div> Connexion…
+        </button>
+        <p style="font-size:11.5px;color:var(--ink2);text-align:center;margin-top:14px">Votre compte est créé par votre responsable RH.</p>
+      </div>
+    </div>
+  </div>
+  <nav id="nav" style="display:none">
+    <button class="nav-item" data-tab="planning" onclick="goTo('planning')">
+      <i class="fa-regular fa-calendar"></i>Planning
+    </button>
+    <button class="nav-item" data-tab="clock" onclick="goTo('clock')">
+      <i class="fa-regular fa-clock"></i>Pointage
+    </button>
+    <button class="nav-item" data-tab="docs" onclick="goTo('docs')">
+      <i class="fa-solid fa-folder-open"></i>Coffre-fort
+    </button>
+    <button class="nav-item" data-tab="requests" onclick="goTo('requests')">
+      <i class="fa-solid fa-paper-plane"></i>Demandes
+      <span class="nav-badge" id="reqBadge" style="display:none"></span>
+    </button>
+    <button class="nav-item" data-tab="profile" onclick="goTo('profile')">
+      <i class="fa-regular fa-user"></i>Profil
+    </button>
+  </nav>
+</div>
+
+<!-- Modals -->
+<div class="modal-bg" id="modalBg" onclick="closeModal(event)">
+  <div class="modal" id="modal"><div class="modal-handle"></div><div id="modalBody"></div></div>
+</div>
+
+<script type="module">
+'use strict';
+
+const SUPABASE_URL  = "https://hzrzkvdebaadditvbqis.supabase.co";
+const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh6cnprdmRlYmFhZGRpdHZicWlzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxMjEwMTQsImV4cCI6MjA5MjY5NzAxNH0.IDFFWHNNIeBReWRTeVj8RlRpyz5J4XaStFhGVEYEBU8";
+
+let sbModule;
+try{
+  sbModule = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm');
+}catch(e){
+  // CDN inaccessible (env offline, proxy…)
+  document.getElementById('authSend').disabled = false;
+  document.getElementById('authSend').innerHTML = '<i class="fa-solid fa-wifi-slash"></i> Réseau indisponible — réessayez';
+  console.error('[portal] CDN Supabase inaccessible :', e.message);
+  throw e; // Stoppe le module — l'écran statique reste visible
+}
+const {createClient} = sbModule;
+const sb = createClient(SUPABASE_URL, SUPABASE_ANON, {auth:{persistSession:true}});
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const iso = (y,m,d) => `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+const dim = (y,m) => new Date(y,m+1,0).getDate();
+const fmtDate = s => s ? new Date(s).toLocaleDateString('fr-FR',{day:'2-digit',month:'short',year:'numeric'}) : '—';
+const fmtTime = ts => ts ? new Date(ts).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}) : '—';
+
+let toast_t;
+function flash(msg, dur=2800){
+  const t=$('toast'); t.textContent=msg; t.classList.add('on');
+  clearTimeout(toast_t); toast_t=setTimeout(()=>t.classList.remove('on'), dur);
+}
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let session=null, employee=null, hotel=null;
+let currentTab='planning';
+let planMonth=new Date();
+
+const CMAP={
+  P:{bg:'#E8F5E9',fg:'#1b5e20',lbl:'Présent'},
+  PE:{bg:'#FFF3E0',fg:'#E65100',lbl:'Extra'},
+  CP:{bg:'#C6EFCE',fg:'#0F5132',lbl:'Congé'},
+  RTT:{bg:'#BDD7EE',fg:'#1F4E78',lbl:'RTT'},
+  MAL:{bg:'#FFC7CE',fg:'#9C0006',lbl:'Maladie'},
+  MAT:{bg:'#E1D5F0',fg:'#5B2A86',lbl:'Mat.'},
+  ABS:{bg:'#FFD9D9',fg:'#7B0000',lbl:'Absence'},
+  F:{bg:'#EDEDED',fg:'#6b7280',lbl:'Férié'},
+  CSS:{bg:'#D9D9D9',fg:'#3F3F3F',lbl:'SS'},
+  AE:{bg:'#FFE699',fg:'#7F6000',lbl:'Except.'},
+  REC:{bg:'#D4F0FC',fg:'#0C4A6E',lbl:'Récup.'},
+  FORM:{bg:'#FEF3C7',fg:'#92400E',lbl:'Form.'},
+};
+const SHIFT_BG={'M':'#E3F2FD','S':'#FFF3E0','N':'#EDE7F6','J':'#F1F8E9','PD':'#FFF8E1','C':'#FCE4EC'};
+const SHIFT_FG={'M':'#1565C0','S':'#BF360C','N':'#4527A0','J':'#558B2F','PD':'#F57F17','C':'#880E4F'};
+
+const REQ_TYPES={
+  conge_paye:   {icon:'fa-umbrella-beach', label:'Congé payé',         color:'#0F5132'},
+  absence_except:{icon:'fa-person-walking-arrow-right', label:'Absence exceptionnelle', color:'#7F6000'},
+  maladie:      {icon:'fa-kit-medical',   label:'Arrêt maladie',       color:'#9C0006'},
+  extra:        {icon:'fa-star',          label:'Demande d\'extra',     color:'#1565C0'},
+  echange_shift:{icon:'fa-arrows-rotate', label:'Échange de shift',    color:'#5B2A86'},
+  autre:        {icon:'fa-circle-dot',    label:'Autre',                color:'#6b7280'},
+};
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+async function boot(){
+  $('view').innerHTML='<div class="loading"><div class="spinner"></div><div>Chargement…</div></div>';
+
+  // Vérifier si on arrive depuis un lien magique (magic link)
+  const hash = window.location.hash;
+  if(hash.includes('access_token') || hash.includes('type=magiclink') || hash.includes('type=recovery')){
+    const {data,error} = await sb.auth.getSessionFromUrl();
+    if(!error && data.session){
+      session = data.session;
+      window.history.replaceState(null,'',window.location.pathname);
+    }
+  }
+
+  const {data:{session:s}} = await sb.auth.getSession();
+  session = s;
+
+  if(!session){ renderAuth(); return; }
+  await loadEmployee();
+}
+
+async function loadEmployee(){
+  try{
+    const {data,error} = await sb
+      .from('employees')
+      .select('*')
+      .eq('portal_auth_id', session.user.id)
+      .eq('portal_enabled', true)
+      .single();
+
+    if(error || !data){
+      // Salarié connecté mais pas encore activé → écran activation
+      renderActivation();
+      return;
+    }
+    employee = data;
+
+    // Charger l'hôtel
+    const {data:h} = await sb.from('hotels').select('id,name,city').eq('id',employee.hotel_id).single();
+    hotel = h;
+
+    // Mettre à jour le journal d'audit (login)
+    auditLog('login').catch(()=>{});
+
+    renderShell();
+    goTo('planning');
+  }catch(e){
+    renderError(e.message);
+  }
+}
+
+async function auditLog(action, extra={}){
+  await sb.from('portal_audit_log').insert({
+    hotel_id:    employee?.hotel_id,
+    employee_id: employee?.id,
+    actor_auth_id: session?.user?.id,
+    actor_type:  'employee',
+    action,
+    metadata: extra,
+  });
+}
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+function renderAuth(){
+  document.body.style.background='';
+  $('topbar').style.display='none';
+  $('nav').style.display='none';
+  $('view').innerHTML=`
+    <div class="auth-wrap" id="authWrap">
+      <div class="auth-card" id="authCard">
+        <div class="auth-logo">
+          <div class="mk">🏨</div>
+          <div class="name">Flowtym<small>Mon espace salarié</small></div>
+        </div>
+        <div id="authStep">
+          ${renderAuthStep1()}
+        </div>
+      </div>
+    </div>`;
+  wireAuthStep1();
+}
+
+function renderAuthStep1(){
+  return `
+    <h2 class="auth-title">Connexion</h2>
+    <p class="auth-sub">Entrez l'adresse email associée à votre dossier RH. Vous recevrez un lien de connexion.</p>
+    <div class="field"><label>Adresse e-mail</label>
+      <input type="email" id="authEmail" placeholder="prenom.nom@hotel.fr" autocomplete="email" inputmode="email">
+    </div>
+    <div class="gdpr-consent">
+      <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer">
+        <input type="checkbox" id="gdprCheck" style="margin-top:2px;flex-shrink:0">
+        <span>J'accepte que mes données soient traitées pour la gestion RH. <a href="#" onclick="showGdpr();return false">En savoir plus</a></span>
+      </label>
+    </div>
+    <button class="btn btn-p btn-full" id="authSend"><i class="fa-solid fa-paper-plane"></i> Recevoir le lien</button>
+    <p style="font-size:11.5px;color:var(--ink2);text-align:center;margin-top:14px">Votre compte est créé par votre responsable RH.</p>`;
+}
+
+function wireAuthStep1(){
+  $('authSend')?.addEventListener('click', async()=>{
+    const email = $('authEmail')?.value?.trim();
+    const gdpr  = $('gdprCheck')?.checked;
+    if(!email || !email.includes('@')){ flash('Email invalide'); return; }
+    if(!gdpr){ flash('Veuillez accepter les conditions'); return; }
+    $('authSend').disabled=true;
+    $('authSend').innerHTML='<div class="spinner" style="width:18px;height:18px;border-width:2px"></div> Envoi…';
+    const {error} = await sb.auth.signInWithOtp({
+      email,
+      options:{
+        emailRedirectTo: window.location.href,
+        shouldCreateUser: false,  // Seuls les comptes invités peuvent se connecter
+        data:{ portal_login: true }
+      }
+    });
+    if(error){
+      flash('Erreur : ' + (error.message==='Signups not allowed for otp'?'Email non reconnu — contactez votre RH':error.message));
+      $('authSend').disabled=false;
+      $('authSend').innerHTML='<i class="fa-solid fa-paper-plane"></i> Recevoir le lien';
+      return;
+    }
+    // Proposer aussi la saisie du code OTP (6 chiffres)
+    $('authStep').innerHTML=`
+      <h2 class="auth-title">Code envoyé ✓</h2>
+      <p class="auth-sub">Un email a été envoyé à <b>${esc(email)}</b>. Cliquez sur le lien ou saisissez le code à 6 chiffres ci-dessous.</p>
+      <div class="otp-inputs" id="otpWrap">
+        ${[0,1,2,3,4,5].map(i=>`<input type="tel" maxlength="1" id="otp${i}" inputmode="numeric">`).join('')}
+      </div>
+      <button class="btn btn-p btn-full" id="otpVerify"><i class="fa-solid fa-unlock"></i> Vérifier le code</button>
+      <button class="btn btn-g btn-full" style="margin-top:8px" id="otpBack"><i class="fa-solid fa-arrow-left"></i> Changer d'email</button>`;
+    wireOtp(email);
+  });
+}
+
+function wireOtp(email){
+  const inputs = [0,1,2,3,4,5].map(i=>$(`otp${i}`));
+  inputs.forEach((inp,i)=>{
+    inp.addEventListener('input', ()=>{
+      if(inp.value.length===1 && i<5) inputs[i+1].focus();
+      if(inputs.every(x=>x.value)) $('otpVerify').click();
+    });
+    inp.addEventListener('keydown', e=>{ if(e.key==='Backspace'&&!inp.value&&i>0) inputs[i-1].focus(); });
+  });
+  inputs[0].focus();
+
+  $('otpVerify').addEventListener('click', async()=>{
+    const token = inputs.map(x=>x.value).join('');
+    if(token.length!==6){ flash('Code incomplet'); return; }
+    $('otpVerify').disabled=true;
+    const {data,error} = await sb.auth.verifyOtp({email, token, type:'email'});
+    if(error){ flash('Code invalide ou expiré'); $('otpVerify').disabled=false; return; }
+    session = data.session;
+    await loadEmployee();
+  });
+
+  $('otpBack').addEventListener('click', ()=>{
+    $('authStep').innerHTML=renderAuthStep1();
+    wireAuthStep1();
+  });
+}
+
+function renderActivation(){
+  $('topbar').style.display='none';
+  $('nav').style.display='none';
+  $('view').innerHTML=`
+    <div class="auth-wrap">
+      <div class="auth-card">
+        <div class="auth-logo">
+          <div class="mk">🏨</div>
+          <div class="name">Flowtym<small>Activation du compte</small></div>
+        </div>
+        <div class="info-box"><i class="fa-solid fa-envelope"></i>
+          Votre compte est en attente d'activation. Votre responsable RH doit d'abord vous inviter via l'application Flowtym.
+        </div>
+        <button class="btn btn-g btn-full" onclick="sb.auth.signOut().then(()=>location.reload())">
+          <i class="fa-solid fa-arrow-right-from-bracket"></i> Se déconnecter
+        </button>
+      </div>
+    </div>`;
+}
+
+function renderError(msg){
+  $('view').innerHTML=`<div class="auth-wrap"><div class="auth-card">
+    <div class="err-box"><i class="fa-solid fa-triangle-exclamation"></i>${esc(msg)}</div>
+    <button class="btn btn-g btn-full" onclick="location.reload()"><i class="fa-solid fa-rotate"></i> Réessayer</button>
+  </div></div>`;
+}
+
+function showGdpr(){
+  openModal(`
+    <div class="modal-title"><i class="fa-solid fa-shield-halved" style="color:var(--vi)"></i>Protection des données</div>
+    <p style="font-size:13px;line-height:1.7;color:var(--ink2)">
+      <b>Responsable de traitement :</b> ${esc(hotel?.name||'Votre employeur')}<br><br>
+      <b>Données traitées :</b> identité, coordonnées, planning, pointages, documents RH, demandes de congés.<br><br>
+      <b>Finalité :</b> gestion des ressources humaines, suivi du temps de travail, dématérialisation des documents RH.<br><br>
+      <b>Base légale :</b> exécution du contrat de travail (art. 6.1.b RGPD).<br><br>
+      <b>Durée de conservation :</b> durée du contrat + 5 ans (obligations légales paie), puis suppression.<br><br>
+      <b>Vos droits :</b> accès, rectification, effacement, portabilité. Exercice via la section Profil > Mes données.<br><br>
+      <b>Hébergement :</b> Supabase (UE), données chiffrées au repos et en transit.
+    </p>`);
+}
+
+// ── Shell ─────────────────────────────────────────────────────────────────────
+function renderShell(){
+  $('topbar').style.display='flex';
+  $('nav').style.display='flex';
+  const initials = (employee.first_name[0]||'?') + (employee.last_name[0]||'');
+  $('topAvatar').textContent = initials.toUpperCase();
+}
+
+function goTo(tab){
+  currentTab = tab;
+  document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('on', b.dataset.tab===tab));
+  const v = $('view');
+  v.scrollTop = 0;
+  ({
+    planning: renderPlanning,
+    clock:    renderClock,
+    docs:     renderDocs,
+    requests: renderRequests,
+    messages: renderMessages,
+    profile:  renderProfile,
+  }[tab]||renderPlanning)();
+  refreshBadges();
+}
+
+async function refreshBadges(){
+  // Demandes en attente côté salarié (confirmations attendues)
+  const {count} = await sb.from('portal_requests')
+    .select('id',{count:'exact',head:true})
+    .eq('employee_id', employee.id)
+    .in('status',['approved','rejected'])
+    .gte('updated_at', new Date(Date.now()-7*86400000).toISOString());
+  $('reqBadge').style.display = count>0 ? 'grid' : 'none';
+  if(count>0) $('reqBadge').textContent = count;
+
+  // Messages non lus
+  const {count:mc} = await sb.from('portal_messages')
+    .select('id',{count:'exact',head:true})
+    .eq('employee_id', employee.id)
+    .eq('direction','manager_to_employee')
+    .is('read_at',null);
+  $('bellBadge').style.display = mc>0 ? 'grid' : 'none';
+  if(mc>0) $('bellBadge').textContent = mc;
+}
+
+// ── Planning ──────────────────────────────────────────────────────────────────
+async function renderPlanning(){
+  const v=$('view');
+  v.innerHTML=`<div class="page">
+    <div class="page-title">Mon planning</div>
+    <div class="page-sub">${esc(employee.first_name)} · ${esc(hotel?.name||'')}</div>
+    <div class="month-nav">
+      <button onclick="prevMonth()"><i class="fa-solid fa-chevron-left"></i></button>
+      <span class="lbl" id="monthLbl"></span>
+      <button onclick="nextMonth()"><i class="fa-solid fa-chevron-right"></i></button>
+    </div>
+    <div class="cal-grid" id="calGrid">
+      <div class="loading"><div class="spinner"></div></div>
+    </div>
+    <div class="cal-legend" id="calLegend"></div>
+    <div class="card" id="monthStats"></div>
+  </div>`;
+  await loadMonthCal();
+}
+
+async function loadMonthCal(){
+  const y=planMonth.getFullYear(), m=planMonth.getMonth();
+  const lbl=$('monthLbl');
+  if(lbl) lbl.textContent = planMonth.toLocaleDateString('fr-FR',{month:'long',year:'numeric'});
+
+  const from=iso(y,m,1), to=iso(y,m,dim(y,m));
+  const {data:rows} = await sb.from('staff_planning')
+    .select('day,status,shift_label')
+    .eq('employee_id', employee.id)
+    .gte('day',from).lte('day',to);
+
+  const dayMap = new Map((rows||[]).map(r=>[r.day,r]));
+  const grid=$('calGrid'); if(!grid) return;
+  const todayStr = new Date().toISOString().slice(0,10);
+
+  const DAYS=['L','M','M','J','V','S','D'];
+  let h = DAYS.map(d=>`<div class="cal-head">${d}</div>`).join('');
+
+  // Padding début
+  const firstWd = (new Date(y,m,1).getDay()+6)%7; // 0=lun
+  for(let i=0;i<firstWd;i++) h+=`<div class="cal-day other-month"></div>`;
+
+  const nd=dim(y,m);
+  const usedCodes=new Set();
+  for(let d=1;d<=nd;d++){
+    const ds=iso(y,m,d);
+    const row=dayMap.get(ds);
+    const status=row?.status||'';
+    const shift=row?.shift_label||'';
+    const c=CMAP[status];
+    const wd=(new Date(y,m,d).getDay()+6)%7;
+    const we=wd>=5;
+    const isToday=ds===todayStr;
+    const st=c?`background:${c.bg};color:${c.fg}`:'background:#f9fafb;color:#9ca3af';
+    if(c) usedCodes.add(status);
+    const shiftBadge=shift?`<span class="sb" style="background:${SHIFT_BG[shift]||'#eee'};color:${SHIFT_FG[shift]||'#333'}">${shift}</span>`:'';
+    h+=`<div class="cal-day ${we?'weekend':''} ${isToday?'today':''}" style="${st}">
+      <span class="dn">${d}</span>
+      ${status?`<span style="font-size:8px;font-weight:800">${esc(status)}</span>`:''}
+      ${shiftBadge}
+    </div>`;
+  }
+  grid.innerHTML=h;
+
+  // Légende
+  const leg=$('calLegend');
+  if(leg) leg.innerHTML=[...usedCodes].map(code=>{const c=CMAP[code];return c?
+    `<span><b style="background:${c.bg};border:1px solid rgba(0,0,0,.08)"></b>${c.lbl}</span>`:''
+  }).join('');
+
+  // Stats du mois
+  const stats=$('monthStats'); if(!stats) return;
+  const rowArr=rows||[];
+  const trav=rowArr.filter(r=>['P','PE'].includes(r.status)).length;
+  const cp=rowArr.filter(r=>r.status==='CP').length;
+  const abs=rowArr.filter(r=>['MAL','ABS','CSS','AE','MAT'].includes(r.status)).length;
+  const rep=nd-(rowArr.length);
+  stats.innerHTML=`
+    <div class="card-title"><i class="fa-solid fa-chart-pie"></i>Résumé du mois</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <div style="background:#f0fdf4;border-radius:10px;padding:10px;text-align:center">
+        <div style="font-size:22px;font-weight:800;color:#16a34a">${trav}</div>
+        <div style="font-size:11px;color:#6b7280">Jours travaillés</div>
+      </div>
+      <div style="background:#eff6ff;border-radius:10px;padding:10px;text-align:center">
+        <div style="font-size:22px;font-weight:800;color:#1d4ed8">${cp}</div>
+        <div style="font-size:11px;color:#6b7280">Congés payés</div>
+      </div>
+      <div style="background:#fef2f2;border-radius:10px;padding:10px;text-align:center">
+        <div style="font-size:22px;font-weight:800;color:#dc2626">${abs}</div>
+        <div style="font-size:11px;color:#6b7280">Absences</div>
+      </div>
+      <div style="background:#f9fafb;border-radius:10px;padding:10px;text-align:center">
+        <div style="font-size:22px;font-weight:800;color:#9ca3af">${rep}</div>
+        <div style="font-size:11px;color:#6b7280">Repos</div>
+      </div>
+    </div>`;
+}
+
+window.prevMonth=()=>{planMonth=new Date(planMonth.getFullYear(),planMonth.getMonth()-1,1);loadMonthCal();};
+window.nextMonth=()=>{planMonth=new Date(planMonth.getFullYear(),planMonth.getMonth()+1,1);loadMonthCal();};
+
+// ── Pointage ──────────────────────────────────────────────────────────────────
+let clockTick;
+async function renderClock(){
+  const v=$('view');
+  v.innerHTML=`<div class="page">
+    <div class="page-title">Pointage</div>
+    <div class="page-sub">${esc(employee.first_name)} ${esc(employee.last_name)}</div>
+    <div class="card clock-card">
+      <div id="liveClock" class="clock-time">--:--</div>
+      <div id="clockDate" class="clock-date"></div>
+      <button class="clock-btn in" id="clockBtn" onclick="handleClockAction()">
+        <i class="fa-solid fa-hand-point-up"></i>
+        <span id="clockBtnLbl">Pointer</span>
+      </button>
+      <div id="clockStatus" style="font-size:13px;color:var(--ink2);margin-bottom:16px"></div>
+      <button class="btn btn-g btn-full" onclick="openQrScan()" style="margin-bottom:8px">
+        <i class="fa-solid fa-qrcode"></i> Scanner un QR Code
+      </button>
+      <button class="btn btn-g btn-full" onclick="openNfcClock()" id="nfcBtn" style="margin-bottom:8px;display:none">
+        <i class="fa-solid fa-wifi"></i> Badge NFC
+      </button>
+    </div>
+    <div class="card">
+      <div class="card-title"><i class="fa-solid fa-list-check"></i>Pointages du jour</div>
+      <div id="clockToday" class="clock-history"><div class="loading" style="padding:16px"><div class="spinner" style="width:20px;height:20px;border-width:2px"></div></div></div>
+    </div>
+    <div class="card">
+      <div class="card-title"><i class="fa-regular fa-calendar"></i>Cette semaine</div>
+      <div id="clockWeek" class="clock-history"><div class="loading" style="padding:16px"><div class="spinner" style="width:20px;height:20px;border-width:2px"></div></div></div>
+    </div>
+  </div>`;
+
+  clearInterval(clockTick);
+  clockTick=setInterval(tickClock,1000);
+  tickClock();
+  if('NDEFReader' in window){ const nb=$('nfcBtn'); if(nb) nb.style.display=''; }
+  await loadClockings();
+}
+
+function tickClock(){
+  const now=new Date();
+  const c=$('liveClock'); if(!c){clearInterval(clockTick);return;}
+  c.textContent=now.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  const d=$('clockDate'); if(d) d.textContent=now.toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long'});
+}
+
+async function loadClockings(){
+  const today=new Date().toISOString().slice(0,10);
+  const weekStart=new Date(); weekStart.setDate(weekStart.getDate()-weekStart.getDay()+1);
+  const wFrom=weekStart.toISOString().slice(0,10);
+
+  const {data} = await sb.from('staff_clockings')
+    .select('*')
+    .eq('employee_id',employee.id)
+    .gte('day',wFrom)
+    .order('clock_in_ts',{ascending:false});
+
+  const rows=data||[];
+  const todayRows=rows.filter(r=>r.day===today);
+  const weekRows=rows.filter(r=>r.day!==today);
+
+  // Déterminer état du bouton
+  const lastOpen=todayRows.find(r=>!r.clock_out_ts);
+  const btn=$('clockBtn'); const lbl=$('clockBtnLbl'); const st=$('clockStatus');
+  if(btn){
+    if(lastOpen){
+      btn.className='clock-btn out';
+      btn.querySelector('i').className='fa-solid fa-hand-point-down';
+      if(lbl) lbl.textContent='Pointer sortie';
+      if(st) st.textContent=`En service depuis ${fmtTime(lastOpen.clock_in_ts)}`;
+      btn.dataset.openId=lastOpen.id;
+    } else {
+      btn.className='clock-btn in';
+      btn.querySelector('i').className='fa-solid fa-hand-point-up';
+      if(lbl) lbl.textContent='Pointer entrée';
+      if(st) st.textContent='';
+      delete btn.dataset.openId;
+    }
+  }
+
+  const renderRow=r=>`<div class="row">
+    <div>
+      <div style="font-weight:600;font-size:13px">${fmtTime(r.clock_in_ts)} → ${r.clock_out_ts?fmtTime(r.clock_out_ts):'<span style="color:var(--green)">En cours</span>'}</div>
+      <div style="font-size:11px;color:var(--ink2)">${r.clock_out_ts?durationStr(r.clock_in_ts,r.clock_out_ts,r.break_minutes):'—'} · ${r.source==='qr'?'QR Code':'Manuel'}</div>
+    </div>
+    ${r.clock_out_ts?'':'<span style="font-size:10.5px;background:#f0fdf4;color:#16a34a;padding:3px 8px;border-radius:6px;font-weight:600">Actif</span>'}
+  </div>`;
+
+  const tod=$('clockToday');
+  if(tod) tod.innerHTML=todayRows.length?todayRows.map(renderRow).join(''):
+    '<div style="text-align:center;padding:16px;color:var(--ink2);font-size:13px">Aucun pointage aujourd\'hui</div>';
+
+  const wk=$('clockWeek');
+  if(wk) wk.innerHTML=weekRows.length?weekRows.map(r=>`<div class="row">
+    <div>
+      <div style="font-weight:600;font-size:13px">${fmtDate(r.day)}</div>
+      <div style="font-size:11px;color:var(--ink2)">${fmtTime(r.clock_in_ts)} → ${r.clock_out_ts?fmtTime(r.clock_out_ts):'—'}</div>
+    </div>
+    <div style="font-size:12px;font-weight:600">${r.clock_out_ts?durationStr(r.clock_in_ts,r.clock_out_ts,r.break_minutes):'—'}</div>
+  </div>`).join(''):
+    '<div style="text-align:center;padding:16px;color:var(--ink2);font-size:13px">Aucun pointage cette semaine</div>';
+}
+
+function durationStr(inTs,outTs,brk=0){
+  const m=Math.round((new Date(outTs)-new Date(inTs))/60000)-(brk||0);
+  return `${Math.floor(m/60)}h${String(m%60).padStart(2,'0')}`;
+}
+
+window.handleClockAction=async()=>{
+  const btn=$('clockBtn'); if(!btn) return;
+  btn.disabled=true;
+  try{
+    if(btn.dataset.openId){
+      // Clock-out
+      const {error}=await sb.from('staff_clockings').update({clock_out_ts:new Date().toISOString()}).eq('id',btn.dataset.openId);
+      if(error) throw error;
+      flash('Sortie pointée ✓');
+      auditLog('clock_out',{clocking_id:btn.dataset.openId});
+    } else {
+      // Clock-in
+      const now=new Date();
+      const {error}=await sb.from('staff_clockings').insert({
+        hotel_id:  employee.hotel_id,
+        employee_id: employee.id,
+        day:       now.toISOString().slice(0,10),
+        clock_in_ts: now.toISOString(),
+        source:    'self',
+      });
+      if(error) throw error;
+      flash('Entrée pointée ✓');
+      auditLog('clock_in');
+    }
+    await loadClockings();
+  }catch(e){flash('Erreur : '+e.message);}
+  finally{btn.disabled=false;}
+};
+
+// ── NFC Pointage (Web NFC API — Chrome Android 89+) ──────────────────────────
+window.openNfcClock=async()=>{
+  if(!('NDEFReader' in window)){
+    flash('NFC non supporté sur cet appareil — utilisez le QR Code');
+    return;
+  }
+  try{
+    const ndef = new NDEFReader();
+    await ndef.scan();
+    flash('NFC actif — approchez le badge du terminal…', 5000);
+    ndef.addEventListener('reading', async({message})=>{
+      for(const record of message.records){
+        if(record.recordType==='text'||record.recordType==='url'){
+          const decoder=new TextDecoder(record.encoding||'utf-8');
+          const raw=decoder.decode(record.data);
+          await submitQrCode(raw); // même logique que QR
+          return;
+        }
+      }
+      flash('Badge non reconnu');
+    });
+    ndef.addEventListener('readingerror', ()=>flash('Erreur lecture NFC'));
+  }catch(e){
+    if(e.name==='NotAllowedError') flash('Permission NFC refusée — activez-la dans les paramètres');
+    else if(e.name==='NotSupportedError') flash('NFC non disponible sur cet appareil');
+    else flash('Erreur NFC : '+e.message);
+  }
+};
+
+window.openQrScan=async()=>{
+  if(!('BarcodeDetector' in window)){
+    // Fallback : saisie manuelle du code
+    openModal(`
+      <div class="modal-title"><i class="fa-solid fa-qrcode" style="color:var(--vi)"></i>Saisir le code</div>
+      <p style="font-size:13px;color:var(--ink2);margin-bottom:14px">Votre navigateur ne supporte pas le scanner. Saisissez le code affiché sur le terminal de pointage.</p>
+      <div class="field"><label>Code pointage</label><input type="text" id="qrCodeInput" placeholder="Ex: FTY-xxxxx" autocomplete="off"></div>
+      <button class="btn btn-p btn-full" onclick="submitQrCode($('qrCodeInput').value)"><i class="fa-solid fa-check"></i> Valider</button>`);
+    return;
+  }
+  openModal(`
+    <div class="modal-title"><i class="fa-solid fa-qrcode" style="color:var(--vi)"></i>Scanner le QR Code</div>
+    <div class="qr-wrap" id="qrWrap">
+      <video id="qrVideo" autoplay playsinline muted></video>
+      <div class="qr-overlay"><div class="qr-frame"></div></div>
+    </div>
+    <p style="font-size:12px;color:var(--ink2);text-align:center">Placez le QR Code dans le cadre</p>`);
+  startQrScanner();
+};
+
+let qrStream=null;
+async function startQrScanner(){
+  try{
+    qrStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+    const vid=$('qrVideo'); if(!vid) return;
+    vid.srcObject=qrStream;
+    const detector=new BarcodeDetector({formats:['qr_code']});
+    const tick=async()=>{
+      if(!$('qrVideo')){if(qrStream)qrStream.getTracks().forEach(t=>t.stop());return;}
+      try{
+        const codes=await detector.detect(vid);
+        if(codes.length){
+          qrStream.getTracks().forEach(t=>t.stop());
+          closeModal();
+          await submitQrCode(codes[0].rawValue);
+          return;
+        }
+      }catch{}
+      requestAnimationFrame(tick);
+    };
+    vid.addEventListener('loadedmetadata',()=>requestAnimationFrame(tick));
+  }catch(e){
+    const w=$('qrWrap');
+    if(w) w.innerHTML=`<div class="err-box" style="margin:16px"><i class="fa-solid fa-camera-slash"></i>Caméra inaccessible : ${esc(e.message)}</div>`;
+  }
+}
+
+async function submitQrCode(raw){
+  if(!raw) return;
+  // Format attendu : FTY-{hotel_id_court} ou URL contenant hotel_id
+  // On pointe simplement l'employé sur l'hôtel validé
+  const now=new Date();
+  const btn=$('clockBtn');
+  const isOut = btn?.dataset.openId;
+  try{
+    if(isOut){
+      await sb.from('staff_clockings').update({clock_out_ts:now.toISOString(),source:'qr'}).eq('id',btn.dataset.openId);
+      flash('Sortie pointée via QR ✓');
+      auditLog('clock_out_qr',{raw});
+    } else {
+      await sb.from('staff_clockings').insert({
+        hotel_id:employee.hotel_id,employee_id:employee.id,
+        day:now.toISOString().slice(0,10),
+        clock_in_ts:now.toISOString(),source:'qr'
+      });
+      flash('Entrée pointée via QR ✓');
+      auditLog('clock_in_qr',{raw});
+    }
+    await loadClockings();
+  }catch(e){flash('Erreur pointage : '+e.message);}
+}
+
+// ── Coffre-fort documents ─────────────────────────────────────────────────────
+const DOC_TYPES={
+  // Documents fournis par l'employeur
+  contrat:     {label:'Contrat de travail',      icon:'fa-file-contract',  dir:'employer',  mime:['pdf']},
+  fiche_paie:  {label:'Fiche de paie',           icon:'fa-money-check-dollar', dir:'employer', mime:['pdf']},
+  attestation: {label:'Attestation de travail',  icon:'fa-stamp',          dir:'employer',  mime:['pdf']},
+  // Documents fournis par le salarié
+  cni:         {label:'CNI / Passeport',         icon:'fa-id-card',        dir:'employee',  mime:['pdf','jpg','png','webp','heic']},
+  sejour:      {label:'Titre de séjour',         icon:'fa-passport',       dir:'employee',  mime:['pdf','jpg','png','webp','heic']},
+  arret_maladie:{label:'Arrêt maladie',          icon:'fa-notes-medical',  dir:'employee',  mime:['pdf','jpg','png','webp','heic']},
+  rib:         {label:'RIB',                     icon:'fa-building-columns',dir:'employee', mime:['pdf','jpg','png']},
+  domicile:    {label:'Justificatif de domicile',icon:'fa-house',          dir:'employee',  mime:['pdf','jpg','png','webp','heic']},
+  mutuelle:    {label:'Attestation mutuelle',    icon:'fa-hand-holding-medical',dir:'employee',mime:['pdf','jpg','png']},
+  autre:       {label:'Autre document',          icon:'fa-paperclip',      dir:'employee',  mime:['pdf','jpg','png','webp']},
+};
+
+async function renderDocs(){
+  $('view').innerHTML=`<div class="page">
+    <div class="page-title">Coffre-fort</div>
+    <div class="page-sub">Vos documents RH sécurisés</div>
+    <div id="docsContent"><div class="loading"><div class="spinner"></div></div></div>
+  </div>`;
+  await loadDocs();
+}
+
+async function loadDocs(){
+  const el=$('docsContent'); if(!el) return;
+
+  // Charger les fichiers du bucket portal-documents/{hotel_id}/{employee_id}/
+  const prefix=`${employee.hotel_id}/${employee.id}/`;
+  const {data:files,error} = await sb.storage.from('portal-documents').list(prefix,{limit:200,sortBy:{column:'created_at',order:'desc'}});
+
+  // Charger employee_documents + portal_signature_requests
+  const {data:empDocs} = await sb.from('employee_documents')
+    .select('*,psr:portal_signature_requests(id,status,yousign_sr_id,signed_document_path)')
+    .eq('employee_id',employee.id).order('created_at',{ascending:false});
+
+  // Construire l'affichage par catégorie
+  const byDir={employer:[],employee:[]};
+
+  // Docs manager (via employee_documents)
+  (empDocs||[]).forEach(d=>{
+    const psr=Array.isArray(d.psr)?d.psr[0]:d.psr;
+    byDir.employer.push({
+      id:d.id, name:d.label||d.doc_type, storage_path:d.storage_path, file_url:d.file_url,
+      type:'employer_doc', doc_type:d.doc_type, created_at:d.created_at,
+      signature_status:d.signature_status||'none',
+      psr_id:psr?.id, yousign_sr_id:psr?.yousign_sr_id,
+      signed_document_path:psr?.signed_document_path,
+    });
+  });
+
+  // Docs portail (uploadés par le salarié)
+  (files||[]).filter(f=>f.name!=='.emptyFolderPlaceholder').forEach(f=>{
+    const parts=f.name.split('/');
+    const cat=parts[0]||'autre';
+    byDir.employee.push({name:f.name, storage_name:f.name, type:'portal_doc', cat, created_at:f.created_at});
+  });
+
+  let h='';
+
+  // Séparer docs à signer des autres
+  const toSign=byDir.employer.filter(d=>d.signature_status==='pending');
+  if(toSign.length){
+    h+=`<div class="card" style="border-color:#7c3aed;background:#faf5ff">
+      <div class="card-title" style="color:#7c3aed"><i class="fa-solid fa-pen-nib"></i>À signer (${toSign.length})</div>`;
+    h+=toSign.map(d=>docRow(d)).join('');
+    h+=`</div>`;
+  }
+  if(byDir.employer.length){
+    h+=`<div class="card"><div class="card-title"><i class="fa-solid fa-building"></i>De votre employeur</div>`;
+    h+=byDir.employer.filter(d=>d.signature_status!=='pending').map(d=>docRow(d)).join('');
+    if(!byDir.employer.filter(d=>d.signature_status!=='pending').length)
+      h+=`<div style="text-align:center;padding:16px;color:var(--ink2);font-size:13px">Aucun autre document</div>`;
+    h+=`</div>`;
+  } else {
+    h+=`<div class="card"><div class="card-title"><i class="fa-solid fa-building"></i>De votre employeur</div>
+      <div style="text-align:center;padding:16px;color:var(--ink2);font-size:13px">Aucun document transmis par votre employeur</div></div>`;
+  }
+
+  h+=`<div class="card">
+    <div class="card-title"><i class="fa-solid fa-upload"></i>Vos documents
+      <button class="btn btn-p" style="margin-left:auto;font-size:12px;padding:6px 10px" onclick="openUploadDoc()">
+        <i class="fa-solid fa-plus"></i> Ajouter
+      </button>
+    </div>`;
+  if(byDir.employee.length){
+    h+=byDir.employee.map(d=>docRow(d)).join('');
+  } else {
+    h+=`<div style="text-align:center;padding:16px;color:var(--ink2);font-size:13px">
+      <i class="fa-solid fa-file-circle-plus" style="font-size:28px;display:block;margin-bottom:8px;opacity:.3"></i>
+      Aucun document. Ajoutez votre CNI, titre de séjour, arrêts maladie…
+    </div>`;
+  }
+  h+=`</div>
+
+  <div class="info-box"><i class="fa-solid fa-lock"></i>
+    Vos documents sont chiffrés et accessibles uniquement par vous et votre responsable RH.
+    <a href="#" onclick="showGdpr();return false" style="color:var(--vi);font-weight:600;margin-left:4px">En savoir plus</a>
+  </div>`;
+
+  el.innerHTML=h;
+}
+
+function docRow(d){
+  const ext=(d.storage_name||d.storage_path||d.name||'').split('.').pop().toLowerCase();
+  const itype=ext==='pdf'?'pdf':['jpg','jpeg','png','heic','webp','gif'].includes(ext)?'img':'other';
+  const icons={pdf:'fa-file-pdf',img:'fa-file-image',other:'fa-file'};
+  const label=d.name||(d.doc_type?(DOC_TYPES[d.doc_type]?.label||d.doc_type):'Document');
+  const sigBadge={
+    pending:`<span style="font-size:11px;font-weight:600;color:#d97706;background:#fffbeb;padding:2px 8px;border-radius:12px">⏳ À signer</span>`,
+    signed:`<span style="font-size:11px;font-weight:600;color:#16a34a;background:#f0fdf4;padding:2px 8px;border-radius:12px">✅ Signé</span>`,
+    refused:`<span style="font-size:11px;font-weight:600;color:#dc2626;background:#fef2f2;padding:2px 8px;border-radius:12px">❌ Refusé</span>`,
+    expired:`<span style="font-size:11px;font-weight:600;color:#9ca3af;background:#f3f4f6;padding:2px 8px;border-radius:12px">⌛ Expiré</span>`,
+  }[d.signature_status]||'';
+  const signBtn=d.signature_status==='pending'
+    ?`<button class="btn btn-p btn-full" style="margin-top:10px;font-size:13px" onclick="openSignatureIframe('${esc(d.yousign_sr_id||'')}','${esc(d.id||'')}')">
+        <i class="fa-solid fa-pen-nib"></i> Signer maintenant
+      </button>`:'';
+  const downloadSigned=d.signature_status==='signed'&&d.signed_document_path
+    ?`<button class="doc-btn" onclick="downloadSignedDoc('${esc(d.signed_document_path)}')" title="Télécharger le document signé"><i class="fa-solid fa-certificate"></i></button>`:'';
+  return `<div class="doc-row" style="flex-direction:column;align-items:stretch">
+    <div style="display:flex;align-items:center;gap:10px">
+      <div class="doc-icon ${itype}"><i class="fa-solid ${icons[itype]}"></i></div>
+      <div class="doc-info" style="flex:1">
+        <div class="doc-name">${esc(label)}</div>
+        <div class="doc-meta" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span>${fmtDate(d.created_at)}</span>
+          ${sigBadge}
+        </div>
+      </div>
+      <div class="doc-actions">
+        ${d.storage_path?`<button class="doc-btn" onclick="downloadEmpDoc('${esc(d.storage_path)}')" title="Télécharger"><i class="fa-solid fa-download"></i></button>`:''}
+        ${d.url?`<button class="doc-btn" onclick="window.open('${esc(d.url)}','_blank')" title="Ouvrir"><i class="fa-solid fa-eye"></i></button>`:''}
+        ${d.storage_name?`<button class="doc-btn" onclick="downloadPortalDoc('${esc(d.storage_name)}')" title="Télécharger"><i class="fa-solid fa-download"></i></button>`:''}
+        ${downloadSigned}
+      </div>
+    </div>
+    ${signBtn}
+  </div>`;
+}
+
+window.downloadPortalDoc=async(name)=>{
+  const prefix=`${employee.hotel_id}/${employee.id}/`;
+  const {data,error}=await sb.storage.from('portal-documents').createSignedUrl(prefix+name,3600);
+  if(error){flash('Erreur : '+error.message);return;}
+  window.open(data.signedUrl,'_blank');
+  auditLog('download_doc',{filename:name});
+};
+
+window.downloadEmpDoc=async(storagePath)=>{
+  const {data,error}=await sb.storage.from('employee-documents').createSignedUrl(storagePath,3600);
+  if(error){flash('Erreur : '+error.message);return;}
+  window.open(data.signedUrl,'_blank');
+  auditLog('download_doc',{storage_path:storagePath});
+};
+
+window.downloadSignedDoc=async(storagePath)=>{
+  const {data,error}=await sb.storage.from('portal-documents').createSignedUrl(storagePath,3600);
+  if(error){flash('Erreur : '+error.message);return;}
+  window.open(data.signedUrl,'_blank');
+  auditLog('download_signed_doc',{storage_path:storagePath});
+};
+
+window.openSignatureIframe=async(yousignSrId, documentId)=>{
+  if(!yousignSrId){flash('Identifiant de signature manquant');return;}
+  // Récupérer le lien de signature depuis portal_signature_requests
+  const {data:psr,error}=await sb.from('portal_signature_requests')
+    .select('yousign_sr_id,yousign_signer_id,status')
+    .eq('yousign_sr_id',yousignSrId).single();
+  if(error||!psr){flash('Demande de signature introuvable');return;}
+  if(psr.status!=='ongoing'){flash('Cette demande de signature n\'est plus active ('+psr.status+')');return;}
+
+  // L'URL de signature YouSign (sandbox ou prod selon env)
+  const YOUSIGN_BASE='https://sandbox.yousign.app';
+  const signUrl=`${YOUSIGN_BASE}/sign/${psr.yousign_sr_id}?signer_id=${psr.yousign_signer_id}&disable_domain_validation=true`;
+
+  openModal(`
+    <div style="display:flex;flex-direction:column;height:85vh;max-height:700px">
+      <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line);flex-shrink:0">
+        <i class="fa-solid fa-pen-nib" style="color:var(--vi);font-size:18px"></i>
+        <span style="font-weight:700;font-size:15px">Signature électronique</span>
+        <span style="font-size:12px;color:var(--ink2);margin-left:4px">— Valeur légale eIDAS</span>
+        <button onclick="closeModal()" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:20px;color:var(--ink2)">×</button>
+      </div>
+      <iframe src="${signUrl}"
+        style="flex:1;border:none;width:100%"
+        allow="camera;microphone"
+        id="signatureIframe">
+      </iframe>
+    </div>`);
+
+  // Écouter le message de fin de signature (postMessage YouSign)
+  const onMsg=(e)=>{
+    if(!e.data) return;
+    const evt=typeof e.data==='string'?JSON.parse(e.data||'{}'):e.data;
+    if(evt.type==='yousign:signed'||evt.event==='signed'||evt.status==='SIGNED'){
+      window.removeEventListener('message',onMsg);
+      closeModal();
+      flash('✅ Document signé avec succès ! Il sera disponible dans votre coffre-fort sous quelques instants.');
+      auditLog('document_signed',{yousign_sr_id:yousignSrId});
+      setTimeout(()=>loadDocs(),3000);
+    }
+  };
+  window.addEventListener('message',onMsg);
+};
+
+window.openUploadDoc=()=>{
+  openModal(`
+    <div class="modal-title"><i class="fa-solid fa-upload" style="color:var(--vi)"></i>Ajouter un document</div>
+    <div class="field"><label>Type de document</label>
+      <select id="docTypeSelect">
+        ${Object.entries(DOC_TYPES).filter(([,v])=>v.dir==='employee')
+          .map(([k,v])=>`<option value="${k}">${v.label}</option>`).join('')}
+      </select>
+    </div>
+    <div class="dropzone" id="uploadZone" onclick="$('docFile').click()">
+      <i class="fa-solid fa-cloud-arrow-up"></i>
+      Appuyez pour choisir un fichier<br>
+      <small style="opacity:.7">PDF, photo — 20 Mo max</small>
+    </div>
+    <input type="file" id="docFile" style="display:none" accept="application/pdf,image/*" onchange="handleDocUpload(this.files[0])">
+    <div id="uploadProgress" style="margin-top:12px"></div>`);
+
+  const zone=$('uploadZone');
+  zone.addEventListener('dragover',e=>{e.preventDefault();zone.classList.add('drag');});
+  zone.addEventListener('dragleave',()=>zone.classList.remove('drag'));
+  zone.addEventListener('drop',e=>{e.preventDefault();zone.classList.remove('drag');handleDocUpload(e.dataTransfer.files[0]);});
+};
+
+window.handleDocUpload=async(file)=>{
+  if(!file){return;}
+  const maxSize=20*1024*1024;
+  if(file.size>maxSize){flash('Fichier trop volumineux (max 20 Mo)');return;}
+  const allowed=['application/pdf','image/jpeg','image/png','image/heic','image/webp','image/gif'];
+  if(!allowed.includes(file.type)){flash('Format non supporté');return;}
+
+  const docType=$('docTypeSelect')?.value||'autre';
+  const ext=file.name.split('.').pop().toLowerCase();
+  const safeName=`${docType}_${Date.now()}.${ext}`;
+  const path=`${employee.hotel_id}/${employee.id}/${safeName}`;
+
+  const prog=$('uploadProgress');
+  if(prog) prog.innerHTML=`<div class="info-box"><i class="fa-solid fa-spinner fa-spin"></i>Envoi en cours…</div>`;
+
+  const {error}=await sb.storage.from('portal-documents').upload(path,file,{upsert:false,contentType:file.type});
+  if(error){
+    if(prog) prog.innerHTML=`<div class="err-box"><i class="fa-solid fa-triangle-exclamation"></i>${esc(error.message)}</div>`;
+    return;
+  }
+  if(prog) prog.innerHTML=`<div class="info-box" style="background:#f0fdf4;color:#16a34a"><i class="fa-solid fa-check"></i>Document envoyé avec succès</div>`;
+  auditLog('upload_doc',{filename:safeName,docType,size:file.size});
+  setTimeout(()=>{closeModal();loadDocs();},1200);
+};
+
+// ── Demandes RH ───────────────────────────────────────────────────────────────
+async function renderRequests(){
+  $('view').innerHTML=`<div class="page">
+    <div class="page-title">Mes demandes</div>
+    <div class="page-sub">Congés, absences, extras, échanges</div>
+    <div id="reqList"><div class="loading"><div class="spinner"></div></div></div>
+  </div>
+  <button class="fab" onclick="openNewRequest()" title="Nouvelle demande"><i class="fa-solid fa-plus"></i></button>`;
+  await loadRequests();
+}
+
+async function loadRequests(){
+  const el=$('reqList'); if(!el) return;
+  const {data,error}=await sb.from('portal_requests')
+    .select('*')
+    .eq('employee_id',employee.id)
+    .order('created_at',{ascending:false})
+    .limit(50);
+
+  if(!data?.length){
+    el.innerHTML=`<div class="card empty"><i class="fa-solid fa-paper-plane"></i><br>Aucune demande.<br><small>Utilisez le bouton + pour créer une demande.</small></div>`;
+    return;
+  }
+
+  const grouped={pending:[],approved:[],rejected:[],cancelled:[]};
+  data.forEach(r=>(grouped[r.status]||grouped.pending).push(r));
+
+  let h='';
+  [['pending','En attente'],['approved','Acceptées'],['rejected','Refusées'],['cancelled','Annulées']].forEach(([s,lbl])=>{
+    if(!grouped[s].length) return;
+    h+=`<div class="card"><div class="card-title"><i class="fa-solid fa-circle-dot"></i>${lbl}</div>`;
+    h+=grouped[s].map(r=>{
+      const t=REQ_TYPES[r.type]||REQ_TYPES.autre;
+      const period=r.date_end&&r.date_end!==r.date_start?`${fmtDate(r.date_start)} → ${fmtDate(r.date_end)}`:fmtDate(r.date_start);
+      return `<div class="req-row" onclick="openRequestDetail('${r.id}')">
+        <div class="req-icon"><i class="fa-solid ${t.icon}" style="color:${t.color}"></i></div>
+        <div class="req-body">
+          <div class="req-type">${t.label}</div>
+          <div class="req-date">${period}</div>
+          ${r.manager_comment?`<div style="font-size:11.5px;color:var(--ink2);margin-top:2px;font-style:italic">"${esc(r.manager_comment.slice(0,60))}"</div>`:''}
+        </div>
+        <span class="tag tag-${r.status}">${{pending:'En attente',approved:'Acceptée',rejected:'Refusée',cancelled:'Annulée'}[r.status]}</span>
+      </div>`;
+    }).join('');
+    h+=`</div>`;
+  });
+  el.innerHTML=h;
+}
+
+window.openNewRequest=()=>{
+  openModal(`
+    <div class="modal-title"><i class="fa-solid fa-plus" style="color:var(--vi)"></i>Nouvelle demande</div>
+    <div class="field"><label>Type de demande</label>
+      <select id="reqType" onchange="updateReqForm()">
+        ${Object.entries(REQ_TYPES).map(([k,v])=>`<option value="${k}">${v.label}</option>`).join('')}
+      </select>
+    </div>
+    <div id="reqFormDyn"></div>
+    <div class="field" id="reqMsgField">
+      <label>Message au responsable (optionnel)</label>
+      <textarea id="reqMessage" placeholder="Précisions, contexte…" maxlength="500"></textarea>
+    </div>
+    <div class="gdpr-consent">
+      <label style="display:flex;gap:8px;cursor:pointer">
+        <input type="checkbox" id="reqConsent" style="flex-shrink:0;margin-top:2px">
+        <span>Je certifie que les informations fournies sont exactes et j'accepte leur traitement RH.</span>
+      </label>
+    </div>
+    <button class="btn btn-p btn-full" id="reqSubmit" onclick="submitRequest()">
+      <i class="fa-solid fa-paper-plane"></i> Envoyer la demande
+    </button>`);
+  updateReqForm();
+};
+
+window.updateReqForm=()=>{
+  const type=$('reqType')?.value;
+  const dyn=$('reqFormDyn'); if(!dyn) return;
+  let h='';
+  if(['conge_paye','absence_except'].includes(type)){
+    h=`<div class="field"><label>Date de début</label><input type="date" id="reqDateStart"></div>
+       <div class="field"><label>Date de fin</label><input type="date" id="reqDateEnd"></div>`;
+  } else if(type==='maladie'){
+    h=`<div class="field"><label>Date de début</label><input type="date" id="reqDateStart"></div>
+       <div class="field"><label>Durée estimée</label><select id="reqDuration">
+         <option value="">Non précisée</option>
+         <option>1 jour</option><option>2-3 jours</option><option>1 semaine</option><option>Plus d'une semaine</option>
+       </select></div>
+       <div class="field"><label>Joindre l'arrêt maladie (optionnel)</label>
+         <div class="dropzone" onclick="$('reqFile').click()"><i class="fa-solid fa-file-medical"></i>Photo ou PDF de l'arrêt</div>
+         <input type="file" id="reqFile" style="display:none" accept="application/pdf,image/*">
+         <div id="reqFileInfo" style="font-size:12px;color:var(--ink2);margin-top:4px"></div>
+       </div>`;
+    setTimeout(()=>{
+      $('reqFile')?.addEventListener('change',e=>{const f=e.target.files[0];if(f)$('reqFileInfo').textContent=`Fichier : ${f.name}`;});
+    },100);
+  } else if(type==='extra'){
+    h=`<div class="field"><label>Date souhaitée</label><input type="date" id="reqDateStart"></div>
+       <div class="field"><label>Shift souhaité</label>
+         <select id="reqShift"><option value="">Au choix</option>
+           <option value="M">Matin</option><option value="S">Soir</option>
+           <option value="N">Nuit</option><option value="J">Journée</option>
+           <option value="PD">Petit-déjeuner</option>
+         </select></div>`;
+  } else if(type==='echange_shift'){
+    h=`<div class="warn-box"><i class="fa-solid fa-triangle-exclamation"></i>L'échange doit être validé par votre responsable.</div>
+       <div class="field"><label>Mon shift à échanger</label>
+         <input type="date" id="reqDateStart">
+       </div>
+       <div class="field"><label>Shift proposé en échange</label>
+         <input type="date" id="reqDateEnd">
+       </div>
+       <div class="field"><label>Collègue concerné (email)</label>
+         <input type="email" id="reqColleague" placeholder="prenom.nom@hotel.fr">
+       </div>`;
+  } else {
+    h=`<div class="field"><label>Date</label><input type="date" id="reqDateStart"></div>`;
+  }
+  dyn.innerHTML=h;
+};
+
+window.submitRequest=async()=>{
+  const btn=$('reqSubmit'); if(!btn) return;
+  if(!$('reqConsent')?.checked){flash('Veuillez cocher la case de consentement');return;}
+  const type=$('reqType')?.value;
+  const dateStart=$('reqDateStart')?.value;
+  if(!dateStart){flash('Date de début requise');return;}
+
+  btn.disabled=true;
+  btn.innerHTML='<div class="spinner" style="width:16px;height:16px;border-width:2px"></div> Envoi…';
+
+  try{
+    // Upload pièce jointe si maladie
+    let attachPath=null, attachName=null;
+    const file=$('reqFile')?.files?.[0];
+    if(file){
+      const ext=file.name.split('.').pop();
+      const fn=`arret_${Date.now()}.${ext}`;
+      const path=`${employee.hotel_id}/${employee.id}/arrets/${fn}`;
+      const {error:ue}=await sb.storage.from('portal-documents').upload(path,file,{contentType:file.type});
+      if(ue) throw ue;
+      attachPath=path; attachName=file.name;
+      auditLog('upload_arret',{filename:fn,size:file.size});
+    }
+
+    const payload={
+      hotel_id:    employee.hotel_id,
+      employee_id: employee.id,
+      type,
+      date_start:  dateStart,
+      date_end:    $('reqDateEnd')?.value||null,
+      shift_label: $('reqShift')?.value||null,
+      message:     $('reqMessage')?.value?.trim()||null,
+      attachment_path: attachPath,
+      attachment_name: attachName,
+      submitted_consent: true,
+    };
+    const {error}=await sb.from('portal_requests').insert(payload);
+    if(error) throw error;
+    flash('Demande envoyée ✓');
+    auditLog('submit_request',{type,date_start:dateStart});
+    closeModal();
+    await loadRequests();
+  }catch(e){flash('Erreur : '+e.message);}
+  finally{if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-paper-plane"></i> Envoyer la demande';}}
+};
+
+window.openRequestDetail=async(id)=>{
+  const {data:r}=await sb.from('portal_requests').select('*').eq('id',id).single();
+  if(!r) return;
+  const t=REQ_TYPES[r.type]||REQ_TYPES.autre;
+  const period=r.date_end&&r.date_end!==r.date_start?`${fmtDate(r.date_start)} → ${fmtDate(r.date_end)}`:fmtDate(r.date_start);
+  openModal(`
+    <div class="modal-title"><i class="fa-solid ${t.icon}" style="color:${t.color}"></i>${t.label}</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <span class="tag tag-${r.status}">${{pending:'En attente',approved:'Acceptée',rejected:'Refusée',cancelled:'Annulée'}[r.status]}</span>
+      <span style="font-size:12px;color:var(--ink2)">${fmtDate(r.created_at)}</span>
+    </div>
+    <div class="card-title" style="margin-bottom:6px"><i class="fa-regular fa-calendar"></i>Période</div>
+    <p style="font-size:14px;font-weight:600;margin-bottom:14px">${period}</p>
+    ${r.message?`<div class="card-title" style="margin-bottom:6px"><i class="fa-regular fa-comment"></i>Votre message</div>
+      <p style="font-size:13px;color:var(--ink2);margin-bottom:14px;font-style:italic">"${esc(r.message)}"</p>`:''}
+    ${r.manager_comment?`<div class="card-title" style="margin-bottom:6px"><i class="fa-solid fa-comment-dots"></i>Réponse du responsable</div>
+      <div style="background:var(--vi-l);border-radius:10px;padding:12px;font-size:13px;color:var(--vi-d);margin-bottom:14px">"${esc(r.manager_comment)}"</div>`:''}
+    ${r.attachment_path?`<button class="btn btn-g btn-full" style="margin-bottom:8px" onclick="downloadPortalDoc('${esc(r.attachment_path.split('/').pop())}')"><i class="fa-solid fa-paperclip"></i> Voir la pièce jointe</button>`:''}
+    ${r.status==='pending'?`<button class="btn btn-red btn-full" onclick="cancelRequest('${r.id}')"><i class="fa-solid fa-xmark"></i> Annuler la demande</button>`:''}
+  `);
+};
+
+window.cancelRequest=async(id)=>{
+  if(!confirm('Annuler cette demande ?')) return;
+  const {error}=await sb.from('portal_requests').update({status:'cancelled',updated_at:new Date().toISOString()}).eq('id',id).eq('employee_id',employee.id);
+  if(error){flash('Erreur : '+error.message);return;}
+  flash('Demande annulée');
+  auditLog('cancel_request',{request_id:id});
+  closeModal();
+  await loadRequests();
+};
+
+// ── Messagerie ────────────────────────────────────────────────────────────────
+async function renderMessages(){
+  $('view').innerHTML=`<div class="page" style="padding-bottom:0">
+    <div class="page-title">Messages</div>
+    <div class="page-sub">${esc(hotel?.name||'')} · RH</div>
+    <div id="msgThread" class="msg-thread"></div>
+  </div>
+  <div class="msg-input-bar">
+    <textarea id="msgInput" placeholder="Votre message…" rows="1" maxlength="2000"></textarea>
+    <button onclick="sendMessage()"><i class="fa-solid fa-paper-plane"></i></button>
+  </div>`;
+  await loadMessages();
+
+  // Marquer comme lus
+  await sb.from('portal_messages')
+    .update({read_at:new Date().toISOString()})
+    .eq('employee_id',employee.id)
+    .eq('direction','manager_to_employee')
+    .is('read_at',null);
+
+  // Auto-resize textarea
+  $('msgInput')?.addEventListener('input',function(){
+    this.style.height='auto';this.style.height=Math.min(this.scrollHeight,100)+'px';
+  });
+}
+
+async function loadMessages(){
+  const {data}=await sb.from('portal_messages')
+    .select('*')
+    .eq('employee_id',employee.id)
+    .eq('deleted_by_employee',false)
+    .order('created_at',{ascending:true})
+    .limit(100);
+
+  const el=$('msgThread');
+  if(!el) return;
+  if(!data?.length){
+    el.innerHTML='<div class="empty"><i class="fa-regular fa-comments"></i><br>Aucun message.<br><small>Posez votre question à votre responsable RH.</small></div>';
+    return;
+  }
+  el.innerHTML=data.map(m=>{
+    const me=m.direction==='employee_to_manager';
+    const t=new Date(m.created_at).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+    const d=new Date(m.created_at).toLocaleDateString('fr-FR',{day:'numeric',month:'short'});
+    return `<div class="msg-bubble ${me?'me':'them'}">
+      ${esc(m.body)}
+      <div class="msg-meta">${d} · ${t}</div>
+    </div>`;
+  }).join('');
+  el.scrollTop=el.scrollHeight;
+}
+
+window.sendMessage=async()=>{
+  const inp=$('msgInput'); if(!inp) return;
+  const body=inp.value.trim();
+  if(!body) return;
+  inp.value=''; inp.style.height='auto';
+  const {error}=await sb.from('portal_messages').insert({
+    hotel_id:employee.hotel_id,
+    employee_id:employee.id,
+    direction:'employee_to_manager',
+    body,
+  });
+  if(error){flash('Erreur : '+error.message);return;}
+  auditLog('send_message',{length:body.length});
+  await loadMessages();
+};
+
+// ── Profil ────────────────────────────────────────────────────────────────────
+async function renderProfile(){
+  const v=$('view');
+  const initials=((employee.first_name||'?')[0]+(employee.last_name||'?')[0]).toUpperCase();
+
+  // Soldes CP
+  const year=new Date().getFullYear();
+  const {data:bal}=await sb.from('portal_leave_balances').select('*')
+    .eq('employee_id',employee.id)
+    .eq('year_start',`${year}-01-01`)
+    .single();
+
+  v.innerHTML=`<div class="page">
+    <div class="profile-hero">
+      <div class="profile-av">${esc(initials)}</div>
+      <div class="profile-name">${esc(employee.first_name)} ${esc(employee.last_name)}</div>
+      <div class="profile-role">${esc(employee.role||'')} · ${esc(employee.department||'')}</div>
+    </div>
+    <div class="kpi-row" style="margin-top:-24px">
+      <div class="kpi"><div class="val">${bal?.cp_taken||0}</div><div class="lbl">CP pris (${year})</div></div>
+      <div class="kpi"><div class="val">${bal?.rtt_taken||0}</div><div class="lbl">RTT pris (${year})</div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><i class="fa-solid fa-id-card"></i>Mes informations</div>
+      ${infoLine('Contrat',employee.contract_type||'—')}
+      ${infoLine('Embauche',fmtDate(employee.hire_date))}
+      ${infoLine('Email',employee.email||'—')}
+      ${infoLine('Téléphone',employee.phone||'—')}
+      ${infoLine('Hôtel',hotel?.name||'—')}
+    </div>
+
+    <div class="card">
+      <div class="card-title"><i class="fa-solid fa-shield-halved"></i>Sécurité & RGPD</div>
+      <button class="btn btn-g btn-full" style="margin-bottom:8px" onclick="showGdpr()">
+        <i class="fa-solid fa-circle-info"></i> Politique de confidentialité
+      </button>
+      <button class="btn btn-g btn-full" style="margin-bottom:8px" onclick="requestDataExport()">
+        <i class="fa-solid fa-file-export"></i> Mes données (droit d'accès RGPD)
+      </button>
+      <button class="btn btn-red btn-full" style="margin-bottom:8px" onclick="requestErasure()">
+        <i class="fa-solid fa-eraser"></i> Supprimer mes données portail
+      </button>
+    </div>
+
+    <div class="card">
+      <button class="btn btn-g btn-full" onclick="signOut()">
+        <i class="fa-solid fa-arrow-right-from-bracket"></i> Se déconnecter
+      </button>
+    </div>
+    <div style="text-align:center;font-size:11px;color:var(--ink2);padding:8px 0 4px">
+      Flowtym RH · v1.0 · Données hébergées dans l'UE
+    </div>
+  </div>`;
+}
+
+function infoLine(label, val){
+  return `<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--line)">
+    <span style="font-size:12px;color:var(--ink2)">${esc(label)}</span>
+    <span style="font-size:13.5px;font-weight:500">${esc(val)}</span>
+  </div>`;
+}
+
+window.requestDataExport=async()=>{
+  const [plan,clockings,requests,messages]=await Promise.all([
+    sb.from('staff_planning').select('day,status,shift_label').eq('employee_id',employee.id),
+    sb.from('staff_clockings').select('day,clock_in_ts,clock_out_ts').eq('employee_id',employee.id),
+    sb.from('portal_requests').select('type,date_start,date_end,status').eq('employee_id',employee.id),
+    sb.from('portal_messages').select('direction,body,created_at').eq('employee_id',employee.id).eq('deleted_by_employee',false),
+  ]);
+  const data={
+    employee:{id:employee.id,first_name:employee.first_name,last_name:employee.last_name,email:employee.email,department:employee.department,contract_type:employee.contract_type,hire_date:employee.hire_date},
+    planning:plan.data||[],
+    clockings:clockings.data||[],
+    requests:requests.data||[],
+    messages:messages.data||[],
+    exported_at:new Date().toISOString(),
+  };
+  const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=`mes_donnees_flowtym_${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  auditLog('gdpr_export');
+  flash('Export téléchargé');
+};
+
+window.requestErasure=async()=>{
+  const confirmed=confirm('Supprimer vos données portail (messages, demandes personnelles) ?\n\nVos données de paie et planning restent conservées pour des raisons légales (5 ans).\n\nVotre compte portail sera désactivé.');
+  if(!confirmed) return;
+  const {error}=await sb.rpc('pl_portal_gdpr_erase',{p_employee_id:employee.id});
+  if(error){flash('Erreur : '+error.message);return;}
+  flash('Données supprimées. Déconnexion…');
+  setTimeout(()=>signOut(),1800);
+};
+
+window.signOut=async()=>{
+  clearInterval(clockTick);
+  await sb.auth.signOut();
+  session=null; employee=null; hotel=null;
+  renderAuth();
+};
+
+// ── Modal ─────────────────────────────────────────────────────────────────────
+window.openModal=body=>{
+  $('modalBody').innerHTML=body;
+  $('modalBg').classList.add('on');
+};
+window.closeModal=e=>{
+  if(e&&e.target!==$('modalBg')) return;
+  $('modalBg').classList.remove('on');
+  if(qrStream){qrStream.getTracks().forEach(t=>t.stop());qrStream=null;}
+};
+$('modal').addEventListener('click',e=>e.stopPropagation());
+
+// ── Démarrage ─────────────────────────────────────────────────────────────────
+// Service Worker PWA
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('/sw.js').catch(()=>{});
+}
+boot();
+</script>
+</body>
+</html>

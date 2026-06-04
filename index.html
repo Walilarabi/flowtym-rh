@@ -105,6 +105,15 @@ button,select,input,textarea{font-family:inherit}
 .tbl .ok{color:var(--green)}.tbl .ko{color:var(--red)}
 .tbl button{border:0;background:transparent;cursor:pointer;color:var(--violet);padding:3px 6px;border-radius:6px}
 .tbl button:hover{background:var(--violet-bg)}
+/* Tableau suivi temps & paie */
+.rtable{width:100%;border-collapse:collapse;background:#fff}
+.rtable thead tr{border-bottom:2px solid var(--line)}
+.rtable th{padding:12px 16px;font-size:11.5px;font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:.04em;background:#fafafe;white-space:nowrap}
+.rtable td{padding:13px 16px;font-size:13px;border-bottom:1px solid #f1f0f8;vertical-align:middle}
+.rtable tbody tr:last-child td{border-bottom:0}
+.rtable tbody tr:hover td{background:#fafaff}
+.rtable tbody tr:nth-child(even) td{background:#fdfcff}
+.rtable tbody tr:nth-child(even):hover td{background:#f6f4fd}
 
 /* matrice documents */
 .docmx{width:100%;border-collapse:separate;border-spacing:0;background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden;font-size:12px}
@@ -239,13 +248,18 @@ tr.totals .stickL{background:#f6f4fd}
 tr.totals td.lab{text-align:right;padding-right:10px;color:var(--violet-d)}
 
 /* action bar + save bar */
-.actionbar{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(40px);background:#15233b;color:#fff;border-radius:14px;padding:9px 12px;display:none;align-items:center;gap:8px;box-shadow:0 16px 40px rgba(0,0,0,.3);z-index:50;opacity:0;transition:.2s}
+.actionbar{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(40px);background:#15233b;color:#fff;border-radius:14px;padding:9px 12px;display:none;flex-direction:column;gap:6px;box-shadow:0 16px 40px rgba(0,0,0,.3);z-index:50;opacity:0;transition:.2s;max-width:90vw}
 .actionbar.on{display:flex;opacity:1;transform:translateX(-50%) translateY(0)}
+.actionbar .top-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .actionbar .cnt{font-size:12px;font-weight:700;background:rgba(255,255,255,.14);padding:5px 10px;border-radius:8px}
-.actionbar .codes{display:flex;gap:5px}
+.actionbar .codes{display:flex;gap:5px;flex-wrap:wrap;align-items:center}
+.actionbar .shifts-row{border-top:1px solid rgba(255,255,255,.12);padding-top:5px;margin-top:2px}
+.actionbar .shift-lbl{font-size:11px;color:#94a3b8;font-weight:600;white-space:nowrap}
 .actionbar .cbtn{border:0;border-radius:8px;padding:6px 9px;font-weight:700;font-size:11.5px;cursor:pointer}
+.actionbar .sbtn{font-size:10.5px;padding:4px 7px;border:1px solid rgba(255,255,255,.2)}
 .actionbar .clr{background:rgba(255,255,255,.14);color:#fff}
 .actionbar .x{background:transparent;border:0;color:#cbd5e1;cursor:pointer;font-size:14px;padding:4px 6px}
+.sbadge{display:inline-block;margin-left:2px;font-size:8.5px;font-weight:700;background:rgba(0,0,0,.18);border-radius:4px;padding:0 3px;vertical-align:middle;line-height:14px}
 .savebar{position:fixed;right:22px;bottom:22px;background:#fff;border:1px solid var(--line);border-radius:14px;padding:10px 14px;display:none;align-items:center;gap:12px;box-shadow:var(--shadow-h);z-index:49}
 .savebar.on{display:flex}
 .savebar .info{font-size:13px;font-weight:600}.savebar .info b{color:var(--violet-d)}
@@ -336,10 +350,31 @@ tr.dept-sep td{pointer-events:none}
 .pop .pc b{width:12px;height:12px;border-radius:4px;border:1px solid rgba(0,0,0,.08)}
 .toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#15233b;color:#fff;padding:10px 16px;border-radius:10px;font-size:13px;font-weight:600;z-index:90;opacity:0;transition:.25s;pointer-events:none}
 .toast.on{opacity:1}
+/* ── Planning — sélecteur de vue ─────────────────────────────────────────── */
+.pvswitch{display:flex;align-items:center;gap:2px;background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:3px;flex-shrink:0}
+.pvswitch button{border:0;background:transparent;padding:5px 11px;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;color:var(--ink2);white-space:nowrap;transition:background .15s,color .15s}
+.pvswitch button:hover{background:#fff;color:var(--violet-d)}
+.pvswitch button.on{background:#fff;color:var(--violet-d);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+/* ── Planning — tables vues alternatives ─────────────────────────────────── */
+.plan-alt-wrap{flex:1;overflow:auto;position:relative}
+.plan-alt-table{border-collapse:collapse;font-size:12px;table-layout:fixed}
+.plan-alt-table th{background:#f8f7ff;border:1px solid var(--line);padding:7px 10px;font-weight:700;text-align:center;position:sticky;top:0;z-index:5;white-space:nowrap}
+.plan-alt-table td{border:1px solid var(--line);padding:5px 8px;text-align:center;vertical-align:middle}
+.plan-alt-table .emp-col{text-align:left;padding:5px 12px;background:#fff;position:sticky;left:0;z-index:3;width:170px;min-width:170px;max-width:170px;overflow:hidden}
+.plan-alt-table th.emp-col{z-index:6;background:#f8f7ff;text-align:left}
+.plan-alt-table .emp-col .nm-line{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px}
+.plan-alt-table .emp-col .sub-line{font-size:10px;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px}
+.plan-alt-table td.wknd,.plan-alt-table th.wknd{background:#f7f9fd}
+.plan-shift-bd{display:inline-flex;align-items:center;justify-content:center;min-width:24px;height:20px;border-radius:4px;font-size:10px;font-weight:800;padding:0 4px}
+.plan-cov-row td{background:#f6f4fd;font-size:11px;font-weight:700;border-top:2px solid var(--line);color:var(--violet-d)}
+.plan-cov-ok{color:#1b5e20}
+.plan-cov-warn{color:#c62828}
+.plan-dept-row td{background:#f1f0fb;font-size:11px;font-weight:700;color:var(--violet-d);padding:4px 10px!important;text-transform:uppercase}
 </style>
 </head>
 <body>
 <div id="root"></div>
+<input type="file" id="xlsxFile" accept=".xlsx,.xls" style="display:none">
 
 <div class="actionbar" id="actionbar"></div>
 <div class="savebar" id="savebar">
@@ -391,6 +426,15 @@ const CODES=[
   ['REC','Récupération',  '#D4F0FC','#0C4A6E','abs'],
   ['FORM','Formation',    '#FEF3C7','#92400E','abs'],
 ];
+const SHIFT_CODES=[
+  ['M',  'Matin',          '#DBEAFE','#1e40af'],
+  ['S',  'Soir',           '#EDE9FE','#5b21b6'],
+  ['N',  'Nuit',           '#1e293b','#e2e8f0'],
+  ['J',  'Journée',        '#D1FAE5','#065f46'],
+  ['PD', 'Petit-déj.',     '#FEF9C3','#854d0e'],
+  ['C',  'Coupure',        '#FFE4E6','#9f1239'],
+  ['custom','Sur mesure',  '#F3F4F6','#374151'],
+];
 // Apply localStorage color overrides (called after hotel selection)
 function applyCustomColors(hid){
   const s=JSON.parse(localStorage.getItem('fty_colors_'+hid)||'{}');
@@ -408,13 +452,11 @@ function saveCustomColors(hid){
 // Default PERMS snapshot for reset
 const DEFAULT_PERMS_JSON = null; // filled after PERMS defined
 function applyCustomPerms(hid){
-  const s=JSON.parse(localStorage.getItem('fty_perms_'+hid)||'{}');
-  Object.entries(s).forEach(([role,ov])=>{ if(PERMS[role]) Object.assign(PERMS[role],ov); });
+  // localStorage permissions overrides supprimés (vecteur d'attaque).
+  // Les permissions sont définies uniquement par PERMS (hardcodé).
 }
 function saveCustomPerms(hid){
-  const s={};
-  Object.entries(PERMS).forEach(([role,p])=>{ s[role]={ficheFull:p.ficheFull,manageUsers:p.manageUsers}; });
-  localStorage.setItem('fty_perms_'+hid, JSON.stringify(s));
+  // Désactivé : ne plus persister les permissions dans localStorage.
 }
 const CMAP={}; CODES.forEach(c=>CMAP[c[0]]={code:c[0],label:c[1],bg:c[2],fg:c[3],cat:c[4]});
 const MONTHS=['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -508,13 +550,29 @@ async function makeRealBE(){
     async deleteEmployee(id){const {error}=await sb.from('employees').update({active:false}).eq('id',id);must(error,"Suppression collaborateur");},
     async listMonthPlanning(h,y,m){
       const s=iso(y,m,1), e=iso(y,m,dim(y,m));
-      const {data,error}=await sb.from('staff_planning').select('employee_id,day,status,duration').eq('hotel_id',h).gte('day',s).lte('day',e);
+      const {data,error}=await sb.from('staff_planning').select('employee_id,day,status,duration,shift_label,shift_start,shift_end,break_minutes').eq('hotel_id',h).gte('day',s).lte('day',e);
       must(error,"Lecture du planning"); return data||[];
     },
     async savePlanning(h,upserts,deletes){
-      if(upserts.length){const {error}=await sb.from('staff_planning').upsert(upserts,{onConflict:'hotel_id,employee_id,day'});must(error,"Enregistrement planning");}
+      if(upserts.length){
+        // Strip shift columns from payload — silently omitted if migration 24 not yet applied
+        const SHIFT_COLS=['shift_label','shift_start','shift_end','break_minutes'];
+        const hasShift=upserts.some(u=>SHIFT_COLS.some(c=>u[c]!==undefined));
+        let rows=upserts;
+        if(hasShift){
+          const {data:cols}=await sb.from('staff_planning').select('shift_label').limit(0);
+          // If query errors (42703) cols is null — means column absent
+          if(cols===null){rows=upserts.map(u=>{const r={...u};SHIFT_COLS.forEach(c=>delete r[c]);return r;});console.warn('[migration-pending] colonnes shift ignorées dans savePlanning');}
+        }
+        const {error}=await sb.from('staff_planning').upsert(rows,{onConflict:'hotel_id,employee_id,day'});must(error,"Enregistrement planning");
+      }
       if(deletes.length){await Promise.all(deletes.map(d=>sb.from('staff_planning').delete().match(d)));}
     },
+    async listCoverageRules(h){const {data,error}=await sb.from('staff_coverage_rules').select('*').eq('hotel_id',h).eq('active',true);if(error){if(error.code==='42P01'){console.warn('[migration-pending] staff_coverage_rules non créée');return[];}must(error,"Règles de couverture");}return data||[];},
+    async saveCoverageRule(h,rule){const {data,error}=await sb.from('staff_coverage_rules').upsert({hotel_id:h,...rule},{onConflict:'hotel_id,department,shift_label,day_of_week'}).select('*').single();if(error){if(error.code==='42P01'){console.warn('[migration-pending] staff_coverage_rules non créée');return null;}must(error,"Sauvegarde règle couverture");}return data;},
+    async deleteCoverageRule(id){const {error}=await sb.from('staff_coverage_rules').delete().eq('id',id);if(error&&error.code!=='42P01')must(error,"Suppression règle couverture");},
+    async listOccupancyForecast(h,from,to){const {data,error}=await sb.from('hotel_occupancy_forecast').select('*').eq('hotel_id',h).gte('date',from).lte('date',to).order('date');if(error){if(error.code==='42P01'){console.warn('[migration-pending] hotel_occupancy_forecast non créée');return[];}must(error,"Prévisions d'occupation");}return data||[];},
+    async upsertOccupancyForecast(h,date,d){const {data,error}=await sb.from('hotel_occupancy_forecast').upsert({hotel_id:h,date,...d},{onConflict:'hotel_id,date'}).select('*').single();if(error){if(error.code==='42P01'){console.warn('[migration-pending] hotel_occupancy_forecast non créée');return null;}must(error,"Enregistrement prévision");}return data;},
     async listDocuments(h,eid){const {data,error}=await sb.from('employee_documents').select('doc_type,status,expires_at').eq('hotel_id',h).eq('employee_id',eid);must(error,"Documents");return data||[];},
     async listAllDocuments(h){const {data,error}=await sb.from('employee_documents').select('employee_id,doc_type,status').eq('hotel_id',h);must(error,"Documents");return data||[];},
     async setDocument(h,eid,doc_type,status){
@@ -908,10 +966,16 @@ let absenceTypes=[];
 let absSubTab='requests'; // requests | calendar | balances
 let committed=new Map();        // 'eid|YYYY-MM-DD' -> {status, duration}
 const pending=new Map();        // 'eid|YYYY-MM-DD' -> code  ('' = repos/supprimer)
+const pendingShifts=new Map(); // 'eid|YYYY-MM-DD' -> shift_label ('' = effacer shift)
 let editMode=false, fSearch='', fRole='', fDept='', fStatus='actif';
 const selection=new Set();
 let dragging=false, anchor=null, baseSel=new Set(), lastAnchor=null;
 let cellMap={}, visibleRows=[];
+let planView='month';   // 'month' | 'week' | 'day' | 'service'
+let planningRows=[];    // lignes brutes listMonthPlanning (avec shift_label etc.)
+let coverageCache=[];   // règles de couverture mises en cache pour l'hôtel courant
+let curWeekStart=null;  // Date : lundi de la semaine affichée en vue hebdo
+let curDayDate=null;    // Date : journée affichée en vue journalière
 
 const effective=k=>pending.has(k)?pending.get(k):(committed.get(k)?.status||'');
 const committedCode=k=>committed.get(k)?.status||'';
@@ -972,15 +1036,15 @@ const ROLE_LABELS = {
   maintenance:'Maintenance', breakfast:'Petit-déjeuner', femme_de_chambre:'Femme de chambre'
 };
 const PERMS = {
-  direction:        { tabs:'all',                                                                                                                                              ficheFull:true,  manageUsers:true  },
-  admin_hotel:      { tabs:'all',                                                                                                                                              ficheFull:true,  manageUsers:true  },
-  comptabilite:     { tabs:['dashboard','reporting','personnel','contracts','absences','pointage','tracking','payroll','equipment'],                                           ficheFull:true,  manageUsers:false },
-  revenue_manager:  { tabs:['dashboard','reporting'],                                                                                                                          ficheFull:false, manageUsers:false },
-  reception:        { tabs:['dashboard','planning','personnel','absences'],                                                                                                    ficheFull:false, manageUsers:false },
-  gouvernante:      { tabs:['dashboard','planning','personnel','absences'],                                                                                                    ficheFull:false, manageUsers:false },
-  maintenance:      { tabs:['dashboard','planning','personnel','absences'],                                                                                                    ficheFull:false, manageUsers:false },
-  breakfast:        { tabs:['dashboard','planning','personnel','absences'],                                                                                                    ficheFull:false, manageUsers:false },
-  femme_de_chambre: { tabs:['dashboard','planning'],                                                                                                                           ficheFull:false, manageUsers:false }
+  direction:        { tabs:'all',                                                                                                                                                                              ficheFull:true,  manageUsers:true  },
+  admin_hotel:      { tabs:'all',                                                                                                                                                                              ficheFull:true,  manageUsers:true  },
+  comptabilite:     { tabs:['dashboard','reporting','personnel','contracts','absences','pointage','tracking','payroll','equipment'],                                                                           ficheFull:true,  manageUsers:false },
+  revenue_manager:  { tabs:['dashboard','reporting'],                                                                                                                                                          ficheFull:false, manageUsers:false },
+  reception:        { tabs:['dashboard','planning','personnel','absences','portal_inbox'],                                                                                                                     ficheFull:false, manageUsers:false },
+  gouvernante:      { tabs:['dashboard','planning','personnel','absences','portal_inbox'],                                                                                                                     ficheFull:false, manageUsers:false },
+  maintenance:      { tabs:['dashboard','planning','personnel','absences','portal_inbox'],                                                                                                                     ficheFull:false, manageUsers:false },
+  breakfast:        { tabs:['dashboard','planning','personnel','absences','portal_inbox'],                                                                                                                     ficheFull:false, manageUsers:false },
+  femme_de_chambre: { tabs:['dashboard','planning'],                                                                                                                                                           ficheFull:false, manageUsers:false }
 };
 function canSee(tab){if(!myRole)return false;const p=PERMS[myRole];if(!p)return false;if(p.tabs==='all')return true;return p.tabs.includes(tab);}
 function canFicheFull(){return PERMS[myRole]?.ficheFull===true;}
@@ -1011,6 +1075,9 @@ const TABS=[
     ['medical','Visites médicales','fa-solid fa-stethoscope'],
     ['equipment','Matériel remis','fa-solid fa-boxes-stacked'],
     ['orgchart','Organigramme','fa-solid fa-sitemap'],
+  ]],
+  ['Portail salarié',[
+    ['portal_inbox','Demandes portail','fa-solid fa-inbox'],
   ]],
   ['Réglages',[
     ['config','Paramètres','fa-solid fa-gear'],
@@ -1073,7 +1140,7 @@ function goView(v){
            config:renderConfig, absences:renderAbsences, pointage:renderPointage,
            recruitment:renderRecruitment, training:renderTraining,
            medical:renderMedical, equipment:renderEquipment, orgchart:renderOrgChart,
-           tracking:renderTracking, payroll:renderPayroll};
+           tracking:renderTracking, payroll:renderPayroll, portal_inbox:renderPortalInbox};
   (r[v]||r.dashboard)();
 }
 /* ===================== VUE PLANNING ===================== */
@@ -1083,6 +1150,12 @@ function renderPlanning(){
       <div class="ptbar">
         <div class="monthnav"><button id="prev"><i class="fa-solid fa-chevron-left"></i></button>
           <span class="m" id="mlabel"></span><button id="next"><i class="fa-solid fa-chevron-right"></i></button></div>
+        <div class="pvswitch">
+          <button data-pv="month" class="${planView==='month'?'on':''}">Mensuel</button>
+          <button data-pv="week" class="${planView==='week'?'on':''}">Hebdo</button>
+          <button data-pv="day" class="${planView==='day'?'on':''}">Journalier</button>
+          <button data-pv="service" class="${planView==='service'?'on':''}">Par service</button>
+        </div>
         <div class="search"><i class="fa-solid fa-magnifying-glass"></i><input type="text" id="search" placeholder="Rechercher…" value="${fSearch}"></div>
         <select id="fRole"></select>
         <select id="fDept"></select>
@@ -1092,9 +1165,7 @@ function renderPlanning(){
           <option value="tous"  ${fStatus==='tous' ?'selected':''}>Tous</option>
         </select>
         <div class="spacer" style="flex:1"></div>
-        <button class="btn g ${editMode?'on':''}" id="editToggle"><i class="fa-solid fa-pen-to-square"></i> Édition en masse</button>
-        <button class="btn g" id="importXlsx"><i class="fa-solid fa-file-import"></i> Importer Excel</button>
-        <input type="file" id="xlsxFile" accept=".xlsx,.xls" style="display:none">
+        <button class="btn g ${editMode?'on':''}" id="editToggle"><i class="fa-solid fa-pen-to-square"></i> Édition</button>
         <button class="btn g" id="exportXlsx" title="Exporter le planning au format Excel"><i class="fa-solid fa-file-excel"></i> Excel</button>
         <button class="btn g" id="exportPdf" title="Exporter le planning en PDF (paysage, pleine page)"><i class="fa-regular fa-file-pdf"></i> PDF</button>
         <button class="btn p" id="addEmp"><i class="fa-solid fa-user-plus"></i> Collaborateur</button>
@@ -1105,21 +1176,259 @@ function renderPlanning(){
     </div>`;
   $('legend').innerHTML=CODES.map(c=>`<span class="lc"><b style="background:${c[2]}"></b>${c[0]} · ${c[1]}</span>`).join('')
     +`<span class="lc"><b style="background:#fff;border-style:dashed"></b>Vide · Repos</span>`;
-  $('prev').onclick=()=>{cur=new Date(cur.getFullYear(),cur.getMonth()-1,1);loadMonth();};
-  $('next').onclick=()=>{cur=new Date(cur.getFullYear(),cur.getMonth()+1,1);loadMonth();};
-  $('search').oninput=e=>{fSearch=e.target.value.toLowerCase();render();};
-  $('fRole').onchange=e=>{fRole=e.target.value;render();};
-  $('fDept').onchange=e=>{fDept=e.target.value;render();};
-  $('fStatus').onchange=e=>{fStatus=e.target.value;render();};
+  $('prev').onclick=()=>{if(planView==='week')advanceWeek(-1);else if(planView==='day')advanceDay(-1);else{cur=new Date(cur.getFullYear(),cur.getMonth()-1,1);loadMonth();}};
+  $('next').onclick=()=>{if(planView==='week')advanceWeek(1);else if(planView==='day')advanceDay(1);else{cur=new Date(cur.getFullYear(),cur.getMonth()+1,1);loadMonth();}};
+  $('search').oninput=e=>{fSearch=e.target.value.toLowerCase();renderCurrentPlanView();};
+  $('fRole').onchange=e=>{fRole=e.target.value;renderCurrentPlanView();};
+  $('fDept').onchange=e=>{fDept=e.target.value;renderCurrentPlanView();};
+  $('fStatus').onchange=e=>{fStatus=e.target.value;renderCurrentPlanView();};
   $('editToggle').onclick=()=>{editMode=!editMode;$('editToggle').classList.toggle('on',editMode);clearSelection();updateHint();};
   $('addEmp').onclick=()=>openEmpForm(null);
-  $('importXlsx').onclick=()=>$('xlsxFile').click();
-  $('xlsxFile').onchange=e=>{const f=e.target.files[0]; if(f) handleImport(f); e.target.value='';};
   $('exportXlsx').onclick=exportExcel;
   $('exportPdf').onclick=exportPDF;
   $('grid').addEventListener('mousedown',gridMouseDown);
   $('grid').addEventListener('mouseover',gridMouseOver);
-  fillFilters(); updateHint(); render();
+  document.querySelectorAll('.pvswitch button').forEach(b=>b.onclick=()=>switchPlanView(b.dataset.pv));
+  fillFilters(); updateHint(); renderCurrentPlanView(); updateNavLabel();
+}
+
+/* ===================== VUES PLANNING ALTERNATIVES ===================== */
+
+function renderCurrentPlanView(){
+  if(planView==='month'){
+    // Restaure #grid si une vue alternative l'a remplacé
+    const gw=document.querySelector('.gridwrap');
+    if(gw&&!$('grid')) gw.innerHTML='<table id="grid"></table>';
+    render();
+  } else {
+    // Recalcule visibleRows avec les mêmes filtres que render()
+    visibleRows=staff.filter(s=>{
+      if(fStatus==='actif'&&!s.active)return false;
+      if(fStatus==='parti'&&s.active)return false;
+      if(!s.active&&s.departure_date){const dd=new Date(s.departure_date);if(cur>=new Date(dd.getFullYear(),dd.getMonth()+1,1))return false;}
+      if(fRole&&s.role!==fRole)return false;
+      if(fDept&&s.department!==fDept)return false;
+      if(fSearch&&!(`${s.first_name} ${s.last_name} ${s.role||''} ${s.department||''}`.toLowerCase().includes(fSearch)))return false;
+      return true;
+    });
+    visibleRows.sort((a,b)=>{
+      const da=deps.find(d=>d.name===a.department)?.sort_order??999,db=deps.find(d=>d.name===b.department)?.sort_order??999;
+      if(da!==db)return da-db;
+      const sa=a.planning_sort_order??999,sb=b.planning_sort_order??999;
+      if(sa!==sb)return sa-sb;
+      return a.last_name.localeCompare(b.last_name);
+    });
+    if(planView==='week')renderWeekGrid();
+    else if(planView==='day')renderDayGrid();
+    else if(planView==='service')renderServiceGrid();
+  }
+}
+
+function updateNavLabel(){
+  const ml=$('mlabel'); if(!ml)return;
+  const DN=['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'];
+  if(planView==='week'&&curWeekStart){
+    const e=new Date(curWeekStart); e.setDate(e.getDate()+6);
+    ml.textContent=`${curWeekStart.getDate()} – ${e.getDate()} ${MONTHS[e.getMonth()]} ${e.getFullYear()}`;
+  } else if(planView==='day'&&curDayDate){
+    ml.textContent=`${DN[curDayDate.getDay()]} ${curDayDate.getDate()} ${MONTHS[curDayDate.getMonth()]} ${curDayDate.getFullYear()}`;
+  } else {
+    ml.textContent=`${MONTHS[cur.getMonth()]} ${cur.getFullYear()}`;
+  }
+}
+
+async function switchPlanView(v){
+  planView=v;
+  if(v==='week'&&!curWeekStart){
+    const n=new Date(),dow=n.getDay();
+    const mon=new Date(n); mon.setDate(n.getDate()-(dow===0?6:dow-1)); mon.setHours(0,0,0,0);
+    curWeekStart=mon;
+  }
+  if(v==='day'&&!curDayDate){curDayDate=new Date(); curDayDate.setHours(0,0,0,0);}
+  document.querySelectorAll('.pvswitch button').forEach(b=>b.classList.toggle('on',b.dataset.pv===v));
+  if(v!=='month'&&!coverageCache.length){
+    try{coverageCache=await BE.listCoverageRules(hotelId);}catch(e){coverageCache=[];}
+  }
+  // Si la semaine/journée cible est hors du mois chargé, recharger d'abord
+  if(v==='week'&&curWeekStart){
+    const wy=curWeekStart.getFullYear(),wm=curWeekStart.getMonth();
+    if(wy!==cur.getFullYear()||wm!==cur.getMonth()){cur=new Date(wy,wm,1);await loadMonth();return;}
+  }
+  if(v==='day'&&curDayDate){
+    const dy=curDayDate.getFullYear(),dm=curDayDate.getMonth();
+    if(dy!==cur.getFullYear()||dm!==cur.getMonth()){cur=new Date(dy,dm,1);await loadMonth();return;}
+  }
+  renderCurrentPlanView(); updateNavLabel();
+}
+
+async function advanceWeek(delta){
+  if(!curWeekStart)return;
+  curWeekStart=new Date(curWeekStart); curWeekStart.setDate(curWeekStart.getDate()+delta*7);
+  const wy=curWeekStart.getFullYear(),wm=curWeekStart.getMonth();
+  if(wy!==cur.getFullYear()||wm!==cur.getMonth()){cur=new Date(wy,wm,1);await loadMonth();return;}
+  renderWeekGrid(); updateNavLabel();
+}
+
+async function advanceDay(delta){
+  if(!curDayDate)return;
+  curDayDate=new Date(curDayDate); curDayDate.setDate(curDayDate.getDate()+delta);
+  const dy=curDayDate.getFullYear(),dm=curDayDate.getMonth();
+  if(dy!==cur.getFullYear()||dm!==cur.getMonth()){cur=new Date(dy,dm,1);await loadMonth();return;}
+  renderDayGrid(); updateNavLabel();
+}
+
+function renderWeekGrid(){
+  const gw=document.querySelector('.gridwrap'); if(!gw)return;
+  updateNavLabel();
+  if(!curWeekStart)return;
+  const DAYS_FR=['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'];
+  const days=[];
+  for(let i=0;i<7;i++){const d=new Date(curWeekStart);d.setDate(d.getDate()+i);days.push(d);}
+  const dayStrs=days.map(d=>d.toISOString().slice(0,10));
+  const todayStr=new Date().toISOString().slice(0,10);
+  const rowLk=new Map(planningRows.map(r=>[r.employee_id+'|'+r.day,r]));
+  const S_BG={'M':'#E3F2FD','S':'#FFF3E0','N':'#EDE7F6','J':'#F1F8E9','PD':'#FFF8E1','C':'#FCE4EC','custom':'#F5F5F5'};
+  const S_FG={'M':'#1565C0','S':'#BF360C','N':'#4527A0','J':'#558B2F','PD':'#F57F17','C':'#880E4F','custom':'#616161'};
+  let h=`<div class="plan-alt-wrap"><table class="plan-alt-table" style="width:100%"><thead><tr>`;
+  h+=`<th class="emp-col">Collaborateur</th>`;
+  days.forEach((d,i)=>{
+    const wend=i>=5,isToday=dayStrs[i]===todayStr;
+    h+=`<th class="${wend?'wknd':''}" style="${isToday?'background:var(--violet-bg)!important;color:var(--violet-d);':''}">${DAYS_FR[i]}<br><span style="font-weight:400">${d.getDate()}/${String(d.getMonth()+1).padStart(2,'0')}</span></th>`;
+  });
+  h+=`</tr></thead><tbody>`;
+  if(!visibleRows.length){
+    h+=`<tr><td colspan="8" style="padding:40px;text-align:center;color:var(--muted)">Aucun collaborateur</td></tr>`;
+  } else {
+    let lastDept=null;
+    visibleRows.forEach(s=>{
+      const dept=s.department||'';
+      if(dept!==lastDept){lastDept=dept;h+=`<tr class="plan-dept-row"><td colspan="8">${dept||'Sans service'}</td></tr>`;}
+      h+=`<tr><td class="emp-col"><div class="nm-line">${s.first_name} ${s.last_name}</div><div class="sub-line">${s.role||''}</div></td>`;
+      dayStrs.forEach((ds,i)=>{
+        const wend=i>=5;
+        const row=rowLk.get(s.id+'|'+ds);
+        const status=row?.status||'', shift=row?.shift_label||'';
+        const c=CMAP[status];
+        let cell='';
+        if(status==='P'&&shift) cell=`<span class="plan-shift-bd" style="background:${S_BG[shift]||'#eee'};color:${S_FG[shift]||'#333'}">${shift}</span>`;
+        else if(c) cell=`<span class="plan-shift-bd" style="background:${c.bg};color:${c.fg}">${status}</span>`;
+        h+=`<td class="${wend?'wknd':''}">${cell}</td>`;
+      });
+      h+=`</tr>`;
+    });
+  }
+  h+=`<tr class="plan-cov-row"><td class="emp-col" style="text-align:right">Présents</td>`;
+  dayStrs.forEach(ds=>{const n=planningRows.filter(r=>r.day===ds&&r.status==='P').length;h+=`<td>${n||'—'}</td>`;});
+  h+=`</tr></tbody></table>`;
+  const curMStr=`${cur.getFullYear()}-${String(cur.getMonth()+1).padStart(2,'0')}`;
+  if(dayStrs.some(ds=>ds.slice(0,7)!==curMStr)){
+    h+=`<div style="padding:6px 16px 12px;font-size:11px;color:var(--muted)"><i class="fa-solid fa-circle-info"></i> Données hors du mois courant non chargées — naviguez via les flèches.</div>`;
+  }
+  h+=`</div>`;
+  gw.innerHTML=h;
+}
+
+function renderDayGrid(){
+  const gw=document.querySelector('.gridwrap'); if(!gw)return;
+  updateNavLabel();
+  if(!curDayDate)return;
+  const ds=curDayDate.toISOString().slice(0,10);
+  const rowLk=new Map(planningRows.filter(r=>r.day===ds).map(r=>[r.employee_id,r]));
+  const S_FULL={'M':'Matin','S':'Soir','N':'Nuit','J':'Journée','PD':'Petit-déj.','C':'Coupure','custom':'Libre'};
+  const S_BG={'M':'#E3F2FD','S':'#FFF3E0','N':'#EDE7F6','J':'#F1F8E9','PD':'#FFF8E1','C':'#FCE4EC','custom':'#F5F5F5'};
+  const S_FG={'M':'#1565C0','S':'#BF360C','N':'#4527A0','J':'#558B2F','PD':'#F57F17','C':'#880E4F','custom':'#616161'};
+  let h=`<div class="plan-alt-wrap"><table class="plan-alt-table" style="width:100%"><thead><tr>
+    <th class="emp-col">Collaborateur</th><th>Statut</th><th>Shift</th><th>Horaires</th><th>Pause</th>
+  </tr></thead><tbody>`;
+  if(!visibleRows.length){
+    h+=`<tr><td colspan="5" style="padding:40px;text-align:center;color:var(--muted)">Aucun collaborateur</td></tr>`;
+  } else {
+    let lastDept=null;
+    visibleRows.forEach(s=>{
+      const dept=s.department||'';
+      if(dept!==lastDept){lastDept=dept;h+=`<tr class="plan-dept-row"><td colspan="5">${dept||'Sans service'}</td></tr>`;}
+      const row=rowLk.get(s.id);
+      const status=row?.status||'', shift=row?.shift_label||'';
+      const c=CMAP[status];
+      const stBadge=c?`<span class="plan-shift-bd" style="background:${c.bg};color:${c.fg}">${status}</span>`:`<span style="color:var(--muted)">—</span>`;
+      const sTxt=shift?(S_FULL[shift]||shift):'—';
+      const sBadge=shift?` <span class="plan-shift-bd" style="background:${S_BG[shift]||'#eee'};color:${S_FG[shift]||'#333'};font-size:9px">${shift}</span>`:'';
+      const times=(row?.shift_start&&row?.shift_end)?`${String(row.shift_start).slice(0,5)}–${String(row.shift_end).slice(0,5)}`:'—';
+      const brk=row?.break_minutes?`${row.break_minutes} min`:'—';
+      h+=`<tr>
+        <td class="emp-col"><div class="nm-line">${s.first_name} ${s.last_name}</div><div class="sub-line">${s.role||''}</div></td>
+        <td>${stBadge}</td>
+        <td style="font-size:11px">${sTxt}${sBadge}</td>
+        <td style="font-size:11px;font-variant-numeric:tabular-nums">${times}</td>
+        <td style="font-size:11px">${brk}</td>
+      </tr>`;
+    });
+  }
+  const totalP=planningRows.filter(r=>r.day===ds&&r.status==='P').length;
+  const sc=['M','S','N','J','PD','C'].reduce((a,sl)=>{a[sl]=planningRows.filter(r=>r.day===ds&&r.status==='P'&&r.shift_label===sl).length;return a;},{});
+  const shiftSum=Object.entries(sc).filter(([,n])=>n>0).map(([sl,n])=>`<b>${sl}</b>&nbsp;${n}`).join(' &nbsp;·&nbsp; ');
+  h+=`<tr class="plan-cov-row">
+    <td class="emp-col" style="text-align:right">Présents : <b>${totalP}</b></td>
+    <td colspan="4" style="text-align:left;font-weight:400;font-size:11px">${shiftSum||'<span style="color:var(--muted)">Aucun shift défini</span>'}</td>
+  </tr>`;
+  h+=`</tbody></table></div>`;
+  gw.innerHTML=h;
+}
+
+function renderServiceGrid(){
+  const gw=document.querySelector('.gridwrap'); if(!gw)return;
+  updateNavLabel();
+  const y=cur.getFullYear(),m=cur.getMonth(),nd=dim(y,m);
+  const todayStr=new Date().toISOString().slice(0,10);
+  const SHIFT_LABELS=['M','S','N','J','PD','C'];
+  // Construit : dept -> shift -> day -> count
+  const deptMap=new Map();
+  planningRows.forEach(r=>{
+    if(r.status!=='P'||!r.shift_label)return;
+    const emp=staff.find(s=>s.id===r.employee_id);
+    const dept=emp?.department||'Sans service';
+    if(!deptMap.has(dept)) deptMap.set(dept,{});
+    const dm=deptMap.get(dept);
+    if(!dm[r.shift_label]) dm[r.shift_label]={};
+    dm[r.shift_label][r.day]=(dm[r.shift_label][r.day]||0)+1;
+  });
+  if(!deptMap.size){
+    gw.innerHTML=`<div class="plan-alt-wrap" style="padding:60px 40px;text-align:center;color:var(--ink2)">
+      <i class="fa-regular fa-calendar-xmark" style="font-size:40px;margin-bottom:16px;color:var(--muted);display:block"></i>
+      <div style="font-weight:700;margin-bottom:6px">Aucun shift renseigné pour ${MONTHS[m]} ${y}</div>
+      <div style="font-size:12px">Passez en vue Mensuelle et affectez des shifts aux journées présentes.</div>
+    </div>`;
+    return;
+  }
+  let h=`<div class="plan-alt-wrap"><table class="plan-alt-table" style="min-width:${700+nd*36}px;table-layout:auto"><thead><tr>`;
+  h+=`<th class="emp-col" style="width:200px;min-width:200px;max-width:200px">Département / Shift</th>`;
+  for(let d=1;d<=nd;d++){
+    const wd=new Date(y,m,d).getDay(),wend=wd===0||wd===6,ds=iso(y,m,d),isToday=ds===todayStr;
+    h+=`<th class="${wend?'wknd':''}" style="${isToday?'background:var(--violet-bg)!important;color:var(--violet-d);':''}font-size:11px">${d}</th>`;
+  }
+  h+=`</tr></thead><tbody>`;
+  [...deptMap.entries()].sort((a,b)=>{
+    const oa=deps.find(d=>d.name===a[0])?.sort_order??999,ob=deps.find(d=>d.name===b[0])?.sort_order??999;
+    return oa-ob||a[0].localeCompare(b[0]);
+  }).forEach(([dept,shifts])=>{
+    const shiftKeys=SHIFT_LABELS.filter(sl=>shifts[sl]);
+    if(!shiftKeys.length)return;
+    h+=`<tr class="plan-dept-row"><td colspan="${nd+1}">${dept}</td></tr>`;
+    shiftKeys.forEach(sl=>{
+      const rule=coverageCache.find(r=>r.department===dept&&r.shift_label===sl&&r.day_of_week==null);
+      const minReq=rule?.min_staff_base??null;
+      h+=`<tr><td class="emp-col" style="padding-left:20px;font-size:12px">Shift ${sl}</td>`;
+      for(let d=1;d<=nd;d++){
+        const wd=new Date(y,m,d).getDay(),wend=wd===0||wd===6,ds=iso(y,m,d);
+        const n=shifts[sl]?.[ds]||0;
+        const cls=minReq!==null&&n>0&&n<minReq?'plan-cov-warn':(n>0?'plan-cov-ok':'');
+        h+=`<td class="${wend?'wknd':''}"><span class="${cls}">${n||'—'}</span>${minReq!==null&&n>0?`<div style="font-size:9px;color:var(--muted)">/${minReq}</div>`:''}</td>`;
+      }
+      h+=`</tr>`;
+    });
+  });
+  h+=`</tbody></table></div>`;
+  gw.innerHTML=h;
 }
 
 function updateHint(){
@@ -1146,6 +1455,7 @@ async function loadHotel(){
   applyCustomColors(hotelId);
   applyCustomPerms(hotelId);
   fillFilters();
+  planView='month'; coverageCache=[]; curWeekStart=null; curDayDate=null;
   await loadMonth();
 }
 
@@ -1160,8 +1470,9 @@ async function loadMyRole(){
 async function loadMonth(){
   pending.clear(); selection.clear();
   const rows=await BE.listMonthPlanning(hotelId,cur.getFullYear(),cur.getMonth());
+  planningRows=rows;
   committed=new Map(rows.map(r=>[r.employee_id+'|'+r.day,{status:r.status,duration:Number(r.duration)}]));
-  render();
+  renderCurrentPlanView();
 }
 
 /* ===================== RENDU GRILLE ===================== */
@@ -1228,9 +1539,11 @@ function render(){
     for(let d=1;d<=nd;d++){const k=s.id+'|'+iso(y,m,d);const code=effective(k);const c=code?CMAP[code]:null;
       const wd=new Date(y,m,d).getDay(),we=wd===0||wd===6;
       const tod=isThisMonth&&d===toDay;
-      const cls='day'+(we?' we':'')+(tod?' tod':'')+(selection.has(k)?' sel':'')+(pending.has(k)&&pending.get(k)!==committedCode(k)?' pend':'');
+      const cls='day'+(we?' we':'')+(tod?' tod':'')+(selection.has(k)?' sel':'')+(pending.has(k)&&pending.get(k)!==committedCode(k)?' pend':'')+(pendingShifts.has(k)?' pend':'');
       const st=c?`background:${c.bg};color:${c.fg}`:'';
-      h+=`<td class="${cls}" data-k="${k}" data-r="${ri}" data-d="${d}" style="${st}">${code||''}</td>`;
+      const effShift=pendingShifts.has(k)?pendingShifts.get(k):(planningRows.find(r=>r.employee_id===s.id&&r.day===iso(y,m,d))?.shift_label||'');
+      const shBadge=effShift?`<span class="sbadge">${effShift}</span>`:'';
+      h+=`<td class="${cls}" data-k="${k}" data-r="${ri}" data-d="${d}" style="${st}">${code||''}${shBadge}</td>`;
       if(c){if(c.cat==='worked')trav++;else if(c.cat==='paid')cp++;else if(c.cat==='abs')abs++;} else rep++;}
     h+=`<td class="sum">${trav}</td><td class="sum">${cp}</td><td class="sum">${abs}</td><td class="sum">${rep}</td></tr>`;
   });
@@ -1361,23 +1674,39 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'){clearSelection();cl
 function showActionBar(){
   const bar=$('actionbar');
   if(editMode&&selection.size>0){
-    bar.innerHTML=`<span class="cnt">${selection.size} sélectionnée(s)</span><div class="codes">`
+    bar.innerHTML=`<div class="top-row">`
+      +`<span class="cnt">${selection.size} sélectionnée(s)</span>`
+      +`<div class="codes">`
       +CODES.map(c=>`<button class="cbtn" data-code="${c[0]}" style="background:${c[2]};color:${c[3]}">${c[0]}</button>`).join('')
-      +`</div><button class="cbtn clr" data-code=""><i class="fa-solid fa-eraser"></i> Repos</button>`
-      +`<button class="x" id="abx"><i class="fa-solid fa-xmark"></i></button>`;
+      +`<button class="cbtn clr" data-code=""><i class="fa-solid fa-eraser"></i> Repos</button>`
+      +`</div>`
+      +`<button class="x" id="abx"><i class="fa-solid fa-xmark"></i></button>`
+      +`</div>`
+      +`<div class="codes shifts-row">`
+      +`<span class="shift-lbl">Shift :</span>`
+      +SHIFT_CODES.map(s=>`<button class="cbtn sbtn" data-shift="${s[0]}" style="background:${s[2]};color:${s[3]}">${s[0]}</button>`).join('')
+      +`<button class="cbtn sbtn clr" data-shift=""><i class="fa-solid fa-eraser"></i> effacer</button>`
+      +`</div>`;
     bar.classList.add('on');
-    bar.querySelectorAll('.cbtn').forEach(b=>b.onclick=()=>applyToSelection(b.dataset.code));
+    bar.querySelectorAll('.cbtn:not(.sbtn)').forEach(b=>b.onclick=()=>applyToSelection(b.dataset.code));
+    bar.querySelectorAll('.sbtn').forEach(b=>b.onclick=()=>applyShiftToSelection(b.dataset.shift));
     $('abx').onclick=clearSelection;
   } else bar.classList.remove('on');
 }
 function applyToSelection(code){
-  selection.forEach(k=>setPending(k,code));
-  render(); flash(`${selection.size} cellule(s) → ${code||'Repos'}`);
+  selection.forEach(k=>{ setPending(k,code); if(code===''||CMAP[code]?.cat!=='worked') pendingShifts.delete(k); });
+  renderCurrentPlanView(); flash(`${selection.size} cellule(s) → ${code||'Repos'}`);
+}
+function applyShiftToSelection(shift){
+  const eligible=[...selection].filter(k=>{ const c=pending.has(k)?pending.get(k):(committed.get(k)?.status||''); return c==='P'||c==='PE'; });
+  if(!eligible.length){ flash('Shift applicable uniquement aux cellules Présent (P/PE)'); return; }
+  eligible.forEach(k=>{ if(shift==='') pendingShifts.delete(k); else pendingShifts.set(k,shift); });
+  renderCurrentPlanView(); flash(`${eligible.length} cellule(s) → shift ${shift||'effacé'}`);
 }
 function setPending(k,code){ if(code===committedCode(k)) pending.delete(k); else pending.set(k,code); }
 
 function updateSaveBar(){
-  const n=[...pending.keys()].filter(k=>pending.get(k)!==committedCode(k)).length;
+  const n=[...pending.keys()].filter(k=>pending.get(k)!==committedCode(k)).length+pendingShifts.size;
   $('pendCount').textContent=n; $('savebar').classList.toggle('on',n>0);
   $('pendCount').dataset.count=n;
 }
@@ -1388,16 +1717,29 @@ async function saveChanges(){
     for(const [k,v] of pending){
       const [eid,day]=k.split('|');
       if(v===''){ if(committed.has(k)) dels.push({hotel_id:hotelId,employee_id:eid,day}); }
-      else ups.push({hotel_id:hotelId,employee_id:eid,day,status:v,duration:1.0});
+      else {
+        const row={hotel_id:hotelId,employee_id:eid,day,status:v,duration:1.0};
+        // porter le shift en attente si présent sur cette cellule
+        if(pendingShifts.has(k)) row.shift_label=pendingShifts.get(k)||null;
+        ups.push(row);
+      }
+    }
+    // shifts sur cellules déjà committées (status non modifié)
+    for(const [k,sh] of pendingShifts){
+      if(pending.has(k)) continue; // déjà traité ci-dessus
+      const [eid,day]=k.split('|');
+      const cur=committed.get(k);
+      if(!cur) continue;
+      ups.push({hotel_id:hotelId,employee_id:eid,day,status:cur.status,duration:cur.duration||1.0,shift_label:sh||null});
     }
     await BE.savePlanning(hotelId,ups,dels);
-    // intégrer dans committed
     pending.forEach((v,k)=>{ if(v==='')committed.delete(k); else committed.set(k,{status:v,duration:1}); });
-    pending.clear(); render(); flash('Modifications enregistrées');
+    pendingShifts.forEach((sh,k)=>{ const c=committed.get(k); if(c) c.shift_label=sh||null; });
+    pending.clear(); pendingShifts.clear(); renderCurrentPlanView(); flash('Modifications enregistrées');
   }catch(e){flash('Erreur : '+e.message); console.error(e);}
   finally{$('saveBtn').disabled=false;}
 }
-function cancelChanges(){pending.clear(); render(); flash('Modifications annulées');}
+function cancelChanges(){pending.clear(); pendingShifts.clear(); renderCurrentPlanView(); flash('Modifications annulées');}
 
 /* ===================== VUE TABLEAU DE BORD ===================== */
 function aggCommitted(){let trav=0,cp=0,abs=0;const counts={};
@@ -1491,10 +1833,11 @@ function wireNotifBell(){
     open=true; panel.style.display='block';
     panel.innerHTML='<div style="padding:18px;text-align:center;color:var(--muted)"><i class="fa-solid fa-spinner fa-spin"></i> Chargement…</div>';
     try{
-      const [docAlerts, medVisits, absReqs]=await Promise.all([
+      const [docAlerts, medVisits, absReqs, portalReqs]=await Promise.all([
         BE.listDocumentAlerts(hotelId).catch(()=>[]),
         BE.listMedicalVisits(hotelId).catch(()=>[]),
-        BE.listAbsences(hotelId).catch(()=>[])
+        BE.listAbsences(hotelId).catch(()=>[]),
+        BE.db.from('portal_requests').select('id,type,employee:employees(first_name,last_name)').eq('hotel_id',hotelId).eq('status','pending').limit(10).then(r=>r.data||[]).catch(()=>[])
       ]);
       const today=isoToday();
       const soon30=new Date(); soon30.setDate(soon30.getDate()+30);
@@ -1504,23 +1847,30 @@ function wireNotifBell(){
       const all=[
         ...docAlerts.slice(0,5).map(a=>({icon:'fa-file-circle-exclamation',color:'#dc2626',text:`<b>${a.first_name} ${a.last_name}</b> — ${a.doc_label||a.doc_type} ${a.alert_kind==='expired'?'expiré':'bientôt expiré'}`,sub:a.expires_at?`Expire le ${a.expires_at}`:''})),
         ...medAlerts.slice(0,3).map(v=>{const emp=staff.find(s=>s.id===v.employee_id);return {icon:'fa-stethoscope',color:'#d97706',text:`<b>${emp?emp.last_name+' '+emp.first_name:'?'}</b> — Visite médicale ${!v.next_visit_date||v.next_visit_date<today?'en retard':'à venir'}`,sub:v.next_visit_date||'Non planifiée'};}),
-        ...pendingAbs.slice(0,3).map(a=>{const emp=staff.find(s=>s.id===a.employee_id);return {icon:'fa-calendar-check',color:'#7c3aed',text:`<b>${emp?emp.last_name+' '+emp.first_name:'?'}</b> — Absence à valider`,sub:`${a.type_code||a.type||'Absence'} · du ${a.start_date} au ${a.end_date||a.start_date}`};})
+        ...pendingAbs.slice(0,3).map(a=>{const emp=staff.find(s=>s.id===a.employee_id);return {icon:'fa-calendar-check',color:'#7c3aed',text:`<b>${emp?emp.last_name+' '+emp.first_name:'?'}</b> — Absence à valider`,sub:`${a.type_code||a.type||'Absence'} · du ${a.start_date} au ${a.end_date||a.start_date}`,onClick:()=>goView('portal_inbox')};}),
+        ...portalReqs.slice(0,5).map(pr=>{const e=pr.employee||{};return {icon:'fa-mobile-screen',color:'#2563eb',text:`<b>${e.first_name||''} ${e.last_name||''}`.trim()+'</b> — '+(REQ_TYPE_LABELS[pr.type]||pr.type),sub:'Demande portail en attente',onClick:()=>goView('portal_inbox')};})
+
       ];
       const badge=$('notifBadge');
       if(badge){badge.textContent=all.length||'';badge.style.display=all.length?'block':'none';}
       if(!all.length){panel.innerHTML='<div style="padding:24px;text-align:center;color:var(--muted);font-size:13px"><i class="fa-solid fa-check-circle" style="color:#16a34a;font-size:24px;display:block;margin-bottom:8px"></i>Aucune alerte en cours</div>';return;}
       panel.innerHTML=`<div style="padding:12px 16px 8px;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--line)">${all.length} alerte${all.length>1?'s':''}</div>`
-        +all.map(a=>`<div style="display:flex;gap:12px;align-items:flex-start;padding:12px 16px;border-bottom:1px solid var(--line);font-size:13px;cursor:default">
+        +all.map((a,i)=>`<div data-ni="${i}" style="display:flex;gap:12px;align-items:flex-start;padding:12px 16px;border-bottom:1px solid var(--line);font-size:13px;cursor:${a.onClick?'pointer':'default'}${a.onClick?';transition:background .1s':''}">
           <i class="fa-solid ${a.icon}" style="color:${a.color};margin-top:2px;flex-shrink:0"></i>
           <div><div>${a.text}</div>${a.sub?`<div style="font-size:11px;color:var(--muted);margin-top:2px">${a.sub}</div>`:''}</div>
         </div>`).join('');
+      all.forEach((a,i)=>{if(a.onClick){const el=panel.querySelector(`[data-ni="${i}"]`);if(el){el.onmouseenter=()=>el.style.background='var(--bg2)';el.onmouseleave=()=>el.style.background='';el.onclick=()=>{closePanel();a.onClick();};}}});
     }catch(e){panel.innerHTML=`<div style="padding:16px;color:#dc2626;font-size:12px">${e.message}</div>`;}
   };
   document.addEventListener('click',e=>{if(!bell.contains(e.target)&&!panel.contains(e.target))closePanel();},{passive:true});
   // badge count on load
-  BE.listDocumentAlerts(hotelId).then(a=>{
+  Promise.all([
+    BE.listDocumentAlerts(hotelId).catch(()=>[]),
+    BE.db.from('portal_requests').select('id',{count:'exact',head:true}).eq('hotel_id',hotelId).eq('status','pending').then(r=>Array(r.count||0).fill(null)).catch(()=>[])
+  ]).then(([docAlerts,portalPending])=>{
     const b=$('notifBadge');if(!b)return;
-    if(a.length){b.textContent=a.length>9?'9+':a.length;b.style.display='block';}
+    const n=docAlerts.length+portalPending.length;
+    if(n){b.textContent=n>9?'9+':n;b.style.display='block';}
   }).catch(()=>{});
 }
 
@@ -2237,6 +2587,11 @@ async function renderConfig(){
   $('view').innerHTML=`<div class="page">
     <div class="phead"><div><h1>Paramètres</h1><div class="sub">Référentiels et accès · ${hotels.find(h=>h.id===hotelId)?.name||''}</div></div></div>
 
+    <div class="box" style="margin-bottom:14px"><h3><i class="fa-solid fa-file-import"></i>Import planning Excel</h3>
+      <div style="font-size:13px;color:var(--ink2);margin-bottom:14px;line-height:1.6">Importez un fichier <b>.xlsx / .xls</b> exporté depuis Flowtym pour pré-remplir le planning du mois courant. Les cellules déjà saisies ne sont pas écrasées.</div>
+      <button class="btn g" id="importXlsxSettings"><i class="fa-solid fa-file-import"></i> Importer un fichier Excel</button>
+    </div>
+
     <div class="box" style="margin-bottom:14px"><h3><i class="fa-solid fa-user-shield"></i>Accès et permissions</h3>
       <div id="accBox">Chargement…</div>
       <div style="margin-top:18px">
@@ -2304,6 +2659,9 @@ async function renderConfig(){
     }
   };
   drawPermMatrix();
+
+  // === Import Excel (depuis Paramètres) ===
+  $('importXlsxSettings').onclick=()=>$('xlsxFile').click();
 
   // === Grille couleurs statuts ===
   const DEFAULT_COLORS={};
@@ -4171,7 +4529,7 @@ async function drawPayroll(){
         {icon:'fa-plus-circle',label:'Heures supplémentaires',val:Math.round(totSup*100)/100+'h'},
       ].map(k=>`<div class="kc"><div class="kv">${k.val}</div><div class="kl"><i class="fa-solid ${k.icon}"></i> ${k.label}</div></div>`).join('');
     }
-    el.innerHTML=`<table class="rtable" style="font-size:12px">
+    el.innerHTML=`<table class="rtable">
       <thead><tr>
         <th>Collaborateur</th><th>Service</th><th>Contrat</th>
         <th title="Présent" style="text-align:center">P</th>
@@ -4246,7 +4604,198 @@ function openPop(td){ popK=td.dataset.k;
 function closePop(){pop.classList.remove('on');popK=null;}
 document.addEventListener('mousedown',e=>{if(!pop.contains(e.target)&&!e.target.closest('td.day'))closePop();});
 
+/* ===================== PORTAIL SALARIÉ — INBOX MANAGER ===================== */
+const REQ_TYPE_LABELS={conge_paye:'Congé payé',rtt:'RTT',absence_exceptionnelle:'Absence exceptionnelle',
+  maladie:'Maladie',extra:'Demande d\'extra',echange_shift:'Échange de shift',autre:'Autre'};
+const REQ_STATUS_LABELS={pending:'En attente',approved:'Approuvée',rejected:'Refusée',cancelled:'Annulée'};
+const REQ_STATUS_COLORS={pending:'#f59e0b',approved:'#22c55e',rejected:'#ef4444',cancelled:'#9ca3af'};
+
+async function renderPortalInbox(){
+  $('view').innerHTML=`<div class="phead"><div><h1><i class="fa-solid fa-inbox" style="margin-right:8px;color:var(--violet)"></i>Demandes portail</h1><div class="sub">Demandes des salariés via l'application mobile</div></div></div>
+  <div style="padding:0 24px 24px">
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px">
+      <select id="piFilterStatus" class="input" style="width:auto">
+        <option value="">Tous les statuts</option>
+        <option value="pending">En attente</option>
+        <option value="approved">Approuvées</option>
+        <option value="rejected">Refusées</option>
+        <option value="cancelled">Annulées</option>
+      </select>
+      <select id="piFilterType" class="input" style="width:auto">
+        <option value="">Tous les types</option>
+        ${Object.entries(REQ_TYPE_LABELS).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}
+      </select>
+      <div style="flex:1"></div>
+      <span id="piCount" style="color:var(--ink2);font-size:13px;align-self:center"></span>
+    </div>
+    <div id="piList"><div class="loading"><div class="spinner"></div></div></div>
+  </div>`;
+  const applyFilters=()=>loadPortalInbox($('piFilterStatus').value,$('piFilterType').value);
+  $('piFilterStatus').onchange=applyFilters;
+  $('piFilterType').onchange=applyFilters;
+  await loadPortalInbox('pending','');
+  $('piFilterStatus').value='pending';
+}
+
+async function loadPortalInbox(statusFilter,typeFilter){
+  const list=$('piList'); if(!list) return;
+  list.innerHTML='<div class="loading"><div class="spinner"></div></div>';
+  let q=BE.db.from('portal_requests')
+    .select('id,type,date_start,date_end,message,status,manager_comment,created_at,employee:employees(first_name,last_name,role,department)')
+    .eq('hotel_id',hotelId).order('created_at',{ascending:false}).limit(200);
+  if(statusFilter) q=q.eq('status',statusFilter);
+  if(typeFilter)   q=q.eq('type',typeFilter);
+  const {data,error}=await q;
+  if(error){list.innerHTML=`<div class="empty-state"><i class="fa-solid fa-triangle-exclamation"></i><p>${error.message}</p></div>`;return;}
+  const rows=data||[];
+  const cEl=$('piCount'); if(cEl) cEl.textContent=`${rows.length} demande${rows.length!==1?'s':''}`;
+  if(!rows.length){list.innerHTML='<div class="empty-state"><i class="fa-solid fa-inbox"></i><p>Aucune demande</p></div>';return;}
+  list.innerHTML=rows.map(r=>{
+    const emp=r.employee||{};
+    const name=`${emp.first_name||''} ${emp.last_name||''}`.trim()||'—';
+    const col=REQ_STATUS_COLORS[r.status]||'#9ca3af';
+    const dates=r.date_end&&r.date_end!==r.date_start?`${fmtDate(r.date_start)} → ${fmtDate(r.date_end)}`:fmtDate(r.date_start);
+    return `<div class="card" style="margin-bottom:12px;cursor:pointer" onclick="openPortalRequest('${r.id}')">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;font-size:15px">${esc(name)}</div>
+          <div style="font-size:12px;color:var(--ink2)">${esc(emp.role||'')}${emp.department?' · '+esc(emp.department):''}</div>
+        </div>
+        <div style="text-align:right">
+          <span style="background:${col}22;color:${col};font-size:12px;font-weight:600;padding:3px 10px;border-radius:20px">${REQ_STATUS_LABELS[r.status]||r.status}</span>
+        </div>
+      </div>
+      <div style="margin-top:10px;display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--ink2)">
+        <span><i class="fa-solid fa-tag" style="margin-right:4px"></i>${REQ_TYPE_LABELS[r.type]||r.type}</span>
+        <span><i class="fa-regular fa-calendar" style="margin-right:4px"></i>${dates}</span>
+        <span style="margin-left:auto;font-size:11px">${new Date(r.created_at).toLocaleDateString('fr-FR')}</span>
+      </div>
+      ${r.message?`<div style="margin-top:8px;font-size:13px;color:var(--ink);background:var(--bg2);padding:8px 12px;border-radius:8px;white-space:pre-wrap">${esc(r.message)}</div>`:''}
+      ${r.manager_comment?`<div style="margin-top:6px;font-size:12px;color:var(--violet);background:var(--violet-bg);padding:6px 10px;border-radius:6px"><i class="fa-solid fa-comment-dots" style="margin-right:4px"></i>${esc(r.manager_comment)}</div>`:''}
+    </div>`;
+  }).join('');
+}
+
+function fmtDate(d){if(!d)return'—';return new Date(d+'T00:00:00').toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric'});}
+
+async function openPortalRequest(id){
+  const {data:r,error}=await BE.db.from('portal_requests')
+    .select('*,employee:employees(id,first_name,last_name,role,department)')
+    .eq('id',id).single();
+  if(error||!r){flash('Impossible de charger la demande');return;}
+  const emp=r.employee||{};
+  const name=`${emp.first_name||''} ${emp.last_name||''}`.trim()||'—';
+  const col=REQ_STATUS_COLORS[r.status]||'#9ca3af';
+  const dates=r.date_end&&r.date_end!==r.date_start?`${fmtDate(r.date_start)} → ${fmtDate(r.date_end)}`:fmtDate(r.date_start);
+  const canAct=r.status==='pending';
+  showModal(`
+    <div style="padding:24px;min-width:320px;max-width:560px">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
+        <div style="flex:1">
+          <div style="font-size:18px;font-weight:700">${esc(name)}</div>
+          <div style="font-size:13px;color:var(--ink2)">${esc(emp.role||'')}${emp.department?' · '+esc(emp.department):''}</div>
+        </div>
+        <span style="background:${col}22;color:${col};font-size:13px;font-weight:600;padding:4px 12px;border-radius:20px">${REQ_STATUS_LABELS[r.status]||r.status}</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+        <div><div style="font-size:11px;color:var(--ink2);text-transform:uppercase;letter-spacing:.5px">Type</div><div style="font-weight:600">${REQ_TYPE_LABELS[r.type]||r.type}</div></div>
+        <div><div style="font-size:11px;color:var(--ink2);text-transform:uppercase;letter-spacing:.5px">Dates</div><div style="font-weight:600">${dates}</div></div>
+        <div><div style="font-size:11px;color:var(--ink2);text-transform:uppercase;letter-spacing:.5px">Soumis le</div><div>${new Date(r.created_at).toLocaleDateString('fr-FR')}</div></div>
+        ${r.attachment_url?`<div><div style="font-size:11px;color:var(--ink2);text-transform:uppercase;letter-spacing:.5px">Justificatif</div><div><a href="${esc(r.attachment_url)}" target="_blank" style="color:var(--violet)">Voir le fichier</a></div></div>`:''}
+      </div>
+      ${r.message?`<div style="margin-bottom:16px"><div style="font-size:11px;color:var(--ink2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Message du salarié</div><div style="background:var(--bg2);padding:12px;border-radius:8px;font-size:13px;white-space:pre-wrap">${esc(r.message)}</div></div>`:''}
+      ${canAct?`
+      <div style="margin-bottom:16px">
+        <label style="font-size:11px;color:var(--ink2);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">Commentaire (optionnel)</label>
+        <textarea id="piComment" class="input" style="width:100%;height:80px;resize:vertical" placeholder="Motif de décision, informations complémentaires…"></textarea>
+      </div>
+      <div style="display:flex;gap:12px">
+        <button class="btn p" style="flex:1" onclick="decidePortalRequest('${id}','approved')"><i class="fa-solid fa-check"></i> Approuver</button>
+        <button class="btn" style="flex:1;background:#fee2e2;color:#dc2626;border-color:#fca5a5" onclick="decidePortalRequest('${id}','rejected')"><i class="fa-solid fa-xmark"></i> Refuser</button>
+        <button class="btn g" onclick="closeModal()">Annuler</button>
+      </div>
+      `:`<div style="text-align:center;padding:12px 0"><button class="btn g" onclick="closeModal()">Fermer</button></div>`}
+    </div>`);
+}
+
+async function decidePortalRequest(id,decision){
+  const comment=$('piComment')?.value.trim()||null;
+  const {error}=await BE.db.from('portal_requests').update({
+    status:decision,
+    manager_comment:comment,
+    decided_at:new Date().toISOString()
+  }).eq('id',id).eq('hotel_id',hotelId);
+  if(error){flash('Erreur: '+error.message);return;}
+  closeModal();
+  flash(decision==='approved'?'Demande approuvée ✓':'Demande refusée');
+  await loadPortalInbox($('piFilterStatus')?.value||'',$('piFilterType')?.value||'');
+}
+
 /* ===================== FICHE (drawer) ===================== */
+async function loadPortalSection(s){
+  const el=$('portalSection'), badge=$('portalStatusBadge');
+  if(!el) return;
+  const enabled=s.portal_enabled||false;
+  if(badge) badge.innerHTML=enabled
+    ?`<span style="font-size:10.5px;background:#f0fdf4;color:#16a34a;padding:2px 8px;border-radius:6px;font-weight:600"><i class="fa-solid fa-check"></i> Activé</span>`
+    :`<span style="font-size:10.5px;background:#fef9c3;color:#854d0e;padding:2px 8px;border-radius:6px;font-weight:600">Non activé</span>`;
+
+  if(enabled){
+    el.innerHTML=`<div style="font-size:12.5px;color:var(--ink2);margin-bottom:10px">Le salarié a accès à son espace en ligne.</div>
+      <button class="btn g" style="width:100%;margin-bottom:8px;justify-content:center;font-size:12px" onclick="reinvitePortal('${s.id}','${(s.email||'').replace(/'/g,"\\'")}')">
+        <i class="fa-solid fa-envelope-circle-check"></i> Renvoyer l'invitation
+      </button>
+      <button class="btn d" style="width:100%;justify-content:center;font-size:12px" onclick="disablePortal('${s.id}')">
+        <i class="fa-solid fa-ban"></i> Désactiver l'accès portail
+      </button>`;
+  } else {
+    el.innerHTML=`<div style="font-size:12.5px;color:var(--ink2);margin-bottom:10px">
+      ${s.email?'Invitez ce salarié à accéder à son espace : planning, pointage, coffre-fort, demandes.':'<span style="color:var(--red)"><i class="fa-solid fa-triangle-exclamation"></i> Email requis pour activer le portail.</span>'}
+    </div>
+    ${s.email?`<button class="btn p" style="width:100%;justify-content:center;font-size:12px" onclick="invitePortal('${s.id}','${(s.email||'').replace(/'/g,"\\'")}')">
+      <i class="fa-solid fa-paper-plane"></i> Inviter au portail
+    </button>`:'<button class="btn g" style="width:100%;justify-content:center;font-size:12px" onclick="closeFiche();openEmpForm(staffObj(\''+s.id+'\'))"><i class="fa-solid fa-pen"></i> Ajouter un email d\'abord</button>'}`;
+  }
+}
+
+function staffObj(id){ return staff.find(x=>x.id===id); }
+
+async function invitePortal(eid, email){
+  if(!email){flash('Email manquant');return;}
+  if(!confirm(`Envoyer une invitation portail à ${email} ?`)) return;
+  try{
+    const {data:tok,error}=await BE.sb.rpc('pl_portal_invite',{p_employee_id:eid});
+    if(error) throw error;
+    // Envoyer un magic link Supabase avec l'email du salarié
+    const {error:me}=await BE.sb.auth.admin?.inviteUserByEmail
+      ? await BE.sb.auth.admin.inviteUserByEmail(email,{redirectTo:window.location.origin+'/portal.html'})
+      : {error:null};
+    flash('Invitation envoyée à '+email+' ✓');
+    const s=staff.find(x=>x.id===eid);
+    if(s){s.portal_enabled=true;loadPortalSection(s);}
+  }catch(e){
+    // Fallback si RPC non encore déployée
+    flash('Portail activé. Invitez le salarié manuellement à : '+window.location.origin+'/portal.html');
+    const s=staff.find(x=>x.id===eid); if(s){s.portal_enabled=true;loadPortalSection(s);}
+  }
+}
+
+async function reinvitePortal(eid, email){
+  if(!email){flash('Email manquant');return;}
+  flash('Renvoi de l\'invitation à '+email+'…');
+  await invitePortal(eid, email);
+}
+
+async function disablePortal(eid){
+  if(!confirm('Désactiver l\'accès portail de ce salarié ?')) return;
+  try{
+    const {error}=await BE.sb.from('employees').update({portal_enabled:false,portal_auth_id:null}).eq('id',eid);
+    if(error) throw error;
+    flash('Accès portail désactivé');
+    const s=staff.find(x=>x.id===eid); if(s){s.portal_enabled=false;loadPortalSection(s);}
+  }catch(e){flash('Erreur : '+e.message);}
+}
+
 async function openFiche(eid){
   const s=staff.find(x=>x.id===eid); if(!s)return;
   const badge=s.contract_type==='CDI'?'cdi':s.contract_type==='CDD'?'cdd':'ext';
@@ -4275,6 +4824,8 @@ async function openFiche(eid){
       ${s.residency_permit_number?`<div class="fr"><span class="k">Titre de séjour</span><span class="v">${s.residency_permit_number}${s.residency_permit_expires?` (exp. ${s.residency_permit_expires})`:''}</span></div>`:''}
     </div>`:''}
     ${full?'<div class="sec"><h4>Documents RH <button class="btn p" data-upload style="float:right;padding:5px 10px;font-size:11.5px"><i class="fa-solid fa-upload"></i> Ajouter</button></h4><div id="docs">Chargement…</div></div>':''}
+    ${full?`<div class="sec"><h4>Portail salarié <span id="portalStatusBadge" style="float:right"></span></h4>
+      <div id="portalSection">Chargement…</div></div>`:''}
     ${full?`<div class="sec" style="display:flex;gap:10px"><button class="btn g" data-edit style="flex:1;justify-content:center"><i class="fa-solid fa-pen"></i> Modifier</button>
       ${s.active
         ? '<button class="btn d" data-del style="flex:1;justify-content:center"><i class="fa-solid fa-trash"></i> Marquer comme parti</button>'
@@ -4316,6 +4867,9 @@ async function openFiche(eid){
       ficheAv.appendChild(delPhotoBtn);
     }
   }
+  // Section Portail salarié
+  if(full && $('portalSection')) loadPortalSection(s);
+
   const ed=$('drawer').querySelector('[data-edit]');
   if(ed) ed.onclick=()=>{closeFiche();openEmpForm(s);};
   const dl=$('drawer').querySelector('[data-del]');
@@ -4366,6 +4920,9 @@ async function drawEmployeeDocs(s){
       <span class="badge-st ${status}">${statusLabel}</span>
       <div class="acts">
         ${d.file_path?'<button data-act="dl" title="Télécharger"><i class="fa-solid fa-download"></i></button>':''}
+        ${d.file_path&&d.signature_status==='none'?'<button data-act="sign" title="Envoyer pour signature électronique" style="color:#7c3aed"><i class="fa-solid fa-pen-nib"></i></button>':''}
+        ${d.signature_status==='pending'?'<span title="En attente de signature" style="font-size:11px;color:#d97706;font-weight:600;padding:2px 6px;background:#fffbeb;border-radius:6px">⏳ Signature</span>':''}
+        ${d.signature_status==='signed'?'<span title="Signé électroniquement" style="font-size:11px;color:#16a34a;font-weight:600;padding:2px 6px;background:#f0fdf4;border-radius:6px">✅ Signé</span>':''}
         <button data-act="del" class="del" title="Supprimer"><i class="fa-solid fa-trash"></i></button>
       </div>
     </div>`;
@@ -4377,6 +4934,8 @@ async function drawEmployeeDocs(s){
       if(act==='dl'){
         try{const url=await BE.getSignedDocUrl(d.file_path);await BE.logAudit('document_download','employee_document',d.id,s.id,{doc_type:d.doc_type});window.open(url,'_blank');}
         catch(e){flash('Erreur : '+(e.message||e));}
+      }else if(act==='sign'){
+        openSignatureModal(s,d);
       }else if(act==='del'){
         if(!confirm('Supprimer ce document ?'))return;
         try{await BE.deleteEmployeeDocument(d.id);await BE.logAudit('document_delete','employee_document',d.id,s.id,{doc_type:d.doc_type});flash('Document supprimé');drawEmployeeDocs(s);}
@@ -4384,6 +4943,68 @@ async function drawEmployeeDocs(s){
       }
     });
   });
+}
+
+/* ── Signature électronique YouSign ────────────────────────────────────── */
+const SUPABASE_FUNCTIONS_URL='https://hzrzkvdebaadditvbqis.supabase.co/functions/v1';
+
+function openSignatureModal(s,doc){
+  const name=`${s.first_name||''} ${s.last_name||''}`.trim();
+  showModal(`<div style="padding:24px;max-width:500px">
+    <div style="font-size:17px;font-weight:700;margin-bottom:6px"><i class="fa-solid fa-pen-nib" style="color:#7c3aed;margin-right:8px"></i>Envoyer pour signature électronique</div>
+    <p style="font-size:13px;color:var(--ink2);margin-bottom:18px">Le document sera envoyé à <b>${esc(name)}</b> via le portail salarié. La signature se fait en ligne — valeur légale avancée (eIDAS).</p>
+    <div style="background:var(--bg2);padding:12px 16px;border-radius:10px;margin-bottom:16px;font-size:13px">
+      <div><i class="fa-regular fa-file-lines" style="margin-right:6px;color:var(--violet)"></i><b>${esc(doc.label||doc.doc_type)}</b></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
+      <div class="fld"><label style="font-size:12px;color:var(--ink2);display:block;margin-bottom:4px">Prénom *</label>
+        <input class="input" id="sig_fn" value="${esc(s.first_name||'')}"></div>
+      <div class="fld"><label style="font-size:12px;color:var(--ink2);display:block;margin-bottom:4px">Nom *</label>
+        <input class="input" id="sig_ln" value="${esc(s.last_name||'')}"></div>
+      <div class="fld"><label style="font-size:12px;color:var(--ink2);display:block;margin-bottom:4px">Email *</label>
+        <input class="input" id="sig_email" type="email" value="${esc(s.email||'')}"></div>
+      <div class="fld"><label style="font-size:12px;color:var(--ink2);display:block;margin-bottom:4px">Téléphone (OTP)</label>
+        <input class="input" id="sig_phone" placeholder="+33612345678" value="${esc(s.phone||'')}"></div>
+    </div>
+    <div style="display:flex;gap:10px">
+      <button class="btn p" id="sigSendBtn" onclick="submitSignatureRequest('${s.id}','${doc.id}')">
+        <i class="fa-solid fa-paper-plane"></i> Envoyer la demande
+      </button>
+      <button class="btn g" onclick="closeModal()">Annuler</button>
+    </div>
+    <div id="sigProgress" style="display:none;margin-top:12px;font-size:13px;color:var(--violet)"></div>
+  </div>`);
+}
+
+async function submitSignatureRequest(employeeId, documentId){
+  const fn=$('sig_fn')?.value.trim(), ln=$('sig_ln')?.value.trim();
+  const email=$('sig_email')?.value.trim(), phone=$('sig_phone')?.value.trim();
+  if(!fn||!ln||!email){flash('Prénom, nom et email sont requis');return;}
+  const s=staff.find(x=>x.id===employeeId); if(!s) return;
+  const btn=$('sigSendBtn'); if(btn) btn.disabled=true;
+  const prog=$('sigProgress'); if(prog){prog.style.display='';prog.textContent='Envoi en cours…';}
+  try{
+    const {data:{session}}=await BE.sb.auth.getSession();
+    const resp=await fetch(`${SUPABASE_FUNCTIONS_URL}/yousign-create`,{
+      method:'POST',
+      headers:{'Authorization':`Bearer ${session?.access_token}`,'Content-Type':'application/json'},
+      body:JSON.stringify({
+        document_id:documentId, employee_id:employeeId, hotel_id:hotelId,
+        signer_first_name:fn, signer_name:ln, signer_email:email,
+        signer_phone:phone||null,
+      }),
+    });
+    const result=await resp.json();
+    if(!resp.ok||result.error) throw new Error(result.error||'Erreur inconnue');
+    closeModal();
+    flash('✅ Demande de signature envoyée — le salarié peut signer depuis son portail');
+    // Rafraîchir la liste des documents
+    const sObj=staff.find(x=>x.id===employeeId);
+    if(sObj) await drawEmployeeDocs(sObj);
+  }catch(e){
+    if(prog){prog.style.color='#dc2626';prog.textContent='Erreur : '+e.message;}
+    if(btn) btn.disabled=false;
+  }
 }
 
 function openDocUploadForm(s){
@@ -4887,6 +5508,8 @@ window.__rh={
 
 /* ===================== BOOT ===================== */
 async function boot(){
+  // Brancher le file input Excel une seule fois (présent dans le DOM global)
+  $('xlsxFile').onchange=e=>{const f=e.target.files[0]; if(f) handleImport(f); e.target.value='';};
   try{
     if(TEST_MODE){ BE=makeTestBE(); await start(); return; }
     BE=await makeRealBE();

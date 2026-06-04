@@ -11,7 +11,7 @@
  */
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { corsHeaders } from '../_shared/cors.ts';
+import { getCorsHeaders } from '../_shared/cors.ts';
 
 const SUPABASE_URL  = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_KEY   = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -23,29 +23,34 @@ const VALID_ROLES = [
 ];
 
 Deno.serve(async (req) => {
+  const origin = req.headers.get('Origin');
+  const cors = getCorsHeaders(origin);
+
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
+    return new Response('ok', { headers: cors });
   }
+
+  const j = (body: unknown, status = 200) => makeJson(cors, body, status);
 
   try {
     // 1. Parse body
     const { email, full_name, role, hotel_id } = await req.json();
     if (!email || !role || !hotel_id) {
-      return json({ error: 'email, role et hotel_id sont requis' }, 400);
+      return j({ error: 'email, role et hotel_id sont requis' }, 400);
     }
     if (!VALID_ROLES.includes(role)) {
-      return json({ error: `Rôle inconnu : ${role}` }, 400);
+      return j({ error: `Rôle inconnu : ${role}` }, 400);
     }
 
     // 2. Identify caller from JWT
     const authHeader = req.headers.get('Authorization');
-    if (!authHeader) return json({ error: 'Non authentifié' }, 401);
+    if (!authHeader) return j({ error: 'Non authentifié' }, 401);
 
     const userClient = createClient(SUPABASE_URL, ANON_KEY, {
       global: { headers: { Authorization: authHeader } },
     });
     const { data: { user }, error: authErr } = await userClient.auth.getUser();
-    if (authErr || !user) return json({ error: 'Token invalide' }, 401);
+    if (authErr || !user) return j({ error: 'Token invalide' }, 401);
 
     // 3. Check caller is admin/direction for this hotel (via service client to bypass RLS)
     const admin = createClient(SUPABASE_URL, SERVICE_KEY);
@@ -54,7 +59,7 @@ Deno.serve(async (req) => {
       .select('id')
       .eq('auth_id', user.id)
       .maybeSingle();
-    if (!callerUser) return json({ error: 'Utilisateur introuvable' }, 403);
+    if (!callerUser) return j({ error: 'Utilisateur introuvable' }, 403);
 
     const { data: callerHotel } = await admin
       .from('user_hotels')
@@ -63,7 +68,7 @@ Deno.serve(async (req) => {
       .eq('user_id', callerUser.id)
       .maybeSingle();
     if (!callerHotel || !['direction','admin_hotel'].includes(callerHotel.role)) {
-      return json({ error: 'Accès refusé : droits administrateur requis pour cet hôtel' }, 403);
+      return j({ error: 'Accès refusé : droits administrateur requis pour cet hôtel' }, 403);
     }
 
     // 4. Invite via auth.admin
@@ -74,7 +79,7 @@ Deno.serve(async (req) => {
     if (inviteErr) {
       // If already registered, just grant access
       if (!inviteErr.message.includes('already registered')) {
-        return json({ error: inviteErr.message }, 400);
+        return j({ error: inviteErr.message }, 400);
       }
     }
 
@@ -93,13 +98,13 @@ Deno.serve(async (req) => {
         .single();
       targetUser = nu;
     }
-    if (!targetUser) return json({ error: 'Impossible de créer le profil utilisateur' }, 500);
+    if (!targetUser) return j({ error: 'Impossible de créer le profil utilisateur' }, 500);
 
     // 6. Grant hotel access (upsert)
     const { error: grantErr } = await admin
       .from('user_hotels')
       .upsert({ hotel_id, user_id: targetUser.id, role }, { onConflict: 'hotel_id,user_id' });
-    if (grantErr) return json({ error: grantErr.message }, 500);
+    if (grantErr) return j({ error: grantErr.message }, 500);
 
     // 7. Audit log
     await admin.from('hr_document_audit_logs').insert({
@@ -112,16 +117,18 @@ Deno.serve(async (req) => {
       details: { email, role },
     }).maybeSingle();
 
-    return json({ success: true, user_id: targetUser.id });
+    return j({ success: true, user_id: targetUser.id });
 
   } catch (e) {
-    return json({ error: String(e) }, 500);
+    return j({ error: String(e) }, 500);
   }
 });
 
-function json(body: unknown, status = 200) {
+// cors is captured per-request in the outer handler scope
+// For error responses before cors is set, fall back to deny-all
+function makeJson(cors: Record<string, string>, body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    headers: { ...cors, 'Content-Type': 'application/json' },
   });
 }
