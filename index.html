@@ -778,7 +778,8 @@ function makeTestBE(){
   let trainingCatalog=[]; let employeeTrainings=[];
   let medicalVisits=[]; let equipmentItems=[];
   const k=(eid,day)=>eid+'|'+day;
-  return {isTest:true, db:{from:()=>({select:()=>({eq:()=>({eq:()=>({limit:()=>({then:r=>r({data:[]})}),then:r=>r({data:null,count:0})})})})})}},
+  const _dbStub={from:()=>({select:()=>({eq:()=>({eq:()=>({limit:()=>Promise.resolve({data:[]}),then:(r)=>r({data:null,count:0})})})})})};
+  return {isTest:true, db:_dbStub,
     async listHotels(){return hotels;},
     async setActiveHotel(){}, async signOut(){},
     async listDepartments(h){return depts[h]||[];},
