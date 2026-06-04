@@ -1,21 +1,23 @@
-/**
- * Edge Function : invite-user
- * Invites a user to the app and grants them access to a hotel.
- *
- * POST body: { email, full_name, role, hotel_id }
- *
- * Security:
- *  - Caller must be authenticated and have role 'direction' or 'admin_hotel' for hotel_id
- *  - Uses service_role key server-side to call auth.admin.inviteUserByEmail
- *  - No service_role key is ever exposed to the frontend
- */
-
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { getCorsHeaders } from '../_shared/cors.ts';
 
-const SUPABASE_URL  = Deno.env.get('SUPABASE_URL')!;
-const SERVICE_KEY   = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-const ANON_KEY      = Deno.env.get('SUPABASE_ANON_KEY')!;
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
+const SERVICE_KEY  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+const ANON_KEY     = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
+
+const ALLOWED_ORIGINS = [
+  'http://localhost', 'http://localhost:3000', 'http://localhost:5173',
+  'https://flowtym.com', 'https://app.flowtym.com', 'https://rh.flowtym.com',
+  'https://hzrzkvdebaadditvbqis.supabase.co',
+];
+
+function cors(origin: string | null) {
+  const ok = origin && ALLOWED_ORIGINS.some(o => origin.startsWith(o));
+  return {
+    'Access-Control-Allow-Origin': ok ? origin! : '*',
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  };
+}
 
 const VALID_ROLES = [
   'direction','admin_hotel','comptabilite','revenue_manager',
@@ -24,127 +26,92 @@ const VALID_ROLES = [
 
 Deno.serve(async (req) => {
   const origin = req.headers.get('Origin');
-  const cors = getCorsHeaders(origin);
+  const h = cors(origin);
 
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: cors });
-  }
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: h });
 
-  const j = (body: unknown, status = 200) => makeJson(cors, body, status);
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { ...h, 'Content-Type': 'application/json' } });
 
   try {
-    // 1. Parse body
     const { email, full_name, role, hotel_id } = await req.json();
-    if (!email || !role || !hotel_id) {
-      return j({ error: 'email, role et hotel_id sont requis' }, 400);
-    }
-    if (!VALID_ROLES.includes(role)) {
-      return j({ error: `Rôle inconnu : ${role}` }, 400);
-    }
+    if (!email || !role || !hotel_id) return json({ error: 'email, role et hotel_id sont requis' }, 400);
+    if (!VALID_ROLES.includes(role)) return json({ error: `Role inconnu: ${role}` }, 400);
 
-    // 2. Identify caller from JWT
     const authHeader = req.headers.get('Authorization');
-    if (!authHeader) return j({ error: 'Non authentifié' }, 401);
+    if (!authHeader) return json({ error: 'Non authentifie' }, 401);
 
     const userClient = createClient(SUPABASE_URL, ANON_KEY, {
       global: { headers: { Authorization: authHeader } },
     });
     const { data: { user }, error: authErr } = await userClient.auth.getUser();
-    if (authErr || !user) return j({ error: 'Token invalide' }, 401);
+    if (authErr || !user) return json({ error: 'Token invalide' }, 401);
 
-    // 3. Check caller is admin/direction for this hotel (via service client to bypass RLS)
     const admin = createClient(SUPABASE_URL, SERVICE_KEY);
-    const { data: callerUser } = await admin
-      .from('users')
-      .select('id')
-      .eq('auth_id', user.id)
-      .maybeSingle();
-    if (!callerUser) return j({ error: 'Utilisateur introuvable' }, 403);
 
-    const { data: callerHotel } = await admin
-      .from('user_hotels')
-      .select('role')
-      .eq('hotel_id', hotel_id)
-      .eq('user_id', callerUser.id)
-      .maybeSingle();
-    if (!callerHotel || !['direction','admin_hotel'].includes(callerHotel.role)) {
-      return j({ error: 'Accès refusé : droits administrateur requis pour cet hôtel' }, 403);
-    }
+    const { data: callerUser } = await admin.from('users').select('id').eq('auth_id', user.id).maybeSingle();
+    if (!callerUser) return json({ error: 'Utilisateur introuvable' }, 403);
 
-    // 4. Invite via auth.admin
-    let invitedAuthId: string | null = null;
-    const { data: inviteData, error: inviteErr } = await admin.auth.admin.inviteUserByEmail(
-      email,
-      { data: { full_name: full_name || '', invited_hotel_id: hotel_id, invited_role: role } }
-    );
+    const { data: callerHotel } = await admin.from('user_hotels').select('role')
+      .eq('hotel_id', hotel_id).eq('user_id', callerUser.id).maybeSingle();
+    if (!callerHotel || !['direction','admin_hotel'].includes(callerHotel.role))
+      return json({ error: 'Acces refuse: droits admin requis' }, 403);
+
+    let targetAuthId: string | null = null;
+
+    const { data: inviteData, error: inviteErr } = await admin.auth.admin.inviteUserByEmail(email, {
+      data: { full_name: full_name || '', invited_hotel_id: hotel_id, invited_role: role },
+    });
+
     if (inviteErr) {
-      if (!inviteErr.message.includes('already registered') && !inviteErr.message.includes('email_exists')) {
-        return j({ error: inviteErr.message }, 400);
+      const msg = inviteErr.message || '';
+      if (!msg.includes('already') && !msg.includes('email_exists')) {
+        return json({ error: msg }, 400);
       }
-      // Utilisateur déjà inscrit — récupérer son auth_id
-      const { data: { users: existingUsers } } = await admin.auth.admin.listUsers({ perPage: 1000 });
-      const found = existingUsers?.find((u: { email?: string }) => u.email?.toLowerCase() === email.toLowerCase());
-      if (found) invitedAuthId = found.id;
+      // Email déjà enregistré — chercher l'auth_id
+      const { data: listData } = await admin.auth.admin.listUsers();
+      const found = (listData?.users ?? []).find((u: { email?: string; id: string }) =>
+        (u.email ?? '').toLowerCase() === email.toLowerCase()
+      );
+      if (found) targetAuthId = found.id;
     } else {
-      invitedAuthId = inviteData?.user?.id ?? null;
+      targetAuthId = inviteData?.user?.id ?? null;
     }
 
-    // 5. Find or create user record in public.users
-    let { data: targetUser } = await admin
-      .from('users')
-      .select('id')
-      .eq('email', email)
-      .maybeSingle();
+    // Trouver ou créer le profil dans public.users
+    let targetUserId: string | null = null;
 
-    if (!targetUser && invitedAuthId) {
-      // Essai par auth_id au cas où l'email ne serait pas indexé
-      const { data: byAuthId } = await admin
-        .from('users')
-        .select('id')
-        .eq('auth_id', invitedAuthId)
-        .maybeSingle();
-      if (byAuthId) {
-        targetUser = byAuthId;
+    const { data: byEmail } = await admin.from('users').select('id').eq('email', email).maybeSingle();
+    if (byEmail) {
+      targetUserId = byEmail.id;
+    } else if (targetAuthId) {
+      const { data: byAuth } = await admin.from('users').select('id').eq('auth_id', targetAuthId).maybeSingle();
+      if (byAuth) {
+        targetUserId = byAuth.id;
       } else {
-        const { data: nu } = await admin
-          .from('users')
-          .insert({ auth_id: invitedAuthId, email, full_name: full_name || '' })
-          .select('id')
-          .single();
-        targetUser = nu;
+        const { data: created } = await admin.from('users')
+          .insert({ auth_id: targetAuthId, email, full_name: full_name || '' })
+          .select('id').single();
+        if (created) targetUserId = created.id;
       }
     }
-    if (!targetUser) return j({ error: 'Impossible de créer le profil utilisateur' }, 500);
 
-    // 6. Grant hotel access (upsert)
-    const { error: grantErr } = await admin
-      .from('user_hotels')
-      .upsert({ hotel_id, user_id: targetUser.id, role }, { onConflict: 'hotel_id,user_id' });
-    if (grantErr) return j({ error: grantErr.message }, 500);
+    if (!targetUserId) return json({ error: 'Impossible de creer le profil utilisateur' }, 500);
 
-    // 7. Audit log
+    const { error: grantErr } = await admin.from('user_hotels')
+      .upsert({ hotel_id, user_id: targetUserId, role }, { onConflict: 'hotel_id,user_id' });
+    if (grantErr) return json({ error: grantErr.message }, 500);
+
     await admin.from('hr_document_audit_logs').insert({
-      hotel_id,
-      actor_user_id: callerUser.id,
-      actor_email: user.email,
-      action: 'invite_user',
-      entity_type: 'user',
-      entity_id: targetUser.id,
+      hotel_id, actor_user_id: callerUser.id, actor_email: user.email,
+      action: 'invite_user', entity_type: 'user', entity_id: targetUserId,
       details: { email, role },
-    }).maybeSingle();
+    }).maybeSingle().catch(() => {});
 
-    return j({ success: true, user_id: targetUser.id });
+    return json({ success: true, user_id: targetUserId });
 
   } catch (e) {
-    return j({ error: String(e) }, 500);
+    console.error('invite-user error:', e);
+    return json({ error: String(e) }, 500);
   }
 });
-
-// cors is captured per-request in the outer handler scope
-// For error responses before cors is set, fall back to deny-all
-function makeJson(cors: Record<string, string>, body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...cors, 'Content-Type': 'application/json' },
-  });
-}
