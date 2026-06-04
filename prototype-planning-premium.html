@@ -1,0 +1,1455 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Flowtym RH — Planning Premium · Prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+<style>
+/* ── Root & Reset ─────────────────────────────────────────────────── */
+:root{
+  --pr:#4F46E5; --pr-l:#EEF2FF; --pr-d:#3730A3;
+  --ok:#059669; --ok-l:#D1FAE5;
+  --wa:#D97706; --wa-l:#FEF3C7;
+  --er:#DC2626; --er-l:#FEE2E2;
+  --g0:#fff; --g50:#F9FAFB; --g100:#F3F4F6; --g200:#E5E7EB;
+  --g300:#D1D5DB; --g400:#9CA3AF; --g500:#6B7280;
+  --g700:#374151; --g900:#111827;
+  --sh:0 1px 3px rgba(0,0,0,.1),0 1px 2px rgba(0,0,0,.06);
+  --shm:0 4px 6px -1px rgba(0,0,0,.1),0 2px 4px -1px rgba(0,0,0,.06);
+  --shl:0 10px 25px -3px rgba(0,0,0,.15),0 4px 6px -2px rgba(0,0,0,.05);
+  --r:8px; --rl:12px; --rs:4px;
+  --col-w:42px; --row-h:52px; --name-w:200px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;font-family:'Inter',sans-serif;font-size:13px;color:var(--g900);background:var(--g50)}
+button{cursor:pointer;font-family:inherit}
+
+/* ── Layout ──────────────────────────────────────────────────────── */
+#app{display:flex;flex-direction:column;height:100vh;overflow:hidden}
+
+/* ── Top Bar ─────────────────────────────────────────────────────── */
+#topbar{
+  display:flex;align-items:center;gap:12px;
+  padding:0 20px;height:56px;background:var(--g0);
+  border-bottom:1px solid var(--g200);box-shadow:var(--sh);
+  flex-shrink:0;z-index:30;
+}
+.logo{font-weight:800;font-size:15px;color:var(--pr);letter-spacing:-.5px;display:flex;align-items:center;gap:6px}
+.logo span{background:var(--pr);color:#fff;border-radius:var(--rs);padding:2px 6px;font-size:11px}
+.hotel-sel{
+  display:flex;align-items:center;gap:6px;padding:6px 12px;
+  border:1px solid var(--g200);border-radius:var(--r);background:var(--g50);
+  font-size:13px;font-weight:500;color:var(--g700);cursor:pointer;
+}
+.hotel-sel i{color:var(--g400);font-size:11px}
+.sep{width:1px;height:28px;background:var(--g200)}
+.view-tabs{display:flex;gap:2px;background:var(--g100);border-radius:var(--r);padding:3px}
+.vtab{
+  padding:5px 14px;border-radius:6px;border:none;background:transparent;
+  font-size:12px;font-weight:500;color:var(--g500);transition:.15s;cursor:pointer;
+  display:flex;align-items:center;gap:5px;white-space:nowrap;
+}
+.vtab:hover{background:var(--g0);color:var(--g700)}
+.vtab.act{background:var(--g0);color:var(--pr);box-shadow:var(--sh);font-weight:600}
+.vtab i{font-size:11px}
+.spacer{flex:1}
+.btn{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:6px 14px;border-radius:var(--r);border:none;
+  font-size:12px;font-weight:600;cursor:pointer;transition:.15s;white-space:nowrap;
+}
+.btn-ghost{background:transparent;color:var(--g500);border:1px solid var(--g200)}
+.btn-ghost:hover{background:var(--g50);color:var(--g700)}
+.btn-primary{background:var(--pr);color:#fff}
+.btn-primary:hover{background:var(--pr-d)}
+.btn-warn{background:var(--wa-l);color:var(--wa);border:1px solid #FDE68A}
+.btn-warn:hover{background:#FDE68A}
+.badge-alert{
+  background:var(--er);color:#fff;border-radius:999px;
+  font-size:10px;font-weight:700;padding:1px 5px;margin-left:2px;
+}
+
+/* ── Toolbar ─────────────────────────────────────────────────────── */
+#toolbar{
+  display:flex;align-items:center;gap:8px;
+  padding:8px 20px;background:var(--g0);
+  border-bottom:1px solid var(--g200);flex-shrink:0;
+}
+.nav-group{display:flex;align-items:center;gap:4px}
+.nav-btn{
+  width:28px;height:28px;border-radius:var(--r);border:1px solid var(--g200);
+  background:var(--g0);color:var(--g500);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;font-size:12px;
+  transition:.15s;
+}
+.nav-btn:hover{background:var(--g50);color:var(--g700)}
+.period-label{font-weight:700;font-size:14px;color:var(--g900);padding:0 8px;min-width:160px;text-align:center}
+.action-group{display:flex;gap:6px;flex-wrap:wrap}
+.chip{
+  display:inline-flex;align-items:center;gap:4px;
+  padding:4px 10px;border-radius:999px;font-size:11px;font-weight:600;
+  border:1px solid var(--g200);background:var(--g0);color:var(--g500);cursor:pointer;transition:.15s;
+}
+.chip:hover{border-color:var(--pr);color:var(--pr);background:var(--pr-l)}
+.chip.active{border-color:var(--pr);color:var(--pr);background:var(--pr-l)}
+
+/* ── Main content ────────────────────────────────────────────────── */
+#main{flex:1;overflow:hidden;position:relative;display:flex}
+.view{display:none;flex:1;overflow:hidden;flex-direction:column}
+.view.active{display:flex}
+
+/* ── Selection toolbar (floating) ───────────────────────────────── */
+#sel-bar{
+  position:fixed;bottom:20px;left:50%;transform:translateX(-50%);
+  background:var(--g900);color:#fff;border-radius:var(--rl);
+  padding:10px 16px;display:flex;align-items:center;gap:10px;
+  box-shadow:var(--shl);z-index:100;display:none;
+}
+#sel-bar.show{display:flex}
+.sel-count{font-size:12px;font-weight:600;opacity:.7}
+.sel-sep{width:1px;height:20px;background:rgba(255,255,255,.2)}
+.code-pill{
+  display:inline-flex;align-items:center;gap:4px;
+  padding:4px 10px;border-radius:999px;font-size:11px;font-weight:700;
+  cursor:pointer;transition:.1s;border:2px solid transparent;
+}
+.code-pill:hover{border-color:rgba(255,255,255,.4);transform:scale(1.05)}
+.shift-pill{
+  padding:4px 8px;border-radius:var(--rs);font-size:10px;font-weight:600;
+  cursor:pointer;transition:.1s;border:1px solid rgba(255,255,255,.2);color:#fff;
+  background:rgba(255,255,255,.1);
+}
+.shift-pill:hover{background:rgba(255,255,255,.2)}
+.sel-clear{padding:4px 8px;border-radius:var(--rs);font-size:11px;opacity:.6;cursor:pointer;background:none;border:none;color:#fff}
+.sel-clear:hover{opacity:1}
+
+/* ── Monthly Grid ────────────────────────────────────────────────── */
+#monthly-wrap{flex:1;overflow:auto;position:relative}
+.planning-grid{
+  display:table;border-collapse:collapse;min-width:100%;
+}
+.pgrow{display:table-row}
+.pgcell{
+  display:table-cell;vertical-align:middle;
+  border-right:1px solid var(--g200);border-bottom:1px solid var(--g200);
+}
+/* Sticky name col */
+.pgcell.name-col{
+  position:sticky;left:0;z-index:10;background:var(--g0);
+  width:var(--name-w);min-width:var(--name-w);max-width:var(--name-w);
+  padding:0 12px;border-right:2px solid var(--g200);
+}
+.pgcell.day-header{
+  width:var(--col-w);min-width:var(--col-w);max-width:var(--col-w);
+  text-align:center;padding:6px 2px;background:var(--g50);
+}
+.day-num{font-weight:700;font-size:13px;color:var(--g900)}
+.day-lbl{font-size:9px;color:var(--g400);text-transform:uppercase;margin-top:1px}
+.day-header.weekend .day-num{color:var(--g400)}
+.day-header.today{background:var(--pr-l)}
+.day-header.today .day-num{color:var(--pr)}
+
+/* Name header */
+.pgcell.name-header{
+  position:sticky;left:0;z-index:11;background:var(--g50);
+  border-right:2px solid var(--g200);padding:8px 12px;
+}
+
+/* Service row */
+.pgcell.svc-row{
+  position:sticky;left:0;z-index:10;
+  background:linear-gradient(135deg,var(--pr) 0%,var(--pr-d) 100%);
+  color:#fff;padding:6px 12px;font-weight:700;font-size:11px;
+  text-transform:uppercase;letter-spacing:.5px;
+  border-right:2px solid var(--pr-d);
+}
+.pgrow.svc-header .pgcell{background:var(--pr-l);border-bottom:1px solid #C7D2FE}
+
+/* Coverage row */
+.pgcell.cov-name{
+  position:sticky;left:0;z-index:10;background:var(--g50);
+  padding:4px 12px;font-size:11px;font-weight:600;color:var(--g500);
+  border-right:2px solid var(--g200);
+}
+.cov-cell{
+  width:var(--col-w);text-align:center;padding:3px 2px;background:var(--g50);
+}
+.cov-badge{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:26px;height:20px;border-radius:var(--rs);font-size:10px;font-weight:700;
+}
+.cov-ok{background:var(--ok-l);color:var(--ok)}
+.cov-warn{background:var(--wa-l);color:var(--wa)}
+.cov-err{background:var(--er-l);color:var(--er)}
+
+/* Employee name cell */
+.emp-name-cell{display:flex;align-items:center;gap:8px;padding:6px 0}
+.emp-avatar{
+  width:30px;height:30px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  font-size:11px;font-weight:700;color:#fff;flex-shrink:0;
+}
+.emp-info{overflow:hidden}
+.emp-fullname{font-weight:600;font-size:12px;color:var(--g900);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.emp-role{font-size:10px;color:var(--g400);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* Planning cell */
+.plan-cell{
+  width:var(--col-w);height:var(--row-h);text-align:center;
+  cursor:pointer;transition:.1s;position:relative;user-select:none;
+  padding:2px;
+}
+.plan-cell:hover{filter:brightness(.95);z-index:2}
+.plan-cell.selected{outline:2px solid var(--pr);outline-offset:-2px;z-index:3}
+.cell-inner{
+  width:100%;height:100%;border-radius:var(--rs);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:1px;font-weight:700;font-size:13px;
+  position:relative;
+}
+.cell-code{font-size:12px;font-weight:700;line-height:1}
+.cell-shift{
+  font-size:9px;font-weight:600;padding:1px 4px;
+  border-radius:999px;background:rgba(0,0,0,.12);white-space:nowrap;
+  max-width:36px;overflow:hidden;text-overflow:ellipsis;
+}
+.cell-alert{
+  position:absolute;top:2px;right:2px;
+  width:8px;height:8px;border-radius:50%;background:var(--er);
+  border:1.5px solid white;
+}
+.cell-alert.warn{background:var(--wa)}
+.plan-cell.weekend .cell-inner{opacity:.7}
+
+/* ── Weekly View ──────────────────────────────────────────────────── */
+#weekly-wrap{flex:1;overflow:auto}
+.week-grid{min-width:900px}
+.week-header-row{display:flex;position:sticky;top:0;z-index:10;background:var(--g0);border-bottom:2px solid var(--g200)}
+.week-name-col{width:180px;min-width:180px;padding:10px 12px;border-right:2px solid var(--g200);font-weight:600;font-size:11px;color:var(--g500);text-transform:uppercase;letter-spacing:.5px}
+.week-day-col{flex:1;text-align:center;padding:8px 4px;border-right:1px solid var(--g200)}
+.week-day-col .day-num{font-size:16px;font-weight:800}
+.week-day-col .day-lbl{font-size:10px;color:var(--g400);text-transform:uppercase}
+.week-day-col.weekend{background:var(--g50)}
+.week-day-col.today{background:var(--pr-l)}
+.week-day-col.today .day-num{color:var(--pr)}
+.week-svc-row{display:flex;background:linear-gradient(135deg,var(--pr) 0%,var(--pr-d) 100%);padding:6px 12px;font-size:11px;font-weight:700;color:#fff;text-transform:uppercase;letter-spacing:.5px}
+.week-emp-row{display:flex;border-bottom:1px solid var(--g200);min-height:60px}
+.week-emp-row:hover{background:var(--g50)}
+.week-emp-name{
+  width:180px;min-width:180px;display:flex;align-items:center;gap:8px;
+  padding:8px 12px;border-right:2px solid var(--g200);
+}
+.week-cell{
+  flex:1;border-right:1px solid var(--g200);display:flex;align-items:center;justify-content:center;
+  padding:6px 4px;cursor:pointer;
+}
+.week-cell:hover{background:var(--g100)}
+.week-cell.weekend{background:var(--g50)}
+.week-badge{
+  width:100%;border-radius:6px;padding:6px 8px;text-align:center;
+  font-weight:700;font-size:12px;
+}
+.week-badge-shift{font-size:10px;font-weight:500;margin-top:2px;opacity:.8}
+.week-badge-hours{font-size:10px;font-weight:600;margin-top:1px;background:rgba(0,0,0,.1);border-radius:999px;padding:1px 6px;display:inline-block}
+
+/* ── Daily View ───────────────────────────────────────────────────── */
+#daily-wrap{flex:1;overflow:auto}
+.daily-timeline{min-width:900px;position:relative}
+.daily-header{display:flex;position:sticky;top:0;z-index:10;background:var(--g0);border-bottom:2px solid var(--g200)}
+.daily-name-col{width:180px;min-width:180px;border-right:2px solid var(--g200);padding:10px 12px;font-weight:600;font-size:11px;color:var(--g500);text-transform:uppercase;letter-spacing:.5px}
+.daily-hours{flex:1;display:flex}
+.daily-hour{flex:1;text-align:center;padding:8px 2px;border-right:1px solid var(--g200);font-size:10px;font-weight:600;color:var(--g400)}
+.daily-emp-row{display:flex;border-bottom:1px solid var(--g200);height:52px;position:relative}
+.daily-emp-row:hover{background:var(--g50)}
+.daily-emp-name{width:180px;min-width:180px;border-right:2px solid var(--g200);display:flex;align-items:center;padding:0 12px;gap:8px}
+.daily-cells{flex:1;position:relative;display:flex}
+.daily-hour-cell{flex:1;border-right:1px solid #F3F4F6}
+.daily-shift-bar{
+  position:absolute;top:8px;bottom:8px;border-radius:6px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:10px;font-weight:700;color:rgba(0,0,0,.7);
+  overflow:hidden;white-space:nowrap;box-shadow:var(--sh);
+}
+.daily-now-line{
+  position:absolute;top:0;bottom:0;width:2px;background:var(--er);z-index:5;
+}
+.daily-now-label{
+  position:absolute;top:-18px;left:50%;transform:translateX(-50%);
+  background:var(--er);color:#fff;font-size:9px;font-weight:700;
+  padding:1px 4px;border-radius:3px;white-space:nowrap;
+}
+
+/* ── Service View ─────────────────────────────────────────────────── */
+#service-wrap{flex:1;overflow:auto}
+
+/* ── Coverage View ────────────────────────────────────────────────── */
+#coverage-wrap{flex:1;overflow:auto;padding:20px}
+.cov-title{font-size:16px;font-weight:800;color:var(--g900);margin-bottom:4px}
+.cov-sub{font-size:12px;color:var(--g500);margin-bottom:20px}
+.cov-table{border-collapse:collapse;width:100%;background:var(--g0);border-radius:var(--rl);overflow:hidden;box-shadow:var(--sh)}
+.cov-table th,.cov-table td{border:1px solid var(--g200);padding:0;text-align:center}
+.cov-table thead th{background:var(--g50);padding:8px 4px;font-size:11px;font-weight:700;color:var(--g500)}
+.cov-table thead th:first-child{text-align:left;padding-left:16px;width:220px;min-width:220px}
+.cov-table td:first-child{text-align:left;padding:10px 16px;font-weight:600;font-size:12px;background:var(--g50);border-right:2px solid var(--g200)}
+.cov-td{width:38px;height:44px;cursor:default}
+.cov-inner{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  height:100%;gap:1px;
+}
+.cov-num{font-size:12px;font-weight:700}
+.cov-req{font-size:9px;opacity:.6}
+.cov-row-header{background:var(--pr-l)!important;font-size:11px!important;font-weight:700!important;color:var(--pr)!important;text-transform:uppercase;letter-spacing:.5px}
+.cov-rule-panel{background:var(--g0);border-radius:var(--rl);padding:20px;margin-top:20px;box-shadow:var(--sh)}
+.cov-rule-title{font-weight:700;margin-bottom:12px;color:var(--g700)}
+.rule-item{
+  display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--g100);
+  font-size:12px;
+}
+.rule-item:last-child{border-bottom:none}
+.rule-badge{padding:4px 10px;border-radius:999px;font-size:11px;font-weight:700;min-width:80px;text-align:center}
+.rule-min{display:flex;align-items:center;gap:6px;margin-left:auto}
+.rule-btn{
+  width:24px;height:24px;border-radius:var(--rs);border:1px solid var(--g200);
+  background:var(--g0);cursor:pointer;font-size:12px;font-weight:700;
+  display:flex;align-items:center;justify-content:center;color:var(--g500);
+}
+.rule-btn:hover{background:var(--g100)}
+.rule-num{width:28px;text-align:center;font-weight:700}
+
+/* ── Alert Panel ─────────────────────────────────────────────────── */
+#alert-panel{
+  width:300px;border-left:1px solid var(--g200);background:var(--g0);
+  display:flex;flex-direction:column;transition:.25s;overflow:hidden;flex-shrink:0;
+}
+#alert-panel.collapsed{width:0;border-left:none}
+.alert-header{
+  padding:14px 16px;border-bottom:1px solid var(--g200);
+  font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:space-between;
+}
+.alert-list{flex:1;overflow-y:auto;padding:8px}
+.alert-item{
+  border-radius:var(--r);padding:10px 12px;margin-bottom:6px;font-size:12px;
+}
+.alert-item.err{background:var(--er-l);border-left:3px solid var(--er)}
+.alert-item.warn{background:var(--wa-l);border-left:3px solid var(--wa)}
+.alert-item.info{background:var(--pr-l);border-left:3px solid var(--pr)}
+.alert-emp{font-weight:700;margin-bottom:2px}
+.alert-msg{color:var(--g700);line-height:1.4}
+.alert-day{font-size:10px;color:var(--g500);margin-top:3px}
+
+/* ── Popover (cell editor) ───────────────────────────────────────── */
+#cell-pop{
+  position:fixed;z-index:200;background:var(--g0);border-radius:var(--rl);
+  box-shadow:var(--shl);border:1px solid var(--g200);padding:12px;
+  width:240px;display:none;
+}
+#cell-pop.show{display:block}
+.pop-title{font-weight:700;font-size:12px;color:var(--g500);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px}
+.status-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-bottom:10px}
+.s-btn{
+  padding:6px 4px;border-radius:var(--r);border:none;font-size:11px;font-weight:700;
+  cursor:pointer;transition:.1s;text-align:center;
+}
+.s-btn:hover{filter:brightness(.92);transform:scale(1.02)}
+.s-btn.active-s{ring:2px solid var(--pr);outline:2px solid var(--pr);outline-offset:1px}
+.pop-sep{border:none;border-top:1px solid var(--g200);margin:8px 0}
+.shift-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:4px}
+.sh-btn{
+  padding:7px 8px;border-radius:var(--r);border:1px solid var(--g200);
+  background:var(--g50);font-size:11px;font-weight:600;
+  cursor:pointer;transition:.1s;text-align:center;
+}
+.sh-btn:hover{border-color:var(--pr);background:var(--pr-l);color:var(--pr)}
+.sh-btn.active-sh{border-color:var(--pr);background:var(--pr-l);color:var(--pr);font-weight:700}
+.sh-time{font-size:9px;font-weight:400;color:var(--g400);display:block;margin-top:1px}
+.pop-actions{display:flex;gap:6px;margin-top:10px}
+.pop-actions button{flex:1;padding:7px;border-radius:var(--r);font-size:12px;font-weight:600;border:none;cursor:pointer}
+.pop-cancel{background:var(--g100);color:var(--g500)}
+.pop-apply{background:var(--pr);color:#fff}
+.pop-apply:hover{background:var(--pr-d)}
+
+/* ── Modals ──────────────────────────────────────────────────────── */
+.modal-bg{
+  position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:300;
+  display:flex;align-items:center;justify-content:center;backdrop-filter:blur(2px);
+  display:none;
+}
+.modal-bg.show{display:flex}
+.modal{
+  background:var(--g0);border-radius:var(--rl);box-shadow:var(--shl);
+  padding:24px;width:480px;max-width:90vw;max-height:85vh;overflow-y:auto;
+}
+.modal-lg{width:600px}
+.modal h2{font-size:18px;font-weight:800;color:var(--g900);margin-bottom:6px}
+.modal p{font-size:13px;color:var(--g500);margin-bottom:20px;line-height:1.5}
+.modal-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px}
+.form-group{margin-bottom:16px}
+.form-label{font-size:12px;font-weight:600;color:var(--g700);margin-bottom:6px;display:block}
+.form-select,.form-input{
+  width:100%;padding:8px 12px;border:1px solid var(--g200);border-radius:var(--r);
+  font-size:13px;font-family:inherit;background:var(--g0);color:var(--g900);
+}
+.form-select:focus,.form-input:focus{outline:2px solid var(--pr);border-color:var(--pr)}
+.modal-footer{display:flex;gap:8px;justify-content:flex-end;margin-top:20px;padding-top:16px;border-top:1px solid var(--g200)}
+.week-picker{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin:12px 0}
+.wp-day{
+  text-align:center;padding:8px 4px;border-radius:var(--r);border:1px solid var(--g200);
+  font-size:11px;font-weight:600;cursor:pointer;transition:.15s;
+}
+.wp-day:hover{border-color:var(--pr);background:var(--pr-l);color:var(--pr)}
+.wp-day.selected{background:var(--pr);color:#fff;border-color:var(--pr)}
+.wp-day.weekend{background:var(--g50);color:var(--g400)}
+.wp-day.weekend.selected{background:var(--pr);color:#fff}
+.copy-preview{background:var(--g50);border-radius:var(--r);padding:12px;font-size:12px;color:var(--g700);margin-top:8px}
+
+/* ── Toast ───────────────────────────────────────────────────────── */
+#toast{
+  position:fixed;bottom:80px;left:50%;transform:translateX(-50%);
+  background:var(--g900);color:#fff;padding:10px 20px;border-radius:999px;
+  font-size:13px;font-weight:500;box-shadow:var(--shl);z-index:400;
+  opacity:0;transition:.3s;pointer-events:none;
+}
+#toast.show{opacity:1}
+
+/* ── Legend ──────────────────────────────────────────────────────── */
+.legend-bar{
+  display:flex;align-items:center;gap:12px;padding:6px 20px;
+  border-top:1px solid var(--g200);background:var(--g0);flex-shrink:0;flex-wrap:wrap;
+}
+.leg-item{display:flex;align-items:center;gap:4px;font-size:10px;color:var(--g500)}
+.leg-dot{width:10px;height:10px;border-radius:2px}
+</style>
+</head>
+<body>
+<div id="app">
+
+<!-- Top Bar -->
+<div id="topbar">
+  <div class="logo"><i class="fa-solid fa-hotel"></i>Flowtym<span>RH</span></div>
+  <div class="hotel-sel"><i class="fa-solid fa-building"></i> Hôtel Le Grand Paris <i class="fa-solid fa-chevron-down"></i></div>
+  <div class="sep"></div>
+  <div class="view-tabs">
+    <button class="vtab act" data-view="monthly" onclick="setView('monthly')"><i class="fa-solid fa-calendar-days"></i>Mensuel</button>
+    <button class="vtab" data-view="weekly" onclick="setView('weekly')"><i class="fa-solid fa-calendar-week"></i>Hebdo</button>
+    <button class="vtab" data-view="daily" onclick="setView('daily')"><i class="fa-solid fa-clock"></i>Journée</button>
+    <button class="vtab" data-view="service" onclick="setView('service')"><i class="fa-solid fa-layer-group"></i>Services</button>
+    <button class="vtab" data-view="coverage" onclick="setView('coverage')"><i class="fa-solid fa-shield-check"></i>Couverture</button>
+  </div>
+  <div class="spacer"></div>
+  <button class="btn btn-ghost" onclick="toggleAlerts()"><i class="fa-solid fa-triangle-exclamation"></i>Alertes<span class="badge-alert" id="alert-count">3</span></button>
+  <button class="btn btn-primary" onclick="showSave()"><i class="fa-solid fa-floppy-disk"></i>Sauvegarder</button>
+</div>
+
+<!-- Toolbar -->
+<div id="toolbar">
+  <div class="nav-group">
+    <button class="nav-btn" onclick="navPrev()"><i class="fa-solid fa-chevron-left"></i></button>
+    <div class="period-label" id="period-label">Juin 2025</div>
+    <button class="nav-btn" onclick="navNext()"><i class="fa-solid fa-chevron-right"></i></button>
+    <button class="btn btn-ghost" onclick="goToday()" style="margin-left:4px;font-size:11px">Aujourd'hui</button>
+  </div>
+  <div class="sep"></div>
+  <div class="action-group">
+    <button class="chip" onclick="openCopyWeek()"><i class="fa-solid fa-copy"></i>Copier semaine</button>
+    <button class="chip" onclick="openDupMonth()"><i class="fa-solid fa-clone"></i>Dupliquer mois N-1</button>
+    <button class="chip" id="mass-btn" style="display:none" onclick="openMassAssign()"><i class="fa-solid fa-bolt"></i>Affecter en masse</button>
+    <button class="chip" onclick="runLegalCheck()"><i class="fa-solid fa-gavel"></i>Contrôles légaux</button>
+  </div>
+  <div class="spacer"></div>
+  <div style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--g400)">
+    <i class="fa-solid fa-users"></i> <span id="emp-count">11 collaborateurs</span>
+  </div>
+</div>
+
+<!-- Main -->
+<div id="main">
+
+  <!-- Monthly View -->
+  <div class="view active" id="view-monthly">
+    <div id="monthly-wrap">
+      <div id="monthly-grid" class="planning-grid"></div>
+    </div>
+    <div class="legend-bar">
+      <span style="font-size:10px;font-weight:600;color:var(--g400);margin-right:4px">STATUTS :</span>
+      <div class="leg-item"><div class="leg-dot" style="background:#D1FAE5;border:1px solid #6EE7B7"></div>Présent</div>
+      <div class="leg-item"><div class="leg-dot" style="background:#C6EFCE;border:1px solid #4ADE80"></div>CP</div>
+      <div class="leg-item"><div class="leg-dot" style="background:#DBEAFE;border:1px solid #60A5FA"></div>RTT</div>
+      <div class="leg-item"><div class="leg-dot" style="background:#FEE2E2;border:1px solid #F87171"></div>MAL</div>
+      <div class="leg-item"><div class="leg-dot" style="background:#F3F4F6;border:1px solid #D1D5DB"></div>Repos</div>
+      <div class="sep"></div>
+      <span style="font-size:10px;font-weight:600;color:var(--g400);margin-right:4px">SHIFTS :</span>
+      <div class="leg-item"><div class="leg-dot" style="background:#DBEAFE;border:1px solid #93C5FD"></div>Matin</div>
+      <div class="leg-item"><div class="leg-dot" style="background:#EDE9FE;border:1px solid #A78BFA"></div>Soir</div>
+      <div class="leg-item"><div class="leg-dot" style="background:#1E3A5F22;border:1px solid #1E3A5F55"></div>Nuit</div>
+      <div class="leg-item"><div class="leg-dot" style="background:#D1FAE5;border:1px solid #6EE7B7"></div>Journée</div>
+      <div class="leg-item"><div class="leg-dot" style="background:#FEF3C7;border:1px solid #FCD34D"></div>PD</div>
+      <div class="sep"></div>
+      <div class="leg-item"><div style="width:8px;height:8px;border-radius:50%;background:var(--er);border:1.5px solid white"></div>Alerte légale</div>
+      <div class="leg-item"><div style="width:8px;height:8px;border-radius:50%;background:var(--wa);border:1.5px solid white"></div>Avertissement</div>
+    </div>
+  </div>
+
+  <!-- Weekly View -->
+  <div class="view" id="view-weekly">
+    <div id="weekly-wrap">
+      <div id="weekly-grid"></div>
+    </div>
+  </div>
+
+  <!-- Daily View -->
+  <div class="view" id="view-daily">
+    <div id="daily-wrap">
+      <div id="daily-timeline" class="daily-timeline"></div>
+    </div>
+  </div>
+
+  <!-- Service View -->
+  <div class="view" id="view-service">
+    <div id="service-wrap">
+      <div id="service-grid" class="planning-grid"></div>
+    </div>
+  </div>
+
+  <!-- Coverage View -->
+  <div class="view" id="view-coverage">
+    <div id="coverage-wrap">
+      <div class="cov-title">Couverture des postes — Juin 2025</div>
+      <div class="cov-sub">Nombre d'employés présents vs minimum requis par service et par shift. Rouge = sous-effectif critique.</div>
+      <table class="cov-table" id="cov-table"></table>
+      <div class="cov-rule-panel">
+        <div class="cov-rule-title"><i class="fa-solid fa-sliders"></i> Règles de couverture minimale</div>
+        <div id="cov-rules-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Alert Panel -->
+  <div id="alert-panel">
+    <div class="alert-header">
+      <span><i class="fa-solid fa-triangle-exclamation" style="color:var(--wa)"></i> Alertes planning</span>
+      <button style="background:none;border:none;cursor:pointer;color:var(--g400)" onclick="toggleAlerts()"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="alert-list" id="alert-list"></div>
+  </div>
+
+</div><!-- /main -->
+</div><!-- /app -->
+
+<!-- Floating selection toolbar -->
+<div id="sel-bar">
+  <div class="sel-count" id="sel-count">0 cellules sélectionnées</div>
+  <div class="sel-sep"></div>
+  <span style="font-size:11px;opacity:.6;margin-right:4px">Statut :</span>
+  <div class="code-pill" style="background:#D1FAE5;color:#166534" onclick="applyToSel('P')">P</div>
+  <div class="code-pill" style="background:#C6EFCE;color:#0F5132" onclick="applyToSel('CP')">CP</div>
+  <div class="code-pill" style="background:#DBEAFE;color:#1E40AF" onclick="applyToSel('RTT')">RTT</div>
+  <div class="code-pill" style="background:#FEE2E2;color:#991B1B" onclick="applyToSel('MAL')">MAL</div>
+  <div class="code-pill" style="background:#F3F4F6;color:#9CA3AF" onclick="applyToSel('REPOS')">REPOS</div>
+  <div class="sel-sep"></div>
+  <span style="font-size:11px;opacity:.6;margin-right:2px">Shift :</span>
+  <div class="shift-pill" onclick="applyShiftToSel('M')">🌅 M</div>
+  <div class="shift-pill" onclick="applyShiftToSel('S')">🌆 S</div>
+  <div class="shift-pill" onclick="applyShiftToSel('N')">🌙 N</div>
+  <div class="shift-pill" onclick="applyShiftToSel('J')">☀️ J</div>
+  <div class="shift-pill" onclick="applyShiftToSel('PD')">☕ PD</div>
+  <button class="sel-clear" onclick="clearSel()"><i class="fa-solid fa-xmark"></i> Désélect.</button>
+</div>
+
+<!-- Cell Popover -->
+<div id="cell-pop">
+  <div class="pop-title">Modifier la cellule</div>
+  <div class="status-grid" id="pop-status"></div>
+  <hr class="pop-sep">
+  <div class="pop-title">Shift horaire</div>
+  <div class="shift-grid" id="pop-shifts"></div>
+  <div class="pop-actions">
+    <button class="pop-cancel" onclick="closePop()">Annuler</button>
+    <button class="pop-apply" onclick="applyPop()">Appliquer</button>
+  </div>
+</div>
+
+<!-- Modal: Copy Week -->
+<div class="modal-bg" id="modal-copy">
+  <div class="modal">
+    <h2><i class="fa-solid fa-copy" style="color:var(--pr)"></i> Copier une semaine</h2>
+    <p>Sélectionnez la semaine source à copier, puis la semaine de destination.</p>
+    <div class="form-group">
+      <label class="form-label">Semaine source</label>
+      <select class="form-select" id="copy-src" onchange="updateCopyPreview()">
+        <option value="1">Semaine du 02/06 (lun–dim)</option>
+        <option value="2">Semaine du 09/06 (lun–dim)</option>
+        <option value="3">Semaine du 16/06 (lun–dim)</option>
+        <option value="4">Semaine du 23/06 (lun–dim)</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Semaine destination</label>
+      <select class="form-select" id="copy-dst" onchange="updateCopyPreview()">
+        <option value="2">Semaine du 09/06 (lun–dim)</option>
+        <option value="3">Semaine du 16/06 (lun–dim)</option>
+        <option value="4">Semaine du 23/06 (lun–dim)</option>
+        <option value="5">Semaine du 30/06 (lun–dim)</option>
+      </select>
+    </div>
+    <div style="margin-bottom:12px">
+      <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer">
+        <input type="checkbox" id="copy-skip-abs" checked> Ignorer les absences (CP, RTT, MAL…) déjà posées en destination
+      </label>
+    </div>
+    <div class="copy-preview" id="copy-preview">
+      <b>Aperçu :</b> 77 cellules (11 emp × 7 jours) seront copiées vers la semaine du 09/06.<br>
+      Les statuts présents en destination seront écrasés (sauf absences si option cochée).
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-copy')">Annuler</button>
+      <button class="btn btn-primary" onclick="execCopyWeek()"><i class="fa-solid fa-copy"></i>Copier</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Duplicate Month -->
+<div class="modal-bg" id="modal-dup">
+  <div class="modal">
+    <h2><i class="fa-solid fa-clone" style="color:var(--pr)"></i> Dupliquer le mois précédent</h2>
+    <p>Le planning de <b>Mai 2025</b> sera utilisé comme base pour <b>Juin 2025</b>. Les décalages calendaires sont gérés automatiquement.</p>
+    <div style="background:var(--wa-l);border:1px solid #FDE68A;border-radius:var(--r);padding:12px;margin-bottom:16px;font-size:12px">
+      <b style="color:var(--wa)"><i class="fa-solid fa-triangle-exclamation"></i> Attention :</b> Cette action remplacera le planning de Juin 2025. Les absences approuvées (CP, RTT) seront conservées.
+    </div>
+    <div class="form-group">
+      <label class="form-label">Mode de duplication</label>
+      <select class="form-select">
+        <option>Remplacer tout le planning</option>
+        <option>Compléter uniquement les jours vides</option>
+      </select>
+    </div>
+    <div style="margin-bottom:12px">
+      <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer">
+        <input type="checkbox" checked> Conserver les absences approuvées (CP, RTT, MAL…)
+      </label>
+    </div>
+    <div style="margin-bottom:12px">
+      <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer">
+        <input type="checkbox" checked> Conserver les shifts horaires (matin/soir/nuit)
+      </label>
+    </div>
+    <div style="margin-bottom:12px">
+      <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer">
+        <input type="checkbox"> Signaler les conflits après duplication
+      </label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-dup')">Annuler</button>
+      <button class="btn btn-primary" onclick="execDupMonth()"><i class="fa-solid fa-clone"></i>Dupliquer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Mass Assign -->
+<div class="modal-bg" id="modal-mass">
+  <div class="modal">
+    <h2><i class="fa-solid fa-bolt" style="color:var(--wa)"></i> Affecter en masse</h2>
+    <p id="mass-sel-info">12 cellules sélectionnées sur 3 collaborateurs.</p>
+    <div class="form-group">
+      <label class="form-label">Statut à appliquer</label>
+      <div class="status-grid" id="mass-status-grid"></div>
+    </div>
+    <div class="form-group" id="mass-shift-group">
+      <label class="form-label">Shift horaire (si statut = Présent)</label>
+      <div class="shift-grid" id="mass-shift-grid"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-mass')">Annuler</button>
+      <button class="btn btn-primary" onclick="execMassAssign()"><i class="fa-solid fa-bolt"></i>Appliquer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<script>
+/* ─────────────────────────────────────────────────────────────────────────
+   DATA MODEL
+───────────────────────────────────────────────────────────────────────── */
+const Y = 2025, M = 5; // June 2025
+
+const SERVICES = [
+  { id:'reception',  label:'Réception',    icon:'fa-concierge-bell', color:'#3B82F6' },
+  { id:'etages',     label:'Étages',       icon:'fa-bed',            color:'#059669' },
+  { id:'technique',  label:'Technique',    icon:'fa-wrench',         color:'#F59E0B' },
+  { id:'direction',  label:'Direction',    icon:'fa-star',           color:'#6366F1' },
+  { id:'restauration',label:'Restauration',icon:'fa-coffee',         color:'#EF4444' },
+];
+
+const SHIFTS = {
+  M:  { label:'Matin',       start:'06:00', end:'14:00', h:8,  color:'#1D4ED8', bg:'#DBEAFE',  icon:'🌅' },
+  S:  { label:'Soir',        start:'14:00', end:'22:00', h:8,  color:'#6D28D9', bg:'#EDE9FE',  icon:'🌆' },
+  N:  { label:'Nuit',        start:'22:00', end:'06:00', h:8,  color:'#1E3A5F', bg:'#CBD5E122', icon:'🌙' },
+  J:  { label:'Journée',     start:'09:00', end:'17:00', h:8,  color:'#047857', bg:'#D1FAE5',  icon:'☀️' },
+  PD: { label:'Petit-dej.',  start:'06:00', end:'11:00', h:5,  color:'#92400E', bg:'#FEF3C7',  icon:'☕' },
+  C:  { label:'Coupure',     start:'08/17', end:'12/21', h:8,  color:'#991B1B', bg:'#FEE2E2',  icon:'✂️' },
+};
+
+const STATUS = {
+  P:    { label:'Présent',   bg:'#F0FDF4', fg:'#15803D', border:'#86EFAC' },
+  CP:   { label:'CP',        bg:'#DCFCE7', fg:'#14532D', border:'#4ADE80' },
+  RTT:  { label:'RTT',       bg:'#DBEAFE', fg:'#1E40AF', border:'#60A5FA' },
+  MAL:  { label:'Maladie',   bg:'#FEE2E2', fg:'#991B1B', border:'#F87171' },
+  MAT:  { label:'Maternité', bg:'#F3E8FF', fg:'#6B21A8', border:'#C084FC' },
+  PAT:  { label:'Paternité', bg:'#E0E7FF', fg:'#3730A3', border:'#818CF8' },
+  REPOS:{ label:'Repos',     bg:'#F3F4F6', fg:'#9CA3AF', border:'#D1D5DB' },
+};
+
+const COVERAGE_RULES = [
+  { id:'rm', service:'reception',   shift:'M',  min:2, label:'Réception Matin',    shiftColor:'#1D4ED8' },
+  { id:'rs', service:'reception',   shift:'S',  min:1, label:'Réception Soir',     shiftColor:'#6D28D9' },
+  { id:'rn', service:'reception',   shift:'N',  min:1, label:'Réception Nuit',     shiftColor:'#1E3A5F' },
+  { id:'ej', service:'etages',      shift:'J',  min:3, label:'Étages Journée',     shiftColor:'#047857' },
+  { id:'pd', service:'restauration',shift:'PD', min:1, label:'Petit-déjeuner',     shiftColor:'#92400E' },
+];
+
+const EMPLOYEES = [
+  { id:'e1',  first:'Sophie',   last:'Martin',   service:'reception',   role:'Réceptionniste',       color:'#3B82F6' },
+  { id:'e2',  first:'Thomas',   last:'Dupont',   service:'reception',   role:'Réceptionniste',       color:'#2563EB' },
+  { id:'e3',  first:'Marie',    last:'Leblanc',  service:'reception',   role:'Chef de réception',    color:'#1D4ED8' },
+  { id:'e4',  first:'J-Pierre', last:'Morel',    service:'reception',   role:'Portier nuit',         color:'#1E3A5F' },
+  { id:'e5',  first:'Amina',    last:'Diallo',   service:'etages',      role:'Gouvernante',          color:'#059669' },
+  { id:'e6',  first:'Fatima',   last:'Benali',   service:'etages',      role:'Femme de chambre',     color:'#10B981' },
+  { id:'e7',  first:'Camille',  last:'Rousseau', service:'etages',      role:'Femme de chambre',     color:'#34D399' },
+  { id:'e8',  first:'Hassan',   last:'Khalil',   service:'technique',   role:'Technicien',           color:'#F59E0B' },
+  { id:'e9',  first:'Pierre',   last:'Girard',   service:'direction',   role:'Directeur Général',    color:'#6366F1' },
+  { id:'e10', first:'Lucie',    last:'Bernard',  service:'restauration',role:'Resp. petit-déjeuner', color:'#EF4444' },
+  { id:'e11', first:'Marc',     last:'Fontaine', service:'restauration',role:'Agent petit-déjeuner', color:'#F87171' },
+];
+
+/* ─────────────────────────────────────────────────────────────────────────
+   PLANNING STATE
+───────────────────────────────────────────────────────────────────────── */
+let planning = {};
+let selection = new Set();
+let isDragging = false;
+let dragStartKey = null;
+let popCell = null; // { eid, day }
+let popStatus = null;
+let popShift = null;
+let currentView = 'monthly';
+let alertsOpen = false;
+let massStatus = 'P';
+let massShift = 'M';
+const DIM = 30;
+
+function daysInMonth(y, m) { return new Date(y, m + 1, 0).getDate(); }
+
+function initPlanning() {
+  EMPLOYEES.forEach(emp => {
+    for (let day = 1; day <= DIM; day++) {
+      const d = new Date(Y, M, day);
+      const wd = d.getDay(); // 0=Sun, 6=Sat
+      const isWe = wd === 0 || wd === 6;
+      const key = `${emp.id}-${day}`;
+      let status = 'P', shift = null;
+
+      if (emp.service === 'reception') {
+        if (emp.id === 'e1') { // Sophie - matin
+          if (isWe && (wd === 0)) { status = 'REPOS'; shift = null; }
+          else { status = 'P'; shift = 'M'; }
+          if (day === 16 || day === 17) { status = 'CP'; shift = null; }
+        } else if (emp.id === 'e2') { // Thomas - soir
+          if (wd === 0) { status = 'REPOS'; shift = null; }
+          else { status = 'P'; shift = 'S'; }
+          if (day >= 23 && day <= 27) { status = 'CP'; shift = null; }
+        } else if (emp.id === 'e3') { // Marie - journée
+          if (isWe) { status = 'REPOS'; shift = null; }
+          else { status = 'P'; shift = 'J'; }
+        } else if (emp.id === 'e4') { // Jean-Pierre - nuit rotation 3/1
+          const pos = (day - 1) % 4;
+          if (pos === 3) { status = 'REPOS'; shift = null; }
+          else { status = 'P'; shift = 'N'; }
+        }
+      } else if (emp.service === 'etages') {
+        if (emp.id === 'e5') { // Amina - gouvernante
+          if (wd === 0) { status = 'REPOS'; shift = null; }
+          else { status = 'P'; shift = 'J'; }
+        } else if (emp.id === 'e6') { // Fatima
+          if (day >= 9 && day <= 13) { status = 'CP'; shift = null; }
+          else if (wd === 0) { status = 'REPOS'; shift = null; }
+          else { status = 'P'; shift = 'J'; }
+        } else if (emp.id === 'e7') { // Camille
+          if (day === 3 || day === 4) { status = 'MAL'; shift = null; }
+          else if (wd === 6) { status = 'REPOS'; shift = null; }
+          else { status = 'P'; shift = 'J'; }
+        }
+      } else if (emp.service === 'technique') {
+        if (isWe) { status = 'REPOS'; shift = null; }
+        else { status = 'P'; shift = 'J'; }
+      } else if (emp.service === 'direction') {
+        if (isWe) { status = 'REPOS'; shift = null; }
+        else { status = 'P'; shift = 'J'; }
+      } else if (emp.service === 'restauration') {
+        if (wd === 0) { status = 'REPOS'; shift = null; }
+        else { status = 'P'; shift = 'PD'; }
+      }
+
+      planning[key] = { status, shift };
+    }
+  });
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   COVERAGE CALCULATION
+───────────────────────────────────────────────────────────────────────── */
+function getCoverage(day) {
+  const result = {};
+  COVERAGE_RULES.forEach(rule => {
+    const key = rule.id;
+    const count = EMPLOYEES.filter(emp => {
+      if (emp.service !== rule.service) return false;
+      const p = planning[`${emp.id}-${day}`];
+      return p && p.status === 'P' && p.shift === rule.shift;
+    }).length;
+    result[key] = count;
+  });
+  return result;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   LEGAL CHECKS
+───────────────────────────────────────────────────────────────────────── */
+function getLegalAlerts() {
+  const alerts = [];
+  EMPLOYEES.forEach(emp => {
+    // Check rest between night and morning shift
+    for (let day = 2; day <= DIM; day++) {
+      const prev = planning[`${emp.id}-${day-1}`];
+      const curr = planning[`${emp.id}-${day}`];
+      if (prev?.shift === 'N' && curr?.shift === 'M') {
+        alerts.push({
+          type: 'err',
+          emp: `${emp.first} ${emp.last}`,
+          msg: `Repos insuffisant : nuit → matin consécutifs (< 11h)`,
+          day: `${day-1} et ${day} juin`
+        });
+      }
+    }
+    // Check 6 consecutive working days
+    let streak = 0;
+    for (let day = 1; day <= DIM; day++) {
+      const p = planning[`${emp.id}-${day}`];
+      if (p?.status === 'P') { streak++; if (streak >= 7) alerts.push({ type:'warn', emp:`${emp.first} ${emp.last}`, msg:`7 jours consécutifs travaillés sans repos`, day:`Semaine du ${day-6} juin` }); }
+      else streak = 0;
+    }
+    // Check coverage
+    for (let day = 1; day <= DIM; day++) {
+      const cov = getCoverage(day);
+      COVERAGE_RULES.forEach(rule => {
+        if (cov[rule.id] === 0) {
+          const d = new Date(Y, M, day);
+          if (!alerts.find(a => a.msg === `${rule.label} : aucun agent présent` && a.day === `${day} juin`)) {
+            alerts.push({ type:'err', emp:'Couverture poste', msg:`${rule.label} : aucun agent présent`, day:`${day} juin` });
+          }
+        }
+      });
+    }
+  });
+  return alerts.slice(0, 12); // limit for prototype
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   RENDER MONTHLY
+───────────────────────────────────────────────────────────────────────── */
+function renderMonthly(container) {
+  const grid = container || document.getElementById('monthly-grid');
+  grid.innerHTML = '';
+
+  const nd = daysInMonth(Y, M);
+
+  // Header row
+  let html = `<div class="pgrow">
+    <div class="pgcell name-header" style="padding:8px 12px;font-size:11px;font-weight:700;color:var(--g500);text-transform:uppercase;letter-spacing:.5px">
+      <i class="fa-solid fa-users" style="margin-right:6px"></i>Collaborateur
+    </div>`;
+  for (let d = 1; d <= nd; d++) {
+    const date = new Date(Y, M, d);
+    const wd = date.getDay();
+    const isWe = wd === 0 || wd === 6;
+    const isToday = d === 4; // simulate today = June 4
+    const days = ['Di','Lu','Ma','Me','Je','Ve','Sa'];
+    html += `<div class="pgcell day-header${isWe ? ' weekend' : ''}${isToday ? ' today' : ''}">
+      <div class="day-num">${d}</div>
+      <div class="day-lbl">${days[wd]}</div>
+    </div>`;
+  }
+  html += `</div>`;
+
+  // Group by service
+  SERVICES.forEach(svc => {
+    const emps = EMPLOYEES.filter(e => e.service === svc.id);
+    if (!emps.length) return;
+
+    // Service header row
+    html += `<div class="pgrow">
+      <div class="pgcell svc-row" style="background:${svc.color}">
+        <i class="fa-solid ${svc.icon}" style="margin-right:6px"></i>${svc.label} <span style="opacity:.6;font-weight:400;margin-left:6px">${emps.length} agent${emps.length>1?'s':''}</span>
+      </div>`;
+    for (let d = 1; d <= nd; d++) {
+      html += `<div class="pgcell" style="background:${svc.color}18;border-bottom:1px solid ${svc.color}30"></div>`;
+    }
+    html += `</div>`;
+
+    // Coverage row
+    const covRule = COVERAGE_RULES.filter(r => r.service === svc.id);
+    if (covRule.length) {
+      covRule.forEach(rule => {
+        html += `<div class="pgrow">
+          <div class="pgcell cov-name"><i class="fa-solid fa-shield-check" style="margin-right:4px;font-size:9px"></i>${rule.label} (min ${rule.min})</div>`;
+        for (let d = 1; d <= nd; d++) {
+          const cov = getCoverage(d);
+          const n = cov[rule.id] || 0;
+          const cls = n >= rule.min ? 'cov-ok' : n > 0 ? 'cov-warn' : 'cov-err';
+          const icon = n >= rule.min ? '✓' : n > 0 ? '⚠' : '✗';
+          html += `<div class="pgcell cov-cell"><div class="cov-badge ${cls}">${icon}${n}</div></div>`;
+        }
+        html += `</div>`;
+      });
+    }
+
+    // Employee rows
+    emps.forEach(emp => {
+      const initials = emp.first[0] + emp.last[0];
+      html += `<div class="pgrow">
+        <div class="pgcell name-col">
+          <div class="emp-name-cell">
+            <div class="emp-avatar" style="background:${emp.color}">${initials}</div>
+            <div class="emp-info">
+              <div class="emp-fullname">${emp.first} ${emp.last}</div>
+              <div class="emp-role">${emp.role}</div>
+            </div>
+          </div>
+        </div>`;
+      for (let d = 1; d <= nd; d++) {
+        const date = new Date(Y, M, d);
+        const isWe = date.getDay() === 0 || date.getDay() === 6;
+        const key = `${emp.id}-${d}`;
+        const p = planning[key] || { status: '', shift: null };
+        const st = STATUS[p.status] || STATUS['REPOS'];
+        const sh = p.shift ? SHIFTS[p.shift] : null;
+        const isSel = selection.has(key);
+
+        // Legal alert check
+        const prevP = planning[`${emp.id}-${d-1}`];
+        const hasAlert = (prevP?.shift === 'N' && p.shift === 'M');
+        const alertHtml = hasAlert ? `<div class="cell-alert"></div>` : '';
+
+        html += `<div class="pgcell plan-cell${isWe?' weekend':''}${isSel?' selected':''}"
+            data-key="${key}" data-emp="${emp.id}" data-day="${d}"
+            onmousedown="cellMouseDown(event,'${key}')"
+            onmouseover="cellMouseOver(event,'${key}')"
+            onclick="openCellPop(event,'${emp.id}',${d})">
+          <div class="cell-inner" style="background:${st.bg};color:${st.fg};border:1.5px solid ${st.border}">
+            ${alertHtml}
+            <div class="cell-code">${p.status || ''}</div>
+            ${sh ? `<div class="cell-shift" style="background:${sh.color}22;color:${sh.color}">${p.shift} ${sh.start}</div>` : ''}
+          </div>
+        </div>`;
+      }
+      html += `</div>`;
+    });
+  });
+
+  grid.innerHTML = html;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   RENDER WEEKLY
+───────────────────────────────────────────────────────────────────────── */
+function renderWeekly() {
+  const grid = document.getElementById('weekly-grid');
+  const days = ['Lu','Ma','Me','Je','Ve','Sa','Di'];
+  const dates = [2,3,4,5,6,7,8]; // June 2-8
+
+  let html = `<div class="week-header-row">
+    <div class="week-name-col"><i class="fa-solid fa-users"></i> Collaborateur</div>`;
+  dates.forEach((d, i) => {
+    const date = new Date(Y, M, d);
+    const isWe = date.getDay() === 0 || date.getDay() === 6;
+    const isToday = d === 4;
+    html += `<div class="week-day-col${isWe?' weekend':''}${isToday?' today':''}">
+      <div class="day-lbl">${days[i]}</div>
+      <div class="day-num">${d}</div>
+      <div style="font-size:9px;color:var(--g400)">juin</div>
+    </div>`;
+  });
+  html += `</div>`;
+
+  SERVICES.forEach(svc => {
+    const emps = EMPLOYEES.filter(e => e.service === svc.id);
+    if (!emps.length) return;
+    html += `<div class="week-svc-row" style="background:${svc.color}"><i class="fa-solid ${svc.icon}" style="margin-right:8px"></i>${svc.label}</div>`;
+    emps.forEach(emp => {
+      const initials = emp.first[0] + emp.last[0];
+      let totalH = 0;
+      html += `<div class="week-emp-row">
+        <div class="week-emp-name">
+          <div class="emp-avatar" style="background:${emp.color};width:28px;height:28px;font-size:10px">${initials}</div>
+          <div class="emp-info"><div class="emp-fullname">${emp.first} ${emp.last}</div><div class="emp-role">${emp.role}</div></div>
+        </div>`;
+      dates.forEach((d, i) => {
+        const date = new Date(Y, M, d);
+        const isWe = date.getDay() === 0 || date.getDay() === 6;
+        const key = `${emp.id}-${d}`;
+        const p = planning[key] || { status:'REPOS', shift:null };
+        const st = STATUS[p.status] || STATUS['REPOS'];
+        const sh = p.shift ? SHIFTS[p.shift] : null;
+        if (sh) totalH += sh.h;
+        html += `<div class="week-cell${isWe?' weekend':''}" onclick="openCellPop(event,'${emp.id}',${d})">
+          <div class="week-badge" style="background:${st.bg};color:${st.fg}">
+            <div>${p.status || '—'}</div>
+            ${sh ? `<div class="week-badge-shift">${sh.icon} ${sh.start}–${sh.end}</div>
+                    <div class="week-badge-hours">${sh.h}h</div>` : ''}
+          </div>
+        </div>`;
+      });
+      html += `<div style="display:flex;align-items:center;padding:0 12px;font-size:11px;font-weight:700;color:${totalH>=35?'var(--ok)':totalH>=28?'var(--wa)':'var(--er)'};min-width:50px">
+        ${totalH}h${totalH>=35?'&nbsp;✓':totalH>=28?'&nbsp;⚠':'&nbsp;✗'}
+      </div>`;
+      html += `</div>`;
+    });
+  });
+
+  grid.innerHTML = html;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   RENDER DAILY
+───────────────────────────────────────────────────────────────────────── */
+function renderDaily() {
+  const tl = document.getElementById('daily-timeline');
+  const HOURS = [6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23];
+  const TOT = HOURS.length;
+  const DAY = 4; // June 4
+
+  let html = `<div class="daily-header">
+    <div class="daily-name-col"><i class="fa-solid fa-calendar-day"></i> Mardi 4 juin 2025</div>
+    <div class="daily-hours">`;
+  HOURS.forEach(h => {
+    html += `<div class="daily-hour">${String(h).padStart(2,'0')}h</div>`;
+  });
+  html += `</div></div>`;
+
+  // Shift to hour offset (relative to 6h start)
+  const shiftToBar = (shift) => {
+    if (!shift) return null;
+    const bases = { M:[0,8], S:[8,8], N:[16,8], J:[3,8], PD:[0,5], C:[2,10] };
+    return bases[shift] || null;
+  };
+
+  SERVICES.forEach(svc => {
+    const emps = EMPLOYEES.filter(e => e.service === svc.id);
+    if (!emps.length) return;
+    html += `<div style="display:flex;background:${svc.color};padding:6px 12px;font-size:11px;font-weight:700;color:#fff;text-transform:uppercase;letter-spacing:.5px">
+      <i class="fa-solid ${svc.icon}" style="margin-right:8px;line-height:1.4"></i>${svc.label}
+    </div>`;
+    emps.forEach(emp => {
+      const initials = emp.first[0] + emp.last[0];
+      const key = `${emp.id}-${DAY}`;
+      const p = planning[key] || { status:'REPOS', shift:null };
+      const st = STATUS[p.status] || STATUS['REPOS'];
+      const bar = p.shift ? shiftToBar(p.shift) : null;
+      const sh = p.shift ? SHIFTS[p.shift] : null;
+      html += `<div class="daily-emp-row">
+        <div class="daily-emp-name">
+          <div class="emp-avatar" style="background:${emp.color};width:28px;height:28px;font-size:10px">${initials}</div>
+          <div class="emp-info"><div class="emp-fullname">${emp.first} ${emp.last}</div><div class="emp-role" style="font-size:9px">${p.status}</div></div>
+        </div>
+        <div class="daily-cells" style="position:relative">`;
+
+      HOURS.forEach(() => { html += `<div class="daily-hour-cell"></div>`; });
+
+      // "Now" indicator at 10h (4h offset from 6h)
+      html += `<div class="daily-now-line" style="left:${(4/TOT)*100}%">
+        <div class="daily-now-label">10:00</div>
+      </div>`;
+
+      if (bar) {
+        const left = (bar[0]/TOT)*100;
+        const width = (bar[1]/TOT)*100;
+        html += `<div class="daily-shift-bar" style="left:${left}%;width:${width}%;background:${sh.bg};color:${sh.color};border:1.5px solid ${sh.color}40">
+          ${sh.icon} ${p.shift} ${sh.start}–${sh.end}
+        </div>`;
+      }
+      html += `</div></div>`;
+    });
+  });
+
+  tl.innerHTML = html;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   RENDER SERVICE VIEW (same as monthly but different order / coverage)
+───────────────────────────────────────────────────────────────────────── */
+function renderService() {
+  renderMonthly(document.getElementById('service-grid'));
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   RENDER COVERAGE VIEW
+───────────────────────────────────────────────────────────────────────── */
+function renderCoverage() {
+  const nd = daysInMonth(Y, M);
+  const tbl = document.getElementById('cov-table');
+  const days = ['Lu','Ma','Me','Je','Ve','Sa','Di'];
+
+  let html = `<thead><tr>
+    <th>Poste / Règle</th>`;
+  for (let d = 1; d <= nd; d++) {
+    const date = new Date(Y, M, d);
+    const wd = date.getDay();
+    const isWe = wd === 0 || wd === 6;
+    html += `<th style="${isWe?'background:var(--g100)':''}">${days[(wd+6)%7]}<br><b>${d}</b></th>`;
+  }
+  html += `</tr></thead><tbody>`;
+
+  COVERAGE_RULES.forEach(rule => {
+    html += `<tr><td style="border-right:2px solid var(--g200)">
+      <div style="display:flex;align-items:center;gap:6px">
+        <div style="width:10px;height:10px;border-radius:2px;background:${rule.shiftColor};flex-shrink:0"></div>
+        <span>${rule.label}</span>
+        <span style="color:var(--g400);font-size:10px">(min ${rule.min})</span>
+      </div>
+    </td>`;
+    for (let d = 1; d <= nd; d++) {
+      const cov = getCoverage(d);
+      const n = cov[rule.id] || 0;
+      const bg = n >= rule.min ? 'var(--ok-l)' : n > 0 ? 'var(--wa-l)' : 'var(--er-l)';
+      const fg = n >= rule.min ? 'var(--ok)' : n > 0 ? 'var(--wa)' : 'var(--er)';
+      const icon = n >= rule.min ? '✓' : n > 0 ? '⚠' : '✗';
+      html += `<td class="cov-td" style="background:${bg}">
+        <div class="cov-inner">
+          <div class="cov-num" style="color:${fg}">${icon}${n}</div>
+          <div class="cov-req" style="color:${fg}">/${rule.min}</div>
+        </div>
+      </td>`;
+    }
+    html += `</tr>`;
+  });
+  html += `</tbody>`;
+  tbl.innerHTML = html;
+
+  // Coverage rules config panel
+  const rulesEl = document.getElementById('cov-rules-list');
+  let rulesHtml = '';
+  COVERAGE_RULES.forEach(rule => {
+    rulesHtml += `<div class="rule-item">
+      <div class="rule-badge" style="background:${rule.shiftColor}22;color:${rule.shiftColor}">${rule.shift}</div>
+      <div style="font-weight:600">${rule.label}</div>
+      <div style="color:var(--g400);font-size:11px;flex:1">Tous les jours</div>
+      <div class="rule-min">
+        <button class="rule-btn" onclick="adjustRule('${rule.id}',-1)">−</button>
+        <div class="rule-num" id="rule-num-${rule.id}">${rule.min}</div>
+        <button class="rule-btn" onclick="adjustRule('${rule.id}',+1)">+</button>
+      </div>
+    </div>`;
+  });
+  rulesEl.innerHTML = rulesHtml;
+}
+
+function adjustRule(id, delta) {
+  const rule = COVERAGE_RULES.find(r => r.id === id);
+  if (!rule) return;
+  rule.min = Math.max(0, rule.min + delta);
+  document.getElementById('rule-num-' + id).textContent = rule.min;
+  renderCoverage();
+  toast('Règle mise à jour');
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   RENDER ALERTS
+───────────────────────────────────────────────────────────────────────── */
+function renderAlerts() {
+  const alerts = getLegalAlerts();
+  document.getElementById('alert-count').textContent = alerts.length;
+  const list = document.getElementById('alert-list');
+  if (!alerts.length) {
+    list.innerHTML = `<div style="text-align:center;padding:40px 20px;color:var(--g400)"><i class="fa-solid fa-circle-check" style="font-size:32px;color:var(--ok);display:block;margin-bottom:12px"></i>Aucune alerte planning</div>`;
+    return;
+  }
+  list.innerHTML = alerts.map(a => `
+    <div class="alert-item ${a.type}">
+      <div class="alert-emp"><i class="fa-solid fa-${a.type==='err'?'circle-xmark':'triangle-exclamation'}" style="margin-right:4px"></i>${a.emp}</div>
+      <div class="alert-msg">${a.msg}</div>
+      <div class="alert-day">${a.day}</div>
+    </div>`).join('');
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   CELL INTERACTIONS
+───────────────────────────────────────────────────────────────────────── */
+function cellMouseDown(e, key) {
+  if (e.button !== 0) return;
+  isDragging = true;
+  dragStartKey = key;
+  if (!e.shiftKey && !e.ctrlKey && !e.metaKey) {
+    selection.clear();
+  }
+  toggleSel(key);
+  updateSelBar();
+}
+
+function cellMouseOver(e, key) {
+  if (!isDragging) return;
+  // Simple drag: add keys between dragStart and current
+  const startParts = dragStartKey.split('-');
+  const currParts = key.split('-');
+  const startEmpIdx = EMPLOYEES.findIndex(em => em.id === startParts[0]);
+  const currEmpIdx = EMPLOYEES.findIndex(em => em.id === currParts[0]);
+  const startDay = parseInt(startParts[1]);
+  const currDay = parseInt(currParts[1]);
+  const minE = Math.min(startEmpIdx, currEmpIdx);
+  const maxE = Math.max(startEmpIdx, currEmpIdx);
+  const minD = Math.min(startDay, currDay);
+  const maxD = Math.max(startDay, currDay);
+  selection.clear();
+  for (let ei = minE; ei <= maxE; ei++) {
+    for (let d = minD; d <= maxD; d++) {
+      selection.add(`${EMPLOYEES[ei].id}-${d}`);
+    }
+  }
+  updateSelBar();
+  refreshSelectionVisuals();
+}
+
+document.addEventListener('mouseup', () => { isDragging = false; });
+
+function toggleSel(key) {
+  if (selection.has(key)) selection.delete(key);
+  else selection.add(key);
+}
+
+function refreshSelectionVisuals() {
+  document.querySelectorAll('.plan-cell').forEach(cell => {
+    cell.classList.toggle('selected', selection.has(cell.dataset.key));
+  });
+}
+
+function updateSelBar() {
+  const bar = document.getElementById('sel-bar');
+  const cnt = document.getElementById('sel-count');
+  if (selection.size > 0) {
+    bar.classList.add('show');
+    cnt.textContent = `${selection.size} cellule${selection.size>1?'s':''} sélectionnée${selection.size>1?'s':''}`;
+    document.getElementById('mass-btn').style.display = '';
+  } else {
+    bar.classList.remove('show');
+    document.getElementById('mass-btn').style.display = 'none';
+  }
+  refreshSelectionVisuals();
+}
+
+function clearSel() { selection.clear(); updateSelBar(); }
+
+function applyToSel(status) {
+  selection.forEach(key => {
+    if (!planning[key]) planning[key] = {};
+    planning[key].status = status;
+    if (status !== 'P') planning[key].shift = null;
+  });
+  rerenderCurrent();
+  toast(`Statut "${STATUS[status]?.label}" appliqué à ${selection.size} cellule${selection.size>1?'s':''}`);
+}
+
+function applyShiftToSel(shift) {
+  selection.forEach(key => {
+    if (!planning[key]) planning[key] = {};
+    planning[key].status = 'P';
+    planning[key].shift = shift;
+  });
+  rerenderCurrent();
+  toast(`Shift "${SHIFTS[shift].label}" appliqué à ${selection.size} cellule${selection.size>1?'s':''}`);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   CELL POPOVER
+───────────────────────────────────────────────────────────────────────── */
+function openCellPop(e, eid, day) {
+  e.stopPropagation();
+  if (isDragging) return;
+  popCell = { eid, day };
+  const key = `${eid}-${day}`;
+  const p = planning[key] || { status:'P', shift:null };
+  popStatus = p.status;
+  popShift = p.shift;
+
+  const pop = document.getElementById('cell-pop');
+  const emp = EMPLOYEES.find(em => em.id === eid);
+
+  // Status buttons
+  const statusHtml = Object.entries(STATUS).map(([code, st]) =>
+    `<button class="s-btn${popStatus===code?' active-s':''}" style="background:${st.bg};color:${st.fg};border:1.5px solid ${popStatus===code?st.fg:st.border}"
+      onclick="popSetStatus('${code}')">${code}</button>`
+  ).join('');
+  document.getElementById('pop-status').innerHTML = statusHtml;
+
+  // Shift buttons
+  const shiftHtml = Object.entries(SHIFTS).map(([code, sh]) =>
+    `<button class="sh-btn${popShift===code?' active-sh':''}" onclick="popSetShift('${code}')">
+      ${sh.icon} ${sh.label}<span class="sh-time">${sh.start}–${sh.end}</span>
+    </button>`
+  ).join('');
+  document.getElementById('pop-shifts').innerHTML = shiftHtml;
+
+  // Position popover near click
+  const rect = e.currentTarget.getBoundingClientRect();
+  pop.style.left = Math.min(rect.left, window.innerWidth - 260) + 'px';
+  pop.style.top = Math.min(rect.bottom + 4, window.innerHeight - 320) + 'px';
+  pop.classList.add('show');
+}
+
+function popSetStatus(code) {
+  popStatus = code;
+  document.querySelectorAll('#pop-status .s-btn').forEach(b => {
+    const isActive = b.textContent.trim() === code;
+    b.classList.toggle('active-s', isActive);
+    const st = STATUS[code];
+    if (isActive) { b.style.borderColor = st.fg; }
+    else { b.style.borderColor = STATUS[b.textContent.trim()]?.border || 'var(--g200)'; }
+  });
+}
+function popSetShift(code) {
+  popShift = code;
+  document.querySelectorAll('#pop-shifts .sh-btn').forEach(b => b.classList.remove('active-sh'));
+  event.target.closest('.sh-btn').classList.add('active-sh');
+}
+
+function applyPop() {
+  if (!popCell) return;
+  const key = `${popCell.eid}-${popCell.day}`;
+  if (!planning[key]) planning[key] = {};
+  planning[key].status = popStatus;
+  planning[key].shift = (popStatus === 'P') ? popShift : null;
+  closePop();
+  rerenderCurrent();
+}
+
+function closePop() { document.getElementById('cell-pop').classList.remove('show'); }
+document.addEventListener('click', e => { if (!e.target.closest('#cell-pop') && !e.target.closest('.plan-cell')) closePop(); });
+
+/* ─────────────────────────────────────────────────────────────────────────
+   VIEW MANAGEMENT
+───────────────────────────────────────────────────────────────────────── */
+function setView(view) {
+  currentView = view;
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.querySelectorAll('.vtab').forEach(t => t.classList.toggle('act', t.dataset.view === view));
+  const el = document.getElementById('view-' + view);
+  if (el) el.classList.add('active');
+  rerenderCurrent();
+}
+
+function rerenderCurrent() {
+  switch (currentView) {
+    case 'monthly': renderMonthly(); break;
+    case 'weekly': renderWeekly(); break;
+    case 'daily': renderDaily(); break;
+    case 'service': renderService(); break;
+    case 'coverage': renderCoverage(); break;
+  }
+  renderAlerts();
+  updateSelBar();
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   MODALS & ACTIONS
+───────────────────────────────────────────────────────────────────────── */
+function openCopyWeek() {
+  document.getElementById('modal-copy').classList.add('show');
+  updateCopyPreview();
+}
+function openDupMonth() { document.getElementById('modal-dup').classList.add('show'); }
+function openMassAssign() {
+  const emps = new Set([...selection].map(k => k.split('-')[0]));
+  document.getElementById('mass-sel-info').textContent = `${selection.size} cellule${selection.size>1?'s':''} sélectionnée${selection.size>1?'s':''} sur ${emps.size} collaborateur${emps.size>1?'s':''}.`;
+  const statusHtml = Object.entries(STATUS).map(([code, st]) =>
+    `<button class="s-btn${massStatus===code?' active-s':''}" style="background:${st.bg};color:${st.fg};border:1.5px solid ${massStatus===code?st.fg:st.border}"
+      onclick="massStatus='${code}';openMassAssign()">${code}</button>`
+  ).join('');
+  document.getElementById('mass-status-grid').innerHTML = statusHtml;
+  const shiftHtml = Object.entries(SHIFTS).map(([code, sh]) =>
+    `<button class="sh-btn${massShift===code?' active-sh':''}" onclick="massShift='${code}';openMassAssign()">
+      ${sh.icon} ${sh.label}<span class="sh-time">${sh.start}–${sh.end}</span>
+    </button>`
+  ).join('');
+  document.getElementById('mass-shift-grid').innerHTML = shiftHtml;
+  document.getElementById('modal-mass').classList.add('show');
+}
+
+function closeModal(id) { document.getElementById(id).classList.remove('show'); }
+
+function updateCopyPreview() {
+  const src = document.getElementById('copy-src').value;
+  const dst = document.getElementById('copy-dst').value;
+  const weeks = {1:'02/06',2:'09/06',3:'16/06',4:'23/06',5:'30/06'};
+  document.getElementById('copy-preview').innerHTML =
+    `<b>Aperçu :</b> ${EMPLOYEES.length*7} cellules (${EMPLOYEES.length} collaborateurs × 7 jours) seront copiées depuis la semaine du ${weeks[src]} vers la semaine du ${weeks[dst]}.<br>
+    Les absences déjà posées en destination seront conservées si l'option est cochée.`;
+}
+
+function execCopyWeek() {
+  closeModal('modal-copy');
+  toast(`✓ Semaine copiée avec succès — ${EMPLOYEES.length*7} cellules`);
+}
+function execDupMonth() {
+  closeModal('modal-dup');
+  toast('✓ Planning de Mai 2025 dupliqué sur Juin 2025');
+}
+function execMassAssign() {
+  applyToSel(massStatus);
+  if (massStatus === 'P') applyShiftToSel(massShift);
+  closeModal('modal-mass');
+}
+
+function showSave() { toast(`✓ Planning sauvegardé — ${Object.keys(planning).filter(k=>planning[k].status).length} entrées`); }
+
+function navPrev() { toast('← Navigation : Mai 2025'); }
+function navNext() { toast('→ Navigation : Juillet 2025'); }
+function goToday() { toast('Aujourd\'hui : 4 juin 2025'); }
+
+function runLegalCheck() {
+  const alerts = getLegalAlerts();
+  alertsOpen = true;
+  document.getElementById('alert-panel').classList.remove('collapsed');
+  renderAlerts();
+  toast(`${alerts.length} alerte${alerts.length>1?'s':''} légale${alerts.length>1?'s':''} détectée${alerts.length>1?'s':''}`);
+}
+
+function toggleAlerts() {
+  alertsOpen = !alertsOpen;
+  document.getElementById('alert-panel').classList.toggle('collapsed', !alertsOpen);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   TOAST
+───────────────────────────────────────────────────────────────────────── */
+let toastTimer = null;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   INIT
+───────────────────────────────────────────────────────────────────────── */
+initPlanning();
+rerenderCurrent();
+renderAlerts();
+// Start with alerts open to show the feature
+alertsOpen = true;
+document.getElementById('alert-panel').classList.remove('collapsed');
+</script>
+</body>
+</html>
