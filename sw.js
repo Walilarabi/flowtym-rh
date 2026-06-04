@@ -1,7 +1,7 @@
 // Flowtym Portal — Service Worker
 // Cache les assets statiques pour fonctionnement offline limité (auth screen)
 const CACHE = 'flowtym-portal-v1';
-const STATIC = ['/portal.html'];
+const STATIC = ['/portal.html', '/salarie', '/salarié'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(STATIC)));

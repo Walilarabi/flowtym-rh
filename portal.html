@@ -1561,7 +1561,7 @@ $('modal').addEventListener('click',e=>e.stopPropagation());
 // ── Démarrage ─────────────────────────────────────────────────────────────────
 // Service Worker PWA
 if('serviceWorker' in navigator){
-  navigator.serviceWorker.register('/sw.js').catch(()=>{});
+  navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(()=>{});
 }
 boot();
 </script>
