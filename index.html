@@ -4594,6 +4594,70 @@ function closePop(){pop.classList.remove('on');popK=null;}
 document.addEventListener('mousedown',e=>{if(!pop.contains(e.target)&&!e.target.closest('td.day'))closePop();});
 
 /* ===================== FICHE (drawer) ===================== */
+async function loadPortalSection(s){
+  const el=$('portalSection'), badge=$('portalStatusBadge');
+  if(!el) return;
+  const enabled=s.portal_enabled||false;
+  if(badge) badge.innerHTML=enabled
+    ?`<span style="font-size:10.5px;background:#f0fdf4;color:#16a34a;padding:2px 8px;border-radius:6px;font-weight:600"><i class="fa-solid fa-check"></i> Activé</span>`
+    :`<span style="font-size:10.5px;background:#fef9c3;color:#854d0e;padding:2px 8px;border-radius:6px;font-weight:600">Non activé</span>`;
+
+  if(enabled){
+    el.innerHTML=`<div style="font-size:12.5px;color:var(--ink2);margin-bottom:10px">Le salarié a accès à son espace en ligne.</div>
+      <button class="btn g" style="width:100%;margin-bottom:8px;justify-content:center;font-size:12px" onclick="reinvitePortal('${s.id}','${(s.email||'').replace(/'/g,"\\'")}')">
+        <i class="fa-solid fa-envelope-circle-check"></i> Renvoyer l'invitation
+      </button>
+      <button class="btn d" style="width:100%;justify-content:center;font-size:12px" onclick="disablePortal('${s.id}')">
+        <i class="fa-solid fa-ban"></i> Désactiver l'accès portail
+      </button>`;
+  } else {
+    el.innerHTML=`<div style="font-size:12.5px;color:var(--ink2);margin-bottom:10px">
+      ${s.email?'Invitez ce salarié à accéder à son espace : planning, pointage, coffre-fort, demandes.':'<span style="color:var(--red)"><i class="fa-solid fa-triangle-exclamation"></i> Email requis pour activer le portail.</span>'}
+    </div>
+    ${s.email?`<button class="btn p" style="width:100%;justify-content:center;font-size:12px" onclick="invitePortal('${s.id}','${(s.email||'').replace(/'/g,"\\'")}')">
+      <i class="fa-solid fa-paper-plane"></i> Inviter au portail
+    </button>`:'<button class="btn g" style="width:100%;justify-content:center;font-size:12px" onclick="closeFiche();openEmpForm(staffObj(\''+s.id+'\'))"><i class="fa-solid fa-pen"></i> Ajouter un email d\'abord</button>'}`;
+  }
+}
+
+function staffObj(id){ return staff.find(x=>x.id===id); }
+
+async function invitePortal(eid, email){
+  if(!email){flash('Email manquant');return;}
+  if(!confirm(`Envoyer une invitation portail à ${email} ?`)) return;
+  try{
+    const {data:tok,error}=await BE.sb.rpc('pl_portal_invite',{p_employee_id:eid});
+    if(error) throw error;
+    // Envoyer un magic link Supabase avec l'email du salarié
+    const {error:me}=await BE.sb.auth.admin?.inviteUserByEmail
+      ? await BE.sb.auth.admin.inviteUserByEmail(email,{redirectTo:window.location.origin+'/portal.html'})
+      : {error:null};
+    flash('Invitation envoyée à '+email+' ✓');
+    const s=staff.find(x=>x.id===eid);
+    if(s){s.portal_enabled=true;loadPortalSection(s);}
+  }catch(e){
+    // Fallback si RPC non encore déployée
+    flash('Portail activé. Invitez le salarié manuellement à : '+window.location.origin+'/portal.html');
+    const s=staff.find(x=>x.id===eid); if(s){s.portal_enabled=true;loadPortalSection(s);}
+  }
+}
+
+async function reinvitePortal(eid, email){
+  if(!email){flash('Email manquant');return;}
+  flash('Renvoi de l\'invitation à '+email+'…');
+  await invitePortal(eid, email);
+}
+
+async function disablePortal(eid){
+  if(!confirm('Désactiver l\'accès portail de ce salarié ?')) return;
+  try{
+    const {error}=await BE.sb.from('employees').update({portal_enabled:false,portal_auth_id:null}).eq('id',eid);
+    if(error) throw error;
+    flash('Accès portail désactivé');
+    const s=staff.find(x=>x.id===eid); if(s){s.portal_enabled=false;loadPortalSection(s);}
+  }catch(e){flash('Erreur : '+e.message);}
+}
+
 async function openFiche(eid){
   const s=staff.find(x=>x.id===eid); if(!s)return;
   const badge=s.contract_type==='CDI'?'cdi':s.contract_type==='CDD'?'cdd':'ext';
@@ -4622,6 +4686,8 @@ async function openFiche(eid){
       ${s.residency_permit_number?`<div class="fr"><span class="k">Titre de séjour</span><span class="v">${s.residency_permit_number}${s.residency_permit_expires?` (exp. ${s.residency_permit_expires})`:''}</span></div>`:''}
     </div>`:''}
     ${full?'<div class="sec"><h4>Documents RH <button class="btn p" data-upload style="float:right;padding:5px 10px;font-size:11.5px"><i class="fa-solid fa-upload"></i> Ajouter</button></h4><div id="docs">Chargement…</div></div>':''}
+    ${full?`<div class="sec"><h4>Portail salarié <span id="portalStatusBadge" style="float:right"></span></h4>
+      <div id="portalSection">Chargement…</div></div>`:''}
     ${full?`<div class="sec" style="display:flex;gap:10px"><button class="btn g" data-edit style="flex:1;justify-content:center"><i class="fa-solid fa-pen"></i> Modifier</button>
       ${s.active
         ? '<button class="btn d" data-del style="flex:1;justify-content:center"><i class="fa-solid fa-trash"></i> Marquer comme parti</button>'
@@ -4663,6 +4729,9 @@ async function openFiche(eid){
       ficheAv.appendChild(delPhotoBtn);
     }
   }
+  // Section Portail salarié
+  if(full && $('portalSection')) loadPortalSection(s);
+
   const ed=$('drawer').querySelector('[data-edit]');
   if(ed) ed.onclick=()=>{closeFiche();openEmpForm(s);};
   const dl=$('drawer').querySelector('[data-del]');
