@@ -219,7 +219,12 @@ thead .stickL{z-index:8;background:#fafafe}
 .cRole{text-align:left;padding:6px 14px 6px 8px;color:var(--ink2);white-space:nowrap}
 .emp{display:flex;align-items:center;gap:9px;cursor:pointer}
 .emp:hover .nm{color:var(--violet-d)}
-.av{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;color:#fff;font-weight:700;font-size:11px;flex-shrink:0}
+.av{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;color:#fff;font-weight:700;font-size:11px;flex-shrink:0;overflow:hidden;position:relative}
+.av img{width:100%;height:100%;object-fit:cover;border-radius:inherit}
+.photo-overlay{position:absolute;inset:0;background:rgba(0,0,0,.45);display:grid;place-items:center;opacity:0;transition:.15s;font-size:12px;color:#fff}
+.photo-drop:hover .photo-overlay{opacity:1}
+.photo-drop.drag-over{outline:2px dashed var(--violet);outline-offset:2px}
+.photo-drop.drag-over .photo-overlay{opacity:1}
 .emp .nm{font-weight:600;font-size:12.5px;line-height:1.15}
 .emp .sub{font-size:10.5px;color:var(--muted)}
 td.day{width:44px;min-width:44px;text-align:center;font-weight:700;font-size:11px;user-select:none;cursor:pointer;position:relative}
@@ -252,7 +257,8 @@ tr.totals td.lab{text-align:right;padding-right:10px;color:var(--violet-d)}
 .drawer.on{transform:none}
 .dh{padding:22px 22px 16px;border-bottom:1px solid var(--line);position:relative}
 .dh .close{position:absolute;top:16px;right:16px;width:32px;height:32px;border-radius:9px;border:0;background:#f4f4f6;cursor:pointer;color:var(--ink2)}
-.dh .av{width:54px;height:54px;font-size:17px;margin-bottom:10px}
+.dh .av{width:64px;height:64px;font-size:20px;margin-bottom:10px;border-radius:16px}
+.dh .photo-overlay{font-size:18px}
 .dh h2{font-size:20px;font-weight:800}.dh .role{color:var(--ink2);font-size:13px;margin-top:3px}
 .sec{padding:16px 22px;border-bottom:1px solid var(--line)}
 .sec h4{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:11px;font-weight:700}
@@ -436,6 +442,33 @@ const iso=(y,m,d)=>`${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'
 const initials=(f,l)=>((f?.[0]||'')+(l?.[0]||'')).toUpperCase();
 const AVC=['#8B5CF6','#3b82f6','#16a34a','#d97706','#ef4444','#0ea5e9','#db2777','#0d9488'];
 const avColor=s=>{let h=0;for(const c of (s||''))h=(h*31+c.charCodeAt(0))%AVC.length;return AVC[h];};
+/* avatarHTML : retourne le contenu interne d'un .av (img ou initiales) */
+function avInner(s){
+  if(s?.photo_url) return `<img src="${s.photo_url}" style="width:100%;height:100%;object-fit:cover;border-radius:inherit">`;
+  return initials(s?.first_name||'?', s?.last_name||'');
+}
+function avBg(s){ return s?.photo_url?'#e5e7eb':avColor(s?.last_name||''); }
+/* resize image file → base64 JPEG (max 240px, qualité 0.82) */
+function resizePhotoToDataUrl(file,maxPx=240){
+  return new Promise((resolve,reject)=>{
+    const img=new Image(), url=URL.createObjectURL(file);
+    img.onload=()=>{
+      URL.revokeObjectURL(url);
+      const scale=Math.min(maxPx/img.width, maxPx/img.height, 1);
+      const w=Math.round(img.width*scale), h=Math.round(img.height*scale);
+      const c=document.createElement('canvas'); c.width=w; c.height=h;
+      c.getContext('2d').drawImage(img,0,0,w,h);
+      resolve(c.toDataURL('image/jpeg',0.82));
+    };
+    img.onerror=reject; img.src=url;
+  });
+}
+async function saveEmployeePhoto(s, file){
+  const dataUrl=await resizePhotoToDataUrl(file);
+  await BE.updateEmployee(s.id,{photo_url:dataUrl});
+  s.photo_url=dataUrl;
+  return dataUrl;
+}
 const $=id=>document.getElementById(id);
 
 /* ===================== BACKEND ===================== */
@@ -1162,7 +1195,7 @@ function render(){
     }
     h+=`<tr data-emprow="${s.id}"${!s.active?' style="opacity:.55"':''}>`
       +`<td class="stickL cDrag dh" title="Réordonner"><i class="fa-solid fa-grip-vertical" style="color:var(--muted);font-size:11px;cursor:grab"></i></td>`
-      +`<td class="stickL cEmp"><div class="emp" data-emp="${s.id}"><div class="av" style="background:${avColor(s.last_name)}">${initials(s.first_name,s.last_name)}</div>`
+      +`<td class="stickL cEmp"><div class="emp" data-emp="${s.id}"><div class="av" style="background:${avBg(s)}">${avInner(s)}</div>`
       +`<div><div class="nm">${s.first_name} ${s.last_name}${!s.active?' <span style="font-size:9.5px;color:var(--red);font-weight:700;background:var(--red-bg);padding:1px 5px;border-radius:5px;margin-left:4px">PARTI</span>':''}</div><div class="sub">${s.department||'—'} · ${s.contract_type||'CDI'}</div></div></div></td>`
       +`<td class="stickL cRole">${s.role||'—'}</td>`;
     let trav=0,cp=0,abs=0,rep=0;
@@ -1370,7 +1403,7 @@ function renderDashboard(){
     </div>
     <div class="cols2">
       <div class="box"><h3><i class="fa-regular fa-user"></i>Équipe active</h3><div class="tlist">
-        ${team.length?team.map(s=>`<div class="it"><div class="av" style="background:${avColor(s.last_name)};color:#fff;display:grid;place-items:center;font-weight:700">${initials(s.first_name,s.last_name)}</div>
+        ${team.length?team.map(s=>`<div class="it"><div class="av" style="background:${avBg(s)}">${avInner(s)}</div>
           <div><div class="nm">${s.first_name} ${s.last_name}</div><div class="sub">${s.role||'—'} · ${s.department||'—'}</div></div>
           <div class="right">${s.contract_type||'CDI'}</div></div>`).join(''):'<div style="padding:14px;color:var(--muted)">Aucun collaborateur — ajoutez-en depuis Personnel.</div>'}
       </div></div>
@@ -1401,7 +1434,7 @@ async function drawDashboardAlerts(){
       else if(a.alert_kind==='expiring_soon'){label=`Expire dans ${a.days_until_expiry} j`; cls='expiring_soon';}
       else if(a.alert_kind==='missing'){label='Manquant'; cls='missing';}
       return `<div class="alertrow" data-eid="${a.employee_id}" style="cursor:pointer">
-        <div class="av" style="background:${avColor(a.last_name||'')};color:#fff;display:grid;place-items:center;font-weight:700">${initials(a.first_name||'?',a.last_name||'')}</div>
+        <div class="av" style="background:${avBg(staff.find(x=>x.id===a.employee_id))}">${avInner(staff.find(x=>x.id===a.employee_id)||{first_name:a.first_name||'?',last_name:a.last_name||''})}</div>
         <div style="flex:1"><div class="nm">${fullName}</div><div class="sub">${a.doc_label||a.doc_type_code}${a.expires_at?` · ${a.expires_at}`:''}</div></div>
         <span class="badge-st ${cls}">${label}</span>
       </div>`;
@@ -1560,7 +1593,7 @@ function renderPersonnel(){
       if(q&&!(`${s.first_name} ${s.last_name} ${s.role||''} ${s.department||''}`.toLowerCase().includes(q)))return false;
       return true;}).sort((a,b)=>(b.active?1:0)-(a.active?1:0));
     $('pcards').innerHTML=list.map(s=>`<div class="card" data-emp="${s.id}" ${!s.active?'style="opacity:.6"':''}>
-      <div class="head"><div class="av" style="background:${avColor(s.last_name)}">${initials(s.first_name,s.last_name)}</div>
+      <div class="head"><div class="av" style="background:${avBg(s)}">${avInner(s)}</div>
         <div><div class="nm">${s.first_name} ${s.last_name}${!s.active?' <span class="tag red">PARTI</span>':''}</div><div class="role">${s.role||'—'} · ${s.department||'—'}</div></div></div>
       <div class="meta">
         <span class="tag ${s.contract_type==='CDI'?'green':'gray'}">${s.contract_type||'CDI'}</span>
@@ -3705,7 +3738,7 @@ async function drawOrgTree(){
     const reports=byMgr.get(s.id)||[];
     return `<div style="display:inline-flex;flex-direction:column;align-items:center;margin:0 8px">
       <div class="card" data-emp="${s.id}" style="cursor:pointer;width:140px;text-align:center;padding:10px 8px;border:2px solid ${depth===0?'var(--violet)':'var(--line)'};border-radius:12px;background:#fff">
-        <div class="av" style="width:34px;height:34px;border-radius:50%;background:${avColor(s.last_name)};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;margin:0 auto 6px">${initials(s.first_name,s.last_name)}</div>
+        <div class="av" style="width:34px;height:34px;border-radius:50%;background:${avBg(s)};margin:0 auto 6px">${avInner(s)}</div>
         <div style="font-weight:700;font-size:12px;line-height:1.2">${s.first_name}<br>${s.last_name}</div>
         <div style="font-size:10.5px;color:var(--muted);margin-top:3px">${s.role||'—'}</div>
       </div>
@@ -3772,7 +3805,7 @@ async function renderClockKiosk(eid){
   document.body.innerHTML=`
     <div id="kiosk" style="min-height:100vh;background:linear-gradient(135deg,#6d28d9 0%,#4f46e5 100%);display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:'Inter',sans-serif;padding:24px;box-sizing:border-box">
       <div style="background:#fff;border-radius:24px;padding:40px 36px;max-width:420px;width:100%;text-align:center;box-shadow:0 25px 60px rgba(0,0,0,.25)">
-        <div id="kavatar" style="width:80px;height:80px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:28px;font-weight:700;color:#fff;margin-bottom:16px;background:${avColor(emp.last_name)}">${initials(emp.first_name,emp.last_name)}</div>
+        <div id="kavatar" style="width:80px;height:80px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:28px;font-weight:700;color:#fff;margin-bottom:16px;overflow:hidden;background:${avBg(emp)}">${avInner(emp)}</div>
         <h2 style="margin:0 0 4px;font-size:22px;color:#1a1a2e">${emp.first_name} ${emp.last_name}</h2>
         <div style="font-size:14px;color:#6b7280;margin-bottom:8px">${emp.role||''} · ${emp.department||''}</div>
         <div id="kclock" style="font-size:42px;font-weight:800;color:#6d28d9;letter-spacing:-1px;margin:20px 0 4px">--:--</div>
@@ -4128,7 +4161,8 @@ async function openFiche(eid){
   const full=canFicheFull();
   $('drawer').innerHTML=`
     <div class="dh"><button class="close" data-x><i class="fa-solid fa-xmark"></i></button>
-      <div class="av" style="background:${avColor(s.last_name)}">${initials(s.first_name,s.last_name)}</div>
+      <div class="av photo-drop" id="ficheAv" data-eid="${s.id}" style="background:${avBg(s)};cursor:pointer;position:relative" title="Glissez une photo ou cliquez pour changer">${avInner(s)}<div class="photo-overlay"><i class="fa-solid fa-camera"></i></div></div>
+      <input type="file" id="fichePhotoIn" accept="image/*" style="display:none">
       <h2>${s.first_name} ${s.last_name}</h2><div class="role">${s.role||'—'} · ${s.department||'—'} <span class="badge ${badge}">${s.contract_type||'CDI'}</span></div></div>
     <div class="sec"><h4>Informations</h4>
       <div class="fr"><span class="k">Statut</span><span class="v" style="${s.active?'color:var(--green)':'color:var(--red)'}">${s.active?'Actif':'Parti'}</span></div>
@@ -4154,6 +4188,22 @@ async function openFiche(eid){
         : '<button class="btn p" data-react style="flex:1;justify-content:center"><i class="fa-solid fa-rotate-left"></i> Réactiver</button>'}</div>`:''}`;
   $('dbg').classList.add('on'); $('drawer').classList.add('on');
   $('drawer').querySelector('[data-x]').onclick=closeFiche;
+  // Photo drag-and-drop / click on fiche avatar
+  const ficheAv=$('ficheAv'), fichePhotoIn=$('fichePhotoIn');
+  if(ficheAv&&fichePhotoIn){
+    const applyPhoto=async file=>{
+      if(!file||!file.type.startsWith('image/'))return;
+      ficheAv.style.opacity='0.5';
+      try{await saveEmployeePhoto(s,file); ficheAv.style.background=avBg(s); ficheAv.innerHTML=avInner(s)+'<div class="photo-overlay"><i class="fa-solid fa-camera"></i></div>'; render();}
+      catch(e){flash('Erreur photo : '+e.message);}
+      finally{ficheAv.style.opacity='';}
+    };
+    ficheAv.onclick=()=>fichePhotoIn.click();
+    fichePhotoIn.onchange=e=>applyPhoto(e.target.files[0]);
+    ficheAv.ondragover=e=>{e.preventDefault();ficheAv.classList.add('drag-over');};
+    ficheAv.ondragleave=()=>ficheAv.classList.remove('drag-over');
+    ficheAv.ondrop=e=>{e.preventDefault();ficheAv.classList.remove('drag-over');applyPhoto(e.dataTransfer.files[0]);};
+  }
   const ed=$('drawer').querySelector('[data-edit]');
   if(ed) ed.onclick=()=>{closeFiche();openEmpForm(s);};
   const dl=$('drawer').querySelector('[data-del]');
