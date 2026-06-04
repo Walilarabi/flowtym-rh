@@ -4920,6 +4920,9 @@ async function drawEmployeeDocs(s){
       <span class="badge-st ${status}">${statusLabel}</span>
       <div class="acts">
         ${d.file_path?'<button data-act="dl" title="Télécharger"><i class="fa-solid fa-download"></i></button>':''}
+        ${d.file_path&&d.signature_status==='none'?'<button data-act="sign" title="Envoyer pour signature électronique" style="color:#7c3aed"><i class="fa-solid fa-pen-nib"></i></button>':''}
+        ${d.signature_status==='pending'?'<span title="En attente de signature" style="font-size:11px;color:#d97706;font-weight:600;padding:2px 6px;background:#fffbeb;border-radius:6px">⏳ Signature</span>':''}
+        ${d.signature_status==='signed'?'<span title="Signé électroniquement" style="font-size:11px;color:#16a34a;font-weight:600;padding:2px 6px;background:#f0fdf4;border-radius:6px">✅ Signé</span>':''}
         <button data-act="del" class="del" title="Supprimer"><i class="fa-solid fa-trash"></i></button>
       </div>
     </div>`;
@@ -4931,6 +4934,8 @@ async function drawEmployeeDocs(s){
       if(act==='dl'){
         try{const url=await BE.getSignedDocUrl(d.file_path);await BE.logAudit('document_download','employee_document',d.id,s.id,{doc_type:d.doc_type});window.open(url,'_blank');}
         catch(e){flash('Erreur : '+(e.message||e));}
+      }else if(act==='sign'){
+        openSignatureModal(s,d);
       }else if(act==='del'){
         if(!confirm('Supprimer ce document ?'))return;
         try{await BE.deleteEmployeeDocument(d.id);await BE.logAudit('document_delete','employee_document',d.id,s.id,{doc_type:d.doc_type});flash('Document supprimé');drawEmployeeDocs(s);}
@@ -4938,6 +4943,68 @@ async function drawEmployeeDocs(s){
       }
     });
   });
+}
+
+/* ── Signature électronique YouSign ────────────────────────────────────── */
+const SUPABASE_FUNCTIONS_URL='https://hzrzkvdebaadditvbqis.supabase.co/functions/v1';
+
+function openSignatureModal(s,doc){
+  const name=`${s.first_name||''} ${s.last_name||''}`.trim();
+  showModal(`<div style="padding:24px;max-width:500px">
+    <div style="font-size:17px;font-weight:700;margin-bottom:6px"><i class="fa-solid fa-pen-nib" style="color:#7c3aed;margin-right:8px"></i>Envoyer pour signature électronique</div>
+    <p style="font-size:13px;color:var(--ink2);margin-bottom:18px">Le document sera envoyé à <b>${esc(name)}</b> via le portail salarié. La signature se fait en ligne — valeur légale avancée (eIDAS).</p>
+    <div style="background:var(--bg2);padding:12px 16px;border-radius:10px;margin-bottom:16px;font-size:13px">
+      <div><i class="fa-regular fa-file-lines" style="margin-right:6px;color:var(--violet)"></i><b>${esc(doc.label||doc.doc_type)}</b></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
+      <div class="fld"><label style="font-size:12px;color:var(--ink2);display:block;margin-bottom:4px">Prénom *</label>
+        <input class="input" id="sig_fn" value="${esc(s.first_name||'')}"></div>
+      <div class="fld"><label style="font-size:12px;color:var(--ink2);display:block;margin-bottom:4px">Nom *</label>
+        <input class="input" id="sig_ln" value="${esc(s.last_name||'')}"></div>
+      <div class="fld"><label style="font-size:12px;color:var(--ink2);display:block;margin-bottom:4px">Email *</label>
+        <input class="input" id="sig_email" type="email" value="${esc(s.email||'')}"></div>
+      <div class="fld"><label style="font-size:12px;color:var(--ink2);display:block;margin-bottom:4px">Téléphone (OTP)</label>
+        <input class="input" id="sig_phone" placeholder="+33612345678" value="${esc(s.phone||'')}"></div>
+    </div>
+    <div style="display:flex;gap:10px">
+      <button class="btn p" id="sigSendBtn" onclick="submitSignatureRequest('${s.id}','${doc.id}')">
+        <i class="fa-solid fa-paper-plane"></i> Envoyer la demande
+      </button>
+      <button class="btn g" onclick="closeModal()">Annuler</button>
+    </div>
+    <div id="sigProgress" style="display:none;margin-top:12px;font-size:13px;color:var(--violet)"></div>
+  </div>`);
+}
+
+async function submitSignatureRequest(employeeId, documentId){
+  const fn=$('sig_fn')?.value.trim(), ln=$('sig_ln')?.value.trim();
+  const email=$('sig_email')?.value.trim(), phone=$('sig_phone')?.value.trim();
+  if(!fn||!ln||!email){flash('Prénom, nom et email sont requis');return;}
+  const s=staff.find(x=>x.id===employeeId); if(!s) return;
+  const btn=$('sigSendBtn'); if(btn) btn.disabled=true;
+  const prog=$('sigProgress'); if(prog){prog.style.display='';prog.textContent='Envoi en cours…';}
+  try{
+    const {data:{session}}=await BE.sb.auth.getSession();
+    const resp=await fetch(`${SUPABASE_FUNCTIONS_URL}/yousign-create`,{
+      method:'POST',
+      headers:{'Authorization':`Bearer ${session?.access_token}`,'Content-Type':'application/json'},
+      body:JSON.stringify({
+        document_id:documentId, employee_id:employeeId, hotel_id:hotelId,
+        signer_first_name:fn, signer_name:ln, signer_email:email,
+        signer_phone:phone||null,
+      }),
+    });
+    const result=await resp.json();
+    if(!resp.ok||result.error) throw new Error(result.error||'Erreur inconnue');
+    closeModal();
+    flash('✅ Demande de signature envoyée — le salarié peut signer depuis son portail');
+    // Rafraîchir la liste des documents
+    const sObj=staff.find(x=>x.id===employeeId);
+    if(sObj) await drawEmployeeDocs(sObj);
+  }catch(e){
+    if(prog){prog.style.color='#dc2626';prog.textContent='Erreur : '+e.message;}
+    if(btn) btn.disabled=false;
+  }
 }
 
 function openDocUploadForm(s){

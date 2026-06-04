@@ -195,6 +195,7 @@ html,body{height:100%;background:var(--bg);font-family:-apple-system,BlinkMacSys
 .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200;display:none;align-items:flex-end}
 .modal-bg.on{display:flex}
 .modal{background:var(--white);border-radius:24px 24px 0 0;padding:20px 16px calc(20px + var(--safe-b));width:100%;max-height:92vh;overflow-y:auto;animation:slideUp .25s ease}
+.modal.modal-fullscreen{border-radius:0;padding:0;max-height:100vh;height:100vh}
 @keyframes slideUp{from{transform:translateY(60px);opacity:0}to{transform:translateY(0);opacity:1}}
 .modal-handle{width:36px;height:4px;background:var(--line);border-radius:2px;margin:0 auto 16px}
 .modal-title{font-size:17px;font-weight:800;margin-bottom:16px;display:flex;align-items:center;gap:8px}
@@ -953,15 +954,24 @@ async function loadDocs(){
   const prefix=`${employee.hotel_id}/${employee.id}/`;
   const {data:files,error} = await sb.storage.from('portal-documents').list(prefix,{limit:200,sortBy:{column:'created_at',order:'desc'}});
 
-  // Charger aussi employee_documents (documents uploadés par RH côté manager)
-  const {data:empDocs} = await sb.from('employee_documents').select('*').eq('employee_id',employee.id);
+  // Charger employee_documents + portal_signature_requests
+  const {data:empDocs} = await sb.from('employee_documents')
+    .select('*,psr:portal_signature_requests(id,status,yousign_sr_id,signed_document_path)')
+    .eq('employee_id',employee.id).order('created_at',{ascending:false});
 
   // Construire l'affichage par catégorie
   const byDir={employer:[],employee:[]};
 
-  // Docs manager (hr-documents bucket via employee_documents)
+  // Docs manager (via employee_documents)
   (empDocs||[]).forEach(d=>{
-    if(d.file_url) byDir.employer.push({name:d.doc_type, url:d.file_url, type:'employer_doc', doc_type:d.doc_type, created_at:d.updated_at});
+    const psr=Array.isArray(d.psr)?d.psr[0]:d.psr;
+    byDir.employer.push({
+      id:d.id, name:d.label||d.doc_type, storage_path:d.storage_path, file_url:d.file_url,
+      type:'employer_doc', doc_type:d.doc_type, created_at:d.created_at,
+      signature_status:d.signature_status||'none',
+      psr_id:psr?.id, yousign_sr_id:psr?.yousign_sr_id,
+      signed_document_path:psr?.signed_document_path,
+    });
   });
 
   // Docs portail (uploadés par le salarié)
@@ -973,9 +983,19 @@ async function loadDocs(){
 
   let h='';
 
+  // Séparer docs à signer des autres
+  const toSign=byDir.employer.filter(d=>d.signature_status==='pending');
+  if(toSign.length){
+    h+=`<div class="card" style="border-color:#7c3aed;background:#faf5ff">
+      <div class="card-title" style="color:#7c3aed"><i class="fa-solid fa-pen-nib"></i>À signer (${toSign.length})</div>`;
+    h+=toSign.map(d=>docRow(d)).join('');
+    h+=`</div>`;
+  }
   if(byDir.employer.length){
     h+=`<div class="card"><div class="card-title"><i class="fa-solid fa-building"></i>De votre employeur</div>`;
-    h+=byDir.employer.map(d=>docRow(d)).join('');
+    h+=byDir.employer.filter(d=>d.signature_status!=='pending').map(d=>docRow(d)).join('');
+    if(!byDir.employer.filter(d=>d.signature_status!=='pending').length)
+      h+=`<div style="text-align:center;padding:16px;color:var(--ink2);font-size:13px">Aucun autre document</div>`;
     h+=`</div>`;
   } else {
     h+=`<div class="card"><div class="card-title"><i class="fa-solid fa-building"></i>De votre employeur</div>
@@ -1007,20 +1027,40 @@ async function loadDocs(){
 }
 
 function docRow(d){
-  const ext=(d.storage_name||d.name||'').split('.').pop().toLowerCase();
+  const ext=(d.storage_name||d.storage_path||d.name||'').split('.').pop().toLowerCase();
   const itype=ext==='pdf'?'pdf':['jpg','jpeg','png','heic','webp','gif'].includes(ext)?'img':'other';
   const icons={pdf:'fa-file-pdf',img:'fa-file-image',other:'fa-file'};
-  const label=d.doc_type?(DOC_TYPES[d.doc_type]?.label||d.doc_type):(d.name?.split('/').pop()||'Document');
-  return `<div class="doc-row">
-    <div class="doc-icon ${itype}"><i class="fa-solid ${icons[itype]}"></i></div>
-    <div class="doc-info">
-      <div class="doc-name">${esc(label)}</div>
-      <div class="doc-meta">${fmtDate(d.created_at)}</div>
+  const label=d.name||(d.doc_type?(DOC_TYPES[d.doc_type]?.label||d.doc_type):'Document');
+  const sigBadge={
+    pending:`<span style="font-size:11px;font-weight:600;color:#d97706;background:#fffbeb;padding:2px 8px;border-radius:12px">⏳ À signer</span>`,
+    signed:`<span style="font-size:11px;font-weight:600;color:#16a34a;background:#f0fdf4;padding:2px 8px;border-radius:12px">✅ Signé</span>`,
+    refused:`<span style="font-size:11px;font-weight:600;color:#dc2626;background:#fef2f2;padding:2px 8px;border-radius:12px">❌ Refusé</span>`,
+    expired:`<span style="font-size:11px;font-weight:600;color:#9ca3af;background:#f3f4f6;padding:2px 8px;border-radius:12px">⌛ Expiré</span>`,
+  }[d.signature_status]||'';
+  const signBtn=d.signature_status==='pending'
+    ?`<button class="btn btn-p btn-full" style="margin-top:10px;font-size:13px" onclick="openSignatureIframe('${esc(d.yousign_sr_id||'')}','${esc(d.id||'')}')">
+        <i class="fa-solid fa-pen-nib"></i> Signer maintenant
+      </button>`:'';
+  const downloadSigned=d.signature_status==='signed'&&d.signed_document_path
+    ?`<button class="doc-btn" onclick="downloadSignedDoc('${esc(d.signed_document_path)}')" title="Télécharger le document signé"><i class="fa-solid fa-certificate"></i></button>`:'';
+  return `<div class="doc-row" style="flex-direction:column;align-items:stretch">
+    <div style="display:flex;align-items:center;gap:10px">
+      <div class="doc-icon ${itype}"><i class="fa-solid ${icons[itype]}"></i></div>
+      <div class="doc-info" style="flex:1">
+        <div class="doc-name">${esc(label)}</div>
+        <div class="doc-meta" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span>${fmtDate(d.created_at)}</span>
+          ${sigBadge}
+        </div>
+      </div>
+      <div class="doc-actions">
+        ${d.storage_path?`<button class="doc-btn" onclick="downloadEmpDoc('${esc(d.storage_path)}')" title="Télécharger"><i class="fa-solid fa-download"></i></button>`:''}
+        ${d.url?`<button class="doc-btn" onclick="window.open('${esc(d.url)}','_blank')" title="Ouvrir"><i class="fa-solid fa-eye"></i></button>`:''}
+        ${d.storage_name?`<button class="doc-btn" onclick="downloadPortalDoc('${esc(d.storage_name)}')" title="Télécharger"><i class="fa-solid fa-download"></i></button>`:''}
+        ${downloadSigned}
+      </div>
     </div>
-    <div class="doc-actions">
-      ${d.url?`<button class="doc-btn" onclick="window.open('${esc(d.url)}','_blank')" title="Ouvrir"><i class="fa-solid fa-eye"></i></button>`:''}
-      ${d.storage_name?`<button class="doc-btn" onclick="downloadPortalDoc('${esc(d.storage_name)}')" title="Télécharger"><i class="fa-solid fa-download"></i></button>`:''}
-    </div>
+    ${signBtn}
   </div>`;
 }
 
@@ -1030,6 +1070,63 @@ window.downloadPortalDoc=async(name)=>{
   if(error){flash('Erreur : '+error.message);return;}
   window.open(data.signedUrl,'_blank');
   auditLog('download_doc',{filename:name});
+};
+
+window.downloadEmpDoc=async(storagePath)=>{
+  const {data,error}=await sb.storage.from('employee-documents').createSignedUrl(storagePath,3600);
+  if(error){flash('Erreur : '+error.message);return;}
+  window.open(data.signedUrl,'_blank');
+  auditLog('download_doc',{storage_path:storagePath});
+};
+
+window.downloadSignedDoc=async(storagePath)=>{
+  const {data,error}=await sb.storage.from('portal-documents').createSignedUrl(storagePath,3600);
+  if(error){flash('Erreur : '+error.message);return;}
+  window.open(data.signedUrl,'_blank');
+  auditLog('download_signed_doc',{storage_path:storagePath});
+};
+
+window.openSignatureIframe=async(yousignSrId, documentId)=>{
+  if(!yousignSrId){flash('Identifiant de signature manquant');return;}
+  // Récupérer le lien de signature depuis portal_signature_requests
+  const {data:psr,error}=await sb.from('portal_signature_requests')
+    .select('yousign_sr_id,yousign_signer_id,status')
+    .eq('yousign_sr_id',yousignSrId).single();
+  if(error||!psr){flash('Demande de signature introuvable');return;}
+  if(psr.status!=='ongoing'){flash('Cette demande de signature n\'est plus active ('+psr.status+')');return;}
+
+  // L'URL de signature YouSign (sandbox ou prod selon env)
+  const YOUSIGN_BASE='https://sandbox.yousign.app';
+  const signUrl=`${YOUSIGN_BASE}/sign/${psr.yousign_sr_id}?signer_id=${psr.yousign_signer_id}&disable_domain_validation=true`;
+
+  openModal(`
+    <div style="display:flex;flex-direction:column;height:85vh;max-height:700px">
+      <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line);flex-shrink:0">
+        <i class="fa-solid fa-pen-nib" style="color:var(--vi);font-size:18px"></i>
+        <span style="font-weight:700;font-size:15px">Signature électronique</span>
+        <span style="font-size:12px;color:var(--ink2);margin-left:4px">— Valeur légale eIDAS</span>
+        <button onclick="closeModal()" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:20px;color:var(--ink2)">×</button>
+      </div>
+      <iframe src="${signUrl}"
+        style="flex:1;border:none;width:100%"
+        allow="camera;microphone"
+        id="signatureIframe">
+      </iframe>
+    </div>`);
+
+  // Écouter le message de fin de signature (postMessage YouSign)
+  const onMsg=(e)=>{
+    if(!e.data) return;
+    const evt=typeof e.data==='string'?JSON.parse(e.data||'{}'):e.data;
+    if(evt.type==='yousign:signed'||evt.event==='signed'||evt.status==='SIGNED'){
+      window.removeEventListener('message',onMsg);
+      closeModal();
+      flash('✅ Document signé avec succès ! Il sera disponible dans votre coffre-fort sous quelques instants.');
+      auditLog('document_signed',{yousign_sr_id:yousignSrId});
+      setTimeout(()=>loadDocs(),3000);
+    }
+  };
+  window.addEventListener('message',onMsg);
 };
 
 window.openUploadDoc=()=>{
