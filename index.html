@@ -527,6 +527,13 @@ async function makeRealBE(){
     async deleteRole(id){const {error}=await sb.from('staff_roles').delete().eq('id',id);must(error,"Suppression rôle");},
     async listAccess(h){const {data,error}=await sb.rpc('rh_list_users_for_hotel',{p_hotel:h});must(error,"Liste des accès");return data||[];},
     async updateAccess(h,user_id,role){const {error}=await sb.rpc('rh_update_user_role',{p_hotel:h,p_user_id:user_id,p_role:role});must(error,"Modification du rôle");},
+    async revokeAccess(h,user_id){const {error}=await sb.rpc('rh_revoke_user_access',{p_hotel:h,p_user_id:user_id});must(error,"Révocation accès");},
+    async inviteUser(h,email,full_name,role){
+      const {data,error}=await sb.functions.invoke('invite-user',{body:{hotel_id:h,email,full_name,role}});
+      if(error) throw error;
+      if(data?.error) throw new Error(data.error);
+      return data;
+    },
     async listClockings(h,day){const {data,error}=await sb.from('staff_clockings').select('*').eq('hotel_id',h).eq('day',day).order('clock_in_ts');must(error,"Liste des pointages");return data||[];},
     async listClockingsByRange(h,from,to){const {data,error}=await sb.from('staff_clockings').select('*').eq('hotel_id',h).gte('day',from).lte('day',to).order('day').order('clock_in_ts');must(error,"Pointages période");return data||[];},
     async addClocking(h,payload){const {data,error}=await sb.from('staff_clockings').insert({hotel_id:h,...payload}).select('*').single();must(error,"Ajout pointage");return data;},
@@ -607,6 +614,14 @@ async function makeRealBE(){
       if(filters?.employee_id) q=q.eq('employee_id',filters.employee_id);
       if(filters?.month){ q=q.gte('start_date',filters.month+'-01').lte('start_date',filters.month+'-31'); }
       const {data,error}=await q; must(error,'Demandes absences'); return data||[];
+    },
+    async listAbsences(h){
+      /* alias rapide : retourne les demandes soumises/en attente — utilisé par la cloche et la paie */
+      const {data,error}=await sb.from('absence_requests')
+        .select('*, absence_types(label,color_bg,color_fg,planning_code)')
+        .eq('hotel_id',h).in('status',['submitted','pending'])
+        .order('start_date',{ascending:false});
+      must(error,'Absences en attente'); return data||[];
     },
     async createAbsenceRequest(h,payload){
       const {data:{user}}=await sb.auth.getUser();
@@ -734,6 +749,11 @@ function makeTestBE(){
       {user_id:'u2',email:'reception@flowtym.local',full_name:'Sophie Réception',role:'reception',is_default:false,granted_at:'2025-02-15T00:00:00Z'}
     ];},
     async updateAccess(h,user_id,role){/* no-op en test */ return; },
+    async revokeAccess(h,user_id){/* no-op en test */ return; },
+    async inviteUser(h,email,full_name,role){
+      /* simulation test : ajoute un utilisateur fictif dans la liste */
+      return {success:true,user_id:'inv-'+Date.now()};
+    },
     async listClockings(h,day){return clockings.filter(c=>c.hotel_id===h && c.day===day).sort((a,b)=>a.clock_in_ts.localeCompare(b.clock_in_ts));},
     async listClockingsByRange(h,from,to){return clockings.filter(c=>c.hotel_id===h && c.day>=from && c.day<=to).sort((a,b)=>a.day===b.day?a.clock_in_ts.localeCompare(b.clock_in_ts):a.day.localeCompare(b.day));},
     async addClocking(h,p){const c={id:'c'+Date.now()+Math.random().toString(36).slice(2,6),hotel_id:h,...p,created_at:new Date().toISOString(),updated_at:new Date().toISOString()};clockings.push(c);return c;},
@@ -806,6 +826,12 @@ function makeTestBE(){
         const t=types.find(x=>x.code===r.type_code);
         return {...r, absence_types:t||null};
       });
+    },
+    async listAbsences(h){
+      const types=await this.listAbsenceTypes();
+      return absenceRequests.filter(r=>r.hotel_id===h && (r.status==='submitted'||r.status==='pending'))
+        .sort((a,b)=>b.start_date.localeCompare(a.start_date))
+        .map(r=>{const t=types.find(x=>x.code===r.type_code);return {...r,absence_types:t||null};});
     },
     async createAbsenceRequest(h,payload){
       const id='ar'+Date.now()+Math.random().toString(36).slice(2,6);
@@ -1474,7 +1500,7 @@ function wireNotifBell(){
       const soon30=new Date(); soon30.setDate(soon30.getDate()+30);
       const soon30str=soon30.toISOString().slice(0,10);
       const medAlerts=medVisits.filter(v=>!v.next_visit_date||v.next_visit_date<=today||(v.next_visit_date<=soon30str));
-      const pendingAbs=absReqs.filter(a=>a.status==='pending');
+      const pendingAbs=absReqs.filter(a=>a.status==='submitted'||a.status==='pending');
       const all=[
         ...docAlerts.slice(0,5).map(a=>({icon:'fa-file-circle-exclamation',color:'#dc2626',text:`<b>${a.first_name} ${a.last_name}</b> — ${a.doc_label||a.doc_type} ${a.alert_kind==='expired'?'expiré':'bientôt expiré'}`,sub:a.expires_at?`Expire le ${a.expires_at}`:''})),
         ...medAlerts.slice(0,3).map(v=>{const emp=staff.find(s=>s.id===v.employee_id);return {icon:'fa-stethoscope',color:'#d97706',text:`<b>${emp?emp.last_name+' '+emp.first_name:'?'}</b> — Visite médicale ${!v.next_visit_date||v.next_visit_date<today?'en retard':'à venir'}`,sub:v.next_visit_date||'Non planifiée'};}),
@@ -2329,37 +2355,52 @@ async function renderConfig(){
   };
 
   // === Bloc Accès et permissions ===
-  try{
-    const list=await BE.listAccess(hotelId);
-    const ROLES_OPTS=Object.keys(ROLE_LABELS);
-    $('accBox').innerHTML=`<table class="tbl">
-      <thead><tr><th>Utilisateur</th><th>E-mail</th><th>Rôle</th><th>Depuis</th></tr></thead>
-      <tbody>${list.map(u=>`<tr data-uid="${u.user_id}">
-        <td><b>${u.full_name||'—'}</b></td>
-        <td>${u.email}</td>
-        <td><select class="roleSel" data-uid="${u.user_id}" style="font-size:12.5px;padding:5px 8px">
-          ${ROLES_OPTS.map(r=>`<option value="${r}" ${r===u.role?'selected':''}>${ROLE_LABELS[r]}</option>`).join('')}
-        </select></td>
-        <td style="font-size:11.5px;color:var(--muted)">${u.granted_at?u.granted_at.slice(0,10):'—'}</td>
-      </tr>`).join('')||'<tr><td colspan="4" style="padding:20px;text-align:center;color:var(--muted)">Aucun utilisateur affecté à cet hôtel.</td></tr>'}</tbody></table>
-      <div style="margin-top:10px;font-size:12px;color:var(--ink2)"><i class="fa-solid fa-circle-info"></i> Pour ajouter un nouvel utilisateur, créez-lui un compte côté Supabase Authentication et ajoutez-le à <code>public.user_hotels</code>. Une page d'invitation directe viendra dans une prochaine itération.</div>`;
-    $('accBox').querySelectorAll('.roleSel').forEach(sel=>{
-      const initial=sel.value;
-      sel.onchange=async()=>{
-        const newRole=sel.value, uid=sel.dataset.uid;
-        if(!confirm(`Confirmer le changement de rôle vers « ${ROLE_LABELS[newRole]} » ?`)){sel.value=initial;return;}
-        try{
-          await BE.updateAccess(hotelId, uid, newRole);
-          flash('Rôle mis à jour');
-        }catch(e){
-          flash('Erreur : '+(e.message||e));
-          sel.value=initial;
-        }
-      };
-    });
-  }catch(e){
-    $('accBox').innerHTML=`<div style="padding:14px;color:var(--red);font-size:13px"><i class="fa-solid fa-triangle-exclamation"></i> Impossible de charger les accès : ${e.message||e}</div>`;
-  }
+  const reloadAccess=async()=>{
+    $('accBox').innerHTML='<div style="padding:14px;color:var(--muted);font-size:13px">Chargement…</div>';
+    try{
+      const list=await BE.listAccess(hotelId);
+      const ROLES_OPTS=Object.keys(ROLE_LABELS);
+      $('accBox').innerHTML=`
+        ${isAdmin?`<div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+          <button class="btn p" id="inviteBtn"><i class="fa-solid fa-envelope"></i> Inviter un utilisateur</button>
+        </div>`:''}
+        <table class="tbl">
+          <thead><tr><th>Utilisateur</th><th>E-mail</th><th>Rôle</th><th>Depuis</th>${isAdmin?'<th></th>':''}</tr></thead>
+          <tbody>${list.map(u=>`<tr data-uid="${u.user_id}">
+            <td><b>${u.full_name||'—'}</b></td>
+            <td style="font-size:12px">${u.email}</td>
+            <td><select class="roleSel" data-uid="${u.user_id}" style="font-size:12.5px;padding:5px 8px" ${isAdmin?'':'disabled'}>
+              ${ROLES_OPTS.map(r=>`<option value="${r}" ${r===u.role?'selected':''}>${ROLE_LABELS[r]}</option>`).join('')}
+            </select></td>
+            <td style="font-size:11.5px;color:var(--muted)">${u.granted_at?u.granted_at.slice(0,10):'—'}</td>
+            ${isAdmin?`<td><button class="btn d revoke-btn" data-uid="${u.user_id}" data-name="${u.full_name||u.email}" title="Révoquer l'accès" style="padding:4px 8px;font-size:11px"><i class="fa-solid fa-user-xmark"></i></button></td>`:''}
+          </tr>`).join('')||`<tr><td colspan="${isAdmin?5:4}" style="padding:20px;text-align:center;color:var(--muted)">Aucun utilisateur affecté à cet hôtel.</td></tr>`}
+          </tbody>
+        </table>`;
+      // Changements de rôle
+      $('accBox').querySelectorAll('.roleSel').forEach(sel=>{
+        const initial=sel.value;
+        sel.onchange=async()=>{
+          const newRole=sel.value, uid=sel.dataset.uid;
+          if(!confirm(`Confirmer le changement de rôle vers « ${ROLE_LABELS[newRole]} » ?`)){sel.value=initial;return;}
+          try{ await BE.updateAccess(hotelId,uid,newRole); flash('Rôle mis à jour'); }
+          catch(e){ flash('Erreur : '+(e.message||e)); sel.value=initial; }
+        };
+      });
+      // Révocation
+      $('accBox').querySelectorAll('.revoke-btn').forEach(b=>b.onclick=async()=>{
+        if(!confirm(`Révoquer l'accès de « ${b.dataset.name} » à cet hôtel ?`))return;
+        try{ await BE.revokeAccess(hotelId,b.dataset.uid); flash('Accès révoqué'); reloadAccess(); }
+        catch(e){ flash('Erreur : '+(e.message||e)); }
+      });
+      // Invitation
+      const invBtn=$('inviteBtn');
+      if(invBtn) invBtn.onclick=()=>openInviteForm(reloadAccess);
+    }catch(e){
+      $('accBox').innerHTML=`<div style="padding:14px;color:var(--red);font-size:13px"><i class="fa-solid fa-triangle-exclamation"></i> Impossible de charger les accès : ${e.message||e}</div>`;
+    }
+  };
+  reloadAccess();
 
   const drawDeps=()=>{$('depList').innerHTML=deps.map(d=>`<div style="display:flex;align-items:center;padding:7px 0;border-bottom:1px dashed var(--line);font-size:13px">
     <span style="flex:1">${d.name}</span>
@@ -3769,6 +3810,59 @@ async function exportOrgPNG(){
   }catch(e){flash('Erreur export : '+e.message);}
 }
 
+/* ===================== INVITATION UTILISATEUR ===================== */
+function openInviteForm(onSuccess){
+  const ROLES_OPTS=Object.keys(ROLE_LABELS);
+  $('modal').innerHTML=`
+    <div class="mh">
+      <div class="mh-ic"><i class="fa-solid fa-envelope"></i></div>
+      <div class="mh-ti"><h2>Inviter un utilisateur</h2>
+        <div class="sub">Un e-mail d'invitation sera envoyé. L'accès est limité à cet hôtel.</div></div>
+      <button class="mh-x" onclick="closeModal()" title="Fermer"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="mb">
+      <div class="row2">
+        <div class="fld"><label>Prénom</label><input type="text" id="invFn" placeholder="Prénom"></div>
+        <div class="fld"><label>Nom</label><input type="text" id="invLn" placeholder="Nom"></div>
+      </div>
+      <div class="fld"><label>E-mail *</label><input type="email" id="invEmail" placeholder="prenom.nom@hotel.fr"></div>
+      <div class="fld"><label>Rôle *</label>
+        <select id="invRole">
+          ${ROLES_OPTS.map(r=>`<option value="${r}">${ROLE_LABELS[r]}</option>`).join('')}
+        </select>
+      </div>
+      <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:10px;padding:12px 14px;font-size:12px;color:#92400e;margin-top:8px">
+        <i class="fa-solid fa-circle-info"></i> L'utilisateur recevra un e-mail de Supabase pour définir son mot de passe.
+        S'il a déjà un compte, son accès à cet hôtel sera simplement ajouté avec le rôle choisi.
+      </div>
+      <div id="invErr" style="color:#dc2626;font-size:12.5px;margin-top:10px;min-height:16px"></div>
+    </div>
+    <div class="mact">
+      <button class="btn g" onclick="closeModal()">Annuler</button>
+      <button class="btn p" id="invSend"><i class="fa-solid fa-paper-plane"></i> Envoyer l'invitation</button>
+    </div>`;
+  $('modalbg').classList.add('on');
+  $('invSend').onclick=async()=>{
+    const email=$('invEmail').value.trim();
+    const full_name=($('invFn').value.trim()+' '+$('invLn').value.trim()).trim();
+    const role=$('invRole').value;
+    $('invErr').textContent='';
+    if(!email){$('invErr').textContent='E-mail requis.';return;}
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){$('invErr').textContent='Format e-mail invalide.';return;}
+    $('invSend').disabled=true; $('invSend').innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Envoi…';
+    try{
+      await BE.inviteUser(hotelId,email,full_name,role);
+      closeModal();
+      flash(`Invitation envoyée à ${email}`);
+      if(onSuccess) onSuccess();
+    }catch(e){
+      $('invErr').textContent='Erreur : '+(e.message||e);
+      $('invSend').disabled=false;
+      $('invSend').innerHTML='<i class="fa-solid fa-paper-plane"></i> Envoyer l\'invitation';
+    }
+  };
+}
+
 /* ===================== QR CODE POINTAGE KIOSQUE ===================== */
 async function showQRCode(emp){
   if(!emp) return;
@@ -4027,10 +4121,9 @@ async function drawPayroll(){
   const [y,m]=pyMonth.split('-').map(Number);
   const from=iso(y,m,1), to=iso(y,m,dim(y,m));
   try{
-    const [planRows, clockRows, absRows]=await Promise.all([
+    const [planRows, clockRows]=await Promise.all([
       BE.listMonthPlanning(hotelId,y,m),
-      BE.listClockingsByRange(hotelId,from,to),
-      BE.listAbsences(hotelId).catch(()=>[])
+      BE.listClockingsByRange(hotelId,from,to)
     ]);
     const active=staff.filter(s=>s.active!==false);
     const planMap=new Map(); planRows.forEach(r=>planMap.set(r.employee_id+'|'+r.day, r.status));
@@ -4203,6 +4296,25 @@ async function openFiche(eid){
     ficheAv.ondragover=e=>{e.preventDefault();ficheAv.classList.add('drag-over');};
     ficheAv.ondragleave=()=>ficheAv.classList.remove('drag-over');
     ficheAv.ondrop=e=>{e.preventDefault();ficheAv.classList.remove('drag-over');applyPhoto(e.dataTransfer.files[0]);};
+    // Bouton supprimer photo (visible seulement si photo présente)
+    if(s.photo_url){
+      const delPhotoBtn=document.createElement('button');
+      delPhotoBtn.className='btn d'; delPhotoBtn.title='Supprimer la photo';
+      delPhotoBtn.style.cssText='position:absolute;bottom:-10px;right:-10px;padding:3px 7px;font-size:11px;z-index:2';
+      delPhotoBtn.innerHTML='<i class="fa-solid fa-trash"></i>';
+      delPhotoBtn.onclick=async e=>{
+        e.stopPropagation();
+        if(!confirm('Supprimer la photo de ce collaborateur ?'))return;
+        try{
+          await BE.updateEmployee(s.id,{photo_url:null});
+          s.photo_url=null;
+          ficheAv.style.background=avBg(s); ficheAv.innerHTML=avInner(s)+'<div class="photo-overlay"><i class="fa-solid fa-camera"></i></div>';
+          delPhotoBtn.remove(); render(); flash('Photo supprimée');
+        }catch(err){flash('Erreur : '+err.message);}
+      };
+      ficheAv.style.position='relative';
+      ficheAv.appendChild(delPhotoBtn);
+    }
   }
   const ed=$('drawer').querySelector('[data-edit]');
   if(ed) ed.onclick=()=>{closeFiche();openEmpForm(s);};

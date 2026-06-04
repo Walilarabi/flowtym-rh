@@ -1,0 +1,25 @@
+{
+  "name": "flowtym-rh",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "test": "jest --coverage",
+    "test:watch": "jest --watch",
+    "test:ci": "jest --ci --coverage --coverageReporters=text"
+  },
+  "devDependencies": {
+    "@jest/globals": "^29.7.0",
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0"
+  },
+  "jest": {
+    "testEnvironment": "jsdom",
+    "testMatch": [
+      "**/tests/**/*.test.js"
+    ],
+    "collectCoverageFrom": [
+      "tests/lib/**/*.js"
+    ],
+    "coverageDirectory": "tests/coverage"
+  }
+}
