@@ -519,7 +519,7 @@ async function makeRealBE(){
   const sb=createClient(SUPABASE_URL,SUPABASE_ANON_KEY,{auth:{persistSession:true}});
   const must=(error,msg)=>{ if(error){ console.error(msg,error); throw new Error(msg+' : '+error.message); } };
   return {
-    sb, isTest:false,
+    sb, db:sb, isTest:false,
     async listHotels(){
       const {data:{user}}=await sb.auth.getUser(); if(!user)return [];
       const {data:u,error:e1}=await sb.from('users').select('id').eq('auth_id',user.id).maybeSingle();
@@ -778,7 +778,7 @@ function makeTestBE(){
   let trainingCatalog=[]; let employeeTrainings=[];
   let medicalVisits=[]; let equipmentItems=[];
   const k=(eid,day)=>eid+'|'+day;
-  return {isTest:true,
+  return {isTest:true, db:{from:()=>({select:()=>({eq:()=>({eq:()=>({limit:()=>({then:r=>r({data:[]})}),then:r=>r({data:null,count:0})})})})})}},
     async listHotels(){return hotels;},
     async setActiveHotel(){}, async signOut(){},
     async listDepartments(h){return depts[h]||[];},
