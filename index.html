@@ -408,13 +408,11 @@ function saveCustomColors(hid){
 // Default PERMS snapshot for reset
 const DEFAULT_PERMS_JSON = null; // filled after PERMS defined
 function applyCustomPerms(hid){
-  const s=JSON.parse(localStorage.getItem('fty_perms_'+hid)||'{}');
-  Object.entries(s).forEach(([role,ov])=>{ if(PERMS[role]) Object.assign(PERMS[role],ov); });
+  // localStorage permissions overrides supprimés (vecteur d'attaque).
+  // Les permissions sont définies uniquement par PERMS (hardcodé).
 }
 function saveCustomPerms(hid){
-  const s={};
-  Object.entries(PERMS).forEach(([role,p])=>{ s[role]={ficheFull:p.ficheFull,manageUsers:p.manageUsers}; });
-  localStorage.setItem('fty_perms_'+hid, JSON.stringify(s));
+  // Désactivé : ne plus persister les permissions dans localStorage.
 }
 const CMAP={}; CODES.forEach(c=>CMAP[c[0]]={code:c[0],label:c[1],bg:c[2],fg:c[3],cat:c[4]});
 const MONTHS=['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
