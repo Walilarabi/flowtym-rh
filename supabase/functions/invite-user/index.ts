@@ -72,15 +72,21 @@ Deno.serve(async (req) => {
     }
 
     // 4. Invite via auth.admin
+    let invitedAuthId: string | null = null;
     const { data: inviteData, error: inviteErr } = await admin.auth.admin.inviteUserByEmail(
       email,
       { data: { full_name: full_name || '', invited_hotel_id: hotel_id, invited_role: role } }
     );
     if (inviteErr) {
-      // If already registered, just grant access
-      if (!inviteErr.message.includes('already registered')) {
+      if (!inviteErr.message.includes('already registered') && !inviteErr.message.includes('email_exists')) {
         return j({ error: inviteErr.message }, 400);
       }
+      // Utilisateur déjà inscrit — récupérer son auth_id
+      const { data: { users: existingUsers } } = await admin.auth.admin.listUsers({ perPage: 1000 });
+      const found = existingUsers?.find((u: { email?: string }) => u.email?.toLowerCase() === email.toLowerCase());
+      if (found) invitedAuthId = found.id;
+    } else {
+      invitedAuthId = inviteData?.user?.id ?? null;
     }
 
     // 5. Find or create user record in public.users
@@ -90,13 +96,23 @@ Deno.serve(async (req) => {
       .eq('email', email)
       .maybeSingle();
 
-    if (!targetUser && inviteData?.user) {
-      const { data: nu } = await admin
+    if (!targetUser && invitedAuthId) {
+      // Essai par auth_id au cas où l'email ne serait pas indexé
+      const { data: byAuthId } = await admin
         .from('users')
-        .insert({ auth_id: inviteData.user.id, email, full_name: full_name || '' })
         .select('id')
-        .single();
-      targetUser = nu;
+        .eq('auth_id', invitedAuthId)
+        .maybeSingle();
+      if (byAuthId) {
+        targetUser = byAuthId;
+      } else {
+        const { data: nu } = await admin
+          .from('users')
+          .insert({ auth_id: invitedAuthId, email, full_name: full_name || '' })
+          .select('id')
+          .single();
+        targetUser = nu;
+      }
     }
     if (!targetUser) return j({ error: 'Impossible de créer le profil utilisateur' }, 500);
 
