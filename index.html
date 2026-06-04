@@ -336,6 +336,24 @@ tr.dept-sep td{pointer-events:none}
 .pop .pc b{width:12px;height:12px;border-radius:4px;border:1px solid rgba(0,0,0,.08)}
 .toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#15233b;color:#fff;padding:10px 16px;border-radius:10px;font-size:13px;font-weight:600;z-index:90;opacity:0;transition:.25s;pointer-events:none}
 .toast.on{opacity:1}
+/* ── Planning — sélecteur de vue ─────────────────────────────────────────── */
+.pvswitch{display:flex;align-items:center;gap:2px;background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:3px;flex-shrink:0}
+.pvswitch button{border:0;background:transparent;padding:5px 11px;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;color:var(--ink2);white-space:nowrap;transition:background .15s,color .15s}
+.pvswitch button:hover{background:#fff;color:var(--violet-d)}
+.pvswitch button.on{background:#fff;color:var(--violet-d);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+/* ── Planning — tables vues alternatives ─────────────────────────────────── */
+.plan-alt-wrap{flex:1;overflow:auto;position:relative}
+.plan-alt-table{border-collapse:collapse;font-size:12px}
+.plan-alt-table th{background:#f8f7ff;border:1px solid var(--line);padding:7px 10px;font-weight:700;text-align:center;position:sticky;top:0;z-index:5;white-space:nowrap}
+.plan-alt-table td{border:1px solid var(--line);padding:5px 8px;text-align:center;vertical-align:middle}
+.plan-alt-table .emp-col{text-align:left;white-space:nowrap;padding:5px 14px;background:#fff;position:sticky;left:0;z-index:3;min-width:160px}
+.plan-alt-table th.emp-col{z-index:6;background:#f8f7ff;text-align:left}
+.plan-alt-table td.wknd,.plan-alt-table th.wknd{background:#f7f9fd}
+.plan-shift-bd{display:inline-flex;align-items:center;justify-content:center;min-width:24px;height:20px;border-radius:4px;font-size:10px;font-weight:800;padding:0 4px}
+.plan-cov-row td{background:#f6f4fd;font-size:11px;font-weight:700;border-top:2px solid var(--line);color:var(--violet-d)}
+.plan-cov-ok{color:#1b5e20}
+.plan-cov-warn{color:#c62828}
+.plan-dept-row td{background:#f1f0fb;font-size:11px;font-weight:700;color:var(--violet-d);padding:4px 10px!important;text-transform:uppercase}
 </style>
 </head>
 <body>
@@ -926,6 +944,11 @@ let editMode=false, fSearch='', fRole='', fDept='', fStatus='actif';
 const selection=new Set();
 let dragging=false, anchor=null, baseSel=new Set(), lastAnchor=null;
 let cellMap={}, visibleRows=[];
+let planView='month';   // 'month' | 'week' | 'day' | 'service'
+let planningRows=[];    // lignes brutes listMonthPlanning (avec shift_label etc.)
+let coverageCache=[];   // règles de couverture mises en cache pour l'hôtel courant
+let curWeekStart=null;  // Date : lundi de la semaine affichée en vue hebdo
+let curDayDate=null;    // Date : journée affichée en vue journalière
 
 const effective=k=>pending.has(k)?pending.get(k):(committed.get(k)?.status||'');
 const committedCode=k=>committed.get(k)?.status||'';
@@ -1097,6 +1120,12 @@ function renderPlanning(){
       <div class="ptbar">
         <div class="monthnav"><button id="prev"><i class="fa-solid fa-chevron-left"></i></button>
           <span class="m" id="mlabel"></span><button id="next"><i class="fa-solid fa-chevron-right"></i></button></div>
+        <div class="pvswitch">
+          <button data-pv="month" class="${planView==='month'?'on':''}">Mensuel</button>
+          <button data-pv="week" class="${planView==='week'?'on':''}">Hebdo</button>
+          <button data-pv="day" class="${planView==='day'?'on':''}">Journalier</button>
+          <button data-pv="service" class="${planView==='service'?'on':''}">Par service</button>
+        </div>
         <div class="search"><i class="fa-solid fa-magnifying-glass"></i><input type="text" id="search" placeholder="Rechercher…" value="${fSearch}"></div>
         <select id="fRole"></select>
         <select id="fDept"></select>
@@ -1119,12 +1148,12 @@ function renderPlanning(){
     </div>`;
   $('legend').innerHTML=CODES.map(c=>`<span class="lc"><b style="background:${c[2]}"></b>${c[0]} · ${c[1]}</span>`).join('')
     +`<span class="lc"><b style="background:#fff;border-style:dashed"></b>Vide · Repos</span>`;
-  $('prev').onclick=()=>{cur=new Date(cur.getFullYear(),cur.getMonth()-1,1);loadMonth();};
-  $('next').onclick=()=>{cur=new Date(cur.getFullYear(),cur.getMonth()+1,1);loadMonth();};
-  $('search').oninput=e=>{fSearch=e.target.value.toLowerCase();render();};
-  $('fRole').onchange=e=>{fRole=e.target.value;render();};
-  $('fDept').onchange=e=>{fDept=e.target.value;render();};
-  $('fStatus').onchange=e=>{fStatus=e.target.value;render();};
+  $('prev').onclick=()=>{if(planView==='week')advanceWeek(-1);else if(planView==='day')advanceDay(-1);else{cur=new Date(cur.getFullYear(),cur.getMonth()-1,1);loadMonth();}};
+  $('next').onclick=()=>{if(planView==='week')advanceWeek(1);else if(planView==='day')advanceDay(1);else{cur=new Date(cur.getFullYear(),cur.getMonth()+1,1);loadMonth();}};
+  $('search').oninput=e=>{fSearch=e.target.value.toLowerCase();renderCurrentPlanView();};
+  $('fRole').onchange=e=>{fRole=e.target.value;renderCurrentPlanView();};
+  $('fDept').onchange=e=>{fDept=e.target.value;renderCurrentPlanView();};
+  $('fStatus').onchange=e=>{fStatus=e.target.value;renderCurrentPlanView();};
   $('editToggle').onclick=()=>{editMode=!editMode;$('editToggle').classList.toggle('on',editMode);clearSelection();updateHint();};
   $('addEmp').onclick=()=>openEmpForm(null);
   $('importXlsx').onclick=()=>$('xlsxFile').click();
@@ -1133,7 +1162,247 @@ function renderPlanning(){
   $('exportPdf').onclick=exportPDF;
   $('grid').addEventListener('mousedown',gridMouseDown);
   $('grid').addEventListener('mouseover',gridMouseOver);
-  fillFilters(); updateHint(); render();
+  document.querySelectorAll('.pvswitch button').forEach(b=>b.onclick=()=>switchPlanView(b.dataset.pv));
+  fillFilters(); updateHint(); renderCurrentPlanView(); updateNavLabel();
+}
+
+/* ===================== VUES PLANNING ALTERNATIVES ===================== */
+
+function renderCurrentPlanView(){
+  if(planView==='month'){
+    // Restaure #grid si une vue alternative l'a remplacé
+    const gw=document.querySelector('.gridwrap');
+    if(gw&&!$('grid')) gw.innerHTML='<table id="grid"></table>';
+    render();
+  } else {
+    // Recalcule visibleRows avec les mêmes filtres que render()
+    visibleRows=staff.filter(s=>{
+      if(fStatus==='actif'&&!s.active)return false;
+      if(fStatus==='parti'&&s.active)return false;
+      if(!s.active&&s.departure_date){const dd=new Date(s.departure_date);if(cur>=new Date(dd.getFullYear(),dd.getMonth()+1,1))return false;}
+      if(fRole&&s.role!==fRole)return false;
+      if(fDept&&s.department!==fDept)return false;
+      if(fSearch&&!(`${s.first_name} ${s.last_name} ${s.role||''} ${s.department||''}`.toLowerCase().includes(fSearch)))return false;
+      return true;
+    });
+    visibleRows.sort((a,b)=>{
+      const da=deps.find(d=>d.name===a.department)?.sort_order??999,db=deps.find(d=>d.name===b.department)?.sort_order??999;
+      if(da!==db)return da-db;
+      const sa=a.planning_sort_order??999,sb=b.planning_sort_order??999;
+      if(sa!==sb)return sa-sb;
+      return a.last_name.localeCompare(b.last_name);
+    });
+    if(planView==='week')renderWeekGrid();
+    else if(planView==='day')renderDayGrid();
+    else if(planView==='service')renderServiceGrid();
+  }
+}
+
+function updateNavLabel(){
+  const ml=$('mlabel'); if(!ml)return;
+  const DN=['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'];
+  if(planView==='week'&&curWeekStart){
+    const e=new Date(curWeekStart); e.setDate(e.getDate()+6);
+    ml.textContent=`${curWeekStart.getDate()} – ${e.getDate()} ${MONTHS[e.getMonth()]} ${e.getFullYear()}`;
+  } else if(planView==='day'&&curDayDate){
+    ml.textContent=`${DN[curDayDate.getDay()]} ${curDayDate.getDate()} ${MONTHS[curDayDate.getMonth()]} ${curDayDate.getFullYear()}`;
+  } else {
+    ml.textContent=`${MONTHS[cur.getMonth()]} ${cur.getFullYear()}`;
+  }
+}
+
+async function switchPlanView(v){
+  planView=v;
+  if(v==='week'&&!curWeekStart){
+    const n=new Date(),dow=n.getDay();
+    const mon=new Date(n); mon.setDate(n.getDate()-(dow===0?6:dow-1)); mon.setHours(0,0,0,0);
+    curWeekStart=mon;
+  }
+  if(v==='day'&&!curDayDate){curDayDate=new Date(); curDayDate.setHours(0,0,0,0);}
+  document.querySelectorAll('.pvswitch button').forEach(b=>b.classList.toggle('on',b.dataset.pv===v));
+  if(v!=='month'&&!coverageCache.length){
+    try{coverageCache=await BE.listCoverageRules(hotelId);}catch(e){coverageCache=[];}
+  }
+  // Si la semaine/journée cible est hors du mois chargé, recharger d'abord
+  if(v==='week'&&curWeekStart){
+    const wy=curWeekStart.getFullYear(),wm=curWeekStart.getMonth();
+    if(wy!==cur.getFullYear()||wm!==cur.getMonth()){cur=new Date(wy,wm,1);await loadMonth();return;}
+  }
+  if(v==='day'&&curDayDate){
+    const dy=curDayDate.getFullYear(),dm=curDayDate.getMonth();
+    if(dy!==cur.getFullYear()||dm!==cur.getMonth()){cur=new Date(dy,dm,1);await loadMonth();return;}
+  }
+  renderCurrentPlanView(); updateNavLabel();
+}
+
+async function advanceWeek(delta){
+  if(!curWeekStart)return;
+  curWeekStart=new Date(curWeekStart); curWeekStart.setDate(curWeekStart.getDate()+delta*7);
+  const wy=curWeekStart.getFullYear(),wm=curWeekStart.getMonth();
+  if(wy!==cur.getFullYear()||wm!==cur.getMonth()){cur=new Date(wy,wm,1);await loadMonth();return;}
+  renderWeekGrid(); updateNavLabel();
+}
+
+async function advanceDay(delta){
+  if(!curDayDate)return;
+  curDayDate=new Date(curDayDate); curDayDate.setDate(curDayDate.getDate()+delta);
+  const dy=curDayDate.getFullYear(),dm=curDayDate.getMonth();
+  if(dy!==cur.getFullYear()||dm!==cur.getMonth()){cur=new Date(dy,dm,1);await loadMonth();return;}
+  renderDayGrid(); updateNavLabel();
+}
+
+function renderWeekGrid(){
+  const gw=document.querySelector('.gridwrap'); if(!gw)return;
+  updateNavLabel();
+  if(!curWeekStart)return;
+  const DAYS_FR=['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'];
+  const days=[];
+  for(let i=0;i<7;i++){const d=new Date(curWeekStart);d.setDate(d.getDate()+i);days.push(d);}
+  const dayStrs=days.map(d=>d.toISOString().slice(0,10));
+  const todayStr=new Date().toISOString().slice(0,10);
+  const rowLk=new Map(planningRows.map(r=>[r.employee_id+'|'+r.day,r]));
+  const S_BG={'M':'#E3F2FD','S':'#FFF3E0','N':'#EDE7F6','J':'#F1F8E9','PD':'#FFF8E1','C':'#FCE4EC','custom':'#F5F5F5'};
+  const S_FG={'M':'#1565C0','S':'#BF360C','N':'#4527A0','J':'#558B2F','PD':'#F57F17','C':'#880E4F','custom':'#616161'};
+  let h=`<div class="plan-alt-wrap"><table class="plan-alt-table" style="width:100%"><thead><tr>`;
+  h+=`<th class="emp-col">Collaborateur</th>`;
+  days.forEach((d,i)=>{
+    const wend=i>=5,isToday=dayStrs[i]===todayStr;
+    h+=`<th class="${wend?'wknd':''}" style="${isToday?'background:var(--violet-bg)!important;color:var(--violet-d);':''}">${DAYS_FR[i]}<br><span style="font-weight:400">${d.getDate()}/${String(d.getMonth()+1).padStart(2,'0')}</span></th>`;
+  });
+  h+=`</tr></thead><tbody>`;
+  if(!visibleRows.length){
+    h+=`<tr><td colspan="8" style="padding:40px;text-align:center;color:var(--muted)">Aucun collaborateur</td></tr>`;
+  } else {
+    let lastDept=null;
+    visibleRows.forEach(s=>{
+      const dept=s.department||'';
+      if(dept!==lastDept){lastDept=dept;h+=`<tr class="plan-dept-row"><td colspan="8">${dept||'Sans service'}</td></tr>`;}
+      h+=`<tr><td class="emp-col"><div style="font-weight:600">${s.first_name} ${s.last_name}</div><div style="font-size:10px;color:var(--ink2)">${s.role||''}</div></td>`;
+      dayStrs.forEach((ds,i)=>{
+        const wend=i>=5;
+        const row=rowLk.get(s.id+'|'+ds);
+        const status=row?.status||'', shift=row?.shift_label||'';
+        const c=CMAP[status];
+        let cell='';
+        if(status==='P'&&shift) cell=`<span class="plan-shift-bd" style="background:${S_BG[shift]||'#eee'};color:${S_FG[shift]||'#333'}">${shift}</span>`;
+        else if(c) cell=`<span class="plan-shift-bd" style="background:${c.bg};color:${c.fg}">${status}</span>`;
+        h+=`<td class="${wend?'wknd':''}">${cell}</td>`;
+      });
+      h+=`</tr>`;
+    });
+  }
+  h+=`<tr class="plan-cov-row"><td class="emp-col" style="text-align:right">Présents</td>`;
+  dayStrs.forEach(ds=>{const n=planningRows.filter(r=>r.day===ds&&r.status==='P').length;h+=`<td>${n||'—'}</td>`;});
+  h+=`</tr></tbody></table>`;
+  const curMStr=`${cur.getFullYear()}-${String(cur.getMonth()+1).padStart(2,'0')}`;
+  if(dayStrs.some(ds=>ds.slice(0,7)!==curMStr)){
+    h+=`<div style="padding:6px 16px 12px;font-size:11px;color:var(--muted)"><i class="fa-solid fa-circle-info"></i> Données hors du mois courant non chargées — naviguez via les flèches.</div>`;
+  }
+  h+=`</div>`;
+  gw.innerHTML=h;
+}
+
+function renderDayGrid(){
+  const gw=document.querySelector('.gridwrap'); if(!gw)return;
+  updateNavLabel();
+  if(!curDayDate)return;
+  const ds=curDayDate.toISOString().slice(0,10);
+  const rowLk=new Map(planningRows.filter(r=>r.day===ds).map(r=>[r.employee_id,r]));
+  const S_FULL={'M':'Matin','S':'Soir','N':'Nuit','J':'Journée','PD':'Petit-déj.','C':'Coupure','custom':'Libre'};
+  const S_BG={'M':'#E3F2FD','S':'#FFF3E0','N':'#EDE7F6','J':'#F1F8E9','PD':'#FFF8E1','C':'#FCE4EC','custom':'#F5F5F5'};
+  const S_FG={'M':'#1565C0','S':'#BF360C','N':'#4527A0','J':'#558B2F','PD':'#F57F17','C':'#880E4F','custom':'#616161'};
+  let h=`<div class="plan-alt-wrap"><table class="plan-alt-table" style="width:100%"><thead><tr>
+    <th class="emp-col">Collaborateur</th><th>Statut</th><th>Shift</th><th>Horaires</th><th>Pause</th>
+  </tr></thead><tbody>`;
+  if(!visibleRows.length){
+    h+=`<tr><td colspan="5" style="padding:40px;text-align:center;color:var(--muted)">Aucun collaborateur</td></tr>`;
+  } else {
+    let lastDept=null;
+    visibleRows.forEach(s=>{
+      const dept=s.department||'';
+      if(dept!==lastDept){lastDept=dept;h+=`<tr class="plan-dept-row"><td colspan="5">${dept||'Sans service'}</td></tr>`;}
+      const row=rowLk.get(s.id);
+      const status=row?.status||'', shift=row?.shift_label||'';
+      const c=CMAP[status];
+      const stBadge=c?`<span class="plan-shift-bd" style="background:${c.bg};color:${c.fg}">${status}</span>`:`<span style="color:var(--muted)">—</span>`;
+      const sTxt=shift?(S_FULL[shift]||shift):'—';
+      const sBadge=shift?` <span class="plan-shift-bd" style="background:${S_BG[shift]||'#eee'};color:${S_FG[shift]||'#333'};font-size:9px">${shift}</span>`:'';
+      const times=(row?.shift_start&&row?.shift_end)?`${String(row.shift_start).slice(0,5)}–${String(row.shift_end).slice(0,5)}`:'—';
+      const brk=row?.break_minutes?`${row.break_minutes} min`:'—';
+      h+=`<tr>
+        <td class="emp-col"><div style="font-weight:600">${s.first_name} ${s.last_name}</div><div style="font-size:10px;color:var(--ink2)">${s.role||''}</div></td>
+        <td>${stBadge}</td>
+        <td style="font-size:11px">${sTxt}${sBadge}</td>
+        <td style="font-size:11px;font-variant-numeric:tabular-nums">${times}</td>
+        <td style="font-size:11px">${brk}</td>
+      </tr>`;
+    });
+  }
+  const totalP=planningRows.filter(r=>r.day===ds&&r.status==='P').length;
+  const sc=['M','S','N','J','PD','C'].reduce((a,sl)=>{a[sl]=planningRows.filter(r=>r.day===ds&&r.status==='P'&&r.shift_label===sl).length;return a;},{});
+  const shiftSum=Object.entries(sc).filter(([,n])=>n>0).map(([sl,n])=>`<b>${sl}</b>&nbsp;${n}`).join(' &nbsp;·&nbsp; ');
+  h+=`<tr class="plan-cov-row">
+    <td class="emp-col" style="text-align:right">Présents : <b>${totalP}</b></td>
+    <td colspan="4" style="text-align:left;font-weight:400;font-size:11px">${shiftSum||'<span style="color:var(--muted)">Aucun shift défini</span>'}</td>
+  </tr>`;
+  h+=`</tbody></table></div>`;
+  gw.innerHTML=h;
+}
+
+function renderServiceGrid(){
+  const gw=document.querySelector('.gridwrap'); if(!gw)return;
+  updateNavLabel();
+  const y=cur.getFullYear(),m=cur.getMonth(),nd=dim(y,m);
+  const todayStr=new Date().toISOString().slice(0,10);
+  const SHIFT_LABELS=['M','S','N','J','PD','C'];
+  // Construit : dept -> shift -> day -> count
+  const deptMap=new Map();
+  planningRows.forEach(r=>{
+    if(r.status!=='P'||!r.shift_label)return;
+    const emp=staff.find(s=>s.id===r.employee_id);
+    const dept=emp?.department||'Sans service';
+    if(!deptMap.has(dept)) deptMap.set(dept,{});
+    const dm=deptMap.get(dept);
+    if(!dm[r.shift_label]) dm[r.shift_label]={};
+    dm[r.shift_label][r.day]=(dm[r.shift_label][r.day]||0)+1;
+  });
+  if(!deptMap.size){
+    gw.innerHTML=`<div class="plan-alt-wrap" style="padding:60px 40px;text-align:center;color:var(--ink2)">
+      <i class="fa-regular fa-calendar-xmark" style="font-size:40px;margin-bottom:16px;color:var(--muted);display:block"></i>
+      <div style="font-weight:700;margin-bottom:6px">Aucun shift renseigné pour ${MONTHS[m]} ${y}</div>
+      <div style="font-size:12px">Passez en vue Mensuelle et affectez des shifts aux journées présentes.</div>
+    </div>`;
+    return;
+  }
+  let h=`<div class="plan-alt-wrap"><table class="plan-alt-table" style="min-width:${700+nd*36}px"><thead><tr>`;
+  h+=`<th class="emp-col" style="min-width:200px">Département / Shift</th>`;
+  for(let d=1;d<=nd;d++){
+    const wd=new Date(y,m,d).getDay(),wend=wd===0||wd===6,ds=iso(y,m,d),isToday=ds===todayStr;
+    h+=`<th class="${wend?'wknd':''}" style="${isToday?'background:var(--violet-bg)!important;color:var(--violet-d);':''}font-size:11px">${d}</th>`;
+  }
+  h+=`</tr></thead><tbody>`;
+  [...deptMap.entries()].sort((a,b)=>{
+    const oa=deps.find(d=>d.name===a[0])?.sort_order??999,ob=deps.find(d=>d.name===b[0])?.sort_order??999;
+    return oa-ob||a[0].localeCompare(b[0]);
+  }).forEach(([dept,shifts])=>{
+    const shiftKeys=SHIFT_LABELS.filter(sl=>shifts[sl]);
+    if(!shiftKeys.length)return;
+    h+=`<tr class="plan-dept-row"><td colspan="${nd+1}">${dept}</td></tr>`;
+    shiftKeys.forEach(sl=>{
+      const rule=coverageCache.find(r=>r.department===dept&&r.shift_label===sl&&r.day_of_week==null);
+      const minReq=rule?.min_staff_base??null;
+      h+=`<tr><td class="emp-col" style="padding-left:20px;font-size:12px">Shift ${sl}</td>`;
+      for(let d=1;d<=nd;d++){
+        const wd=new Date(y,m,d).getDay(),wend=wd===0||wd===6,ds=iso(y,m,d);
+        const n=shifts[sl]?.[ds]||0;
+        const cls=minReq!==null&&n>0&&n<minReq?'plan-cov-warn':(n>0?'plan-cov-ok':'');
+        h+=`<td class="${wend?'wknd':''}"><span class="${cls}">${n||'—'}</span>${minReq!==null&&n>0?`<div style="font-size:9px;color:var(--muted)">/${minReq}</div>`:''}</td>`;
+      }
+      h+=`</tr>`;
+    });
+  });
+  h+=`</tbody></table></div>`;
+  gw.innerHTML=h;
 }
 
 function updateHint(){
@@ -1160,6 +1429,7 @@ async function loadHotel(){
   applyCustomColors(hotelId);
   applyCustomPerms(hotelId);
   fillFilters();
+  planView='month'; coverageCache=[]; curWeekStart=null; curDayDate=null;
   await loadMonth();
 }
 
@@ -1174,8 +1444,9 @@ async function loadMyRole(){
 async function loadMonth(){
   pending.clear(); selection.clear();
   const rows=await BE.listMonthPlanning(hotelId,cur.getFullYear(),cur.getMonth());
+  planningRows=rows;
   committed=new Map(rows.map(r=>[r.employee_id+'|'+r.day,{status:r.status,duration:Number(r.duration)}]));
-  render();
+  renderCurrentPlanView();
 }
 
 /* ===================== RENDU GRILLE ===================== */
