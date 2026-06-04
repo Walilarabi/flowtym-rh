@@ -19,6 +19,8 @@ function makeTestBE() {
   let balanceMovements = [];
   let clockings = [];
   let planning = [];
+  let coverageRules = [];
+  let occupancyForecasts = [];
 
   const be = {
     isTest: true,
@@ -122,6 +124,40 @@ function makeTestBE() {
       });
     },
 
+    // ── Coverage rules ─────────────────────────────────────────────────────
+    async listCoverageRules(h) {
+      return coverageRules.filter(r => r.hotel_id === h && r.active !== false);
+    },
+    async saveCoverageRule(h, rule) {
+      const key = r => r.hotel_id === h && r.department === rule.department && r.shift_label === rule.shift_label && (r.day_of_week ?? null) === (rule.day_of_week ?? null);
+      const existing = coverageRules.find(key);
+      if (existing) {
+        Object.assign(existing, rule);
+        return existing;
+      }
+      const rec = { id: 'cr-' + Date.now() + Math.random().toString(36).slice(2,5), hotel_id: h, active: true, formula_type: 'static', formula_params: {}, ...rule };
+      coverageRules.push(rec);
+      return rec;
+    },
+    async deleteCoverageRule(id) {
+      const i = coverageRules.findIndex(r => r.id === id);
+      if (i >= 0) coverageRules.splice(i, 1);
+    },
+
+    // ── Occupancy forecast ─────────────────────────────────────────────────
+    async listOccupancyForecast(h, from, to) {
+      return occupancyForecasts.filter(f => f.hotel_id === h && f.date >= from && f.date <= to);
+    },
+    async upsertOccupancyForecast(h, date, data) {
+      let f = occupancyForecasts.find(x => x.hotel_id === h && x.date === date);
+      if (f) { Object.assign(f, data); }
+      else {
+        f = { id: 'of-' + Date.now(), hotel_id: h, date, total_rooms: 0, occupied_rooms: 0, arrivals: 0, departures: 0, rooms_deep_clean: 0, source: 'manual', ...data };
+        occupancyForecasts.push(f);
+      }
+      return f;
+    },
+
     // ── Clockings ──────────────────────────────────────────────────────────
     async listClockings(h, day) {
       return clockings.filter(c => c.hotel_id === h && c.day === day);
@@ -154,8 +190,8 @@ function makeTestBE() {
     },
 
     // ── Helpers for test inspection ────────────────────────────────────────
-    _state() { return { staff, absenceRequests, absenceBalances, balanceMovements, clockings, planning }; },
-    _reset() { staff=[]; absenceRequests=[]; absenceBalances=[]; balanceMovements=[]; clockings=[]; planning=[]; },
+    _state() { return { staff, absenceRequests, absenceBalances, balanceMovements, clockings, planning, coverageRules, occupancyForecasts }; },
+    _reset() { staff=[]; absenceRequests=[]; absenceBalances=[]; balanceMovements=[]; clockings=[]; planning=[]; coverageRules=[]; occupancyForecasts=[]; },
   };
 
   return be;

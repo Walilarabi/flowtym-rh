@@ -506,13 +506,18 @@ async function makeRealBE(){
     async deleteEmployee(id){const {error}=await sb.from('employees').update({active:false}).eq('id',id);must(error,"Suppression collaborateur");},
     async listMonthPlanning(h,y,m){
       const s=iso(y,m,1), e=iso(y,m,dim(y,m));
-      const {data,error}=await sb.from('staff_planning').select('employee_id,day,status,duration').eq('hotel_id',h).gte('day',s).lte('day',e);
+      const {data,error}=await sb.from('staff_planning').select('employee_id,day,status,duration,shift_label,shift_start,shift_end,break_minutes').eq('hotel_id',h).gte('day',s).lte('day',e);
       must(error,"Lecture du planning"); return data||[];
     },
     async savePlanning(h,upserts,deletes){
       if(upserts.length){const {error}=await sb.from('staff_planning').upsert(upserts,{onConflict:'hotel_id,employee_id,day'});must(error,"Enregistrement planning");}
       if(deletes.length){await Promise.all(deletes.map(d=>sb.from('staff_planning').delete().match(d)));}
     },
+    async listCoverageRules(h){const {data,error}=await sb.from('staff_coverage_rules').select('*').eq('hotel_id',h).eq('active',true);must(error,"Règles de couverture");return data||[];},
+    async saveCoverageRule(h,rule){const {data,error}=await sb.from('staff_coverage_rules').upsert({hotel_id:h,...rule},{onConflict:'hotel_id,department,shift_label,day_of_week'}).select('*').single();must(error,"Sauvegarde règle couverture");return data;},
+    async deleteCoverageRule(id){const {error}=await sb.from('staff_coverage_rules').delete().eq('id',id);must(error,"Suppression règle couverture");},
+    async listOccupancyForecast(h,from,to){const {data,error}=await sb.from('hotel_occupancy_forecast').select('*').eq('hotel_id',h).gte('date',from).lte('date',to).order('date');must(error,"Prévisions d'occupation");return data||[];},
+    async upsertOccupancyForecast(h,date,d){const {data,error}=await sb.from('hotel_occupancy_forecast').upsert({hotel_id:h,date,...d},{onConflict:'hotel_id,date'}).select('*').single();must(error,"Enregistrement prévision");return data;},
     async listDocuments(h,eid){const {data,error}=await sb.from('employee_documents').select('doc_type,status,expires_at').eq('hotel_id',h).eq('employee_id',eid);must(error,"Documents");return data||[];},
     async listAllDocuments(h){const {data,error}=await sb.from('employee_documents').select('employee_id,doc_type,status').eq('hotel_id',h);must(error,"Documents");return data||[];},
     async setDocument(h,eid,doc_type,status){
