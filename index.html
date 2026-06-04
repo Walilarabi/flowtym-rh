@@ -510,14 +510,25 @@ async function makeRealBE(){
       must(error,"Lecture du planning"); return data||[];
     },
     async savePlanning(h,upserts,deletes){
-      if(upserts.length){const {error}=await sb.from('staff_planning').upsert(upserts,{onConflict:'hotel_id,employee_id,day'});must(error,"Enregistrement planning");}
+      if(upserts.length){
+        // Strip shift columns from payload — silently omitted if migration 24 not yet applied
+        const SHIFT_COLS=['shift_label','shift_start','shift_end','break_minutes'];
+        const hasShift=upserts.some(u=>SHIFT_COLS.some(c=>u[c]!==undefined));
+        let rows=upserts;
+        if(hasShift){
+          const {data:cols}=await sb.from('staff_planning').select('shift_label').limit(0);
+          // If query errors (42703) cols is null — means column absent
+          if(cols===null){rows=upserts.map(u=>{const r={...u};SHIFT_COLS.forEach(c=>delete r[c]);return r;});console.warn('[migration-pending] colonnes shift ignorées dans savePlanning');}
+        }
+        const {error}=await sb.from('staff_planning').upsert(rows,{onConflict:'hotel_id,employee_id,day'});must(error,"Enregistrement planning");
+      }
       if(deletes.length){await Promise.all(deletes.map(d=>sb.from('staff_planning').delete().match(d)));}
     },
-    async listCoverageRules(h){const {data,error}=await sb.from('staff_coverage_rules').select('*').eq('hotel_id',h).eq('active',true);must(error,"Règles de couverture");return data||[];},
-    async saveCoverageRule(h,rule){const {data,error}=await sb.from('staff_coverage_rules').upsert({hotel_id:h,...rule},{onConflict:'hotel_id,department,shift_label,day_of_week'}).select('*').single();must(error,"Sauvegarde règle couverture");return data;},
-    async deleteCoverageRule(id){const {error}=await sb.from('staff_coverage_rules').delete().eq('id',id);must(error,"Suppression règle couverture");},
-    async listOccupancyForecast(h,from,to){const {data,error}=await sb.from('hotel_occupancy_forecast').select('*').eq('hotel_id',h).gte('date',from).lte('date',to).order('date');must(error,"Prévisions d'occupation");return data||[];},
-    async upsertOccupancyForecast(h,date,d){const {data,error}=await sb.from('hotel_occupancy_forecast').upsert({hotel_id:h,date,...d},{onConflict:'hotel_id,date'}).select('*').single();must(error,"Enregistrement prévision");return data;},
+    async listCoverageRules(h){const {data,error}=await sb.from('staff_coverage_rules').select('*').eq('hotel_id',h).eq('active',true);if(error){if(error.code==='42P01'){console.warn('[migration-pending] staff_coverage_rules non créée');return[];}must(error,"Règles de couverture");}return data||[];},
+    async saveCoverageRule(h,rule){const {data,error}=await sb.from('staff_coverage_rules').upsert({hotel_id:h,...rule},{onConflict:'hotel_id,department,shift_label,day_of_week'}).select('*').single();if(error){if(error.code==='42P01'){console.warn('[migration-pending] staff_coverage_rules non créée');return null;}must(error,"Sauvegarde règle couverture");}return data;},
+    async deleteCoverageRule(id){const {error}=await sb.from('staff_coverage_rules').delete().eq('id',id);if(error&&error.code!=='42P01')must(error,"Suppression règle couverture");},
+    async listOccupancyForecast(h,from,to){const {data,error}=await sb.from('hotel_occupancy_forecast').select('*').eq('hotel_id',h).gte('date',from).lte('date',to).order('date');if(error){if(error.code==='42P01'){console.warn('[migration-pending] hotel_occupancy_forecast non créée');return[];}must(error,"Prévisions d'occupation");}return data||[];},
+    async upsertOccupancyForecast(h,date,d){const {data,error}=await sb.from('hotel_occupancy_forecast').upsert({hotel_id:h,date,...d},{onConflict:'hotel_id,date'}).select('*').single();if(error){if(error.code==='42P01'){console.warn('[migration-pending] hotel_occupancy_forecast non créée');return null;}must(error,"Enregistrement prévision");}return data;},
     async listDocuments(h,eid){const {data,error}=await sb.from('employee_documents').select('doc_type,status,expires_at').eq('hotel_id',h).eq('employee_id',eid);must(error,"Documents");return data||[];},
     async listAllDocuments(h){const {data,error}=await sb.from('employee_documents').select('employee_id,doc_type,status').eq('hotel_id',h);must(error,"Documents");return data||[];},
     async setDocument(h,eid,doc_type,status){
