@@ -588,7 +588,14 @@ async function makeRealBE(){
     async revokeAccess(h,user_id){const {error}=await sb.rpc('rh_revoke_user_access',{p_hotel:h,p_user_id:user_id});must(error,"Révocation accès");},
     async inviteUser(h,email,full_name,role){
       const {data,error}=await sb.functions.invoke('invite-user',{body:{hotel_id:h,email,full_name,role}});
-      if(error) throw error;
+      // Extraire le vrai message d'erreur (le SDK masque tout derrière "non-2xx")
+      if(error){
+        let msg=error.message||'Erreur inconnue';
+        try{const ctx=error.context;if(ctx?.json){const j=await ctx.json();if(j?.error)msg=j.error;}
+        }catch(e2){}
+        if(data?.error) msg=data.error;
+        throw new Error(msg);
+      }
       if(data?.error) throw new Error(data.error);
       return data;
     },
