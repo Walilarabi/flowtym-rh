@@ -481,7 +481,6 @@ const DOC_TYPES=[
 const CONTRACT_TYPES = ['CDI','CDD','Extra','Saisonnier','Stage','Apprentissage','Interim'];
 const dim=(y,m)=>new Date(y,m+1,0).getDate();
 const iso=(y,m,d)=>`${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const initials=(f,l)=>((f?.[0]||'')+(l?.[0]||'')).toUpperCase();
 const AVC=['#8B5CF6','#3b82f6','#16a34a','#d97706','#ef4444','#0ea5e9','#db2777','#0d9488'];
 const avColor=s=>{let h=0;for(const c of (s||''))h=(h*31+c.charCodeAt(0))%AVC.length;return AVC[h];};
@@ -520,7 +519,7 @@ async function makeRealBE(){
   const sb=createClient(SUPABASE_URL,SUPABASE_ANON_KEY,{auth:{persistSession:true}});
   const must=(error,msg)=>{ if(error){ console.error(msg,error); throw new Error(msg+' : '+error.message); } };
   return {
-    sb, isTest:false,
+    sb, db:sb, isTest:false,
     async listHotels(){
       const {data:{user}}=await sb.auth.getUser(); if(!user)return [];
       const {data:u,error:e1}=await sb.from('users').select('id').eq('auth_id',user.id).maybeSingle();
@@ -589,7 +588,14 @@ async function makeRealBE(){
     async revokeAccess(h,user_id){const {error}=await sb.rpc('rh_revoke_user_access',{p_hotel:h,p_user_id:user_id});must(error,"Révocation accès");},
     async inviteUser(h,email,full_name,role){
       const {data,error}=await sb.functions.invoke('invite-user',{body:{hotel_id:h,email,full_name,role}});
-      if(error) throw error;
+      // Extraire le vrai message d'erreur (le SDK masque tout derrière "non-2xx")
+      if(error){
+        let msg=error.message||'Erreur inconnue';
+        try{const ctx=error.context;if(ctx?.json){const j=await ctx.json();if(j?.error)msg=j.error;}
+        }catch(e2){}
+        if(data?.error) msg=data.error;
+        throw new Error(msg);
+      }
       if(data?.error) throw new Error(data.error);
       return data;
     },
@@ -779,7 +785,8 @@ function makeTestBE(){
   let trainingCatalog=[]; let employeeTrainings=[];
   let medicalVisits=[]; let equipmentItems=[];
   const k=(eid,day)=>eid+'|'+day;
-  return {isTest:true,
+  const _dbStub={from:()=>({select:()=>({eq:()=>({eq:()=>({limit:()=>Promise.resolve({data:[]}),then:(r)=>r({data:null,count:0})})})})})};
+  return {isTest:true, db:_dbStub,
     async listHotels(){return hotels;},
     async setActiveHotel(){}, async signOut(){},
     async listDepartments(h){return depts[h]||[];},
@@ -1037,15 +1044,15 @@ const ROLE_LABELS = {
   maintenance:'Maintenance', breakfast:'Petit-déjeuner', femme_de_chambre:'Femme de chambre'
 };
 const PERMS = {
-  direction:        { tabs:'all',                                                                                                                                              ficheFull:true,  manageUsers:true  },
-  admin_hotel:      { tabs:'all',                                                                                                                                              ficheFull:true,  manageUsers:true  },
-  comptabilite:     { tabs:['dashboard','reporting','personnel','contracts','absences','pointage','tracking','payroll','equipment'],                                           ficheFull:true,  manageUsers:false },
-  revenue_manager:  { tabs:['dashboard','reporting'],                                                                                                                          ficheFull:false, manageUsers:false },
-  reception:        { tabs:['dashboard','planning','personnel','absences'],                                                                                                    ficheFull:false, manageUsers:false },
-  gouvernante:      { tabs:['dashboard','planning','personnel','absences'],                                                                                                    ficheFull:false, manageUsers:false },
-  maintenance:      { tabs:['dashboard','planning','personnel','absences'],                                                                                                    ficheFull:false, manageUsers:false },
-  breakfast:        { tabs:['dashboard','planning','personnel','absences'],                                                                                                    ficheFull:false, manageUsers:false },
-  femme_de_chambre: { tabs:['dashboard','planning'],                                                                                                                           ficheFull:false, manageUsers:false }
+  direction:        { tabs:'all',                                                                                                                                                                              ficheFull:true,  manageUsers:true  },
+  admin_hotel:      { tabs:'all',                                                                                                                                                                              ficheFull:true,  manageUsers:true  },
+  comptabilite:     { tabs:['dashboard','reporting','personnel','contracts','absences','pointage','tracking','payroll','equipment'],                                                                           ficheFull:true,  manageUsers:false },
+  revenue_manager:  { tabs:['dashboard','reporting'],                                                                                                                                                          ficheFull:false, manageUsers:false },
+  reception:        { tabs:['dashboard','planning','personnel','absences','portal_inbox'],                                                                                                                     ficheFull:false, manageUsers:false },
+  gouvernante:      { tabs:['dashboard','planning','personnel','absences','portal_inbox'],                                                                                                                     ficheFull:false, manageUsers:false },
+  maintenance:      { tabs:['dashboard','planning','personnel','absences','portal_inbox'],                                                                                                                     ficheFull:false, manageUsers:false },
+  breakfast:        { tabs:['dashboard','planning','personnel','absences','portal_inbox'],                                                                                                                     ficheFull:false, manageUsers:false },
+  femme_de_chambre: { tabs:['dashboard','planning'],                                                                                                                                                           ficheFull:false, manageUsers:false }
 };
 function canSee(tab){if(!myRole)return false;const p=PERMS[myRole];if(!p)return false;if(p.tabs==='all')return true;return p.tabs.includes(tab);}
 function canFicheFull(){return PERMS[myRole]?.ficheFull===true;}
@@ -1076,6 +1083,9 @@ const TABS=[
     ['medical','Visites médicales','fa-solid fa-stethoscope'],
     ['equipment','Matériel remis','fa-solid fa-boxes-stacked'],
     ['orgchart','Organigramme','fa-solid fa-sitemap'],
+  ]],
+  ['Portail salarié',[
+    ['portal_inbox','Demandes portail','fa-solid fa-inbox'],
   ]],
   ['Réglages',[
     ['config','Paramètres','fa-solid fa-gear'],
@@ -1138,7 +1148,7 @@ function goView(v){
            config:renderConfig, absences:renderAbsences, pointage:renderPointage,
            recruitment:renderRecruitment, training:renderTraining,
            medical:renderMedical, equipment:renderEquipment, orgchart:renderOrgChart,
-           tracking:renderTracking, payroll:renderPayroll};
+           tracking:renderTracking, payroll:renderPayroll, portal_inbox:renderPortalInbox};
   (r[v]||r.dashboard)();
 }
 /* ===================== VUE PLANNING ===================== */
@@ -1164,15 +1174,12 @@ function renderPlanning(){
         </select>
         <div class="spacer" style="flex:1"></div>
         <button class="btn g ${editMode?'on':''}" id="editToggle"><i class="fa-solid fa-pen-to-square"></i> Édition</button>
-        <button class="btn g" id="copyWeekBtn" title="Copier la semaine sur la suivante" style="display:none"><i class="fa-solid fa-copy"></i> Copier sem.</button>
-        <button class="btn g" id="dupMonthBtn" title="Dupliquer le mois précédent" style="display:none"><i class="fa-solid fa-calendar-plus"></i> Dup. mois</button>
         <button class="btn g" id="exportXlsx" title="Exporter le planning au format Excel"><i class="fa-solid fa-file-excel"></i> Excel</button>
         <button class="btn g" id="exportPdf" title="Exporter le planning en PDF (paysage, pleine page)"><i class="fa-regular fa-file-pdf"></i> PDF</button>
         <button class="btn p" id="addEmp"><i class="fa-solid fa-user-plus"></i> Collaborateur</button>
       </div>
       <div class="legend" id="legend"></div>
       <div class="hint" id="hint"></div>
-      <div id="legalAlertsBar" style="display:none"></div>
       <div class="gridwrap"><table id="grid"></table></div>
     </div>`;
   $('legend').innerHTML=CODES.map(c=>`<span class="lc"><b style="background:${c[2]}"></b>${c[0]} · ${c[1]}</span>`).join('')
@@ -1187,8 +1194,6 @@ function renderPlanning(){
   $('addEmp').onclick=()=>openEmpForm(null);
   $('exportXlsx').onclick=exportExcel;
   $('exportPdf').onclick=exportPDF;
-  $('copyWeekBtn').onclick=()=>openCopyWeekModal();
-  $('dupMonthBtn').onclick=()=>openDupMonthModal();
   $('grid').addEventListener('mousedown',gridMouseDown);
   $('grid').addEventListener('mouseover',gridMouseOver);
   document.querySelectorAll('.pvswitch button').forEach(b=>b.onclick=()=>switchPlanView(b.dataset.pv));
@@ -1261,14 +1266,7 @@ async function switchPlanView(v){
     const dy=curDayDate.getFullYear(),dm=curDayDate.getMonth();
     if(dy!==cur.getFullYear()||dm!==cur.getMonth()){cur=new Date(dy,dm,1);await loadMonth();return;}
   }
-  updatePlanToolbarBtns(v);
   renderCurrentPlanView(); updateNavLabel();
-}
-
-function updatePlanToolbarBtns(v){
-  const cw=$('copyWeekBtn'),dm=$('dupMonthBtn'); if(!cw||!dm) return;
-  cw.style.display=(v==='week')?'':'none';
-  dm.style.display=(v==='month')?'':'none';
 }
 
 async function advanceWeek(delta){
@@ -1285,109 +1283,6 @@ async function advanceDay(delta){
   const dy=curDayDate.getFullYear(),dm=curDayDate.getMonth();
   if(dy!==cur.getFullYear()||dm!==cur.getMonth()){cur=new Date(dy,dm,1);await loadMonth();return;}
   renderDayGrid(); updateNavLabel();
-}
-
-/* ── Copie semaine ──────────────────────────────────────────────────── */
-function openCopyWeekModal(){
-  if(!curWeekStart){flash('Aucune semaine sélectionnée');return;}
-  const src=new Date(curWeekStart);
-  const srcDays=[];for(let i=0;i<7;i++){const d=new Date(src);d.setDate(d.getDate()+i);srcDays.push(d.toISOString().slice(0,10));}
-  const dst=new Date(src);dst.setDate(dst.getDate()+7);
-  const dstDays=[];for(let i=0;i<7;i++){const d=new Date(dst);d.setDate(d.getDate()+i);dstDays.push(d.toISOString().slice(0,10));}
-  const fmt=d=>new Date(d+'T00:00:00').toLocaleDateString('fr-FR',{weekday:'short',day:'numeric',month:'short'});
-  showModal(`<div style="padding:24px;max-width:520px">
-    <div style="font-size:17px;font-weight:700;margin-bottom:8px"><i class="fa-solid fa-copy" style="color:var(--violet);margin-right:8px"></i>Copier la semaine</div>
-    <p style="font-size:13px;color:var(--ink2);margin-bottom:16px">Copie les statuts et shifts de la semaine source vers la semaine cible. Les absences existantes dans la cible ne seront pas écrasées sauf si vous cochez l'option ci-dessous.</p>
-    <div style="background:var(--bg2);padding:12px 16px;border-radius:10px;margin-bottom:12px;font-size:13px">
-      <div><b>Source :</b> ${fmt(srcDays[0])} → ${fmt(srcDays[6])}</div>
-      <div style="margin-top:4px"><b>Cible :</b> ${fmt(dstDays[0])} → ${fmt(dstDays[6])}</div>
-    </div>
-    <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:20px;cursor:pointer">
-      <input type="checkbox" id="copyOverwriteAbs"> Écraser les absences existantes dans la cible
-    </label>
-    <div style="display:flex;gap:10px">
-      <button class="btn p" onclick="executeCopyWeek(${JSON.stringify(srcDays)},${JSON.stringify(dstDays)})"><i class="fa-solid fa-check"></i> Copier</button>
-      <button class="btn g" onclick="closeModal()">Annuler</button>
-    </div>
-  </div>`);
-}
-
-async function executeCopyWeek(srcDays,dstDays){
-  const overwriteAbs=$('copyOverwriteAbs')?.checked||false;
-  const ABS_CATS=new Set(['abs','paid','holiday']);
-  let copied=0,skipped=0;
-  staff.forEach(s=>{
-    srcDays.forEach((srcDay,i)=>{
-      const dstDay=dstDays[i];
-      const srcKey=s.id+'|'+srcDay, dstKey=s.id+'|'+dstDay;
-      const srcRow=committed.get(srcKey);
-      if(!srcRow||!srcRow.status)return; // source vide → rien à copier
-      const dstRow=committed.get(dstKey);
-      const dstCat=dstRow?CMAP[dstRow.status]?.cat:'';
-      // Ne pas écraser une absence existante sauf si option cochée
-      if(!overwriteAbs&&dstCat&&ABS_CATS.has(dstCat)){skipped++;return;}
-      pending.set(dstKey,srcRow.status);
-      if(srcRow.shift_label) pendingShifts.set(dstKey,srcRow.shift_label);
-      else pendingShifts.delete(dstKey);
-      copied++;
-    });
-  });
-  closeModal();
-  if(copied){flash(`${copied} cellule${copied>1?'s':''} copiée${copied>1?'s':''}${skipped?` · ${skipped} absence${skipped>1?'s':''} conservée${skipped>1?'s':''}`:''}`);render();}
-  else flash('Rien à copier');
-}
-
-/* ── Duplication mois précédent ───────────────────────────────────── */
-function openDupMonthModal(){
-  const y=cur.getFullYear(),m=cur.getMonth();
-  const prevDate=new Date(y,m-1,1);
-  const prevLabel=`${MONTHS[prevDate.getMonth()]} ${prevDate.getFullYear()}`;
-  const curLabel=`${MONTHS[m]} ${y}`;
-  showModal(`<div style="padding:24px;max-width:520px">
-    <div style="font-size:17px;font-weight:700;margin-bottom:8px"><i class="fa-solid fa-calendar-plus" style="color:var(--violet);margin-right:8px"></i>Dupliquer le mois précédent</div>
-    <p style="font-size:13px;color:var(--ink2);margin-bottom:16px">Reproduit le planning de <b>${prevLabel}</b> sur <b>${curLabel}</b> pour tous les collaborateurs visibles.</p>
-    <div style="margin-bottom:16px">
-      <label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px">Mode de remplissage</label>
-      <label style="display:flex;gap:8px;align-items:center;font-size:13px;margin-bottom:6px;cursor:pointer"><input type="radio" name="dupMode" value="fill" checked> Remplir uniquement les jours vides</label>
-      <label style="display:flex;gap:8px;align-items:center;font-size:13px;margin-bottom:6px;cursor:pointer"><input type="radio" name="dupMode" value="replace"> Remplacer tout (écrase les données existantes)</label>
-      <label style="display:flex;gap:8px;align-items:center;font-size:13px;cursor:pointer"><input type="radio" name="dupMode" value="keep_abs"> Remplacer sauf les absences existantes</label>
-    </div>
-    <div style="display:flex;gap:10px">
-      <button class="btn p" onclick="executeDupMonth()"><i class="fa-solid fa-check"></i> Dupliquer</button>
-      <button class="btn g" onclick="closeModal()">Annuler</button>
-    </div>
-  </div>`);
-}
-
-async function executeDupMonth(){
-  const mode=document.querySelector('[name="dupMode"]:checked')?.value||'fill';
-  const y=cur.getFullYear(),m=cur.getMonth();
-  const prevY=m===0?y-1:y, prevM=m===0?11:m-1;
-  const nd=dim(y,m), pnd=dim(prevY,prevM);
-  const ABS_CATS=new Set(['abs','paid','holiday']);
-  let copied=0,skipped=0;
-  staff.forEach(s=>{
-    for(let d=1;d<=nd;d++){
-      const dstDay=iso(y,m,d);
-      // Source : même numéro de jour dans le mois précédent (plafonné)
-      const srcD=Math.min(d,pnd);
-      const srcDay=iso(prevY,prevM,srcD);
-      const srcKey=s.id+'|'+srcDay, dstKey=s.id+'|'+dstDay;
-      const srcRow=committed.get(srcKey);
-      if(!srcRow||!srcRow.status)continue;
-      const dstRow=committed.get(dstKey);
-      const dstCat=dstRow?CMAP[dstRow.status]?.cat:'';
-      if(mode==='fill'&&dstRow&&dstRow.status){skipped++;continue;}
-      if(mode==='keep_abs'&&dstCat&&ABS_CATS.has(dstCat)){skipped++;continue;}
-      pending.set(dstKey,srcRow.status);
-      if(srcRow.shift_label) pendingShifts.set(dstKey,srcRow.shift_label);
-      else pendingShifts.delete(dstKey);
-      copied++;
-    }
-  });
-  closeModal();
-  if(copied){flash(`${copied} jour${copied>1?'s':''} dupliqué${copied>1?'s':''}${skipped?` · ${skipped} conservé${skipped>1?'s':''}`:''}`);render();}
-  else flash('Rien à dupliquer (source vide ou tout déjà rempli)');
 }
 
 function renderWeekGrid(){
@@ -1673,7 +1568,6 @@ function render(){
   $('grid').querySelectorAll('[data-emp]').forEach(el=>el.onclick=()=>openFiche(el.dataset.emp));
   wirePlanningRowDrag();
   applyStickyWidths(); updateSaveBar();
-  renderLegalAlertsBar();
 }
 function applyStickyWidths(){
   const g=$('grid'); if(!g)return;
@@ -1824,85 +1718,6 @@ function updateSaveBar(){
   $('pendCount').textContent=n; $('savebar').classList.toggle('on',n>0);
   $('pendCount').dataset.count=n;
 }
-
-/* ── Contrôles légaux (inline depuis tests/lib/planningLogic.js) ── */
-function computeLegalAlerts(rows,y,m,{cmap,dimFn,isoFn}){
-  const alerts=[];const nd=dimFn(y,m);
-  const byEmp=new Map();
-  rows.forEach(r=>{if(!byEmp.has(r.employee_id))byEmp.set(r.employee_id,new Map());byEmp.get(r.employee_id).set(r.day,r);});
-  byEmp.forEach((dayMap,eid)=>{
-    let streak=0,streakStart=null;
-    for(let d=1;d<=nd;d++){const day=isoFn(y,m,d);const row=dayMap.get(day);const cat=row?(cmap[row.status]?.cat||''):'';
-      if(cat==='worked'){streak++;if(streak===1)streakStart=day;if(streak===7)alerts.push({employee_id:eid,day:streakStart,type:'7_consecutive',message:'7 jours consécutifs travaillés'});}
-      else{streak=0;streakStart=null;}}
-    dayMap.forEach((row,day)=>{const cat=cmap[row.status]?.cat||'';if((cat==='abs'||cat==='paid')&&row.shift_label)alerts.push({employee_id:eid,day,type:'shift_on_absence',message:`Shift ${row.shift_label} incompatible avec ${row.status}`});});
-    dayMap.forEach((row,day)=>{if(row.status!=='P'||!row.shift_start||!row.shift_end)return;const[sh,sm]=String(row.shift_start).split(':').map(Number);const[eh,em]=String(row.shift_end).split(':').map(Number);let dm=(eh*60+em)-(sh*60+sm);if(dm<0)dm+=1440;dm-=(row.break_minutes||0);if(dm>600)alerts.push({employee_id:eid,day,type:'excessive_duration',message:`Durée excessive : ${Math.round(dm/6)/10}h`});});
-  });
-  return alerts;
-}
-
-function computeCoverageAlerts(rows,coverageRules,staffDeptMap,y,m,{dimFn,isoFn}){
-  const alerts=[];const nd=dimFn(y,m);
-  const activeRules=coverageRules.filter(r=>r.active!==false);
-  activeRules.forEach(rule=>{
-    for(let d=1;d<=nd;d++){const wd=new Date(y,m,d).getDay();const wdMon=wd===0?6:wd-1;
-      if(rule.day_of_week!=null&&rule.day_of_week!==wdMon)continue;
-      const day=isoFn(y,m,d);
-      const count=rows.filter(r=>r.day===day&&r.status==='P'&&r.shift_label===rule.shift_label&&staffDeptMap.get(r.employee_id)===rule.department).length;
-      if(count<rule.min_staff_base)alerts.push({day,department:rule.department,shift:rule.shift_label,required:rule.min_staff_base,actual:count,type:'understaffed'});}
-  });
-  return alerts;
-}
-
-function renderLegalAlertsBar(){
-  const bar=$('legalAlertsBar'); if(!bar) return;
-  if(planView!=='month'){bar.style.display='none';return;}
-  const y=cur.getFullYear(),m=cur.getMonth();
-  // build rows from committed map
-  const rows=[];
-  committed.forEach((v,k)=>{const[eid,day]=k.split('|');rows.push({employee_id:eid,day,status:v.status,shift_label:v.shift_label||null,shift_start:v.shift_start||null,shift_end:v.shift_end||null,break_minutes:v.break_minutes||0});});
-  // also pending
-  pending.forEach((status,k)=>{if(!status)return;const[eid,day]=k.split('|');const existing=rows.find(r=>r.employee_id===eid&&r.day===day);if(existing){existing.status=status;}else rows.push({employee_id:eid,day,status,shift_label:pendingShifts.get(k)||null,shift_start:null,shift_end:null,break_minutes:0});});
-  const legalAlerts=computeLegalAlerts(rows,y,m,{cmap:CMAP,dimFn:dim,isoFn:iso});
-  // coverage alerts
-  let coverAlerts=[];
-  if(coverageCache&&coverageCache.length){
-    const deptMap=new Map(staff.map(s=>[s.id,s.department||'']));
-    coverAlerts=computeCoverageAlerts(rows,coverageCache,deptMap,y,m,{dimFn:dim,isoFn:iso});
-  }
-  const total=legalAlerts.length+coverAlerts.length;
-  if(!total){bar.style.display='none';return;}
-  bar.style.display='';
-  const byType={};
-  legalAlerts.forEach(a=>{byType[a.type]=(byType[a.type]||0)+1;});
-  coverAlerts.forEach(()=>{byType['understaffed']=(byType['understaffed']||0)+1;});
-  const TYPE_INFO={'7_consecutive':{icon:'fa-rotate',color:'#d97706',label:'7j consécutifs'},'shift_on_absence':{icon:'fa-triangle-exclamation',color:'#dc2626',label:'Shift sur absence'},'excessive_duration':{icon:'fa-clock',color:'#b45309',label:'Durée > 10h'},'understaffed':{icon:'fa-users',color:'#7c3aed',label:'Sous-effectif'}};
-  bar.innerHTML=`<div style="display:flex;align-items:center;gap:8px;padding:8px 16px;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;margin:4px 0;flex-wrap:wrap">
-    <i class="fa-solid fa-shield-halved" style="color:#d97706;font-size:14px"></i>
-    <span style="font-size:12px;font-weight:600;color:#92400e">${total} alerte${total>1?'s':''} légale${total>1?'s':''}</span>
-    ${Object.entries(byType).map(([t,n])=>{const ti=TYPE_INFO[t]||{icon:'fa-circle-exclamation',color:'#9ca3af',label:t};return `<span title="${ti.label}" style="background:${ti.color}18;color:${ti.color};font-size:11px;font-weight:600;padding:2px 8px;border-radius:12px;cursor:pointer" onclick="showLegalAlertsDetail()"><i class="fa-solid ${ti.icon}" style="margin-right:3px"></i>${n} ${ti.label}</span>`;}).join('')}
-    <button onclick="showLegalAlertsDetail()" style="margin-left:auto;font-size:11px;color:#d97706;background:none;border:none;cursor:pointer;text-decoration:underline">Voir le détail</button>
-  </div>`;
-  bar._legalAlerts=legalAlerts;
-  bar._coverAlerts=coverAlerts;
-}
-
-function showLegalAlertsDetail(){
-  const bar=$('legalAlertsBar'); if(!bar) return;
-  const legalAlerts=bar._legalAlerts||[];
-  const coverAlerts=bar._coverAlerts||[];
-  const rows=[
-    ...legalAlerts.map(a=>{const emp=staff.find(s=>s.id===a.employee_id);const name=emp?`${emp.last_name} ${emp.first_name}`:'?';const col={'7_consecutive':'#d97706','shift_on_absence':'#dc2626','excessive_duration':'#b45309'}[a.type]||'#9ca3af';return `<tr><td style="padding:6px 10px">${esc(name)}</td><td style="padding:6px 10px">${a.day}</td><td style="padding:6px 10px"><span style="color:${col};font-weight:600">${esc(a.message)}</span></td></tr>`;}),
-    ...coverAlerts.map(a=>`<tr><td style="padding:6px 10px;color:var(--ink2)">—</td><td style="padding:6px 10px">${a.day}</td><td style="padding:6px 10px"><span style="color:#7c3aed;font-weight:600">Sous-effectif : ${esc(a.department||'?')} shift ${esc(a.shift||'?')} (${a.actual}/${a.required})</span></td></tr>`)
-  ];
-  showModal(`<div style="padding:24px;min-width:340px;max-width:640px"><div style="font-size:17px;font-weight:700;margin-bottom:16px"><i class="fa-solid fa-shield-halved" style="color:#d97706;margin-right:8px"></i>Alertes légales</div>
-    <div style="overflow:auto;max-height:400px"><table style="width:100%;border-collapse:collapse;font-size:13px">
-      <thead><tr style="background:var(--bg2)"><th style="padding:6px 10px;text-align:left">Collaborateur</th><th style="padding:6px 10px;text-align:left">Date</th><th style="padding:6px 10px;text-align:left">Alerte</th></tr></thead>
-      <tbody>${rows.join('')}</tbody>
-    </table></div>
-    <div style="margin-top:16px;text-align:right"><button class="btn g" onclick="closeModal()">Fermer</button></div>
-  </div>`);
-}
 async function saveChanges(){
   $('saveBtn').disabled=true;
   try{
@@ -2026,10 +1841,11 @@ function wireNotifBell(){
     open=true; panel.style.display='block';
     panel.innerHTML='<div style="padding:18px;text-align:center;color:var(--muted)"><i class="fa-solid fa-spinner fa-spin"></i> Chargement…</div>';
     try{
-      const [docAlerts, medVisits, absReqs]=await Promise.all([
+      const [docAlerts, medVisits, absReqs, portalReqs]=await Promise.all([
         BE.listDocumentAlerts(hotelId).catch(()=>[]),
         BE.listMedicalVisits(hotelId).catch(()=>[]),
-        BE.listAbsences(hotelId).catch(()=>[])
+        BE.listAbsences(hotelId).catch(()=>[]),
+        BE.db.from('portal_requests').select('id,type,employee:employees(first_name,last_name)').eq('hotel_id',hotelId).eq('status','pending').limit(10).then(r=>r.data||[]).catch(()=>[])
       ]);
       const today=isoToday();
       const soon30=new Date(); soon30.setDate(soon30.getDate()+30);
@@ -2039,23 +1855,30 @@ function wireNotifBell(){
       const all=[
         ...docAlerts.slice(0,5).map(a=>({icon:'fa-file-circle-exclamation',color:'#dc2626',text:`<b>${a.first_name} ${a.last_name}</b> — ${a.doc_label||a.doc_type} ${a.alert_kind==='expired'?'expiré':'bientôt expiré'}`,sub:a.expires_at?`Expire le ${a.expires_at}`:''})),
         ...medAlerts.slice(0,3).map(v=>{const emp=staff.find(s=>s.id===v.employee_id);return {icon:'fa-stethoscope',color:'#d97706',text:`<b>${emp?emp.last_name+' '+emp.first_name:'?'}</b> — Visite médicale ${!v.next_visit_date||v.next_visit_date<today?'en retard':'à venir'}`,sub:v.next_visit_date||'Non planifiée'};}),
-        ...pendingAbs.slice(0,3).map(a=>{const emp=staff.find(s=>s.id===a.employee_id);return {icon:'fa-calendar-check',color:'#7c3aed',text:`<b>${emp?emp.last_name+' '+emp.first_name:'?'}</b> — Absence à valider`,sub:`${a.type_code||a.type||'Absence'} · du ${a.start_date} au ${a.end_date||a.start_date}`};})
+        ...pendingAbs.slice(0,3).map(a=>{const emp=staff.find(s=>s.id===a.employee_id);return {icon:'fa-calendar-check',color:'#7c3aed',text:`<b>${emp?emp.last_name+' '+emp.first_name:'?'}</b> — Absence à valider`,sub:`${a.type_code||a.type||'Absence'} · du ${a.start_date} au ${a.end_date||a.start_date}`,onClick:()=>goView('portal_inbox')};}),
+        ...portalReqs.slice(0,5).map(pr=>{const e=pr.employee||{};return {icon:'fa-mobile-screen',color:'#2563eb',text:`<b>${e.first_name||''} ${e.last_name||''}`.trim()+'</b> — '+(REQ_TYPE_LABELS[pr.type]||pr.type),sub:'Demande portail en attente',onClick:()=>goView('portal_inbox')};})
+
       ];
       const badge=$('notifBadge');
       if(badge){badge.textContent=all.length||'';badge.style.display=all.length?'block':'none';}
       if(!all.length){panel.innerHTML='<div style="padding:24px;text-align:center;color:var(--muted);font-size:13px"><i class="fa-solid fa-check-circle" style="color:#16a34a;font-size:24px;display:block;margin-bottom:8px"></i>Aucune alerte en cours</div>';return;}
       panel.innerHTML=`<div style="padding:12px 16px 8px;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--line)">${all.length} alerte${all.length>1?'s':''}</div>`
-        +all.map(a=>`<div style="display:flex;gap:12px;align-items:flex-start;padding:12px 16px;border-bottom:1px solid var(--line);font-size:13px;cursor:default">
+        +all.map((a,i)=>`<div data-ni="${i}" style="display:flex;gap:12px;align-items:flex-start;padding:12px 16px;border-bottom:1px solid var(--line);font-size:13px;cursor:${a.onClick?'pointer':'default'}${a.onClick?';transition:background .1s':''}">
           <i class="fa-solid ${a.icon}" style="color:${a.color};margin-top:2px;flex-shrink:0"></i>
           <div><div>${a.text}</div>${a.sub?`<div style="font-size:11px;color:var(--muted);margin-top:2px">${a.sub}</div>`:''}</div>
         </div>`).join('');
+      all.forEach((a,i)=>{if(a.onClick){const el=panel.querySelector(`[data-ni="${i}"]`);if(el){el.onmouseenter=()=>el.style.background='var(--bg2)';el.onmouseleave=()=>el.style.background='';el.onclick=()=>{closePanel();a.onClick();};}}});
     }catch(e){panel.innerHTML=`<div style="padding:16px;color:#dc2626;font-size:12px">${e.message}</div>`;}
   };
   document.addEventListener('click',e=>{if(!bell.contains(e.target)&&!panel.contains(e.target))closePanel();},{passive:true});
   // badge count on load
-  BE.listDocumentAlerts(hotelId).then(a=>{
+  Promise.all([
+    BE.listDocumentAlerts(hotelId).catch(()=>[]),
+    BE.db.from('portal_requests').select('id',{count:'exact',head:true}).eq('hotel_id',hotelId).eq('status','pending').then(r=>Array(r.count||0).fill(null)).catch(()=>[])
+  ]).then(([docAlerts,portalPending])=>{
     const b=$('notifBadge');if(!b)return;
-    if(a.length){b.textContent=a.length>9?'9+':a.length;b.style.display='block';}
+    const n=docAlerts.length+portalPending.length;
+    if(n){b.textContent=n>9?'9+':n;b.style.display='block';}
   }).catch(()=>{});
 }
 
@@ -4394,10 +4217,49 @@ function openInviteForm(onSuccess){
     if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){$('invErr').textContent='Format e-mail invalide.';return;}
     $('invSend').disabled=true; $('invSend').innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Envoi…';
     try{
-      await BE.inviteUser(hotelId,email,full_name,role);
-      closeModal();
-      flash(`Invitation envoyée à ${email}`);
-      if(onSuccess) onSuccess();
+      const res=await BE.inviteUser(hotelId,email,full_name,role);
+      if(res?.invite_link){
+        const lnk=res.invite_link;
+        const smsHref='sms:?body='+encodeURIComponent('Accédez à Flowtym RH : '+lnk);
+        const waHref='https://wa.me/?text='+encodeURIComponent('Accédez à Flowtym RH : '+lnk);
+        $('modal').innerHTML=`
+          <div class="mh">
+            <div class="mh-ic" style="background:#f0fdf4;color:#16a34a"><i class="fa-solid fa-link"></i></div>
+            <div class="mh-ti"><h2>${res.already_existed?'Lien de connexion':'Lien d\'invitation'}</h2>
+              <div class="sub">${res.already_existed?'Compte existant.':'Compte créé.'} Partagez ce lien à <b>${email}</b> par SMS ou WhatsApp.</div>
+            </div>
+            <button class="mh-x" onclick="closeModal()" title="Fermer"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+          <div class="mb">
+            <div style="background:#f8f9fb;border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:flex;gap:10px;align-items:center">
+              <input id="invLinkInput" readonly value="${lnk}" style="flex:1;border:none;background:transparent;font-size:11px;color:var(--ink);outline:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+              <button class="btn p" id="invCopyBtn" style="flex-shrink:0">
+                <i class="fa-solid fa-copy"></i> Copier
+              </button>
+            </div>
+            <div style="margin-top:14px;display:flex;gap:10px">
+              <a href="${smsHref}" class="btn g" style="flex:1;text-align:center"><i class="fa-solid fa-comment-sms"></i> SMS</a>
+              <a href="${waHref}" target="_blank" class="btn g" style="flex:1;text-align:center;background:#dcfce7;color:#15803d"><i class="fa-brands fa-whatsapp"></i> WhatsApp</a>
+            </div>
+            <div style="margin-top:12px;font-size:12px;color:var(--muted)"><i class="fa-solid fa-clock"></i> Ce lien est valable 24h.</div>
+          </div>
+          <div class="mact">
+            <button class="btn p" onclick="closeModal()"><i class="fa-solid fa-check"></i> Terminé</button>
+          </div>`;
+        $('invCopyBtn').onclick=()=>{
+          navigator.clipboard.writeText(lnk).then(()=>{
+            $('invCopyBtn').innerHTML='<i class="fa-solid fa-check"></i> Copié !';
+            setTimeout(()=>{ $('invCopyBtn').innerHTML='<i class="fa-solid fa-copy"></i> Copier'; },2000);
+          });
+        };
+        if(onSuccess) onSuccess();
+      } else {
+        closeModal();
+        flash(res?.already_existed
+          ? `Accès accordé à ${email} — demandez-lui de se connecter sur rh.flowtym.com`
+          : `Invitation créée pour ${email}`);
+        if(onSuccess) onSuccess();
+      }
     }catch(e){
       $('invErr').textContent='Erreur : '+(e.message||e);
       $('invSend').disabled=false;
@@ -4789,7 +4651,198 @@ function openPop(td){ popK=td.dataset.k;
 function closePop(){pop.classList.remove('on');popK=null;}
 document.addEventListener('mousedown',e=>{if(!pop.contains(e.target)&&!e.target.closest('td.day'))closePop();});
 
+/* ===================== PORTAIL SALARIÉ — INBOX MANAGER ===================== */
+const REQ_TYPE_LABELS={conge_paye:'Congé payé',rtt:'RTT',absence_exceptionnelle:'Absence exceptionnelle',
+  maladie:'Maladie',extra:'Demande d\'extra',echange_shift:'Échange de shift',autre:'Autre'};
+const REQ_STATUS_LABELS={pending:'En attente',approved:'Approuvée',rejected:'Refusée',cancelled:'Annulée'};
+const REQ_STATUS_COLORS={pending:'#f59e0b',approved:'#22c55e',rejected:'#ef4444',cancelled:'#9ca3af'};
+
+async function renderPortalInbox(){
+  $('view').innerHTML=`<div class="phead"><div><h1><i class="fa-solid fa-inbox" style="margin-right:8px;color:var(--violet)"></i>Demandes portail</h1><div class="sub">Demandes des salariés via l'application mobile</div></div></div>
+  <div style="padding:0 24px 24px">
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px">
+      <select id="piFilterStatus" class="input" style="width:auto">
+        <option value="">Tous les statuts</option>
+        <option value="pending">En attente</option>
+        <option value="approved">Approuvées</option>
+        <option value="rejected">Refusées</option>
+        <option value="cancelled">Annulées</option>
+      </select>
+      <select id="piFilterType" class="input" style="width:auto">
+        <option value="">Tous les types</option>
+        ${Object.entries(REQ_TYPE_LABELS).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}
+      </select>
+      <div style="flex:1"></div>
+      <span id="piCount" style="color:var(--ink2);font-size:13px;align-self:center"></span>
+    </div>
+    <div id="piList"><div class="loading"><div class="spinner"></div></div></div>
+  </div>`;
+  const applyFilters=()=>loadPortalInbox($('piFilterStatus').value,$('piFilterType').value);
+  $('piFilterStatus').onchange=applyFilters;
+  $('piFilterType').onchange=applyFilters;
+  await loadPortalInbox('pending','');
+  $('piFilterStatus').value='pending';
+}
+
+async function loadPortalInbox(statusFilter,typeFilter){
+  const list=$('piList'); if(!list) return;
+  list.innerHTML='<div class="loading"><div class="spinner"></div></div>';
+  let q=BE.db.from('portal_requests')
+    .select('id,type,date_start,date_end,message,status,manager_comment,created_at,employee:employees(first_name,last_name,role,department)')
+    .eq('hotel_id',hotelId).order('created_at',{ascending:false}).limit(200);
+  if(statusFilter) q=q.eq('status',statusFilter);
+  if(typeFilter)   q=q.eq('type',typeFilter);
+  const {data,error}=await q;
+  if(error){list.innerHTML=`<div class="empty-state"><i class="fa-solid fa-triangle-exclamation"></i><p>${error.message}</p></div>`;return;}
+  const rows=data||[];
+  const cEl=$('piCount'); if(cEl) cEl.textContent=`${rows.length} demande${rows.length!==1?'s':''}`;
+  if(!rows.length){list.innerHTML='<div class="empty-state"><i class="fa-solid fa-inbox"></i><p>Aucune demande</p></div>';return;}
+  list.innerHTML=rows.map(r=>{
+    const emp=r.employee||{};
+    const name=`${emp.first_name||''} ${emp.last_name||''}`.trim()||'—';
+    const col=REQ_STATUS_COLORS[r.status]||'#9ca3af';
+    const dates=r.date_end&&r.date_end!==r.date_start?`${fmtDate(r.date_start)} → ${fmtDate(r.date_end)}`:fmtDate(r.date_start);
+    return `<div class="card" style="margin-bottom:12px;cursor:pointer" onclick="openPortalRequest('${r.id}')">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;font-size:15px">${esc(name)}</div>
+          <div style="font-size:12px;color:var(--ink2)">${esc(emp.role||'')}${emp.department?' · '+esc(emp.department):''}</div>
+        </div>
+        <div style="text-align:right">
+          <span style="background:${col}22;color:${col};font-size:12px;font-weight:600;padding:3px 10px;border-radius:20px">${REQ_STATUS_LABELS[r.status]||r.status}</span>
+        </div>
+      </div>
+      <div style="margin-top:10px;display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--ink2)">
+        <span><i class="fa-solid fa-tag" style="margin-right:4px"></i>${REQ_TYPE_LABELS[r.type]||r.type}</span>
+        <span><i class="fa-regular fa-calendar" style="margin-right:4px"></i>${dates}</span>
+        <span style="margin-left:auto;font-size:11px">${new Date(r.created_at).toLocaleDateString('fr-FR')}</span>
+      </div>
+      ${r.message?`<div style="margin-top:8px;font-size:13px;color:var(--ink);background:var(--bg2);padding:8px 12px;border-radius:8px;white-space:pre-wrap">${esc(r.message)}</div>`:''}
+      ${r.manager_comment?`<div style="margin-top:6px;font-size:12px;color:var(--violet);background:var(--violet-bg);padding:6px 10px;border-radius:6px"><i class="fa-solid fa-comment-dots" style="margin-right:4px"></i>${esc(r.manager_comment)}</div>`:''}
+    </div>`;
+  }).join('');
+}
+
+function fmtDate(d){if(!d)return'—';return new Date(d+'T00:00:00').toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric'});}
+
+async function openPortalRequest(id){
+  const {data:r,error}=await BE.db.from('portal_requests')
+    .select('*,employee:employees(id,first_name,last_name,role,department)')
+    .eq('id',id).single();
+  if(error||!r){flash('Impossible de charger la demande');return;}
+  const emp=r.employee||{};
+  const name=`${emp.first_name||''} ${emp.last_name||''}`.trim()||'—';
+  const col=REQ_STATUS_COLORS[r.status]||'#9ca3af';
+  const dates=r.date_end&&r.date_end!==r.date_start?`${fmtDate(r.date_start)} → ${fmtDate(r.date_end)}`:fmtDate(r.date_start);
+  const canAct=r.status==='pending';
+  showModal(`
+    <div style="padding:24px;min-width:320px;max-width:560px">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
+        <div style="flex:1">
+          <div style="font-size:18px;font-weight:700">${esc(name)}</div>
+          <div style="font-size:13px;color:var(--ink2)">${esc(emp.role||'')}${emp.department?' · '+esc(emp.department):''}</div>
+        </div>
+        <span style="background:${col}22;color:${col};font-size:13px;font-weight:600;padding:4px 12px;border-radius:20px">${REQ_STATUS_LABELS[r.status]||r.status}</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+        <div><div style="font-size:11px;color:var(--ink2);text-transform:uppercase;letter-spacing:.5px">Type</div><div style="font-weight:600">${REQ_TYPE_LABELS[r.type]||r.type}</div></div>
+        <div><div style="font-size:11px;color:var(--ink2);text-transform:uppercase;letter-spacing:.5px">Dates</div><div style="font-weight:600">${dates}</div></div>
+        <div><div style="font-size:11px;color:var(--ink2);text-transform:uppercase;letter-spacing:.5px">Soumis le</div><div>${new Date(r.created_at).toLocaleDateString('fr-FR')}</div></div>
+        ${r.attachment_url?`<div><div style="font-size:11px;color:var(--ink2);text-transform:uppercase;letter-spacing:.5px">Justificatif</div><div><a href="${esc(r.attachment_url)}" target="_blank" style="color:var(--violet)">Voir le fichier</a></div></div>`:''}
+      </div>
+      ${r.message?`<div style="margin-bottom:16px"><div style="font-size:11px;color:var(--ink2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Message du salarié</div><div style="background:var(--bg2);padding:12px;border-radius:8px;font-size:13px;white-space:pre-wrap">${esc(r.message)}</div></div>`:''}
+      ${canAct?`
+      <div style="margin-bottom:16px">
+        <label style="font-size:11px;color:var(--ink2);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">Commentaire (optionnel)</label>
+        <textarea id="piComment" class="input" style="width:100%;height:80px;resize:vertical" placeholder="Motif de décision, informations complémentaires…"></textarea>
+      </div>
+      <div style="display:flex;gap:12px">
+        <button class="btn p" style="flex:1" onclick="decidePortalRequest('${id}','approved')"><i class="fa-solid fa-check"></i> Approuver</button>
+        <button class="btn" style="flex:1;background:#fee2e2;color:#dc2626;border-color:#fca5a5" onclick="decidePortalRequest('${id}','rejected')"><i class="fa-solid fa-xmark"></i> Refuser</button>
+        <button class="btn g" onclick="closeModal()">Annuler</button>
+      </div>
+      `:`<div style="text-align:center;padding:12px 0"><button class="btn g" onclick="closeModal()">Fermer</button></div>`}
+    </div>`);
+}
+
+async function decidePortalRequest(id,decision){
+  const comment=$('piComment')?.value.trim()||null;
+  const {error}=await BE.db.from('portal_requests').update({
+    status:decision,
+    manager_comment:comment,
+    decided_at:new Date().toISOString()
+  }).eq('id',id).eq('hotel_id',hotelId);
+  if(error){flash('Erreur: '+error.message);return;}
+  closeModal();
+  flash(decision==='approved'?'Demande approuvée ✓':'Demande refusée');
+  await loadPortalInbox($('piFilterStatus')?.value||'',$('piFilterType')?.value||'');
+}
+
 /* ===================== FICHE (drawer) ===================== */
+async function loadPortalSection(s){
+  const el=$('portalSection'), badge=$('portalStatusBadge');
+  if(!el) return;
+  const enabled=s.portal_enabled||false;
+  if(badge) badge.innerHTML=enabled
+    ?`<span style="font-size:10.5px;background:#f0fdf4;color:#16a34a;padding:2px 8px;border-radius:6px;font-weight:600"><i class="fa-solid fa-check"></i> Activé</span>`
+    :`<span style="font-size:10.5px;background:#fef9c3;color:#854d0e;padding:2px 8px;border-radius:6px;font-weight:600">Non activé</span>`;
+
+  if(enabled){
+    el.innerHTML=`<div style="font-size:12.5px;color:var(--ink2);margin-bottom:10px">Le salarié a accès à son espace en ligne.</div>
+      <button class="btn g" style="width:100%;margin-bottom:8px;justify-content:center;font-size:12px" onclick="reinvitePortal('${s.id}','${(s.email||'').replace(/'/g,"\\'")}')">
+        <i class="fa-solid fa-envelope-circle-check"></i> Renvoyer l'invitation
+      </button>
+      <button class="btn d" style="width:100%;justify-content:center;font-size:12px" onclick="disablePortal('${s.id}')">
+        <i class="fa-solid fa-ban"></i> Désactiver l'accès portail
+      </button>`;
+  } else {
+    el.innerHTML=`<div style="font-size:12.5px;color:var(--ink2);margin-bottom:10px">
+      ${s.email?'Invitez ce salarié à accéder à son espace : planning, pointage, coffre-fort, demandes.':'<span style="color:var(--red)"><i class="fa-solid fa-triangle-exclamation"></i> Email requis pour activer le portail.</span>'}
+    </div>
+    ${s.email?`<button class="btn p" style="width:100%;justify-content:center;font-size:12px" onclick="invitePortal('${s.id}','${(s.email||'').replace(/'/g,"\\'")}')">
+      <i class="fa-solid fa-paper-plane"></i> Inviter au portail
+    </button>`:'<button class="btn g" style="width:100%;justify-content:center;font-size:12px" onclick="closeFiche();openEmpForm(staffObj(\''+s.id+'\'))"><i class="fa-solid fa-pen"></i> Ajouter un email d\'abord</button>'}`;
+  }
+}
+
+function staffObj(id){ return staff.find(x=>x.id===id); }
+
+async function invitePortal(eid, email){
+  if(!email){flash('Email manquant');return;}
+  if(!confirm(`Envoyer une invitation portail à ${email} ?`)) return;
+  try{
+    const {data:tok,error}=await BE.sb.rpc('pl_portal_invite',{p_employee_id:eid});
+    if(error) throw error;
+    // Envoyer un magic link Supabase avec l'email du salarié
+    const {error:me}=await BE.sb.auth.admin?.inviteUserByEmail
+      ? await BE.sb.auth.admin.inviteUserByEmail(email,{redirectTo:window.location.origin+'/portal.html'})
+      : {error:null};
+    flash('Invitation envoyée à '+email+' ✓');
+    const s=staff.find(x=>x.id===eid);
+    if(s){s.portal_enabled=true;loadPortalSection(s);}
+  }catch(e){
+    // Fallback si RPC non encore déployée
+    flash('Portail activé. Invitez le salarié manuellement à : '+window.location.origin+'/portal.html');
+    const s=staff.find(x=>x.id===eid); if(s){s.portal_enabled=true;loadPortalSection(s);}
+  }
+}
+
+async function reinvitePortal(eid, email){
+  if(!email){flash('Email manquant');return;}
+  flash('Renvoi de l\'invitation à '+email+'…');
+  await invitePortal(eid, email);
+}
+
+async function disablePortal(eid){
+  if(!confirm('Désactiver l\'accès portail de ce salarié ?')) return;
+  try{
+    const {error}=await BE.sb.from('employees').update({portal_enabled:false,portal_auth_id:null}).eq('id',eid);
+    if(error) throw error;
+    flash('Accès portail désactivé');
+    const s=staff.find(x=>x.id===eid); if(s){s.portal_enabled=false;loadPortalSection(s);}
+  }catch(e){flash('Erreur : '+e.message);}
+}
+
 async function openFiche(eid){
   const s=staff.find(x=>x.id===eid); if(!s)return;
   const badge=s.contract_type==='CDI'?'cdi':s.contract_type==='CDD'?'cdd':'ext';
@@ -4818,6 +4871,8 @@ async function openFiche(eid){
       ${s.residency_permit_number?`<div class="fr"><span class="k">Titre de séjour</span><span class="v">${s.residency_permit_number}${s.residency_permit_expires?` (exp. ${s.residency_permit_expires})`:''}</span></div>`:''}
     </div>`:''}
     ${full?'<div class="sec"><h4>Documents RH <button class="btn p" data-upload style="float:right;padding:5px 10px;font-size:11.5px"><i class="fa-solid fa-upload"></i> Ajouter</button></h4><div id="docs">Chargement…</div></div>':''}
+    ${full?`<div class="sec"><h4>Portail salarié <span id="portalStatusBadge" style="float:right"></span></h4>
+      <div id="portalSection">Chargement…</div></div>`:''}
     ${full?`<div class="sec" style="display:flex;gap:10px"><button class="btn g" data-edit style="flex:1;justify-content:center"><i class="fa-solid fa-pen"></i> Modifier</button>
       ${s.active
         ? '<button class="btn d" data-del style="flex:1;justify-content:center"><i class="fa-solid fa-trash"></i> Marquer comme parti</button>'
@@ -4859,6 +4914,9 @@ async function openFiche(eid){
       ficheAv.appendChild(delPhotoBtn);
     }
   }
+  // Section Portail salarié
+  if(full && $('portalSection')) loadPortalSection(s);
+
   const ed=$('drawer').querySelector('[data-edit]');
   if(ed) ed.onclick=()=>{closeFiche();openEmpForm(s);};
   const dl=$('drawer').querySelector('[data-del]');
@@ -4909,6 +4967,9 @@ async function drawEmployeeDocs(s){
       <span class="badge-st ${status}">${statusLabel}</span>
       <div class="acts">
         ${d.file_path?'<button data-act="dl" title="Télécharger"><i class="fa-solid fa-download"></i></button>':''}
+        ${d.file_path&&d.signature_status==='none'?'<button data-act="sign" title="Envoyer pour signature électronique" style="color:#7c3aed"><i class="fa-solid fa-pen-nib"></i></button>':''}
+        ${d.signature_status==='pending'?'<span title="En attente de signature" style="font-size:11px;color:#d97706;font-weight:600;padding:2px 6px;background:#fffbeb;border-radius:6px">⏳ Signature</span>':''}
+        ${d.signature_status==='signed'?'<span title="Signé électroniquement" style="font-size:11px;color:#16a34a;font-weight:600;padding:2px 6px;background:#f0fdf4;border-radius:6px">✅ Signé</span>':''}
         <button data-act="del" class="del" title="Supprimer"><i class="fa-solid fa-trash"></i></button>
       </div>
     </div>`;
@@ -4920,6 +4981,8 @@ async function drawEmployeeDocs(s){
       if(act==='dl'){
         try{const url=await BE.getSignedDocUrl(d.file_path);await BE.logAudit('document_download','employee_document',d.id,s.id,{doc_type:d.doc_type});window.open(url,'_blank');}
         catch(e){flash('Erreur : '+(e.message||e));}
+      }else if(act==='sign'){
+        openSignatureModal(s,d);
       }else if(act==='del'){
         if(!confirm('Supprimer ce document ?'))return;
         try{await BE.deleteEmployeeDocument(d.id);await BE.logAudit('document_delete','employee_document',d.id,s.id,{doc_type:d.doc_type});flash('Document supprimé');drawEmployeeDocs(s);}
@@ -4927,6 +4990,68 @@ async function drawEmployeeDocs(s){
       }
     });
   });
+}
+
+/* ── Signature électronique YouSign ────────────────────────────────────── */
+const SUPABASE_FUNCTIONS_URL='https://hzrzkvdebaadditvbqis.supabase.co/functions/v1';
+
+function openSignatureModal(s,doc){
+  const name=`${s.first_name||''} ${s.last_name||''}`.trim();
+  showModal(`<div style="padding:24px;max-width:500px">
+    <div style="font-size:17px;font-weight:700;margin-bottom:6px"><i class="fa-solid fa-pen-nib" style="color:#7c3aed;margin-right:8px"></i>Envoyer pour signature électronique</div>
+    <p style="font-size:13px;color:var(--ink2);margin-bottom:18px">Le document sera envoyé à <b>${esc(name)}</b> via le portail salarié. La signature se fait en ligne — valeur légale avancée (eIDAS).</p>
+    <div style="background:var(--bg2);padding:12px 16px;border-radius:10px;margin-bottom:16px;font-size:13px">
+      <div><i class="fa-regular fa-file-lines" style="margin-right:6px;color:var(--violet)"></i><b>${esc(doc.label||doc.doc_type)}</b></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
+      <div class="fld"><label style="font-size:12px;color:var(--ink2);display:block;margin-bottom:4px">Prénom *</label>
+        <input class="input" id="sig_fn" value="${esc(s.first_name||'')}"></div>
+      <div class="fld"><label style="font-size:12px;color:var(--ink2);display:block;margin-bottom:4px">Nom *</label>
+        <input class="input" id="sig_ln" value="${esc(s.last_name||'')}"></div>
+      <div class="fld"><label style="font-size:12px;color:var(--ink2);display:block;margin-bottom:4px">Email *</label>
+        <input class="input" id="sig_email" type="email" value="${esc(s.email||'')}"></div>
+      <div class="fld"><label style="font-size:12px;color:var(--ink2);display:block;margin-bottom:4px">Téléphone (OTP)</label>
+        <input class="input" id="sig_phone" placeholder="+33612345678" value="${esc(s.phone||'')}"></div>
+    </div>
+    <div style="display:flex;gap:10px">
+      <button class="btn p" id="sigSendBtn" onclick="submitSignatureRequest('${s.id}','${doc.id}')">
+        <i class="fa-solid fa-paper-plane"></i> Envoyer la demande
+      </button>
+      <button class="btn g" onclick="closeModal()">Annuler</button>
+    </div>
+    <div id="sigProgress" style="display:none;margin-top:12px;font-size:13px;color:var(--violet)"></div>
+  </div>`);
+}
+
+async function submitSignatureRequest(employeeId, documentId){
+  const fn=$('sig_fn')?.value.trim(), ln=$('sig_ln')?.value.trim();
+  const email=$('sig_email')?.value.trim(), phone=$('sig_phone')?.value.trim();
+  if(!fn||!ln||!email){flash('Prénom, nom et email sont requis');return;}
+  const s=staff.find(x=>x.id===employeeId); if(!s) return;
+  const btn=$('sigSendBtn'); if(btn) btn.disabled=true;
+  const prog=$('sigProgress'); if(prog){prog.style.display='';prog.textContent='Envoi en cours…';}
+  try{
+    const {data:{session}}=await BE.sb.auth.getSession();
+    const resp=await fetch(`${SUPABASE_FUNCTIONS_URL}/yousign-create`,{
+      method:'POST',
+      headers:{'Authorization':`Bearer ${session?.access_token}`,'Content-Type':'application/json'},
+      body:JSON.stringify({
+        document_id:documentId, employee_id:employeeId, hotel_id:hotelId,
+        signer_first_name:fn, signer_name:ln, signer_email:email,
+        signer_phone:phone||null,
+      }),
+    });
+    const result=await resp.json();
+    if(!resp.ok||result.error) throw new Error(result.error||'Erreur inconnue');
+    closeModal();
+    flash('✅ Demande de signature envoyée — le salarié peut signer depuis son portail');
+    // Rafraîchir la liste des documents
+    const sObj=staff.find(x=>x.id===employeeId);
+    if(sObj) await drawEmployeeDocs(sObj);
+  }catch(e){
+    if(prog){prog.style.color='#dc2626';prog.textContent='Erreur : '+e.message;}
+    if(btn) btn.disabled=false;
+  }
 }
 
 function openDocUploadForm(s){
@@ -5096,7 +5221,6 @@ function openEmpForm(s){
   };
 }
 function closeModal(){$('modalbg').classList.remove('on');}
-function showModal(html){$('modal').innerHTML=html;$('modalbg').classList.add('on');}
 
 /* ---- Helper : en-tête standard de modale ----
    icon    = classe Font Awesome  ex: 'fa-solid fa-upload'
