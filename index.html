@@ -5547,11 +5547,28 @@ window.__rh={
 
 /* ===================== BOOT ===================== */
 async function boot(){
+  // Sécurité : si l'URL commence par /salarie, rediriger vers le portail salarié
+  if(window.location.pathname.startsWith('/salarie')){
+    window.location.replace('/salarie');
+    return;
+  }
+
+  // Traiter le token Supabase arrivant via /auth/callback (invitation manager)
+  const hash = window.location.hash;
+  const search = window.location.search;
+  const hasToken = hash.includes('access_token')
+    || search.includes('access_token')
+    || search.includes('code=');
+
   // Brancher le file input Excel une seule fois (présent dans le DOM global)
   $('xlsxFile').onchange=e=>{const f=e.target.files[0]; if(f) handleImport(f); e.target.value='';};
   try{
     if(TEST_MODE){ BE=makeTestBE(); await start(); return; }
     BE=await makeRealBE();
+    if(hasToken){
+      const {data,error}=await BE.sb.auth.getSessionFromUrl();
+      if(!error && data?.session) window.history.replaceState(null,'','/');
+    }
     const {data:{session}}=await BE.sb.auth.getSession();
     if(!session) renderLogin(); else await start();
   }catch(e){showFatal(e);}

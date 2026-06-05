@@ -1,9 +1,12 @@
 {
   "rewrites": [
-    { "source": "/salarie",   "destination": "/portal.html" },
-    { "source": "/salarié",   "destination": "/portal.html" },
-    { "source": "/sw.js",     "destination": "/sw.js" },
-    { "source": "/(.*)",      "destination": "/index.html" }
+    { "source": "/salarie/auth/callback", "destination": "/portal.html" },
+    { "source": "/salarie/(.*)",          "destination": "/portal.html" },
+    { "source": "/salarie",               "destination": "/portal.html" },
+    { "source": "/salarié",               "destination": "/portal.html" },
+    { "source": "/auth/callback",         "destination": "/index.html" },
+    { "source": "/sw.js",                 "destination": "/sw.js" },
+    { "source": "/(.*)",                  "destination": "/index.html" }
   ],
   "headers": [
     {

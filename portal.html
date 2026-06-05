@@ -340,13 +340,17 @@ const REQ_TYPES={
 async function boot(){
   $('view').innerHTML='<div class="loading"><div class="spinner"></div><div>Chargement…</div></div>';
 
-  // Vérifier si on arrive depuis un lien magique (magic link)
+  // Traiter le token Supabase s'il est présent dans l'URL (invitation, magic link, recovery)
   const hash = window.location.hash;
-  if(hash.includes('access_token') || hash.includes('type=magiclink') || hash.includes('type=recovery')){
+  const search = window.location.search;
+  const hasToken = hash.includes('access_token')
+    || search.includes('access_token')
+    || search.includes('code=');
+  if(hasToken){
     const {data,error} = await sb.auth.getSessionFromUrl();
-    if(!error && data.session){
+    if(!error && data?.session){
       session = data.session;
-      window.history.replaceState(null,'',window.location.pathname);
+      window.history.replaceState(null,'','/salarie');
     }
   }
 
