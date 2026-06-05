@@ -3,7 +3,6 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SERVICE_KEY  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const ANON_KEY     = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
-const SITE_URL     = Deno.env.get('SITE_URL') ?? 'https://rh.flowtym.com';
 
 const ALLOWED = [
   'http://localhost','http://localhost:3000','http://localhost:5173',
@@ -25,10 +24,12 @@ Deno.serve(async (req) => {
   const json = (b: unknown, s=200) => new Response(JSON.stringify(b),{status:s,headers:{...h,'Content-Type':'application/json'}});
 
   try {
-    const { email, full_name, role, hotel_id } = await req.json();
+    const { email, full_name, role, hotel_id, password } = await req.json();
     if (!email || !role || !hotel_id) return json({error:'email, role et hotel_id sont requis'},400);
     if (!VALID_ROLES.includes(role)) return json({error:`Role inconnu: ${role}`},400);
+    if (!password || password.length < 6) return json({error:'Mot de passe requis (6 caractères minimum)'},400);
 
+    // Vérifier le JWT de l'appelant
     const authHdr = req.headers.get('Authorization');
     if (!authHdr) return json({error:'Non authentifie'},401);
     const anon = createClient(SUPABASE_URL, ANON_KEY, {global:{headers:{Authorization:authHdr}}});
@@ -37,6 +38,7 @@ Deno.serve(async (req) => {
 
     const admin = createClient(SUPABASE_URL, SERVICE_KEY);
 
+    // Vérifier que l'appelant est direction ou admin_hotel pour cet hôtel
     const { data: cu } = await admin.from('users').select('id').eq('auth_id',user.id).maybeSingle();
     if (!cu) return json({error:'Profil appelant introuvable'},403);
     const { data: ch } = await admin.from('user_hotels').select('role')
@@ -46,50 +48,36 @@ Deno.serve(async (req) => {
 
     let targetAuthId: string|null = null;
     let alreadyExisted = false;
-    let emailSent = false;
 
-    const { data: inv, error: invErr } = await admin.auth.admin.inviteUserByEmail(email, {
-      data: { full_name: full_name||'', invited_hotel_id: hotel_id, invited_role: role },
-      options: { redirectTo: SITE_URL },
-    });
+    // Chercher si l'utilisateur existe déjà dans auth
+    const { data: list } = await admin.auth.admin.listUsers();
+    const existing = (list?.users ?? []).find((u: {email?:string;id:string}) =>
+      (u.email ?? '').toLowerCase() === email.toLowerCase());
 
-    if (invErr) {
-      const msg = invErr.message||'';
-      if (!msg.includes('already') && !msg.includes('email_exists'))
-        return json({error: msg},400);
-
+    if (existing) {
+      // Mettre à jour le mot de passe de l'utilisateur existant
       alreadyExisted = true;
-      const { data: list } = await admin.auth.admin.listUsers();
-      const found = (list?.users??[]).find((u:{email?:string;id:string}) =>
-        (u.email??'').toLowerCase()===email.toLowerCase());
-      targetAuthId = found?.id ?? null;
-
-      // Envoyer un magic link pour permettre la connexion
-      if (targetAuthId) {
-        const { error: otpErr } = await admin.auth.admin.generateLink({
-          type: 'magiclink',
-          email,
-          options: { redirectTo: SITE_URL },
-        });
-        if (otpErr) {
-          // Fallback: password reset via l'API publique
-          const resetRes = await fetch(`${SUPABASE_URL}/auth/v1/recover`, {
-            method: 'POST',
-            headers: { 'apikey': ANON_KEY, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email }),
-          });
-          emailSent = resetRes.ok;
-        } else {
-          emailSent = true;
-        }
-      }
+      targetAuthId = existing.id;
+      const { error: updErr } = await admin.auth.admin.updateUserById(existing.id, {
+        password,
+        email_confirm: true,
+      });
+      if (updErr) return json({error:'Erreur mise à jour mot de passe: '+updErr.message},500);
     } else {
-      targetAuthId = inv?.user?.id ?? null;
-      emailSent = true;
+      // Créer un nouvel utilisateur avec email + mot de passe
+      const { data: newUser, error: createErr } = await admin.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true, // pas besoin de vérification email
+        user_metadata: { full_name: full_name||'', invited_hotel_id: hotel_id, invited_role: role },
+      });
+      if (createErr) return json({error:'Erreur création compte: '+createErr.message},500);
+      targetAuthId = newUser?.user?.id ?? null;
     }
 
-    if (!targetAuthId) return json({error:"Impossible de retrouver l'utilisateur dans auth"},500);
+    if (!targetAuthId) return json({error:"Impossible de créer ou retrouver le compte"},500);
 
+    // Upsert atomique dans public.users + user_hotels
     const { data: userId, error: rpcErr } = await admin.rpc('rh_grant_hotel_access', {
       p_auth_id:   targetAuthId,
       p_email:     email,
@@ -101,11 +89,11 @@ Deno.serve(async (req) => {
 
     await admin.from('hr_document_audit_logs').insert({
       hotel_id, actor_user_id: cu.id, actor_email: user.email,
-      action:'invite_user', entity_type:'user', entity_id: userId,
+      action:'create_user_access', entity_type:'user', entity_id: userId,
       details:{email, role, already_existed: alreadyExisted},
-    }).maybeSingle().catch(()=>{});
+    }).catch(()=>{});
 
-    return json({ success:true, user_id: userId, already_existed: alreadyExisted, email_sent: emailSent });
+    return json({ success:true, user_id: userId, already_existed: alreadyExisted });
 
   } catch(e) {
     console.error('invite-user fatal:', e);

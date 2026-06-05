@@ -586,9 +586,8 @@ async function makeRealBE(){
     async listAccess(h){const {data,error}=await sb.rpc('rh_list_users_for_hotel',{p_hotel:h});must(error,"Liste des accès");return data||[];},
     async updateAccess(h,user_id,role){const {error}=await sb.rpc('rh_update_user_role',{p_hotel:h,p_user_id:user_id,p_role:role});must(error,"Modification du rôle");},
     async revokeAccess(h,user_id){const {error}=await sb.rpc('rh_revoke_user_access',{p_hotel:h,p_user_id:user_id});must(error,"Révocation accès");},
-    async inviteUser(h,email,full_name,role){
-      const {data,error}=await sb.functions.invoke('invite-user',{body:{hotel_id:h,email,full_name,role}});
-      // Extraire le vrai message d'erreur (le SDK masque tout derrière "non-2xx")
+    async inviteUser(h,email,full_name,role,password){
+      const {data,error}=await sb.functions.invoke('invite-user',{body:{hotel_id:h,email,full_name,role,password}});
       if(error){
         let msg=error.message||'Erreur inconnue';
         try{const ctx=error.context;if(ctx?.json){const j=await ctx.json();if(j?.error)msg=j.error;}
@@ -816,9 +815,8 @@ function makeTestBE(){
     ];},
     async updateAccess(h,user_id,role){/* no-op en test */ return; },
     async revokeAccess(h,user_id){/* no-op en test */ return; },
-    async inviteUser(h,email,full_name,role){
-      /* simulation test : ajoute un utilisateur fictif dans la liste */
-      return {success:true,user_id:'inv-'+Date.now()};
+    async inviteUser(h,email,full_name,role,password){
+      return {success:true,user_id:'inv-'+Date.now(),already_existed:false};
     },
     async listClockings(h,day){return clockings.filter(c=>c.hotel_id===h && c.day===day).sort((a,b)=>a.clock_in_ts.localeCompare(b.clock_in_ts));},
     async listClockingsByRange(h,from,to){return clockings.filter(c=>c.hotel_id===h && c.day>=from && c.day<=to).sort((a,b)=>a.day===b.day?a.clock_in_ts.localeCompare(b.clock_in_ts):a.day.localeCompare(b.day));},
@@ -4177,13 +4175,26 @@ async function exportOrgPNG(){
 }
 
 /* ===================== INVITATION UTILISATEUR ===================== */
+function _genPassword(){
+  const adjs=['Bleu','Vert','Rose','Gris','Brun','Ciel','Beau','Grand'];
+  const noms=['Hotel','Royal','Plaza','Parc','Soleil','Matin','Foyer'];
+  const n=Math.floor(Math.random()*900+100);
+  return adjs[Math.floor(Math.random()*adjs.length)]+noms[Math.floor(Math.random()*noms.length)]+n;
+}
+function _copyText(txt,btn){
+  navigator.clipboard.writeText(txt).then(()=>{
+    const orig=btn.innerHTML; btn.innerHTML='<i class="fa-solid fa-check"></i>';
+    setTimeout(()=>{btn.innerHTML=orig;},2000);
+  });
+}
 function openInviteForm(onSuccess){
   const ROLES_OPTS=Object.keys(ROLE_LABELS);
+  const pwd=_genPassword();
   $('modal').innerHTML=`
     <div class="mh">
-      <div class="mh-ic"><i class="fa-solid fa-envelope"></i></div>
-      <div class="mh-ti"><h2>Inviter un utilisateur</h2>
-        <div class="sub">Un e-mail d'invitation sera envoyé. L'accès est limité à cet hôtel.</div></div>
+      <div class="mh-ic"><i class="fa-solid fa-user-plus"></i></div>
+      <div class="mh-ti"><h2>Créer un accès collaborateur</h2>
+        <div class="sub">Définissez les identifiants et transmettez-les directement à l'employé.</div></div>
       <button class="mh-x" onclick="closeModal()" title="Fermer"><i class="fa-solid fa-xmark"></i></button>
     </div>
     <div class="mb">
@@ -4191,46 +4202,86 @@ function openInviteForm(onSuccess){
         <div class="fld"><label>Prénom</label><input type="text" id="invFn" placeholder="Prénom"></div>
         <div class="fld"><label>Nom</label><input type="text" id="invLn" placeholder="Nom"></div>
       </div>
-      <div class="fld"><label>E-mail *</label><input type="email" id="invEmail" placeholder="prenom.nom@hotel.fr"></div>
+      <div class="fld"><label>E-mail (identifiant) *</label><input type="email" id="invEmail" placeholder="prenom.nom@hotel.fr"></div>
       <div class="fld"><label>Rôle *</label>
         <select id="invRole">
           ${ROLES_OPTS.map(r=>`<option value="${r}">${ROLE_LABELS[r]}</option>`).join('')}
         </select>
       </div>
-      <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:10px;padding:12px 14px;font-size:12px;color:#92400e;margin-top:8px">
-        <i class="fa-solid fa-circle-info"></i> L'utilisateur recevra un e-mail de Supabase pour définir son mot de passe.
-        S'il a déjà un compte, son accès à cet hôtel sera simplement ajouté avec le rôle choisi.
+      <div class="fld"><label>Mot de passe *</label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input type="text" id="invPwd" value="${pwd}" style="flex:1;font-family:monospace;letter-spacing:.05em">
+          <button type="button" class="btn g" style="flex-shrink:0;padding:0 10px" title="Générer un nouveau mot de passe" onclick="$('invPwd').value=_genPassword()">
+            <i class="fa-solid fa-rotate"></i>
+          </button>
+        </div>
       </div>
-      <div id="invErr" style="color:#dc2626;font-size:12.5px;margin-top:10px;min-height:16px"></div>
+      <div id="invErr" style="color:#dc2626;font-size:12.5px;margin-top:6px;min-height:16px"></div>
     </div>
     <div class="mact">
       <button class="btn g" onclick="closeModal()">Annuler</button>
-      <button class="btn p" id="invSend"><i class="fa-solid fa-paper-plane"></i> Envoyer l'invitation</button>
+      <button class="btn p" id="invSend"><i class="fa-solid fa-user-check"></i> Créer l'accès</button>
     </div>`;
   $('modalbg').classList.add('on');
   $('invSend').onclick=async()=>{
     const email=$('invEmail').value.trim();
     const full_name=($('invFn').value.trim()+' '+$('invLn').value.trim()).trim();
     const role=$('invRole').value;
+    const password=$('invPwd').value.trim();
     $('invErr').textContent='';
     if(!email){$('invErr').textContent='E-mail requis.';return;}
     if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){$('invErr').textContent='Format e-mail invalide.';return;}
-    $('invSend').disabled=true; $('invSend').innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Envoi…';
+    if(password.length<6){$('invErr').textContent='Mot de passe trop court (6 caractères min).';return;}
+    $('invSend').disabled=true; $('invSend').innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Création…';
     try{
-      const res=await BE.inviteUser(hotelId,email,full_name,role);
-      closeModal();
-      if(res?.already_existed){
-        flash(res?.email_sent
-          ? `Accès accordé à ${email} — lien de connexion envoyé (vérifier spams)`
-          : `Accès accordé à ${email} — compte existant, demandez-lui de se connecter sur rh.flowtym.com`);
-      } else {
-        flash(`Invitation envoyée à ${email} — vérifier les spams si non reçue dans 5 min`);
-      }
+      const res=await BE.inviteUser(hotelId,email,full_name,role,password);
+      // Afficher la fiche identifiants à partager
+      const url='https://rh.flowtym.com/salarié';
+      const shareMsg=`Accès Flowtym RH\nURL : ${url}\nIdentifiant : ${email}\nMot de passe : ${password}`;
+      const smsHref='sms:?body='+encodeURIComponent(shareMsg);
+      const waHref='https://wa.me/?text='+encodeURIComponent(shareMsg);
+      $('modal').innerHTML=`
+        <div class="mh">
+          <div class="mh-ic" style="background:#f0fdf4;color:#16a34a"><i class="fa-solid fa-circle-check"></i></div>
+          <div class="mh-ti"><h2>Accès créé${res?.already_existed?' (mis à jour)':''}</h2>
+            <div class="sub">Transmettez ces identifiants à <b>${email}</b> par SMS ou WhatsApp.</div>
+          </div>
+          <button class="mh-x" onclick="closeModal()" title="Fermer"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="mb">
+          <div style="background:#f8f9fb;border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:10px">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <div><div style="font-size:11px;color:var(--muted);margin-bottom:2px">URL de connexion</div>
+                <code style="font-size:13px;font-weight:600;color:var(--violet)">${url}</code></div>
+              <button class="btn g" id="cpUrl" style="padding:0 10px"><i class="fa-solid fa-copy"></i></button>
+            </div>
+            <div style="border-top:1px solid var(--line);padding-top:10px;display:flex;justify-content:space-between;align-items:center">
+              <div><div style="font-size:11px;color:var(--muted);margin-bottom:2px">Identifiant</div>
+                <code style="font-size:13px">${email}</code></div>
+              <button class="btn g" id="cpEmail" style="padding:0 10px"><i class="fa-solid fa-copy"></i></button>
+            </div>
+            <div style="border-top:1px solid var(--line);padding-top:10px;display:flex;justify-content:space-between;align-items:center">
+              <div><div style="font-size:11px;color:var(--muted);margin-bottom:2px">Mot de passe</div>
+                <code style="font-size:15px;font-weight:700;letter-spacing:.08em">${password}</code></div>
+              <button class="btn g" id="cpPwd" style="padding:0 10px"><i class="fa-solid fa-copy"></i></button>
+            </div>
+          </div>
+          <div style="margin-top:14px;display:flex;gap:10px">
+            <a href="${smsHref}" class="btn g" style="flex:1;text-align:center"><i class="fa-solid fa-comment-sms"></i> Envoyer par SMS</a>
+            <a href="${waHref}" target="_blank" class="btn g" style="flex:1;text-align:center;background:#dcfce7;color:#15803d"><i class="fa-brands fa-whatsapp"></i> WhatsApp</a>
+          </div>
+        </div>
+        <div class="mact">
+          <button class="btn p" onclick="closeModal()"><i class="fa-solid fa-check"></i> Terminé</button>
+        </div>`;
+      $('cpUrl').onclick=e=>_copyText(url,e.currentTarget);
+      $('cpEmail').onclick=e=>_copyText(email,e.currentTarget);
+      $('cpPwd').onclick=e=>_copyText(password,e.currentTarget);
       if(onSuccess) onSuccess();
     }catch(e){
       $('invErr').textContent='Erreur : '+(e.message||e);
       $('invSend').disabled=false;
-      $('invSend').innerHTML='<i class="fa-solid fa-paper-plane"></i> Envoyer l\'invitation';
+      $('invSend').innerHTML='<i class="fa-solid fa-user-check"></i> Créer l\'accès';
     }
   };
 }
