@@ -2073,87 +2073,416 @@ function openPersonnelImport(){
 }
 
 /* ===================== VUE CONTRATS (sous-onglets) ===================== */
-let contractsSubTab = 'overview';  // overview | templates | generate
+let contractsSubTab = 'dpae';  // dpae | templates | generate
 
 function renderContracts(){
   const hName = hotels.find(h=>h.id===hotelId)?.name||'';
   $('view').innerHTML = `<div class="page">
-    <div class="phead"><div><h1>Contrats</h1><div class="sub">${hName}</div></div></div>
+    <div class="phead"><div><h1>${contractsSubTab==='dpae'?'DPAE':contractsSubTab==='templates'?'Modèles de contrats':'Générer un contrat'}</h1>
+      <div class="sub">${contractsSubTab==='dpae'?'Déclarez vos embauches en ligne via l\'URSSAF.':contractsSubTab==='templates'?'Gérez vos modèles de contrats versionnés.':'Sélectionnez un collaborateur et les informations du contrat pour générer le document.'}</div>
+    </div></div>
     <div class="ctab-bar" style="display:flex;gap:4px;margin-bottom:18px;border-bottom:1px solid var(--line)">
-      <button class="ctab ${contractsSubTab==='overview'?'on':''}" data-sub="overview"><i class="fa-regular fa-rectangle-list"></i> Vue d'ensemble</button>
+      <button class="ctab ${contractsSubTab==='dpae'?'on':''}" data-sub="dpae"><i class="fa-solid fa-building-columns"></i> DPAE</button>
       <button class="ctab ${contractsSubTab==='templates'?'on':''}" data-sub="templates"><i class="fa-regular fa-file-lines"></i> Modèles</button>
-      <button class="ctab ${contractsSubTab==='generate'?'on':''}" data-sub="generate"><i class="fa-solid fa-wand-magic-sparkles"></i> Générer un contrat</button>
+      <button class="ctab ${contractsSubTab==='generate'?'on':''}" data-sub="generate"><i class="fa-solid fa-wand-magic-sparkles"></i> Génération de contrat</button>
     </div>
     <div id="csub"></div>
   </div>`;
   $('view').querySelectorAll('.ctab').forEach(b=>b.onclick=()=>{contractsSubTab=b.dataset.sub;renderContracts();});
-  if(contractsSubTab==='overview')      renderContractsOverview();
+  if(contractsSubTab==='dpae')           renderContractsDpae();
   else if(contractsSubTab==='templates') renderContractsTemplates();
   else                                   renderContractsGenerate();
 }
 
-function renderContractsOverview(){
-  const list=staff.slice().sort((a,b)=>a.last_name.localeCompare(b.last_name));
-  $('csub').innerHTML=`<table class="tbl"><thead><tr>
-      <th>Collaborateur</th><th>Rôle</th><th>Service</th><th>Contrat</th><th>Entrée</th><th>Départ</th><th>Statut</th><th></th>
-    </tr></thead><tbody>
-    ${list.map(s=>`<tr data-emp="${s.id}">
-      <td><b>${s.first_name} ${s.last_name}</b></td>
-      <td>${s.role||'—'}</td><td>${s.department||'—'}</td>
-      <td><span class="tag ${s.contract_type==='CDI'?'green':'gray'}">${s.contract_type||'CDI'}</span></td>
-      <td>${s.hire_date||'—'}</td><td>${s.departure_date||'—'}</td>
-      <td>${s.active?'<span class="ok">Actif</span>':'<span class="ko">Parti</span>'}</td>
-      <td><button title="Voir la fiche"><i class="fa-regular fa-eye"></i></button></td>
-    </tr>`).join('')||'<tr><td colspan="8" style="padding:24px;text-align:center;color:var(--muted)">Aucun collaborateur enregistré.</td></tr>'}
-    </tbody></table>`;
-  $('csub').querySelectorAll('tr[data-emp]').forEach(tr=>tr.onclick=()=>openFiche(tr.dataset.emp));
+/* ===== DPAE ===== */
+async function renderContractsDpae(){
+  const hotel = hotels.find(h=>h.id===hotelId)||{};
+  const URSSAF_URL = 'https://www.urssaf.fr/portail/home/utile-et-pratique/embaucher/declaration-prealable-embauche.html';
+  const fmt = d => d ? new Date(d).toLocaleDateString('fr-FR') : '—';
+
+  // Load data
+  let dpaeList = [], nextDpae = [];
+  try { dpaeList = await BE.listDpaeRecords(hotelId); } catch(e){ dpaeList=[]; }
+  const today = new Date(); const in14 = new Date(); in14.setDate(today.getDate()+14);
+  nextDpae = staff.filter(s => {
+    if(!s.active || !s.hire_date) return false;
+    const hd = new Date(s.hire_date);
+    if(hd < today || hd > in14) return false;
+    return !dpaeList.some(d => d.employee_id === s.id && d.status === 'transmitted');
+  });
+  const drafts = dpaeList.filter(d=>d.status==='draft');
+  const recent = dpaeList.slice(0,8);
+
+  const statusBadge = s => s==='transmitted'?'<span class="tag green">Transmise</span>':s==='draft'?'<span class="tag" style="background:#fef3c7;color:#92400e">Brouillon</span>':s==='cancelled'?'<span class="tag red">Annulée</span>':'<span class="tag gray">Erreur</span>';
+
+  $('csub').innerHTML = `
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px;align-items:start">
+    <!-- LEFT COL -->
+    <div style="display:flex;flex-direction:column;gap:16px">
+      <div class="box" style="padding:20px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+          <h3 style="font-size:13.5px;font-weight:700;flex:1;margin:0">Déclaration Préalable à l'Embauche (DPAE)</h3>
+          <span class="tag green" style="white-space:nowrap"><i class="fa-solid fa-check"></i> Établissement reconnu</span>
+        </div>
+        <div style="font-size:12px;color:var(--ink2);margin-bottom:14px">Les informations de votre établissement sont automatiquement préremplies.</div>
+        <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+          <tr><td style="padding:5px 0;color:var(--muted);width:140px">SIRET</td><td style="font-weight:600">${hotel.siret||'—'}</td></tr>
+          <tr><td style="padding:5px 0;color:var(--muted)">Nom</td><td style="font-weight:600">${hotel.name||'—'}</td></tr>
+          <tr><td style="padding:5px 0;color:var(--muted)">Adresse</td><td style="font-weight:600">${hotel.address||hotel.city||'—'}</td></tr>
+          <tr><td style="padding:5px 0;color:var(--muted)">Code APE</td><td style="font-weight:600">${hotel.ape_code||'—'}</td></tr>
+          <tr><td style="padding:5px 0;color:var(--muted)">URSSAF compétente</td><td style="font-weight:600">${hotel.urssaf_office||'—'}</td></tr>
+        </table>
+        <button class="btn g" style="margin-top:14px;width:100%;font-size:12px" onclick="navTo('settings')"><i class="fa-solid fa-pen"></i> Voir / Modifier les informations de l'établissement</button>
+      </div>
+
+      <!-- Bon à savoir -->
+      <div style="border:1.5px solid #ede9fe;border-radius:14px;padding:18px;background:#faf9ff">
+        <div style="font-size:12.5px;font-weight:700;color:var(--violet-d);margin-bottom:10px"><i class="fa-solid fa-lightbulb" style="color:var(--violet)"></i> Bon à savoir</div>
+        <ul style="margin:0;padding-left:18px;font-size:12.5px;color:var(--ink2);line-height:1.8">
+          <li>La DPAE doit être effectuée au plus tôt <b>8 jours</b> avant l'embauche et au plus tard juste avant.</li>
+          <li>Conservez l'<b>accusé de réception</b> remis par l'URSSAF.</li>
+          <li>En cas d'erreur, vous pouvez <b>annuler et recommencer</b> la déclaration.</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- MIDDLE COL -->
+    <div style="display:flex;flex-direction:column;gap:16px">
+      <div class="box" style="padding:20px">
+        <h3 style="font-size:13.5px;font-weight:700;margin:0 0 16px">Effectuer une DPAE</h3>
+        <a href="${URSSAF_URL}" target="_blank" class="btn p" style="display:block;text-align:center;text-decoration:none;width:100%;box-sizing:border-box;margin-bottom:14px"><i class="fa-solid fa-arrow-up-right-from-square"></i> Accéder à la DPAE sur le site de l'URSSAF</a>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Ou copier le lien :</div>
+        <div id="dpaeLink" style="background:#f4f2fd;border-radius:8px;padding:8px 12px;font-size:11.5px;color:var(--violet-d);cursor:pointer;word-break:break-all" onclick="navigator.clipboard.writeText('${URSSAF_URL}').then(()=>flash('Lien copié !'))" title="Cliquer pour copier">${URSSAF_URL}</div>
+      </div>
+      <div class="box" style="padding:20px">
+        <h3 style="font-size:13.5px;font-weight:700;margin:0 0 14px">Raccourcis utiles</h3>
+        <a href="https://www.urssaf.fr/portail/home/utile-et-pratique/embaucher/declaration-prealable-embauche.html" target="_blank" style="display:flex;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid var(--line);color:var(--ink);text-decoration:none;font-size:13px">
+          <i class="fa-solid fa-book" style="color:var(--violet);width:16px"></i> Consulter la documentation URSSAF
+          <i class="fa-solid fa-arrow-up-right-from-square" style="color:var(--muted);font-size:11px;margin-left:auto"></i>
+        </a>
+        <a href="https://www.urssaf.fr/portail/home/utile-et-pratique/embaucher/declaration-prealable-embauche/faq-dpae.html" target="_blank" style="display:flex;align-items:center;gap:8px;padding:10px 0;color:var(--ink);text-decoration:none;font-size:13px">
+          <i class="fa-solid fa-circle-question" style="color:var(--violet);width:16px"></i> Besoin d'aide ? Accéder à la FAQ DPAE
+          <i class="fa-solid fa-arrow-up-right-from-square" style="color:var(--muted);font-size:11px;margin-left:auto"></i>
+        </a>
+      </div>
+    </div>
+
+    <!-- RIGHT COL -->
+    <div style="display:flex;flex-direction:column;gap:16px">
+      <div class="box" style="padding:20px">
+        <div style="display:flex;align-items:center;margin-bottom:14px">
+          <h3 style="font-size:13.5px;font-weight:700;flex:1;margin:0">Historique des DPAE</h3>
+          <span style="font-size:12px;color:var(--violet);cursor:pointer">Voir tout</span>
+        </div>
+        ${recent.length ? `<table class="tbl" style="font-size:12px">
+          <thead><tr><th>Salarié</th><th>Date</th><th>Statut</th><th>N° accusé</th></tr></thead>
+          <tbody>
+          ${recent.map(d=>`<tr>
+            <td>${d.employees?d.employees.first_name+' '+d.employees.last_name:'—'}</td>
+            <td style="white-space:nowrap">${fmt(d.submitted_at||d.created_at)}</td>
+            <td>${statusBadge(d.status)}</td>
+            <td style="font-size:11px;color:var(--muted)">${d.receipt_number||'—'}</td>
+          </tr>`).join('')}
+          </tbody>
+        </table>` : '<div style="padding:20px;text-align:center;color:var(--muted);font-size:12.5px">Aucune DPAE enregistrée</div>'}
+      </div>
+
+      <div class="box" style="padding:20px">
+        <div style="display:flex;align-items:center;margin-bottom:14px">
+          <h3 style="font-size:13.5px;font-weight:700;flex:1;margin:0">DPAE en brouillon <span style="background:#fef3c7;color:#92400e;border-radius:20px;padding:2px 8px;font-size:11px;margin-left:6px">${drafts.length}</span></h3>
+        </div>
+        ${drafts.length ? drafts.map(d=>`<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)">
+          <div style="flex:1">
+            <div style="font-size:13px;font-weight:600">${d.employees?d.employees.first_name+' '+d.employees.last_name:'—'}</div>
+            <div style="font-size:11.5px;color:var(--muted)">${fmt(d.start_date)}</div>
+          </div>
+          <button class="btn g" style="font-size:11.5px;padding:5px 10px" onclick="openDpaeModal('${d.id}')"><i class="fa-solid fa-pen"></i> Reprendre</button>
+        </div>`).join('') : '<div style="text-align:center;color:var(--muted);font-size:12.5px;padding:10px 0">Aucun brouillon</div>'}
+      </div>
+    </div>
+  </div>
+
+  <!-- BOTTOM: Prochaines DPAE -->
+  <div class="box" style="margin-top:18px;padding:20px">
+    <div style="display:flex;align-items:center;margin-bottom:16px;gap:12px">
+      <h3 style="font-size:13.5px;font-weight:700;flex:1;margin:0">Prochaines DPAE à effectuer</h3>
+      <button class="btn p" onclick="openDpaeModal(null)"><i class="fa-solid fa-plus"></i> Nouvelle DPAE</button>
+    </div>
+    ${nextDpae.length ? `<table class="tbl">
+      <thead><tr><th>Salarié</th><th>Poste</th><th>Date d'embauche</th><th>Délai conseillé</th><th></th></tr></thead>
+      <tbody>
+      ${nextDpae.map(s=>{
+        const hd = new Date(s.hire_date);
+        const due = new Date(hd); due.setDate(due.getDate()-1);
+        const urgent = due <= new Date(Date.now()+3*86400000);
+        return `<tr>
+          <td><b>${s.first_name} ${s.last_name}</b></td>
+          <td>${s.role||'—'}</td>
+          <td>${fmt(s.hire_date)}</td>
+          <td style="color:${urgent?'var(--red)':'#d97706'};font-size:12px"><i class="fa-solid fa-clock"></i> À faire avant le ${due.toLocaleDateString('fr-FR')}</td>
+          <td><button class="btn p" style="font-size:12px;padding:5px 12px" onclick="openDpaeModal(null,'${s.id}')">Déclarer</button></td>
+        </tr>`;
+      }).join('')}
+      </tbody>
+    </table>` : '<div style="padding:20px;text-align:center;color:var(--muted);font-size:13px"><i class="fa-solid fa-circle-check" style="color:var(--green);font-size:20px;display:block;margin-bottom:8px"></i>Aucune DPAE urgente à effectuer dans les 14 prochains jours.</div>'}
+  </div>
+
+  <!-- WORKFLOW -->
+  <div style="margin-top:28px;background:#fff;border:1px solid var(--line);border-radius:16px;padding:24px">
+    <h3 style="font-size:13.5px;font-weight:700;margin-bottom:20px">Workflow de génération et signature</h3>
+    <div style="display:flex;align-items:flex-start;gap:0;overflow-x:auto">
+      ${[
+        ['1','fa-user','Sélection du collaborateur','Choisissez le collaborateur concerné.'],
+        ['2','fa-pen-to-square','Remplissage des informations','Complétez les détails du contrat.'],
+        ['3','fa-eye','Aperçu du contrat','Vérifiez et validez le contrat généré.'],
+        ['4','fa-paper-plane','Envoi pour signature','Envoi automatique via Yousign par email ou portail salarié.'],
+        ['5','fa-signature','Signature électronique','Le collaborateur signe en ligne en toute sécurité.'],
+        ['6','fa-box-archive','Archivage','Le contrat signé est archivé dans la fiche salarié.'],
+      ].map((s,i,arr)=>`<div style="flex:1;min-width:130px;text-align:center;padding:0 6px;position:relative">
+        <div style="width:36px;height:36px;border-radius:50%;background:var(--violet);color:#fff;font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:center;margin:0 auto 8px">${s[0]}</div>
+        <div style="font-size:11.5px;font-weight:700;color:var(--ink);margin-bottom:4px">${s[2]}</div>
+        <div style="font-size:11px;color:var(--muted)">${s[3]}</div>
+        ${i<arr.length-1?'<div style="position:absolute;top:18px;right:-6px;color:var(--line);font-size:16px">›</div>':''}
+      </div>`).join('')}
+    </div>
+    <div style="margin-top:18px;background:#faf9ff;border:1px solid #ede9fe;border-radius:10px;padding:12px 20px;font-size:12.5px;color:var(--violet-d)">
+      <i class="fa-solid fa-star" style="color:var(--violet)"></i> <b>Fonctionnalités Premium :</b>
+      &nbsp;✓ Génération automatique de contrats &nbsp;✓ Intégration Yousign &nbsp;✓ Portail salarié dédié &nbsp;✓ Archivage sécurisé &nbsp;✓ DPAE intégrée
+    </div>
+  </div>`;
 }
 
+async function openDpaeModal(dpaeId, preEmployeeId){
+  let existing = null;
+  if(dpaeId){
+    const list = await BE.listDpaeRecords(hotelId);
+    existing = list.find(d=>d.id===dpaeId)||null;
+  }
+  const empOpts = staff.filter(s=>s.active).map(s=>`<option value="${s.id}" ${(preEmployeeId===s.id||(existing&&existing.employee_id===s.id))?'selected':''}>${s.first_name} ${s.last_name}</option>`).join('');
+  $('modal').innerHTML = mhHTML('fa-solid fa-building-columns', dpaeId?'Modifier la DPAE':'Nouvelle DPAE') + `
+  <div class="mb">
+    <div class="fld"><label>Collaborateur *</label><select id="dpEmp"><option value="">— Choisir —</option>${empOpts}</select></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="fld"><label>Date d'embauche</label><input type="date" id="dpStart" value="${existing?.start_date||''}"></div>
+      <div class="fld"><label>Statut</label>
+        <select id="dpStatus">
+          <option value="draft" ${!existing||existing.status==='draft'?'selected':''}>Brouillon</option>
+          <option value="transmitted" ${existing?.status==='transmitted'?'selected':''}>Transmise</option>
+          <option value="cancelled" ${existing?.status==='cancelled'?'selected':''}>Annulée</option>
+        </select>
+      </div>
+      <div class="fld"><label>N° d'accusé (optionnel)</label><input type="text" id="dpReceipt" value="${existing?.receipt_number||''}" placeholder="N° fourni par l'URSSAF"></div>
+      <div class="fld"><label>Date d'envoi</label><input type="date" id="dpSent" value="${existing?.submitted_at?existing.submitted_at.slice(0,10):''}"></div>
+    </div>
+    <div class="fld"><label>Notes</label><textarea id="dpNotes" rows="3">${existing?.notes||''}</textarea></div>
+  </div>
+  <div class="mact">
+    ${dpaeId?`<button class="btn g" id="dpDel" style="color:var(--red)"><i class="fa-solid fa-trash"></i> Supprimer</button>`:''}
+    <button class="btn g" id="dpCancel">Annuler</button>
+    <button class="btn p" id="dpSave"><i class="fa-solid fa-check"></i> ${dpaeId?'Enregistrer':'Créer'}</button>
+  </div>`;
+  $('modalbg').classList.add('on');
+  $('dpCancel').onclick = closeModal;
+  if(dpaeId && $('dpDel')) $('dpDel').onclick = async()=>{
+    if(!confirm('Supprimer cette DPAE ?')) return;
+    try{ await BE.deleteDpaeRecord(dpaeId); closeModal(); flash('DPAE supprimée'); renderContractsDpae(); }catch(e){flash('Erreur : '+e.message);}
+  };
+  $('dpSave').onclick = async()=>{
+    const eid = $('dpEmp').value; if(!eid){flash('Choisissez un collaborateur');return;}
+    const payload = {
+      employee_id: eid,
+      status: $('dpStatus').value,
+      start_date: $('dpStart').value||null,
+      receipt_number: $('dpReceipt').value||null,
+      submitted_at: $('dpSent').value ? new Date($('dpSent').value).toISOString() : null,
+      notes: $('dpNotes').value||null
+    };
+    try{
+      if(dpaeId) await BE.updateDpaeRecord(dpaeId, payload);
+      else await BE.saveDpaeRecord(hotelId, payload);
+      closeModal(); flash(dpaeId?'DPAE mise à jour':'DPAE créée'); renderContractsDpae();
+    }catch(e){flash('Erreur : '+e.message);}
+  };
+}
+
+let tplSelectedId = null;
 async function renderContractsTemplates(){
+  tplSelectedId = null;
   $('csub').innerHTML=`
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
-      <div style="flex:1;font-size:13.5px;color:var(--ink2)">Modèles HTML versionnés. Utilisez les variables ci-dessous, elles seront remplacées à la génération.</div>
-      <button class="btn g" id="tplImport"><i class="fa-solid fa-file-import"></i> Importer PDF / Word</button>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+      <input type="text" id="tplSearch" placeholder="Rechercher un modèle…" style="padding:7px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px;width:220px">
+      <select id="tplFiltDept" style="padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-size:12.5px">
+        <option value="">Tous les services</option>
+        ${deps.map(d=>`<option value="${d.id}">${d.name}</option>`).join('')}
+      </select>
+      <select id="tplFiltRole" style="padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-size:12.5px">
+        <option value="">Tous les rôles</option>
+        ${rols.map(r=>`<option value="${r.id}">${r.name}</option>`).join('')}
+      </select>
+      <select id="tplFiltType" style="padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-size:12.5px">
+        <option value="">Tous les types</option>
+        ${CONTRACT_TYPES.map(c=>`<option value="${c}">${c}</option>`).join('')}
+      </select>
+      <select id="tplFiltStatus" style="padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-size:12.5px">
+        <option value="">Tous les statuts</option>
+        <option value="active">Actif</option>
+        <option value="draft">Brouillon</option>
+        <option value="archived">Archivé</option>
+      </select>
+      <div style="flex:1"></div>
+      <button class="btn g" id="tplImport"><i class="fa-solid fa-file-import"></i> Importer un modèle</button>
       <button class="btn p" id="tplNew"><i class="fa-solid fa-plus"></i> Nouveau modèle</button>
     </div>
-    <div id="tplList">Chargement…</div>
-    <div class="box" style="margin-top:18px"><h3><i class="fa-solid fa-code"></i>Variables disponibles</h3>
+    <div style="background:#f4f2fd;border:1px solid #ede9fe;border-radius:10px;padding:12px 16px;display:flex;align-items:center;gap:12px;margin-bottom:14px;font-size:12.5px;color:var(--violet-d)">
+      <i class="fa-solid fa-file-import" style="font-size:16px"></i>
+      <div style="flex:1"><b>Importez un modèle Word ou PDF</b> — Nous extrayons le contenu et vous permettez d'insérer des variables dynamiques.</div>
+      <button class="btn g" style="font-size:12px" id="tplImport2">En savoir plus</button>
+    </div>
+    <div style="display:flex;gap:18px;align-items:flex-start">
+      <div style="flex:1;min-width:0">
+        <div id="tplList">Chargement…</div>
+      </div>
+      <div id="tplPanel" style="display:none;width:340px;flex-shrink:0;background:#fff;border:1px solid var(--line);border-radius:14px;padding:0;overflow:hidden"></div>
+    </div>
+    <div class="box" style="margin-top:18px;padding:20px">
+      <h3 style="font-size:13px;font-weight:700;margin:0 0 14px"><i class="fa-solid fa-code" style="color:var(--violet)"></i> Variables disponibles</h3>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;font-family:'SFMono-Regular',Consolas,monospace;font-size:11.5px">
         ${TEMPLATE_VARS.map(v=>`<div style="background:#f4f2fd;padding:6px 10px;border-radius:6px;color:var(--violet-d)"><b>{{${v[0]}}}</b><br><span style="color:var(--muted);font-family:'Inter'">${v[1]}</span></div>`).join('')}
       </div>
     </div>`;
   $('tplNew').onclick=()=>openTemplateForm(null);
   $('tplImport').onclick=()=>openTemplateImportForm();
+  $('tplImport2').onclick=()=>openTemplateImportForm();
+  const doFilter = () => {
+    const q = $('tplSearch').value.toLowerCase();
+    const fd = $('tplFiltDept').value, fr = $('tplFiltRole').value, ft = $('tplFiltType').value, fs = $('tplFiltStatus').value;
+    $('tplList').querySelectorAll('tr[data-tid]').forEach(tr=>{
+      const t = _tplCache.find(x=>x.id===tr.dataset.tid);
+      if(!t){tr.style.display='none';return;}
+      const show = (!q||t.name.toLowerCase().includes(q))
+        && (!fd||t.department_id===fd)&&(!fr||t.role_id===fr)
+        && (!ft||t.contract_type===ft)&&(!fs||t.status===fs);
+      tr.style.display=show?'':'none';
+    });
+  };
+  ['tplSearch','tplFiltDept','tplFiltRole','tplFiltType','tplFiltStatus'].forEach(id=>$(id)&&($(id).oninput=$(id).onchange=doFilter));
+
   try{
-    const list=await BE.listTemplates(hotelId);
+    const list = await BE.listTemplates(hotelId);
+    window._tplCache = list;
+    const statusBadge = s => s==='active'?'<span class="tag green">Actif</span>':s==='draft'?'<span class="tag" style="background:#fef3c7;color:#92400e">Brouillon</span>':'<span class="tag gray">Archivé</span>';
     if(!list.length){$('tplList').innerHTML='<div style="padding:30px;text-align:center;color:var(--muted);background:#fff;border:1px dashed var(--line);border-radius:14px">Aucun modèle enregistré.<br><span style="font-size:12px">Cliquez « Nouveau modèle » pour démarrer.</span></div>';return;}
-    $('tplList').innerHTML=`<table class="tbl"><thead><tr><th>Modèle</th><th>Type</th><th>Service / Rôle</th><th>Version</th><th>Statut</th><th>Mis à jour</th><th></th></tr></thead><tbody>
-      ${list.map(t=>{const dp=deps.find(d=>d.id===t.department_id),rl=rols.find(r=>r.id===t.role_id);
-        return `<tr data-tid="${t.id}" ${t.status==='archived'?'style="opacity:.55"':''}>
+    $('tplList').innerHTML=`<table class="tbl"><thead><tr>
+      <th>MODÈLE</th><th>SERVICE</th><th>RÔLE / POSTE</th><th>TYPE</th><th>VERSION</th><th>STATUT</th><th>DERNIÈRE MÀJ</th><th></th>
+    </tr></thead><tbody>
+      ${list.map(t=>{
+        const dp=deps.find(d=>d.id===t.department_id),rl=rols.find(r=>r.id===t.role_id);
+        return `<tr data-tid="${t.id}" style="cursor:pointer${t.status==='archived'?';opacity:.6':''}">
           <td><b>${t.name}</b></td>
-          <td><span class="tag">${t.contract_type}</span></td>
-          <td style="font-size:12px">${dp?dp.name:'—'}${rl?' · '+rl.name:''}</td>
-          <td>v${t.version||1}</td>
-          <td>${t.status==='active'?'<span class="ok">Actif</span>':'<span class="ko">Archivé</span>'}</td>
+          <td style="font-size:12px">${dp?dp.name:(t.service_name||'—')}</td>
+          <td style="font-size:12px">${rl?rl.name:'—'}</td>
+          <td><span class="tag">${t.contract_type||'—'}</span></td>
+          <td style="color:var(--muted)">v${t.version||1}</td>
+          <td>${statusBadge(t.status)}</td>
           <td style="font-size:11.5px;color:var(--muted)">${(t.updated_at||t.created_at||'').slice(0,10)}</td>
-          <td style="text-align:right;white-space:nowrap">
-            <button data-act="edit"  title="Modifier"><i class="fa-solid fa-pen"></i></button>
-            <button data-act="newver" title="Nouvelle version"><i class="fa-solid fa-code-branch"></i></button>
-            ${t.status==='active'?'<button data-act="archive" title="Archiver"><i class="fa-solid fa-box-archive"></i></button>':''}
-            <button data-act="del" title="Supprimer"><i class="fa-solid fa-trash"></i></button>
+          <td style="text-align:right;white-space:nowrap" onclick="event.stopPropagation()">
+            <button data-act="edit" title="Modifier"><i class="fa-solid fa-pen"></i></button>
+            <button data-act="dup" title="Dupliquer"><i class="fa-regular fa-copy"></i></button>
+            <button data-act="more" title="Plus d'actions" style="position:relative"><i class="fa-solid fa-ellipsis-vertical"></i></button>
           </td>
         </tr>`;}).join('')}
-      </tbody></table>`;
+    </tbody></table>`;
     $('tplList').querySelectorAll('tr[data-tid]').forEach(tr=>{
       const tid=tr.dataset.tid; const t=list.find(x=>x.id===tid);
+      tr.onclick=()=>{ tplSelectedId=tid; showTplPanel(t,list); };
       tr.querySelectorAll('button[data-act]').forEach(b=>b.onclick=async ev=>{ev.stopPropagation();const act=b.dataset.act;
-        if(act==='edit')        openTemplateForm(t);
-        else if(act==='newver') openTemplateForm(t,true);
-        else if(act==='archive'){if(!confirm('Archiver ce modèle ?'))return;try{await BE.archiveTemplate(tid);await BE.logAudit('template_archive','contract_template',tid);flash('Archivé');renderContractsTemplates();}catch(e){flash('Erreur : '+e.message);}}
-        else if(act==='del'){if(!confirm('Supprimer définitivement ce modèle ?'))return;try{await BE.deleteTemplate(tid);flash('Supprimé');renderContractsTemplates();}catch(e){flash('Erreur : '+e.message);}}
+        if(act==='edit') openTemplateForm(t);
+        else if(act==='dup'){openTemplateForm(t,true);}
+        else if(act==='more'){
+          // simple inline menu
+          const existing=$('tplMoreMenu'); if(existing)existing.remove();
+          const menu=document.createElement('div');
+          menu.id='tplMoreMenu';
+          menu.style.cssText='position:fixed;z-index:9999;background:#fff;border:1px solid var(--line);border-radius:10px;padding:6px;box-shadow:0 4px 16px #0002;min-width:160px';
+          const rect=b.getBoundingClientRect(); menu.style.top=(rect.bottom+4)+'px'; menu.style.left=(rect.left-120)+'px';
+          menu.innerHTML=`<button class="btn g" style="width:100%;text-align:left;display:block;border-radius:6px;padding:7px 12px;margin:2px 0" data-mact="archive"><i class="fa-solid fa-box-archive"></i> Archiver</button>
+            <button class="btn g" style="width:100%;text-align:left;display:block;border-radius:6px;padding:7px 12px;margin:2px 0;color:var(--red)" data-mact="del"><i class="fa-solid fa-trash"></i> Supprimer</button>`;
+          document.body.appendChild(menu);
+          const close=()=>{menu.remove(); document.removeEventListener('click',close);};
+          setTimeout(()=>document.addEventListener('click',close),10);
+          menu.querySelectorAll('[data-mact]').forEach(mb=>mb.onclick=async()=>{
+            close();
+            if(mb.dataset.mact==='archive'){if(!confirm('Archiver ce modèle ?'))return;try{await BE.archiveTemplate(tid);flash('Archivé');renderContractsTemplates();}catch(e){flash('Erreur : '+e.message);}}
+            else if(mb.dataset.mact==='del'){if(!confirm('Supprimer définitivement ce modèle ?'))return;try{await BE.deleteTemplate(tid);flash('Supprimé');renderContractsTemplates();}catch(e){flash('Erreur : '+e.message);}}
+          });
+        }
       });
     });
   }catch(e){$('tplList').innerHTML=`<div style="padding:20px;color:var(--red)">Erreur : ${e.message||e}</div>`;}
+}
+
+function showTplPanel(t, list){
+  const panel = $('tplPanel');
+  if(!panel) return;
+  panel.style.display='block';
+  const dp=deps.find(d=>d.id===t.department_id),rl=rols.find(r=>r.id===t.role_id);
+  const statusBadge = s => s==='active'?'<span class="tag green">Actif</span>':s==='draft'?'<span class="tag" style="background:#fef3c7;color:#92400e">Brouillon</span>':'<span class="tag gray">Archivé</span>';
+  // Detect variables
+  const vars = [...new Set((t.body_html||'').match(/\{\{(\w+)\}\}/g)||[])];
+  panel.innerHTML=`
+    <div style="padding:16px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px">
+      <div style="flex:1">
+        <div style="font-size:13.5px;font-weight:700">${t.name}</div>
+        <div style="margin-top:4px">${statusBadge(t.status)}</div>
+      </div>
+      <button onclick="$('tplPanel').style.display='none'" style="background:none;border:none;cursor:pointer;font-size:16px;color:var(--muted)"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div style="display:flex;gap:0;border-bottom:1px solid var(--line)">
+      <button class="tpl-ptab on" data-ptab="details" style="padding:10px 14px;border:none;background:none;cursor:pointer;font-size:12px;font-weight:600;border-bottom:2px solid var(--violet);color:var(--violet)">Détails</button>
+      <button class="tpl-ptab" data-ptab="vars" style="padding:10px 14px;border:none;background:none;cursor:pointer;font-size:12px;color:var(--muted)">Variables (${vars.length})</button>
+      <button class="tpl-ptab" data-ptab="preview" style="padding:10px 14px;border:none;background:none;cursor:pointer;font-size:12px;color:var(--muted)">Aperçu</button>
+      <button class="tpl-ptab" data-ptab="history" style="padding:10px 14px;border:none;background:none;cursor:pointer;font-size:12px;color:var(--muted)">Historique</button>
+    </div>
+    <div id="tplPanelBody" style="padding:18px;overflow-y:auto;max-height:480px">
+      <div data-pane="details">
+        <div style="font-size:12px;line-height:2;color:var(--ink2)">
+          <div style="display:grid;grid-template-columns:120px 1fr;gap:4px 8px">
+            <span style="color:var(--muted)">Service</span><span style="font-weight:600">${dp?dp.name:(t.service_name||'—')}</span>
+            <span style="color:var(--muted)">Rôle / Poste</span><span style="font-weight:600">${rl?rl.name:'—'}</span>
+            <span style="color:var(--muted)">Type contrat</span><span><span class="tag">${t.contract_type||'—'}</span></span>
+            <span style="color:var(--muted)">Convention</span><span style="font-weight:600">${t.collective_agreement||'HCR'}</span>
+            <span style="color:var(--muted)">Version</span><span style="font-weight:600">v${t.version||1}</span>
+            <span style="color:var(--muted)">Créé le</span><span style="font-weight:600">${(t.created_at||'').slice(0,10)}</span>
+            <span style="color:var(--muted)">Mis à jour</span><span style="font-weight:600">${(t.updated_at||t.created_at||'').slice(0,10)}</span>
+          </div>
+        </div>
+      </div>
+      <div data-pane="vars" style="display:none">
+        ${vars.length ? vars.map(v=>`<div style="background:#f4f2fd;border-radius:6px;padding:6px 10px;margin-bottom:6px;font-family:monospace;font-size:12px;color:var(--violet-d)">${v}</div>`).join('') : '<div style="color:var(--muted);font-size:12.5px;text-align:center;padding:20px">Aucune variable détectée</div>'}
+      </div>
+      <div data-pane="preview" style="display:none">
+        <div style="font-family:\'Times New Roman\',serif;font-size:12px;line-height:1.5;color:#222;border:1px solid var(--line);border-radius:8px;padding:16px;max-height:380px;overflow-y:auto">${t.body_html||'<em>Aucun contenu</em>'}</div>
+      </div>
+      <div data-pane="history" style="display:none">
+        ${(list.filter(x=>x.parent_id===t.id||x.id===t.id)).map(x=>`<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)">
+          <span style="font-size:12px;color:var(--muted);width:28px">v${x.version||1}</span>
+          <span style="font-size:12.5px;flex:1">${x.name}</span>
+          <span style="font-size:11px;color:var(--muted)">${(x.created_at||'').slice(0,10)}</span>
+        </div>`).join('')||'<div style="color:var(--muted);font-size:12.5px;padding:10px 0">Aucun historique</div>'}
+      </div>
+    </div>
+    <div style="padding:14px 18px;border-top:1px solid var(--line);display:flex;gap:8px">
+      <button class="btn g" style="flex:1;font-size:12px" onclick="openTemplateForm(window._tplCache.find(x=>x.id==='${t.id}'),true)">Dupliquer</button>
+      <button class="btn g" style="flex:1;font-size:12px" onclick="BE.archiveTemplate('${t.id}').then(()=>{flash('Archivé');renderContractsTemplates()})">Archiver</button>
+      <button class="btn p" style="flex:1;font-size:12px" onclick="openTemplateForm(window._tplCache.find(x=>x.id==='${t.id}'))"><i class="fa-solid fa-pen"></i> Modifier</button>
+    </div>`;
+  // Tab switching
+  panel.querySelectorAll('.tpl-ptab').forEach(btn => btn.onclick=()=>{
+    panel.querySelectorAll('.tpl-ptab').forEach(b=>{b.style.borderBottom='none';b.style.color='var(--muted)';b.classList.remove('on');});
+    btn.style.borderBottom='2px solid var(--violet)'; btn.style.color='var(--violet)'; btn.classList.add('on');
+    const pane = btn.dataset.ptab;
+    panel.querySelectorAll('[data-pane]').forEach(p=>p.style.display=p.dataset.pane===pane?'block':'none');
+  });
 }
 
 const TEMPLATE_VARS=[
@@ -2368,14 +2697,378 @@ demeurant {{address}}, n° de sécurité sociale {{social_security_number}}, ci-
 <p style="margin-top:40px">Fait à {{hotel_address}}, le {{today}}, en deux exemplaires.</p>
 <table style="width:100%;margin-top:30px"><tr><td style="width:50%"><b>L'Employeur</b></td><td><b>Le Salarié</b></td></tr></table>`;
 
-function renderContractsGenerate(){
-  $('csub').innerHTML=`<div class="box" style="padding:24px;text-align:center;color:var(--ink2)">
-    <i class="fa-solid fa-wand-magic-sparkles" style="font-size:36px;color:var(--violet);margin-bottom:14px"></i>
-    <h2 style="font-size:18px;font-weight:800;color:var(--ink);margin-bottom:8px">Générateur de contrat</h2>
-    <p style="font-size:13.5px;max-width:520px;margin:0 auto 14px">À partir d'un collaborateur et d'un modèle, le système remplit les variables, produit un aperçu et génère le PDF prêt à signer.</p>
-    <button class="btn p" id="genStart" style="margin-top:6px"><i class="fa-solid fa-play"></i> Lancer l'assistant</button>
+let genInlineState = {step:1, employee_id:'', template_id:'', fields:{contract_type:'CDI', start_date:'', end_date:'', trial_period:'', weekly_hours:'', salary_type:'brut_mensuel', salary_amount:'', manager_id:'', service_id:'', role_id:'', signature_method:'email'}, tplList:[]};
+
+async function renderContractsGenerate(){
+  const s = genInlineState;
+  const steps = ['Informations','Aperçu','Envoi & Signature','Archivage'];
+  const stepper = steps.map((name,i)=>`
+    <div style="display:flex;align-items:center;gap:6px;${i>0?'margin-left:0':''}">
+      ${i>0?'<div style="width:40px;height:2px;background:'+(s.step>i?'var(--violet)':'var(--line)')+'"></div>':''}
+      <div style="display:flex;align-items:center;gap:7px">
+        <div style="width:28px;height:28px;border-radius:50%;background:${s.step===i+1?'var(--violet)':s.step>i+1?'#6d4ac4':'var(--line)'};color:${s.step>=i+1?'#fff':'var(--muted)'};font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:center">${i+1}</div>
+        <span style="font-size:12.5px;font-weight:${s.step===i+1?'700':'400'};color:${s.step===i+1?'var(--ink)':'var(--muted)'}">${name}</span>
+      </div>
+    </div>`).join('');
+
+  $('csub').innerHTML=`
+    <div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px 24px;display:flex;align-items:center;gap:0;margin-bottom:20px;overflow-x:auto">
+      ${stepper}
+    </div>
+    <div id="genInlineBody"></div>`;
+
+  if(s.step===1) await _genStep1();
+  else if(s.step===2) await _genStep2();
+  else if(s.step===3) await _genStep3();
+  else _genStep4();
+}
+
+async function _genStep1(){
+  const s = genInlineState;
+  try{ s.tplList = await BE.listTemplates(hotelId); }catch(e){ s.tplList=[]; }
+  const activeStaff = staff.filter(x=>x.active).sort((a,b)=>a.last_name.localeCompare(b.last_name));
+  const emp = staff.find(x=>x.id===s.employee_id);
+  const hotel = hotels.find(h=>h.id===hotelId)||{};
+
+  // Auto-select template based on matching dept/role/type
+  const autoTpl = s.tplList.filter(t=>t.status==='active').find(t=>{
+    if(t.contract_type && t.contract_type !== s.fields.contract_type) return false;
+    if(t.department_id && emp && t.department_id !== emp.department_id) return false;
+    if(t.role_id && emp && t.role_id !== emp.role_id) return false;
+    return true;
+  }) || s.tplList.filter(t=>t.status==='active')[0];
+  if(autoTpl && !s.template_id) s.template_id = autoTpl.id;
+  const tpl = s.tplList.find(t=>t.id===s.template_id);
+
+  // Build live preview
+  let previewHtml = '';
+  if(emp && tpl && tpl.body_html){
+    const ctx = buildContractContext(emp, hotel, {
+      contract_type: s.fields.contract_type,
+      contract_start_date: s.fields.start_date,
+      contract_end_date: s.fields.end_date,
+      trial_period: s.fields.trial_period,
+      weekly_hours: s.fields.weekly_hours ? s.fields.weekly_hours+' h/semaine' : '',
+      salary: s.fields.salary_amount ? s.fields.salary_amount+' €' : '',
+      manager_name: staff.find(x=>x.id===s.fields.manager_id) ? (staff.find(x=>x.id===s.fields.manager_id).first_name+' '+staff.find(x=>x.id===s.fields.manager_id).last_name) : '',
+      collective_agreement: 'HCR – Hôtels Cafés Restaurants'
+    });
+    previewHtml = substituteVariables(tpl.body_html, ctx);
+  }
+
+  const empOpts = activeStaff.map(e=>`<option value="${e.id}" ${e.id===s.employee_id?'selected':''}>${e.first_name} ${e.last_name}${e.role?' · '+e.role:''}</option>`).join('');
+  const deptOpts = deps.map(d=>`<option value="${d.id}" ${d.id===s.fields.service_id?'selected':''}>${d.name}</option>`).join('');
+  const roleOpts = rols.map(r=>`<option value="${r.id}" ${r.id===s.fields.role_id?'selected':''}>${r.name}</option>`).join('');
+  const mgrOpts = activeStaff.map(e=>`<option value="${e.id}" ${e.id===s.fields.manager_id?'selected':''}>${e.first_name} ${e.last_name}</option>`).join('');
+  const typeOpts = CONTRACT_TYPES.map(c=>`<option ${c===s.fields.contract_type?'selected':''}>${c}</option>`).join('');
+
+  $('genInlineBody').innerHTML=`
+  <div style="display:grid;grid-template-columns:1fr 1fr 320px;gap:18px;align-items:start">
+    <!-- LEFT: FORM -->
+    <div style="display:flex;flex-direction:column;gap:16px">
+      <div class="box" style="padding:20px">
+        <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px">1. Collaborateur</div>
+        <div class="fld"><label>Collaborateur *</label>
+          <select id="gi_emp"><option value="">— Choisir —</option>${empOpts}</select></div>
+        ${emp?`<div style="display:flex;align-items:center;gap:10px;margin-top:10px;padding:10px;background:#f9f9ff;border-radius:8px">
+          <div style="width:36px;height:36px;border-radius:50%;background:var(--violet);color:#fff;font-size:14px;display:flex;align-items:center;justify-content:center;font-weight:700">${emp.first_name[0]}${emp.last_name[0]}</div>
+          <div><div style="font-size:13px;font-weight:600">${emp.first_name} ${emp.last_name}</div><div style="font-size:11.5px;color:var(--muted)">${emp.role||''} ${emp.department?'· '+emp.department:''}</div></div>
+        </div>`:''}
+      </div>
+
+      <div class="box" style="padding:20px">
+        <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px">2. Affectation</div>
+        <div class="fld"><label>Service</label><select id="gi_dept"><option value="">—</option>${deptOpts}</select></div>
+        <div class="fld"><label>Rôle / Poste</label><select id="gi_role"><option value="">—</option>${roleOpts}</select></div>
+        <div class="fld"><label>Responsable hiérarchique</label><select id="gi_mgr"><option value="">—</option>${mgrOpts}</select></div>
+      </div>
+
+      <div class="box" style="padding:20px">
+        <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px">3. Contrat</div>
+        <div class="fld"><label>Type de contrat</label><select id="gi_type">${typeOpts}</select></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="fld"><label>Date de début *</label><input type="date" id="gi_start" value="${s.fields.start_date||''}"></div>
+          <div class="fld"><label>Date de fin <span id="gi_end_label" style="color:var(--muted);font-weight:400">(CDD/Stage)</span></label>
+            <input type="date" id="gi_end" value="${s.fields.end_date||''}" ${s.fields.contract_type==='CDI'?'disabled':''}></div>
+        </div>
+        <div class="fld"><label>Période d'essai</label>
+          <select id="gi_trial">
+            <option value="">Aucune</option>
+            ${['1 mois','2 mois','3 mois','6 mois'].map(v=>`<option ${s.fields.trial_period===v?'selected':''}>${v}</option>`).join('')}
+          </select></div>
+        <div class="fld"><label>Durée hebdomadaire</label>
+          <div style="display:flex;align-items:center;gap:8px">
+            <input type="number" id="gi_hours" style="width:80px" value="${s.fields.weekly_hours||''}" min="1" max="48">
+            <span style="font-size:13px;color:var(--muted)">heures / semaine</span>
+          </div></div>
+      </div>
+
+      <div class="box" style="padding:20px">
+        <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px">4. Rémunération</div>
+        <div class="fld"><label>Type de rémunération</label>
+          <select id="gi_saltype">
+            <option value="brut_mensuel" ${s.fields.salary_type==='brut_mensuel'?'selected':''}>Brut mensuel</option>
+            <option value="taux_horaire" ${s.fields.salary_type==='taux_horaire'?'selected':''}>Taux horaire</option>
+          </select></div>
+        <div class="fld"><label>Montant</label>
+          <div style="display:flex;align-items:center;gap:8px">
+            <input type="number" id="gi_sal" style="flex:1" value="${s.fields.salary_amount||''}" step="0.01" min="0">
+            <span style="font-size:13px;color:var(--muted)">€</span>
+          </div></div>
+      </div>
+
+      <div style="display:flex;gap:10px">
+        <button class="btn g" id="gi_draft" style="flex:1">Enregistrer comme brouillon</button>
+        <button class="btn p" id="gi_next" style="flex:1">Suivant <i class="fa-solid fa-arrow-right"></i></button>
+      </div>
+    </div>
+
+    <!-- CENTER: PREVIEW -->
+    <div class="box" style="padding:0;overflow:hidden">
+      <div style="padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px">
+        <span style="font-size:13px;font-weight:700;flex:1">Aperçu du contrat</span>
+        <button class="btn g" style="padding:5px 10px;font-size:12px" title="Zoom -" onclick="_genZoom(-10)">−</button>
+        <span id="gi_zoom_label" style="font-size:12px;color:var(--muted);min-width:40px;text-align:center">100%</span>
+        <button class="btn g" style="padding:5px 10px;font-size:12px" title="Zoom +" onclick="_genZoom(10)">+</button>
+      </div>
+      <div id="gi_preview" style="padding:20px;max-height:620px;overflow-y:auto;font-family:'Times New Roman',serif;font-size:13px;line-height:1.5;color:#222">
+        ${previewHtml || (emp && !tpl ? '<div style="text-align:center;color:var(--muted);padding:40px">Aucun modèle actif trouvé pour ce poste / type de contrat</div>' : '<div style="text-align:center;color:var(--muted);padding:40px">Sélectionnez un collaborateur pour voir l\'aperçu</div>')}
+      </div>
+    </div>
+
+    <!-- RIGHT: RECAP + ACTIONS -->
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div class="box" style="padding:18px">
+        <div style="display:flex;align-items:center;margin-bottom:12px">
+          <span style="font-size:13px;font-weight:700;flex:1">Récapitulatif</span>
+          <span style="font-size:12px;color:var(--violet);cursor:pointer" onclick="_genRefresh()">Modifier</span>
+        </div>
+        <div style="font-size:12.5px;line-height:2;color:var(--ink2)">
+          <div><span style="color:var(--muted)">Collaborateur</span> <b>${emp?emp.first_name+' '+emp.last_name:'—'}</b></div>
+          <div><span style="color:var(--muted)">Poste</span> <b>${(rols.find(r=>r.id===s.fields.role_id)||{}).name||emp?.role||'—'}</b></div>
+          <div><span style="color:var(--muted)">Service</span> <b>${(deps.find(d=>d.id===s.fields.service_id)||{}).name||emp?.department||'—'}</b></div>
+          <div><span style="color:var(--muted)">Type contrat</span> <b>${s.fields.contract_type||'—'}</b></div>
+          <div><span style="color:var(--muted)">Début</span> <b>${s.fields.start_date||'—'}</b></div>
+          <div><span style="color:var(--muted)">Durée/semaine</span> <b>${s.fields.weekly_hours?s.fields.weekly_hours+' h':'—'}</b></div>
+          <div><span style="color:var(--muted)">Rémunération</span> <b>${s.fields.salary_amount?s.fields.salary_amount+' €':'—'}</b></div>
+        </div>
+      </div>
+
+      <div class="box" style="padding:18px">
+        <div style="font-size:13px;font-weight:700;margin-bottom:10px">Modèle utilisé</div>
+        ${tpl ? `<div style="display:flex;align-items:center;gap:10px">
+          <i class="fa-regular fa-file-lines" style="font-size:20px;color:var(--violet)"></i>
+          <div style="flex:1"><div style="font-size:13px;font-weight:600">${tpl.name}</div>
+            <span class="tag green" style="font-size:11px">Actif</span>
+          </div>
+        </div>
+        <a style="font-size:12px;color:var(--violet);cursor:pointer;display:block;margin-top:8px" onclick="contractsSubTab='templates';renderContracts()">Voir le modèle</a>`
+        : '<div style="color:var(--muted);font-size:12.5px">Aucun modèle sélectionné</div>'}
+      </div>
+
+      <div class="box" style="padding:18px">
+        <div style="font-size:13px;font-weight:700;margin-bottom:12px">Envoyer pour signature</div>
+        <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;cursor:pointer;font-size:12.5px">
+          <input type="radio" name="gi_sigmethod" value="email" ${s.fields.signature_method==='email'?'checked':''} style="margin-top:2px">
+          <div><b>Par e-mail</b><br><span style="color:var(--muted)">Le collaborateur recevra un email pour signer le contrat.</span></div>
+        </label>
+        <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:12.5px">
+          <input type="radio" name="gi_sigmethod" value="portal" ${s.fields.signature_method==='portal'?'checked':''} style="margin-top:2px">
+          <div><b>Via le portail salarié</b><br><span style="color:var(--muted)">Le collaborateur signera depuis son portail salarié.</span></div>
+        </label>
+      </div>
+
+      <div class="box" style="padding:18px">
+        <div style="font-size:13px;font-weight:700;margin-bottom:10px">Après signature</div>
+        <div style="font-size:12.5px;color:var(--ink2);line-height:1.8">
+          <div><i class="fa-solid fa-check" style="color:var(--green)"></i> Le contrat signé sera automatiquement archivé dans la fiche du salarié.</div>
+          <div><i class="fa-solid fa-check" style="color:var(--green)"></i> Vous serez notifié dès que le contrat est signé.</div>
+        </div>
+      </div>
+
+      <button class="btn p" id="gi_sign" style="width:100%;padding:12px;font-size:13.5px"><i class="fa-solid fa-pen-nib"></i> Envoyer pour signature</button>
+      <button class="btn g" id="gi_draft2" style="width:100%;padding:11px;font-size:13px">Enregistrer comme brouillon</button>
+    </div>
   </div>`;
-  $('genStart').onclick=()=>openGenerateWizard();
+
+  window._genZoomLevel = 100;
+  window._genZoom = (delta)=>{
+    _genZoomLevel = Math.min(150, Math.max(70, _genZoomLevel+delta));
+    const pr = $('gi_preview'); if(pr) pr.style.fontSize = (_genZoomLevel/100*13)+'px';
+    const lb = $('gi_zoom_label'); if(lb) lb.textContent = _genZoomLevel+'%';
+  };
+  window._genRefresh = ()=> renderContractsGenerate();
+
+  const syncAndRefresh = ()=>{
+    const s = genInlineState;
+    s.employee_id = $('gi_emp')?.value||s.employee_id;
+    s.fields.service_id = $('gi_dept')?.value||'';
+    s.fields.role_id = $('gi_role')?.value||'';
+    s.fields.manager_id = $('gi_mgr')?.value||'';
+    s.fields.contract_type = $('gi_type')?.value||'CDI';
+    s.fields.start_date = $('gi_start')?.value||'';
+    s.fields.end_date = $('gi_end')?.value||'';
+    s.fields.trial_period = $('gi_trial')?.value||'';
+    s.fields.weekly_hours = $('gi_hours')?.value||'';
+    s.fields.salary_type = $('gi_saltype')?.value||'brut_mensuel';
+    s.fields.salary_amount = $('gi_sal')?.value||'';
+    s.template_id = '';  // force re-auto-select
+    renderContractsGenerate();
+  };
+
+  ['gi_emp','gi_type','gi_dept','gi_role'].forEach(id=>{const el=$(id);if(el)el.onchange=syncAndRefresh;});
+  $('gi_type').onchange=()=>{
+    const v=$('gi_type').value; const endEl=$('gi_end');
+    if(endEl) endEl.disabled = v==='CDI';
+    syncAndRefresh();
+  };
+
+  const saveFields = ()=>{
+    genInlineState.employee_id = $('gi_emp')?.value||'';
+    genInlineState.fields.service_id = $('gi_dept')?.value||'';
+    genInlineState.fields.role_id = $('gi_role')?.value||'';
+    genInlineState.fields.manager_id = $('gi_mgr')?.value||'';
+    genInlineState.fields.contract_type = $('gi_type')?.value||'CDI';
+    genInlineState.fields.start_date = $('gi_start')?.value||'';
+    genInlineState.fields.end_date = $('gi_end')?.value||'';
+    genInlineState.fields.trial_period = $('gi_trial')?.value||'';
+    genInlineState.fields.weekly_hours = $('gi_hours')?.value||'';
+    genInlineState.fields.salary_type = $('gi_saltype')?.value||'brut_mensuel';
+    genInlineState.fields.salary_amount = $('gi_sal')?.value||'';
+    document.querySelectorAll('input[name="gi_sigmethod"]').forEach(r=>{ if(r.checked) genInlineState.fields.signature_method=r.value; });
+  };
+
+  $('gi_next').onclick=()=>{
+    saveFields();
+    if(!genInlineState.employee_id){flash('Choisissez un collaborateur');return;}
+    if(!genInlineState.fields.start_date){flash('Date de début obligatoire');return;}
+    genInlineState.step=2; renderContractsGenerate();
+  };
+
+  const draftSave = async()=>{
+    saveFields();
+    if(!genInlineState.employee_id){flash('Choisissez un collaborateur');return;}
+    const tplId = genInlineState.template_id || (s.tplList.filter(t=>t.status==='active')[0]?.id);
+    try{
+      await BE.saveGeneratedContract(hotelId,{
+        employee_id:genInlineState.employee_id, template_id:tplId||null,
+        contract_number:'DRAFT-'+Date.now(), status:'draft',
+        contract_type:genInlineState.fields.contract_type,
+        start_date:genInlineState.fields.start_date||null,
+        end_date:genInlineState.fields.end_date||null,
+        weekly_hours:genInlineState.fields.weekly_hours||null,
+        salary_type:genInlineState.fields.salary_type,
+        salary_amount:genInlineState.fields.salary_amount||null,
+        trial_period:genInlineState.fields.trial_period||null,
+        signature_method:genInlineState.fields.signature_method,
+        manager_id:genInlineState.fields.manager_id||null
+      });
+      flash('Brouillon enregistré');
+    }catch(e){flash('Erreur : '+e.message);}
+  };
+  $('gi_draft').onclick = draftSave;
+  $('gi_draft2').onclick = draftSave;
+
+  $('gi_sign').onclick=()=>{
+    saveFields();
+    if(!genInlineState.employee_id){flash('Choisissez un collaborateur');return;}
+    if(!genInlineState.fields.start_date){flash('Date de début obligatoire');return;}
+    genInlineState.step=3; renderContractsGenerate();
+  };
+}
+
+async function _genStep2(){
+  const s = genInlineState;
+  const emp = staff.find(x=>x.id===s.employee_id);
+  const hotel = hotels.find(h=>h.id===hotelId)||{};
+  const tpl = s.tplList.find(t=>t.id===s.template_id);
+  if(!emp||!tpl){
+    $('genInlineBody').innerHTML='<div style="text-align:center;padding:40px;color:var(--red)">Données manquantes — retournez à l\'étape 1.</div><button class="btn g" onclick="genInlineState.step=1;renderContractsGenerate()">Retour</button>';
+    return;
+  }
+  const ctx = buildContractContext(emp, hotel, {
+    contract_type:s.fields.contract_type, contract_start_date:s.fields.start_date, contract_end_date:s.fields.end_date,
+    trial_period:s.fields.trial_period, weekly_hours:s.fields.weekly_hours?s.fields.weekly_hours+' h/semaine':'',
+    salary:s.fields.salary_amount?s.fields.salary_amount+' €':'',
+    manager_name: staff.find(x=>x.id===s.fields.manager_id) ? staff.find(x=>x.id===s.fields.manager_id).first_name+' '+staff.find(x=>x.id===s.fields.manager_id).last_name : '',
+    collective_agreement:'HCR – Hôtels Cafés Restaurants'
+  });
+  const rendered = substituteVariables(tpl.body_html, ctx);
+  $('genInlineBody').innerHTML=`
+    <div class="box" style="padding:20px;margin-bottom:16px">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Vérifiez votre contrat avant envoi. Les variables en jaune sont manquantes.</div>
+      <div style="font-family:'Times New Roman',serif;font-size:13px;line-height:1.6;color:#222;border:1px solid var(--line);border-radius:8px;padding:28px;max-height:65vh;overflow-y:auto">${rendered}</div>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:space-between">
+      <button class="btn g" onclick="genInlineState.step=1;renderContractsGenerate()"><i class="fa-solid fa-arrow-left"></i> Retour</button>
+      <div style="display:flex;gap:10px">
+        <button class="btn g" id="gs2_pdf"><i class="fa-solid fa-file-pdf"></i> Télécharger PDF</button>
+        <button class="btn p" onclick="genInlineState.step=3;renderContractsGenerate()">Suivant <i class="fa-solid fa-arrow-right"></i></button>
+      </div>
+    </div>`;
+  $('gs2_pdf').onclick=async()=>{
+    const btn=$('gs2_pdf'); btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';
+    try{
+      const pdfBlob=await renderHtmlToPdfBlob(rendered,`Contrat - ${emp.first_name} ${emp.last_name}`);
+      const fn=`contrat_${emp.last_name}_${emp.first_name}_${new Date().toISOString().slice(0,10)}.pdf`;
+      const url=URL.createObjectURL(pdfBlob); const a=document.createElement('a'); a.href=url; a.download=fn; a.click(); URL.revokeObjectURL(url);
+    }catch(e){flash('Erreur PDF : '+e.message);}
+    btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-file-pdf"></i> Télécharger PDF';
+  };
+}
+
+async function _genStep3(){
+  const s = genInlineState;
+  const emp = staff.find(x=>x.id===s.employee_id);
+  if(!emp){$('genInlineBody').innerHTML='<div style="color:var(--red);padding:20px">Données manquantes</div>';return;}
+  $('genInlineBody').innerHTML=`
+    <div class="box" style="padding:28px;max-width:560px;margin:0 auto">
+      <h3 style="font-size:15px;font-weight:700;margin-bottom:4px">Envoi pour signature</h3>
+      <p style="font-size:13px;color:var(--ink2);margin-bottom:20px">Le contrat sera envoyé à <b>${emp.first_name} ${emp.last_name}</b> pour signature électronique.</p>
+      <div class="fld"><label>Adresse email du signataire</label>
+        <input type="email" id="gs3_email" value="${emp.email||''}" placeholder="email@exemple.com"></div>
+      <div class="fld"><label>Message personnalisé (optionnel)</label>
+        <textarea id="gs3_msg" rows="3" placeholder="Bonjour, veuillez signer votre contrat…"></textarea></div>
+      <div style="display:flex;gap:10px;margin-top:20px">
+        <button class="btn g" style="flex:1" onclick="genInlineState.step=2;renderContractsGenerate()"><i class="fa-solid fa-arrow-left"></i> Retour</button>
+        <button class="btn p" style="flex:1" id="gs3_send"><i class="fa-solid fa-paper-plane"></i> Envoyer pour signature</button>
+      </div>
+    </div>`;
+  $('gs3_send').onclick=async()=>{
+    const email=$('gs3_email').value;
+    if(!email){flash('Email requis');return;}
+    const btn=$('gs3_send'); btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Envoi…';
+    try{
+      await BE.saveGeneratedContract(hotelId,{
+        employee_id:s.employee_id, template_id:s.template_id||null,
+        contract_number:'CTR-'+Date.now(), status:'sent_signature',
+        contract_type:s.fields.contract_type, start_date:s.fields.start_date||null,
+        end_date:s.fields.end_date||null, weekly_hours:s.fields.weekly_hours||null,
+        salary_type:s.fields.salary_type, salary_amount:s.fields.salary_amount||null,
+        trial_period:s.fields.trial_period||null, signature_method:s.fields.signature_method,
+        manager_id:s.fields.manager_id||null, sent_at:new Date().toISOString()
+      });
+      flash('Contrat envoyé pour signature !'); genInlineState.step=4; renderContractsGenerate();
+    }catch(e){flash('Erreur : '+e.message); btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-paper-plane"></i> Envoyer pour signature';}
+  };
+}
+
+function _genStep4(){
+  const s = genInlineState;
+  const emp = staff.find(x=>x.id===s.employee_id);
+  $('genInlineBody').innerHTML=`
+    <div style="text-align:center;padding:48px 24px">
+      <div style="width:64px;height:64px;border-radius:50%;background:#d1fae5;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:28px">
+        <i class="fa-solid fa-check" style="color:#059669"></i>
+      </div>
+      <h2 style="font-size:20px;font-weight:800;margin-bottom:8px">Contrat envoyé !</h2>
+      <p style="font-size:13.5px;color:var(--ink2);max-width:420px;margin:0 auto 24px">${emp?emp.first_name+' '+emp.last_name:''} recevra une notification pour signer son contrat. Le document sera archivé automatiquement dans sa fiche après signature.</p>
+      <div style="display:flex;gap:12px;justify-content:center">
+        <button class="btn g" onclick="genInlineState={step:1,employee_id:'',template_id:'',fields:{contract_type:'CDI',start_date:'',end_date:'',trial_period:'',weekly_hours:'',salary_type:'brut_mensuel',salary_amount:'',manager_id:'',service_id:'',role_id:'',signature_method:'email'},tplList:[]};renderContractsGenerate()">
+          <i class="fa-solid fa-plus"></i> Nouveau contrat</button>
+        ${emp?`<button class="btn p" onclick="openFiche('${emp.id}')"><i class="fa-solid fa-user"></i> Voir la fiche salarié</button>`:''}
+      </div>
+    </div>`;
 }
 
 /* ===== MOTEUR DE SUBSTITUTION DE VARIABLES ===== */
