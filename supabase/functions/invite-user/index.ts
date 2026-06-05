@@ -115,16 +115,28 @@ Deno.serve(async (req) => {
 
     // --- Audit log (best-effort) ---
     try {
-      await admin.from('hr_document_audit_logs').insert({
-        hotel_id,
-        actor_user_id: cu.id,
-        actor_email: user.email,
-        action: 'invite_user',
-        entity_type: 'user',
-        entity_id: userId,
-        details: { email, role, access_type, already_existed: alreadyExisted },
+      await admin.rpc('gen_audit_log_invite', {
+        p_hotel_id:    hotel_id,
+        p_actor_id:    cu.id,
+        p_actor_email: user.email,
+        p_entity_id:   userId,
+        p_details:     JSON.stringify({ email, role, access_type, already_existed: alreadyExisted }),
       });
-    } catch(_) {}
+    } catch(_) {
+      // Fallback direct insert si la RPC n'existe pas
+      try {
+        await admin.from('hr_document_audit_logs').insert({
+          id:            crypto.randomUUID(),
+          hotel_id,
+          actor_user_id: cu.id,
+          actor_email:   user.email,
+          action:        'invite_user',
+          entity_type:   'user',
+          entity_id:     userId ?? undefined,
+          details:       { email, role, access_type, already_existed: alreadyExisted },
+        });
+      } catch(_2) {}
+    }
 
     return json({
       success: true,
