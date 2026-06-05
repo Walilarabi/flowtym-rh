@@ -2232,17 +2232,22 @@ async function renderContractsDpae(){
     <h3 style="font-size:13.5px;font-weight:700;margin-bottom:20px">Workflow de génération et signature</h3>
     <div style="display:flex;align-items:flex-start;gap:0;overflow-x:auto">
       ${[
-        ['1','fa-user','Sélection du collaborateur','Choisissez le collaborateur concerné.'],
-        ['2','fa-pen-to-square','Remplissage des informations','Complétez les détails du contrat.'],
-        ['3','fa-eye','Aperçu du contrat','Vérifiez et validez le contrat généré.'],
-        ['4','fa-paper-plane','Envoi pour signature','Envoi automatique via Yousign par email ou portail salarié.'],
-        ['5','fa-signature','Signature électronique','Le collaborateur signe en ligne en toute sécurité.'],
-        ['6','fa-box-archive','Archivage','Le contrat signé est archivé dans la fiche salarié.'],
-      ].map((s,i,arr)=>`<div style="flex:1;min-width:130px;text-align:center;padding:0 6px;position:relative">
-        <div style="width:36px;height:36px;border-radius:50%;background:var(--violet);color:#fff;font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:center;margin:0 auto 8px">${s[0]}</div>
-        <div style="font-size:11.5px;font-weight:700;color:var(--ink);margin-bottom:4px">${s[2]}</div>
-        <div style="font-size:11px;color:var(--muted)">${s[3]}</div>
-        ${i<arr.length-1?'<div style="position:absolute;top:18px;right:-6px;color:var(--line);font-size:16px">›</div>':''}
+        {icon:'fa-user-group',     label:'Sélection du collaborateur',    sub:'Choisissez le collaborateur concerné.'},
+        {icon:'fa-layer-group',    label:'Remplissage des informations',   sub:'Complétez les détails du contrat.'},
+        {icon:'fa-file-circle-check',label:'Aperçu du contrat',           sub:'Vérifiez et validez le contrat généré.'},
+        {icon:'__yousign__',       label:'Envoi pour signature',           sub:'Envoi automatique via Yousign par email ou portail salarié.'},
+        {icon:'fa-pen-nib',        label:'Signature électronique',         sub:'Le collaborateur signe en ligne en toute sécurité.'},
+        {icon:'fa-cloud-arrow-up', label:'Archivage',                      sub:'Le contrat signé est archivé dans la fiche salarié.'},
+      ].map((s,i,arr)=>`<div style="flex:1;min-width:130px;text-align:center;padding:0 6px;position:relative;display:flex;flex-direction:column;align-items:center">
+        <div style="width:72px;height:72px;border-radius:14px;border:1.5px solid var(--line);background:#fff;display:flex;align-items:center;justify-content:center;margin-bottom:12px;flex-direction:column;gap:3px">
+          ${s.icon==='__yousign__'
+            ? `<span style="font-size:13px;font-weight:800;color:#6c3fc5;font-family:sans-serif;letter-spacing:-.5px">Y/</span><span style="font-size:9px;font-weight:700;color:#7c3aed;letter-spacing:.5px">YOUSIGN</span><div style="width:6px;height:6px;border-radius:50%;background:var(--violet);margin-top:1px"></div>`
+            : `<i class="fa-solid ${s.icon}" style="font-size:22px;color:var(--violet)"></i>`
+          }
+        </div>
+        <div style="font-size:11.5px;font-weight:700;color:var(--ink);margin-bottom:4px">${s.label}</div>
+        <div style="font-size:11px;color:var(--muted);line-height:1.4">${s.sub}</div>
+        ${i<arr.length-1?`<div style="position:absolute;top:28px;right:-10px;font-size:18px;color:var(--muted)">→</div>`:''}
       </div>`).join('')}
     </div>
     <div style="margin-top:18px;background:#faf9ff;border:1px solid #ede9fe;border-radius:10px;padding:12px 20px;font-size:12.5px;color:var(--violet-d)">
