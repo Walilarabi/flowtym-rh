@@ -105,6 +105,14 @@ Deno.serve(async (req) => {
     });
     if (rpcErr) return json({error:'Erreur base de données : '+rpcErr.message},500);
 
+    // --- Pour le portail salarié : lier le compte Auth à la fiche employé ---
+    if (access_type === 'salarie') {
+      await admin.from('employees')
+        .update({ portal_auth_id: targetAuthId, portal_enabled: true })
+        .eq('email', email)
+        .eq('hotel_id', hotel_id);
+    }
+
     // --- Audit log (best-effort) ---
     try {
       await admin.from('hr_document_audit_logs').insert({

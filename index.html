@@ -4800,28 +4800,24 @@ async function loadPortalSection(s){
 function staffObj(id){ return staff.find(x=>x.id===id); }
 
 async function invitePortal(eid, email){
-  if(!email){flash('Email manquant');return;}
-  if(!confirm(`Envoyer une invitation portail à ${email} ?`)) return;
+  if(!email){flash('Email manquant sur la fiche — ajoutez-le d\'abord.');return;}
+  if(!confirm(`Envoyer une invitation portail salarié à ${email} ?`)) return;
+  const s=staff.find(x=>x.id===eid);
+  if(!s){flash('Salarié introuvable');return;}
+  const full_name=((s.first_name||'')+' '+(s.last_name||'')).trim();
   try{
-    const {data:tok,error}=await BE.sb.rpc('pl_portal_invite',{p_employee_id:eid});
-    if(error) throw error;
-    // Envoyer un magic link Supabase avec l'email du salarié
-    const {error:me}=await BE.sb.auth.admin?.inviteUserByEmail
-      ? await BE.sb.auth.admin.inviteUserByEmail(email,{redirectTo:window.location.origin+'/portal.html'})
-      : {error:null};
-    flash('Invitation envoyée à '+email+' ✓');
-    const s=staff.find(x=>x.id===eid);
+    // Appel de l'edge function invite-user (service_role côté serveur)
+    // access_type='salarie' → redirectTo = /salarie/auth/callback + MAJ portal_auth_id
+    await BE.inviteUser(hotelId, email, full_name, s.role||'reception', 'salarie');
+    flash('Invitation portail envoyée à '+email+' ✓');
     if(s){s.portal_enabled=true;loadPortalSection(s);}
   }catch(e){
-    // Fallback si RPC non encore déployée
-    flash('Portail activé. Invitez le salarié manuellement à : '+window.location.origin+'/portal.html');
-    const s=staff.find(x=>x.id===eid); if(s){s.portal_enabled=true;loadPortalSection(s);}
+    flash('Erreur invitation portail : '+(e.message||e));
   }
 }
 
 async function reinvitePortal(eid, email){
   if(!email){flash('Email manquant');return;}
-  flash('Renvoi de l\'invitation à '+email+'…');
   await invitePortal(eid, email);
 }
 

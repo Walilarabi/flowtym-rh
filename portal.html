@@ -363,14 +363,32 @@ async function boot(){
 
 async function loadEmployee(){
   try{
-    const {data,error} = await sb
+    // Cherche d'abord par portal_auth_id (cas normal)
+    let {data} = await sb
       .from('employees')
       .select('*')
       .eq('portal_auth_id', session.user.id)
       .eq('portal_enabled', true)
-      .single();
+      .maybeSingle();
 
-    if(error || !data){
+    // Fallback : cherche par email et auto-link (première connexion après invitation)
+    if(!data && session.user.email){
+      const {data: byEmail} = await sb
+        .from('employees')
+        .select('*')
+        .eq('email', session.user.email)
+        .eq('portal_enabled', true)
+        .maybeSingle();
+      if(byEmail){
+        // Lier l'Auth ID à la fiche salarié (idempotent)
+        await sb.from('employees')
+          .update({portal_auth_id: session.user.id})
+          .eq('id', byEmail.id);
+        data = {...byEmail, portal_auth_id: session.user.id};
+      }
+    }
+
+    if(!data){
       // Salarié connecté mais pas encore activé → écran activation
       renderActivation();
       return;
