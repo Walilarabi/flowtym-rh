@@ -526,7 +526,7 @@ async function makeRealBE(){
       must(e1,"Lecture du profil utilisateur");
       if(!u){return [];}
       const {data,error}=await sb.from('user_hotels')
-        .select('hotel_id, hotels(id,name,city)').eq('user_id',u.id);
+        .select('hotel_id, hotels(id,name,city,address,siret,ape_code,urssaf_office)').eq('user_id',u.id);
       must(error,"Lecture des hôtels accessibles");
       return (data||[]).map(x=>x.hotels).filter(Boolean);
     },
@@ -616,6 +616,16 @@ async function makeRealBE(){
     },
     async archiveTemplate(id){const {error}=await sb.from('contract_templates').update({status:'archived'}).eq('id',id);must(error,'Archive');},
     async deleteTemplate(id){const {error}=await sb.from('contract_templates').delete().eq('id',id);must(error,'Suppression');},
+    // DPAE
+    async listDpaeRecords(h){const {data,error}=await sb.from('dpae_records').select('*,employees(first_name,last_name,role)').eq('hotel_id',h).order('created_at',{ascending:false});if(error&&error.code==='42P01'){console.warn('[migration-pending] dpae_records non créée');return[];}must(error,'DPAE');return data||[];},
+    async saveDpaeRecord(h,payload){const {data,error}=await sb.from('dpae_records').insert({hotel_id:h,...payload}).select('*').single();must(error,'DPAE créer');return data;},
+    async updateDpaeRecord(id,patch){const {data,error}=await sb.from('dpae_records').update(patch).eq('id',id).select('*').single();must(error,'DPAE màj');return data;},
+    async deleteDpaeRecord(id){const {error}=await sb.from('dpae_records').delete().eq('id',id);must(error,'DPAE supprimer');},
+    async updateHotelInfo(id,patch){const {data,error}=await sb.from('hotels').update(patch).eq('id',id).select('*').single();must(error,'Hôtel màj');return data;},
+    // Generated contracts
+    async listGeneratedContracts(h){const {data,error}=await sb.from('generated_contracts').select('*,employees(first_name,last_name)').eq('hotel_id',h).order('created_at',{ascending:false});if(error&&error.code==='42P01'){console.warn('[migration-pending] generated_contracts non créée');return[];}must(error,'Contrats');return data||[];},
+    async saveGeneratedContract(h,payload){const {data,error}=await sb.from('generated_contracts').insert({hotel_id:h,...payload}).select('*').single();must(error,'Contrat créer');return data;},
+    async updateGeneratedContract(id,patch){const {data,error}=await sb.from('generated_contracts').update(patch).eq('id',id).select('*').single();must(error,'Contrat màj');return data;},
 
     /* --- DOCUMENTS ENRICHIS + STORAGE --- */
     async listDocumentsForEmployee(h,eid){const {data,error}=await sb.from('employee_documents').select('*').eq('hotel_id',h).eq('employee_id',eid).order('created_at',{ascending:false});must(error,'Documents');return data||[];},
