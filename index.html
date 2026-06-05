@@ -1748,75 +1748,291 @@ async function saveChanges(){
 function cancelChanges(){pending.clear(); pendingShifts.clear(); renderCurrentPlanView(); flash('Modifications annulées');}
 
 /* ===================== VUE TABLEAU DE BORD ===================== */
-function aggCommitted(){let trav=0,cp=0,abs=0;const counts={};
-  committed.forEach(v=>{if(!v.status)return;counts[v.status]=(counts[v.status]||0)+Number(v.duration||1);
-    const c=CMAP[v.status];if(!c)return;
-    if(c.cat==='worked')trav+=Number(v.duration||1);
-    else if(c.cat==='paid')cp+=Number(v.duration||1);
-    else if(c.cat==='abs')abs+=Number(v.duration||1);});
-  return {trav,cp,abs,counts};}
+const DAY_NAMES_FR=['dimanche','lundi','mardi','mercredi','jeudi','vendredi','samedi'];
+const DAY_SHORT_FR=['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'];
 
 function renderDashboard(){
-  const m=cur.getMonth(),y=cur.getFullYear();
-  const actifs=staff.filter(s=>s.active).length;
-  const partis=staff.filter(s=>!s.active).length;
-  const {trav,cp,abs}=aggCommitted();
-  const alerts=staff.filter(s=>s.active && !s.emergency_contact).length;
-  const team=staff.filter(s=>s.active).slice(0,7);
-  const recent=[];committed.forEach((v,k)=>{const [eid,day]=k.split('|');const s=staff.find(x=>x.id===eid);
-    if(s)recent.push({day, name:`${s.first_name} ${s.last_name}`, status:v.status});});
-  recent.sort((a,b)=>b.day.localeCompare(a.day));
-  $('view').innerHTML=`<div class="page">
-    <div class="phead"><div><h1>Tableau de bord</h1><div class="sub">${hotels.find(h=>h.id===hotelId)?.name||''} · ${MONTHS[m]} ${y}</div></div>
-      <div class="actions"><button class="btn p" id="goPlan"><i class="fa-regular fa-calendar"></i> Ouvrir le planning</button></div></div>
-    <div class="kpis">
-      <div class="kpi v"><div class="ic"><i class="fa-solid fa-users"></i></div><div class="n">${actifs}</div><div class="l">Collaborateurs actifs</div></div>
-      <div class="kpi g"><div class="ic"><i class="fa-regular fa-clock"></i></div><div class="n">${Math.round(trav)}</div><div class="l">Jours travaillés ce mois</div></div>
-      <div class="kpi b"><div class="ic"><i class="fa-regular fa-plane"></i></div><div class="n">${Math.round(cp)}</div><div class="l">CP pris ce mois</div></div>
-      <div class="kpi a"><div class="ic"><i class="fa-solid fa-triangle-exclamation"></i></div><div class="n">${alerts}</div><div class="l">Fiches incomplètes</div></div>
+  const hotel = hotels.find(h=>h.id===hotelId);
+  const hName = hotel?.name||'';
+  const now = new Date();
+  const dateStr = `${DAY_NAMES_FR[now.getDay()]} ${now.getDate()} ${MONTHS[now.getMonth()]} ${now.getFullYear()}`;
+
+  // KPI: actifs
+  const actifs = staff.filter(s=>s.active).length;
+  const newThisMonth = staff.filter(s=>{
+    if(!s.hire_date||!s.active) return false;
+    const h=new Date(s.hire_date);
+    return h.getFullYear()===now.getFullYear()&&h.getMonth()===now.getMonth();
+  }).length;
+
+  // KPI: présents aujourd'hui (planning committed)
+  const todayKey = now.toISOString().slice(0,10);
+  let presentsToday=0, reposToday=0, maladeToday=0;
+  committed.forEach((v,k)=>{
+    const [,day]=k.split('|'); if(day!==todayKey) return;
+    const c=CMAP[v.status];
+    if(!c) return;
+    if(c.cat==='worked') presentsToday++;
+    else if(v.status==='R'||v.status==='RH') reposToday++;
+    else if(v.status==='AM'||v.status==='AT') maladeToday++;
+  });
+
+  // KPI: docs manquants (loaded async)
+  // KPI: candidatures (loaded async)
+
+  // Week planning
+  const weekStart = new Date(now);
+  weekStart.setDate(now.getDate() - ((now.getDay()+6)%7)); // Monday
+  const weekDays = Array.from({length:7},(_,i)=>{
+    const d=new Date(weekStart); d.setDate(weekStart.getDate()+i); return d;
+  });
+  const weekCounts = weekDays.map(d=>{
+    const dk=d.toISOString().slice(0,10);
+    let n=0; committed.forEach((v,k)=>{const [,day]=k.split('|');const c=CMAP[v.status];if(day===dk&&c&&c.cat==='worked')n++;});
+    return n;
+  });
+  const weekLabel = `Semaine du ${weekStart.getDate()} au ${weekDays[6].getDate()} ${MONTHS[weekDays[6].getMonth()]} ${weekDays[6].getFullYear()}`;
+
+  // Today's team (shifts)
+  const todayTeam = staff.filter(s=>{
+    if(!s.active) return false;
+    const v=committed.get(`${s.id}|${todayKey}`);
+    return v && CMAP[v.status]?.cat==='worked';
+  }).slice(0,8);
+
+  $('view').innerHTML=`<div class="page" id="dashPage">
+    <!-- Header -->
+    <div style="margin-bottom:24px">
+      <h1 style="font-size:24px;font-weight:800;margin-bottom:4px">Bonjour, Directeur 👋</h1>
+      <div style="color:var(--ink2);font-size:13.5px">${dateStr} • ${hName}</div>
     </div>
-    <div class="cols2">
-      <div class="box"><h3><i class="fa-regular fa-user"></i>Équipe active</h3><div class="tlist">
-        ${team.length?team.map(s=>`<div class="it"><div class="av" style="background:${avBg(s)}">${avInner(s)}</div>
-          <div><div class="nm">${s.first_name} ${s.last_name}</div><div class="sub">${s.role||'—'} · ${s.department||'—'}</div></div>
-          <div class="right">${s.contract_type||'CDI'}</div></div>`).join(''):'<div style="padding:14px;color:var(--muted)">Aucun collaborateur — ajoutez-en depuis Personnel.</div>'}
-      </div></div>
-      <div class="box"><h3><i class="fa-regular fa-rectangle-list"></i>Activité récente du mois</h3><div class="tlist">
-        ${recent.slice(0,7).map(r=>{const c=CMAP[r.status];return `<div class="it"><span class="tag" style="background:${c?.bg};color:${c?.fg}">${r.status}</span>
-          <div><div class="nm">${r.name}</div><div class="sub">${r.day}</div></div></div>`;}).join('')||'<div style="padding:14px;color:var(--muted)">Aucune saisie pour le mois.</div>'}
-      </div></div>
+
+    <!-- KPI cards -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:22px">
+      <!-- Collaborateurs actifs -->
+      <div style="background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:var(--shadow);position:relative">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px">
+          <div style="width:38px;height:38px;background:#ede9fe;border-radius:10px;display:grid;place-items:center">
+            <i class="fa-solid fa-user-group" style="color:#7c3aed;font-size:15px"></i>
+          </div>
+          ${newThisMonth>0?`<span style="background:#dcfce7;color:#16a34a;font-size:11px;font-weight:700;padding:3px 8px;border-radius:99px">+${newThisMonth} ce mois</span>`:''}
+        </div>
+        <div style="font-size:32px;font-weight:800;margin-bottom:4px">${actifs}</div>
+        <div style="font-size:13px;font-weight:600;color:var(--ink)">Collaborateurs actifs</div>
+        <div style="font-size:11.5px;color:var(--muted)">sur ${staff.length} total</div>
+      </div>
+      <!-- Présents aujourd'hui -->
+      <div style="background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:var(--shadow)">
+        <div style="margin-bottom:16px">
+          <div style="width:38px;height:38px;background:#dcfce7;border-radius:10px;display:grid;place-items:center">
+            <i class="fa-regular fa-clock" style="color:#16a34a;font-size:15px"></i>
+          </div>
+        </div>
+        <div style="font-size:32px;font-weight:800;margin-bottom:4px">${presentsToday}</div>
+        <div style="font-size:13px;font-weight:600;color:var(--ink)">Présents aujourd'hui</div>
+        <div style="font-size:11.5px;color:var(--muted)">${reposToday} en repos, ${maladeToday} malade</div>
+      </div>
+      <!-- Documents manquants -->
+      <div style="background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:var(--shadow)">
+        <div style="margin-bottom:16px">
+          <div style="width:38px;height:38px;background:#fef9c3;border-radius:10px;display:grid;place-items:center">
+            <i class="fa-solid fa-triangle-exclamation" style="color:#ca8a04;font-size:15px"></i>
+          </div>
+        </div>
+        <div style="font-size:32px;font-weight:800;margin-bottom:4px" id="dashDocCount">…</div>
+        <div style="font-size:13px;font-weight:600;color:var(--ink)">Documents manquants</div>
+        <div style="font-size:11.5px;color:var(--muted)">À régulariser</div>
+      </div>
+      <!-- Nouvelles candidatures -->
+      <div style="background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:var(--shadow);position:relative">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px">
+          <div style="width:38px;height:38px;background:#dcfce7;border-radius:10px;display:grid;place-items:center">
+            <i class="fa-solid fa-user-plus" style="color:#16a34a;font-size:15px"></i>
+          </div>
+          <span id="dashCandBadge" style="display:none;background:#fee2e2;color:#dc2626;font-size:11px;font-weight:700;padding:3px 8px;border-radius:99px"></span>
+        </div>
+        <div style="font-size:32px;font-weight:800;margin-bottom:4px" id="dashCandCount">…</div>
+        <div style="font-size:13px;font-weight:600;color:var(--ink)">Nouvelles candidatures</div>
+        <div style="font-size:11.5px;color:var(--muted)">En attente de traitement</div>
+      </div>
     </div>
-    ${canFicheFull()?`<div class="box" style="margin-top:14px"><h3><i class="fa-solid fa-bell"></i>Alertes documents <span id="alertCount" style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:5px;font-size:11px;font-weight:700;margin-left:6px">…</span></h3>
-      <div id="alertList">Chargement…</div></div>`:''}
-    ${partis?`<div class="box" style="margin-top:14px"><h3><i class="fa-regular fa-circle-question"></i>Partis</h3>
-      <div style="font-size:13px;color:var(--ink2)">${partis} collaborateur(s) ne sont plus actifs. Allez dans Personnel + filtre « Partis » pour les consulter ou les réactiver.</div></div>`:''}
+
+    <!-- 3 cols: Actions | Equipe du jour | Activité -->
+    <div style="display:grid;grid-template-columns:1.1fr 1fr 1fr;gap:16px;margin-bottom:18px">
+      <!-- Actions rapides -->
+      <div style="background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:var(--shadow)">
+        <div style="font-size:15px;font-weight:700;margin-bottom:16px">Actions rapides</div>
+        ${[
+          {icon:'fa-calendar-days',bg:'#ede9fe',fg:'#7c3aed',label:'Voir le planning',action:"goView('planning')"},
+          {icon:'fa-user-plus',bg:'#dbeafe',fg:'#2563eb',label:'Ajouter un collaborateur',action:"goView('personnel');setTimeout(()=>openEmpForm(null),300)"},
+          {icon:'fa-file-contract',bg:'#fef9c3',fg:'#ca8a04',label:'Générer un contrat',action:"goView('contracts');contractsSubTab='generate';setTimeout(renderContracts,100)"},
+          {icon:'fa-magnifying-glass-chart',bg:'#dcfce7',fg:'#16a34a',label:'Voir les candidats',action:"goView('recruitment')"},
+        ].map(a=>`<div onclick="${a.action}" style="display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:12px;cursor:pointer;margin-bottom:8px;transition:.15s" onmouseover="this.style.background='#f8f8fc'" onmouseout="this.style.background='transparent'">
+          <div style="width:36px;height:36px;background:${a.bg};border-radius:10px;display:grid;place-items:center;flex-shrink:0">
+            <i class="fa-solid ${a.icon}" style="color:${a.fg};font-size:14px"></i>
+          </div>
+          <div style="flex:1;font-size:13.5px;font-weight:600;color:var(--ink)">${a.label}</div>
+          <i class="fa-solid fa-chevron-right" style="color:var(--muted);font-size:11px"></i>
+        </div>`).join('')}
+      </div>
+
+      <!-- Equipe du jour -->
+      <div style="background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:var(--shadow)">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+          <div style="font-size:15px;font-weight:700">Équipe du jour</div>
+          <span style="background:#f1f1f5;color:var(--ink2);font-size:11.5px;font-weight:600;padding:4px 10px;border-radius:8px">${DAY_SHORT_FR[now.getDay()]}. ${now.getDate()} ${MONTHS[now.getMonth()].slice(0,4).toLowerCase()}</span>
+        </div>
+        ${todayTeam.length ? todayTeam.map(s=>`
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)">
+            <div class="av" style="background:${avBg(s)};width:32px;height:32px;border-radius:8px;font-size:11px;flex-shrink:0">${avInner(s)}</div>
+            <div>
+              <div style="font-size:13px;font-weight:600">${s.first_name} ${s.last_name}</div>
+              <div style="font-size:11.5px;color:var(--muted)">${s.role||'—'}</div>
+            </div>
+          </div>`).join('')
+          : `<div style="text-align:center;padding:32px 0;color:var(--muted);font-size:13px">
+              <i class="fa-regular fa-calendar-xmark" style="font-size:24px;margin-bottom:10px;display:block"></i>
+              Aucun shift prévu aujourd'hui
+            </div>`}
+      </div>
+
+      <!-- Activité récente -->
+      <div style="background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:var(--shadow)">
+        <div style="font-size:15px;font-weight:700;margin-bottom:16px">Activité récente</div>
+        <div id="dashActivity">
+          ${(()=>{
+            const items=[]; committed.forEach((v,k)=>{const [eid,day]=k.split('|');const s=staff.find(x=>x.id===eid);const c=CMAP[v.status];if(s&&c)items.push({day,name:`${s.first_name} ${s.last_name}`,label:c.label||v.status,cat:c.cat});});
+            items.sort((a,b)=>b.day.localeCompare(a.day));
+            if(!items.length) return `<div style="color:var(--muted);font-size:13px;text-align:center;padding:32px 0">Aucune activité récente</div>`;
+            return items.slice(0,6).map(it=>{
+              const dotColor=it.cat==='worked'?'#16a34a':it.cat==='paid'?'#ca8a04':'#9aa0ad';
+              const daysAgo=Math.max(0,Math.floor((new Date()-new Date(it.day))/(1000*86400)));
+              const when=daysAgo===0?'Aujourd\'hui':daysAgo===1?'Hier':`Il y a ${daysAgo}j`;
+              return `<div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:14px">
+                <div style="width:8px;height:8px;border-radius:50%;background:${dotColor};flex-shrink:0;margin-top:5px"></div>
+                <div>
+                  <div style="font-size:13px;font-weight:600;color:var(--ink)">${it.name} - ${it.label}</div>
+                  <div style="font-size:11.5px;color:var(--muted)">${when}</div>
+                </div>
+              </div>`;
+            }).join('');
+          })()}
+        </div>
+      </div>
+    </div>
+
+    <!-- Alertes RH -->
+    <div id="dashAlertBanner" style="display:none;border-radius:14px;padding:14px 20px;margin-bottom:18px;display:flex;align-items:center;gap:12px;background:#fff7ed;border:1px solid #fed7aa">
+      <i class="fa-solid fa-triangle-exclamation" style="color:#f97316;font-size:16px;flex-shrink:0"></i>
+      <div style="flex:1">
+        <span style="font-weight:700;color:#c2410c;font-size:13.5px" id="dashAlertTitle">alertes RH à traiter</span>
+        <span style="font-size:12.5px;color:#c2410c;margin-left:8px" id="dashAlertDetails"></span>
+      </div>
+      <button onclick="goView('documents')" class="btn" style="background:#fff;border:1px solid #fed7aa;color:#c2410c;font-weight:700;font-size:12.5px;padding:7px 14px;border-radius:8px;cursor:pointer">
+        Gérer <i class="fa-solid fa-chevron-right" style="font-size:10px"></i>
+      </button>
+    </div>
+
+    <!-- Planning cette semaine -->
+    <div style="background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:var(--shadow)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
+        <div>
+          <div style="font-size:15px;font-weight:700">Planning cette semaine</div>
+          <div style="font-size:12px;color:var(--muted)">${weekLabel}</div>
+        </div>
+        <button onclick="goView('planning')" style="background:none;border:none;color:var(--violet-d);font-size:13px;font-weight:600;cursor:pointer">
+          Voir le planning complet <i class="fa-solid fa-chevron-right" style="font-size:10px"></i>
+        </button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:8px">
+        ${weekDays.map((d,i)=>{
+          const isToday=d.toISOString().slice(0,10)===todayKey;
+          const isWknd=i>=5;
+          const count=weekCounts[i];
+          return `<div style="text-align:center;padding:14px 8px;border-radius:12px;background:${isToday?'var(--violet-bg)':isWknd?'#faf9ff':'#fafafe'};border:1px solid ${isToday?'var(--violet)':'transparent'}">
+            <div style="font-size:11.5px;font-weight:600;color:${isWknd?'var(--violet-d)':isToday?'var(--violet-d)':'var(--ink2)'};margin-bottom:4px">${DAY_SHORT_FR[(d.getDay()+6)%7+1]||DAY_SHORT_FR[d.getDay()]} ${d.getDate()}</div>
+            <div style="font-size:26px;font-weight:800;color:${isWknd?'var(--violet)':isToday?'var(--violet)':'var(--ink)'}">${count}</div>
+            <div style="font-size:11px;color:var(--muted)">présents</div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
   </div>`;
-  $('goPlan').onclick=()=>goView('planning');
-  if(canFicheFull()) drawDashboardAlerts();
+
+  // Load async data
+  drawDashboardAlerts();
 }
 
 async function drawDashboardAlerts(){
   try{
-    const list = await BE.listDocumentAlerts(hotelId);
-    $('alertCount').textContent = list.length;
-    if(!list.length){$('alertList').innerHTML='<div style="padding:14px;color:var(--muted);font-size:13px"><i class="fa-solid fa-circle-check" style="color:var(--green);margin-right:6px"></i>Aucune alerte. Tous les documents sont à jour.</div>';return;}
-    const top = list.slice(0,10);
-    $('alertList').innerHTML = top.map(a=>{
-      const fullName = `${a.first_name||'?'} ${a.last_name||''}`.trim();
-      let label='', cls='valid';
-      if(a.alert_kind==='expired'){label=`Expiré il y a ${-a.days_until_expiry} j`; cls='expired';}
-      else if(a.alert_kind==='expiring_soon'){label=`Expire dans ${a.days_until_expiry} j`; cls='expiring_soon';}
-      else if(a.alert_kind==='missing'){label='Manquant'; cls='missing';}
-      return `<div class="alertrow" data-eid="${a.employee_id}" style="cursor:pointer">
-        <div class="av" style="background:${avBg(staff.find(x=>x.id===a.employee_id))}">${avInner(staff.find(x=>x.id===a.employee_id)||{first_name:a.first_name||'?',last_name:a.last_name||''})}</div>
-        <div style="flex:1"><div class="nm">${fullName}</div><div class="sub">${a.doc_label||a.doc_type_code}${a.expires_at?` · ${a.expires_at}`:''}</div></div>
-        <span class="badge-st ${cls}">${label}</span>
-      </div>`;
-    }).join('');
-    if(list.length>top.length){
-      $('alertList').innerHTML += `<div style="text-align:center;padding:10px 0 0;font-size:12px;color:var(--muted)">… et ${list.length-top.length} autre(s).</div>`;
+    const [alerts, candidates] = await Promise.all([
+      BE.listDocumentAlerts(hotelId).catch(()=>[]),
+      BE.listCandidates(hotelId).catch(()=>[]),
+    ]);
+
+    // Docs manquants
+    const docEl=$('dashDocCount');
+    if(docEl) docEl.textContent=alerts.filter(a=>a.alert_kind==='missing').length;
+
+    // Candidatures en attente
+    const newCands=candidates.filter(c=>c.status==='nouveau'||c.status==='new'||!c.status);
+    const candEl=$('dashCandCount');
+    if(candEl) candEl.textContent=newCands.length;
+    const badgeEl=$('dashCandBadge');
+    if(badgeEl&&newCands.length>0){badgeEl.textContent='+'+newCands.length;badgeEl.style.display='inline';}
+
+    // Alert banner
+    if(alerts.length>0){
+      const banner=$('dashAlertBanner');
+      if(banner){
+        banner.style.display='flex';
+        const titleEl=$('dashAlertTitle');
+        if(titleEl) titleEl.textContent=`${alerts.length} alerte${alerts.length>1?'s':''} RH à traiter`;
+        const detEl=$('dashAlertDetails');
+        if(detEl){
+          const top=alerts.slice(0,3).map(a=>{
+            const s=staff.find(x=>x.id===a.employee_id);
+            const name=s?`${s.first_name} ${s.last_name}`:`${a.first_name||''} ${a.last_name||''}`.trim();
+            return `${name} - ${a.doc_label||a.doc_type_code} ${a.alert_kind==='missing'?'manquante':a.alert_kind==='expired'?'expirée':'bientôt expirée'}`;
+          });
+          detEl.textContent='• '+top.join(' • ');
+        }
+      }
     }
-    $('alertList').querySelectorAll('.alertrow').forEach(r=>r.onclick=()=>openFiche(r.dataset.eid));
+
+    // Activité récente enrichie avec audit logs
+    const auditLogs = await BE.listAuditLogs(hotelId, 10).catch(()=>[]);
+    if(auditLogs.length>0){
+      const actEl=$('dashActivity');
+      if(actEl){
+        const actionLabels={
+          'invite_user':'Accès accordé',
+          'contract_generate':'Contrat généré',
+          'document_upload':'Document ajouté',
+          'template_upload':'Modèle importé',
+          'template_update':'Modèle mis à jour',
+          'employee_create':'Collaborateur ajouté',
+        };
+        actEl.innerHTML=auditLogs.slice(0,6).map(log=>{
+          const label=actionLabels[log.action]||log.action||'Action';
+          const dotColor=log.action?.includes('contract')?'#16a34a':log.action?.includes('doc')?'#ca8a04':'#8B5CF6';
+          const d=new Date(log.created_at);
+          const diffH=Math.floor((Date.now()-d)/3600000);
+          const when=diffH<1?'Il y a moins d\'1h':diffH<24?`Il y a ${diffH}h`:diffH<48?'Hier':`${Math.floor(diffH/24)}j`;
+          return `<div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:14px">
+            <div style="width:8px;height:8px;border-radius:50%;background:${dotColor};flex-shrink:0;margin-top:5px"></div>
+            <div>
+              <div style="font-size:13px;font-weight:600;color:var(--ink)">${label}</div>
+              <div style="font-size:11.5px;color:var(--muted)">${when}</div>
+            </div>
+          </div>`;
+        }).join('');
+      }
+    }
+  }catch(e){
+    console.warn('Dashboard async error:', e);
+  }
+}
   }catch(e){
     $('alertList').innerHTML=`<div style="padding:12px;color:var(--red);font-size:12px">Erreur chargement alertes : ${e.message||e}</div>`;
   }
