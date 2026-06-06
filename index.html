@@ -6762,6 +6762,12 @@ async function openAutoFillModal(){
       <select id="afEmp">${visibleRows.map(s=>`<option value="${s.id}">${s.last_name} ${s.first_name}</option>`).join('')}</select>
     </div>
     <div style="margin-top:14px;font-size:12px;font-weight:600;color:var(--ink);margin-bottom:8px">Période</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+      <button type="button" class="btn g" style="font-size:11px;padding:4px 10px" onclick="$('afFrom').value='${y}-01-01';$('afTo').value='${y}-12-31'">Année ${y}</button>
+      <button type="button" class="btn g" style="font-size:11px;padding:4px 10px" onclick="$('afFrom').value='${y+1}-01-01';$('afTo').value='${y+1}-12-31'">Année ${y+1}</button>
+      <button type="button" class="btn g" style="font-size:11px;padding:4px 10px" onclick="$('afFrom').value='${iso(y,m,1)}';$('afTo').value='${iso(y,m,dim(y,m))}'">Ce mois</button>
+      <button type="button" class="btn g" style="font-size:11px;padding:4px 10px" onclick="(function(){const n=new Date();const ny=n.getFullYear();const nm=n.getMonth();const q=Math.floor(nm/3);$('afFrom').value=iso(ny,q*3,1);$('afTo').value=iso(ny,q*3+2,dim(ny,q*3+2));})()">Ce trimestre</button>
+    </div>
     <div class="row2">
       <div class="fld"><label>Du</label><input type="date" id="afFrom" value="${iso(y,m,1)}"></div>
       <div class="fld"><label>Au</label><input type="date" id="afTo" value="${iso(y,m,dim(y,m))}"></div>
