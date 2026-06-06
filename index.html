@@ -6457,32 +6457,86 @@ function toggleCycleDay(el){
   el.innerHTML=`J${el.dataset.cday}<br><span style="font-size:10px;font-weight:400">${cur==='work'?'Trav.':'Repos'}</span>`;
 }
 
+// Formate une Date locale en 'YYYY-MM-DD' sans conversion UTC (timezone-safe)
+function localIso(d){
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+
+// Différence en jours entiers entre deux strings 'YYYY-MM-DD' (UTC-safe, immune DST)
+// new Date('YYYY-MM-DD') sans heure = UTC midnight en JS
+function dateDiffDays(startStr, endStr){
+  return Math.round((new Date(endStr).getTime()-new Date(startStr).getTime())/86400000);
+}
+
 // Calcule le code à appliquer pour un salarié à une date donnée
-// Retourne {code: 'P'|''|null, reason: string}
-// null = pas de règle, '' = repos, 'P' = travail
-function computeCodeForDate(emp, dateObj, pattern){
+// dateStr : string 'YYYY-MM-DD' (local, timezone-safe)
+// Retourne {code: 'P'|''|null, reason: string} ou null
+function computeCodeForDate(emp, dateStr, pattern){
   if(!pattern||pattern.pattern_type==='manual') return null;
 
   if(pattern.pattern_type==='fixed_days_off'){
-    const wd=dateObj.getDay(); // 0=dim
+    // Construire depuis UTC midnight pour avoir le bon jour de semaine local
+    const [y,mo,dd]=dateStr.split('-').map(Number);
+    const wd=new Date(y,mo-1,dd).getDay(); // local date → bon getDay()
     const fdo=pattern.fixed_days_off||[];
     return fdo.includes(wd)?{code:'',reason:'Repos fixe'}:{code:'P',reason:'Jour travaillé'};
   }
 
   if(pattern.pattern_type==='rotating_cycle'){
     if(!pattern.cycle_start_date||!pattern.cycle_length_days||!pattern.cycle_days?.length) return null;
-    const start=new Date(pattern.cycle_start_date+'T00:00:00');
-    const diffMs=dateObj.getTime()-start.getTime();
-    if(diffMs<0) return null; // avant le début du cycle
-    const diffDays=Math.floor(diffMs/86400000);
-    const idx=(diffDays % pattern.cycle_length_days);
-    const entry=(pattern.cycle_days||[]).find(d=>d.day===(idx+1));
+    // Diff en jours entiers, 100% UTC, immune aux DST
+    const diffDays=dateDiffDays(pattern.cycle_start_date, dateStr);
+    if(diffDays<0) return null; // avant le début du cycle
+    // idx 0-based : idx=0 → J1, idx=1 → J2, ...
+    const idx=diffDays % pattern.cycle_length_days;
+    // cycle_days stocké avec day 1-indexed : J1→day:1, J2→day:2 …
+    const entry=(pattern.cycle_days||[]).find(e=>+e.day===(idx+1));
     if(!entry) return null;
-    return entry.status==='work'?{code:'P',reason:`Cycle J${idx+1} travail`}:{code:'',reason:`Cycle J${idx+1} repos`};
+    return entry.status==='work'
+      ?{code:'P',  reason:`Cycle J${idx+1} travail`}
+      :{code:'',   reason:`Cycle J${idx+1} repos`};
   }
 
   return null;
 }
+
+// Auto-test silencieux au chargement (vérifie l'indexation du cycle)
+;(function selfTestCycle(){
+  const pattern={
+    pattern_type:'rotating_cycle',
+    cycle_start_date:'2026-09-01',
+    cycle_length_days:28,
+    cycle_days:[
+      {day:1,status:'off'},{day:2,status:'off'},{day:3,status:'work'},{day:4,status:'work'},
+      {day:5,status:'off'},{day:6,status:'off'},{day:7,status:'off'},{day:8,status:'work'},
+      {day:9,status:'work'},{day:10,status:'off'},{day:11,status:'off'},{day:12,status:'work'},
+      {day:13,status:'work'},{day:14,status:'work'},{day:15,status:'off'},{day:16,status:'off'},
+      {day:17,status:'work'},{day:18,status:'work'},{day:19,status:'off'},{day:20,status:'off'},
+      {day:21,status:'off'},{day:22,status:'work'},{day:23,status:'work'},{day:24,status:'off'},
+      {day:25,status:'off'},{day:26,status:'work'},{day:27,status:'work'},{day:28,status:'work'},
+    ]
+  };
+  const expected={
+    '2026-09-01':'','2026-09-02':'','2026-09-03':'P','2026-09-04':'P',
+    '2026-09-05':'','2026-09-06':'','2026-09-07':'','2026-09-08':'P',
+    '2026-09-09':'P','2026-09-10':'','2026-09-11':'','2026-09-12':'P',
+    '2026-09-13':'P','2026-09-14':'P','2026-09-15':'','2026-09-16':'',
+    '2026-09-17':'P','2026-09-18':'P','2026-09-19':'','2026-09-20':'',
+    '2026-09-21':'','2026-09-22':'P','2026-09-23':'P','2026-09-24':'',
+    '2026-09-25':'','2026-09-26':'P','2026-09-27':'P','2026-09-28':'P',
+    '2026-09-29':'','2026-09-30':'',
+  };
+  let ok=true;
+  Object.entries(expected).forEach(([ds,exp])=>{
+    const res=computeCodeForDate(null,ds,pattern);
+    if((res?.code??null)!==exp){
+      console.error(`[cycle-test] ${ds}: attendu="${exp}" obtenu="${res?.code}"`,res);
+      ok=false;
+    }
+  });
+  if(ok) console.log('[cycle-test] ✓ 30 dates septembre 2026 correctes');
+  else    console.error('[cycle-test] ✗ Des erreurs de cycle ont été détectées — vérifier computeCodeForDate');
+})();
 
 // Charge les patterns de tous les employés visibles en mémoire (cache léger)
 let workPatternsCache = {}; // empId → pattern object
@@ -6541,17 +6595,20 @@ async function openCreateCycleModal(){
     const empRows=rows.filter(r=>r.employee_id===eid);
     // Construire les len premiers jours à partir de startD
     extractedDays=[];
-    const startObj=new Date(startD+'T00:00:00');
+    const startObj=new Date(startD); // UTC midnight — new Date('YYYY-MM-DD') = UTC
     for(let i=0;i<len;i++){
-      const d=new Date(startObj.getTime()+i*86400000);
-      const ds=d.toISOString().slice(0,10);
-      const row=empRows.find(r=>r.day===ds);
+      const utcMs=startObj.getTime()+i*86400000;
+      const tmp=new Date(utcMs);
+      // Reconstruire la date en local pour éviter tout décalage DST
+      const ds=new Date(tmp.getUTCFullYear(),tmp.getUTCMonth(),tmp.getUTCDate());
+      const dsStr=localIso(ds);
+      const row=empRows.find(r=>r.day===dsStr);
       const code=row?.status||'';
       const isWork=code==='P'||code==='PE';
       const isOff=!code||code==='';
       let status=isWork?'work':(isOff?'off':null);
       if(!status&&PROTECTED_CODES.has(code)) status='off'; // congé = repos pour détecter le cycle
-      extractedDays.push({day:i+1,date:ds,code,status:status||'off'});
+      extractedDays.push({day:i+1,date:dsStr,code,status:status||'off'});
     }
     const workCount=extractedDays.filter(d=>d.status==='work').length;
     const offCount=extractedDays.filter(d=>d.status==='off').length;
@@ -6718,7 +6775,7 @@ async function computeAutoFill(){
     }
 
     for(let d=new Date(fromD);d<=toD;d.setDate(d.getDate()+1)){
-      const ds=d.toISOString().slice(0,10);
+      const ds=localIso(d); // timezone-safe : date locale, pas UTC
       const key=emp.id+'|'+ds;
       const existing=existMap.get(key);
 
@@ -6734,7 +6791,7 @@ async function computeAutoFill(){
         continue;
       }
 
-      const result=computeCodeForDate(emp, new Date(d), pat);
+      const result=computeCodeForDate(emp, ds, pat); // passe la string, pas un Date
       if(result===null){
         // Avant le cycle — ignorer silencieusement
         continue;
