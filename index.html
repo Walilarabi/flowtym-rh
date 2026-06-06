@@ -116,6 +116,11 @@ button,select,input,textarea{font-family:inherit}
 .rtable tbody tr:nth-child(even):hover td{background:#f6f4fd}
 
 /* matrice documents */
+/* ── Paramètres — onglets ── */
+.cfg-tab-bar{display:flex;gap:4px;flex-wrap:wrap;background:#fff;border:1px solid var(--line);border-radius:14px;padding:6px;margin-bottom:20px;overflow-x:auto}
+.cfg-tab-btn{display:flex;align-items:center;gap:7px;padding:8px 16px;border-radius:10px;border:none;background:transparent;font-size:13px;font-weight:500;color:var(--muted);cursor:pointer;transition:all .15s;white-space:nowrap}
+.cfg-tab-btn:hover{background:#f4f2fd;color:var(--violet-d)}
+.cfg-tab-btn.active{background:var(--violet);color:#fff;font-weight:600}
 /* ── Documents RH ── */
 .docmx{width:100%;border-collapse:separate;border-spacing:0;background:#fff;font-size:12px;table-layout:fixed}
 .docmx th,.docmx td{padding:7px 6px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -4747,63 +4752,396 @@ async function _dxSendReminder(empId){
 }
 
 /* ===================== VUE CONFIGURATION ===================== */
+/* ===================== PARAMÈTRES RH — ONGLETS ===================== */
+let _cfgTab = 'general'; // onglet actif
+
 async function renderConfig(){
-  const isAdmin=canManageUsers();
+  const hotel = hotels.find(h=>h.id===hotelId)||{};
+  const isAdmin = canManageUsers();
+
+  const TABS_CFG = [
+    ['general',   'fa-building',          'Général'],
+    ['org',       'fa-layer-group',        'Organisation'],
+    ['planning',  'fa-calendar-days',      'Planning'],
+    ['etages',    'fa-broom',              'Service Étages'],
+    ['docs',      'fa-folder-open',        'Documents RH'],
+    ['contrats',  'fa-file-signature',     'Contrats'],
+    ['access',    'fa-user-shield',        'Accès & Permissions'],
+    ['security',  'fa-shield-halved',      'Sécurité'],
+  ];
+
+  const tabBar = TABS_CFG.map(([id,ic,lab])=>`
+    <button class="cfg-tab-btn ${_cfgTab===id?'active':''}" onclick="_cfgTab='${id}';renderConfig()">
+      <i class="fa-solid ${ic}"></i> ${lab}
+    </button>`).join('');
+
   $('view').innerHTML=`<div class="page">
-    <div class="phead"><div><h1>Paramètres</h1><div class="sub">Référentiels et accès · ${hotels.find(h=>h.id===hotelId)?.name||''}</div></div></div>
+    <div class="phead"><div><h1>Paramètres RH</h1><div class="sub">Configuration de l'établissement et des accès</div></div></div>
+    <div class="cfg-tab-bar">${tabBar}</div>
+    <div id="cfgBody"></div>
+  </div>`;
 
-    <div class="box" style="margin-bottom:14px"><h3><i class="fa-solid fa-file-import"></i>Import planning Excel</h3>
-      <div style="font-size:13px;color:var(--ink2);margin-bottom:14px;line-height:1.6">Importez un fichier <b>.xlsx / .xls</b> exporté depuis Flowtym pour pré-remplir le planning du mois courant. Les cellules déjà saisies ne sont pas écrasées.</div>
-      <button class="btn g" id="importXlsxSettings"><i class="fa-solid fa-file-import"></i> Importer un fichier Excel</button>
-    </div>
+  if(_cfgTab==='general')     await _cfgGeneral(hotel, isAdmin);
+  else if(_cfgTab==='org')    _cfgOrg();
+  else if(_cfgTab==='planning') _cfgPlanning();
+  else if(_cfgTab==='etages') await _cfgEtages();
+  else if(_cfgTab==='docs')   _cfgDocs();
+  else if(_cfgTab==='contrats') _cfgContrats();
+  else if(_cfgTab==='access') await _cfgAccess(isAdmin);
+  else if(_cfgTab==='security') _cfgSecurity(hotel);
+}
 
-    <div class="box" style="margin-bottom:14px"><h3><i class="fa-solid fa-user-shield"></i>Accès et permissions</h3>
-      <div id="accBox">Chargement…</div>
-      <div style="margin-top:18px">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-          <b style="font-size:13px;color:var(--ink)">Matrice des permissions par rôle</b>
-          ${isAdmin?`<button class="btn g" id="permReset" style="font-size:11.5px;padding:5px 10px"><i class="fa-solid fa-rotate-left"></i> Réinitialiser</button>`:''}
+/* ──────────────────────────────────────────────
+   ONGLET 1 · GÉNÉRAL
+────────────────────────────────────────────── */
+async function _cfgGeneral(hotel, isAdmin){
+  // Lire les paramètres locaux
+  const lsCfg = JSON.parse(localStorage.getItem('fty_cfg_'+hotelId)||'{}');
+  const allHotels = hotels; // multi-hôtel
+
+  $('cfgBody').innerHTML=`
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+      <!-- INFOS ÉTABLISSEMENT -->
+      <div class="box">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+          <h3 style="margin:0"><i class="fa-regular fa-building"></i> Informations établissement</h3>
+          ${isAdmin?`<button class="btn g" id="editHotelBtn" style="font-size:11.5px;padding:5px 12px"><i class="fa-solid fa-pen"></i> Modifier</button>`:''}
         </div>
-        <table class="tbl" style="font-size:11.5px" id="permMatrix">
-          <thead><tr><th>Rôle</th><th>Onglets</th><th>Fiche complète</th><th>Gestion accès</th></tr></thead>
-          <tbody id="permRows"></tbody>
-        </table>
+        <div id="hotelInfoView">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 20px;font-size:13px">
+            ${[
+              ["Nom de l'établissement", hotel.name||'—'],
+              ["Siret", hotel.siret||'—'],
+              ["Adresse", hotel.address||hotel.city||'—'],
+              ["Téléphone", hotel.phone||'—'],
+              ["Email général", hotel.email||'—'],
+              ["Site web", hotel.website||'—'],
+              ["Représentant légal", hotel.legal_representative||'—'],
+              ["Fonction", hotel.representative_role||'Directeur d\'hébergement'],
+            ].map(([k,v])=>`<div><div style="font-size:10.5px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px">${k}</div><div style="font-weight:600;color:var(--ink)">${v}</div></div>`).join('')}
+          </div>
+        </div>
+        <div id="hotelInfoEdit" style="display:none">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div class="fld"><label>Nom de l'établissement</label><input id="hi_name" value="${esc(hotel.name||'')}"></div>
+            <div class="fld"><label>SIRET</label><input id="hi_siret" value="${esc(hotel.siret||'')}"></div>
+            <div class="fld" style="grid-column:1/-1"><label>Adresse</label><input id="hi_address" value="${esc(hotel.address||hotel.city||'')}"></div>
+            <div class="fld"><label>Téléphone</label><input id="hi_phone" value="${esc(hotel.phone||'')}"></div>
+            <div class="fld"><label>Email général</label><input id="hi_email" type="email" value="${esc(hotel.email||'')}"></div>
+            <div class="fld"><label>Site web</label><input id="hi_website" value="${esc(hotel.website||'')}"></div>
+            <div class="fld"><label>Représentant légal</label><input id="hi_rep" value="${esc(hotel.legal_representative||'')}"></div>
+            <div class="fld"><label>Fonction</label><input id="hi_repRole" value="${esc(hotel.representative_role||'Directeur d\'hébergement')}"></div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:12px">
+            <button class="btn p" id="hi_save"><i class="fa-solid fa-check"></i> Enregistrer</button>
+            <button class="btn g" id="hi_cancel">Annuler</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- PARAMÈTRES RH GLOBAUX -->
+      <div class="box">
+        <h3><i class="fa-solid fa-sliders"></i> Paramètres RH globaux</h3>
+        <div style="display:flex;flex-direction:column;gap:12px;font-size:13px">
+          <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding-bottom:10px">
+            <span style="color:var(--ink2)">Début de la semaine</span>
+            <select id="cfg_week" style="font-size:12.5px;padding:5px 10px;border:1px solid var(--line);border-radius:8px">
+              <option value="1" ${(lsCfg.weekStart||'1')==='1'?'selected':''}>Lundi</option>
+              <option value="0" ${lsCfg.weekStart==='0'?'selected':''}>Dimanche</option>
+            </select>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding-bottom:10px">
+            <span style="color:var(--ink2)">Format de la date</span>
+            <select id="cfg_datefmt" style="font-size:12.5px;padding:5px 10px;border:1px solid var(--line);border-radius:8px">
+              <option value="DD/MM/YYYY" ${(lsCfg.dateFmt||'DD/MM/YYYY')==='DD/MM/YYYY'?'selected':''}>DD/MM/YYYY</option>
+              <option value="MM/DD/YYYY" ${lsCfg.dateFmt==='MM/DD/YYYY'?'selected':''}>MM/DD/YYYY</option>
+              <option value="YYYY-MM-DD" ${lsCfg.dateFmt==='YYYY-MM-DD'?'selected':''}>YYYY-MM-DD</option>
+            </select>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding-bottom:10px">
+            <span style="color:var(--ink2)">Format de l'heure</span>
+            <select id="cfg_timefmt" style="font-size:12.5px;padding:5px 10px;border:1px solid var(--line);border-radius:8px">
+              <option value="24h" ${(lsCfg.timeFmt||'24h')==='24h'?'selected':''}>24 heures</option>
+              <option value="12h" ${lsCfg.timeFmt==='12h'?'selected':''}>12 heures (AM/PM)</option>
+            </select>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding-bottom:10px">
+            <span style="color:var(--ink2)">Fuseau horaire</span>
+            <select id="cfg_tz" style="font-size:12.5px;padding:5px 10px;border:1px solid var(--line);border-radius:8px">
+              <option value="Europe/Paris">Europe/Paris</option>
+              <option value="Europe/London">Europe/London</option>
+              <option value="America/New_York">America/New_York</option>
+            </select>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding-bottom:10px">
+            <span style="color:var(--ink2)">Langue par défaut</span>
+            <select id="cfg_lang" style="font-size:12.5px;padding:5px 10px;border:1px solid var(--line);border-radius:8px">
+              <option value="fr">Français</option>
+              <option value="en">English</option>
+            </select>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding-bottom:10px">
+            <span style="color:var(--ink2)">Activer les demandes portail salarié</span>
+            <label class="tog-wrap"><input type="checkbox" id="cfg_portal" ${lsCfg.portal!==false?'checked':''}><span class="tog-sw"></span></label>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding-bottom:10px">
+            <span style="color:var(--ink2)">Activer les notifications par email</span>
+            <label class="tog-wrap"><input type="checkbox" id="cfg_notif" ${lsCfg.notif!==false?'checked':''}><span class="tog-sw"></span></label>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <span style="color:var(--ink2)">Activer les rappels automatiques</span>
+            <label class="tog-wrap"><input type="checkbox" id="cfg_rappels" ${lsCfg.rappels!==false?'checked':''}><span class="tog-sw"></span></label>
+          </div>
+        </div>
+        <button class="btn p" id="cfg_saveGlobal" style="margin-top:14px"><i class="fa-solid fa-check"></i> Enregistrer les préférences</button>
       </div>
     </div>
 
-    <div class="box" style="margin-bottom:14px"><h3><i class="fa-solid fa-palette"></i>Couleurs des statuts du planning</h3>
-      <div style="font-size:12.5px;color:var(--ink2);margin-bottom:12px">Personnalisez la couleur de fond et de texte de chaque statut. Cliquez sur un swatch pour modifier.</div>
-      <div id="colorsGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px"></div>
-      <div style="display:flex;gap:8px;margin-top:12px">
-        <button class="btn p" id="saveColors"><i class="fa-solid fa-check"></i> Enregistrer les couleurs</button>
-        <button class="btn g" id="resetColors"><i class="fa-solid fa-rotate-left"></i> Réinitialiser</button>
+    <!-- MULTI-HÔTEL -->
+    <div class="box" style="margin-bottom:16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <h3 style="margin:0"><i class="fa-solid fa-hotel"></i> Multi-hôtel</h3>
+        <button class="btn g" style="font-size:11.5px;padding:5px 12px" onclick="navTo('config')"><i class="fa-solid fa-pen"></i> Modifier</button>
+      </div>
+      <table class="tbl" style="font-size:12.5px">
+        <thead><tr><th>Établissement</th><th>Code</th><th>Adresse</th><th>Statut</th></tr></thead>
+        <tbody>
+          ${allHotels.map(h=>`<tr>
+            <td><b>${esc(h.name||'—')}</b></td>
+            <td>${esc(h.code||h.city?.slice(0,3).toUpperCase()||'—')}</td>
+            <td style="color:var(--muted)">${esc(h.address||h.city||'—')}</td>
+            <td><span class="tag ${h.active===false?'gray':'ok'}">${h.active===false?'Inactif':'Actif'}</span></td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- IMPORT / EXPORT -->
+    <div class="box" style="margin-bottom:16px">
+      <h3><i class="fa-solid fa-right-left"></i> Import / Export</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px">
+        <div style="padding:12px;border:1px solid var(--line);border-radius:10px">
+          <div style="font-weight:600;font-size:13px;margin-bottom:4px">Import planning Excel</div>
+          <div style="font-size:11.5px;color:var(--muted);margin-bottom:10px">Importez un fichier .xlsx/.xls depuis Flowtym pour pré-remplir le planning du mois courant.</div>
+          <button class="btn g" id="importXlsxSettings"><i class="fa-solid fa-file-import"></i> Importer un fichier</button>
+        </div>
+        <div style="padding:12px;border:1px solid var(--line);border-radius:10px">
+          <div style="font-weight:600;font-size:13px;margin-bottom:4px">Export des données RH</div>
+          <div style="font-size:11.5px;color:var(--muted);margin-bottom:10px">Exportez vos données (planning, temps, documents, etc.).</div>
+          <button class="btn g"><i class="fa-solid fa-download"></i> Exporter les données</button>
+        </div>
+        <div style="padding:12px;border:1px solid var(--line);border-radius:10px">
+          <div style="font-weight:600;font-size:13px;margin-bottom:4px">Modèles d'export</div>
+          <div style="font-size:11.5px;color:var(--muted);margin-bottom:10px">Gérez vos modèles d'export personnalisés.</div>
+          <button class="btn g" onclick="_cfgTab='contrats';renderConfig()"><i class="fa-solid fa-file-lines"></i> Gérer les modèles</button>
+        </div>
       </div>
     </div>
 
+    <!-- PORTAIL SALARIÉ -->
+    <div class="box">
+      <h3><i class="fa-solid fa-mobile-screen"></i> Paramètres portail salarié</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+        ${[
+          ['Autoriser les demandes d\'absence','Les salariés peuvent soumettre des demandes depuis leur portail.','cfg_ps_absence'],
+          ['Autoriser le téléchargement de documents','Les salariés peuvent déposer leurs documents RH.','cfg_ps_docs'],
+          ['Affichage du planning','Afficher le planning et les horaires sur le portail.','cfg_ps_planning'],
+          ['Notifications','Les salariés reçoivent des notifications sur les événements importants.','cfg_ps_notifs'],
+          ['Solde et compteurs','Afficher les soldes d\'absences et compteurs sur le portail.','cfg_ps_solde'],
+          ['Messagerie interne','Activer la messagerie interne entre salariés et management.','cfg_ps_msg'],
+        ].map(([lab,sub,id])=>`
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;padding:10px;border:1px solid var(--line);border-radius:10px;gap:12px">
+            <div>
+              <div style="font-size:13px;font-weight:600">${lab}</div>
+              <div style="font-size:11.5px;color:var(--muted);margin-top:2px">${sub}</div>
+            </div>
+            <label class="tog-wrap" style="margin-top:2px;flex-shrink:0"><input type="checkbox" id="${id}" ${id!=='cfg_ps_msg'?'checked':''}><span class="tog-sw"></span></label>
+          </div>`).join('')}
+      </div>
+    </div>`;
+
+  // Hotel info edit/save
+  if(isAdmin){
+    $('editHotelBtn').onclick=()=>{$('hotelInfoView').style.display='none';$('hotelInfoEdit').style.display='';};
+    $('hi_cancel').onclick=()=>{$('hotelInfoEdit').style.display='none';$('hotelInfoView').style.display='';};
+    $('hi_save').onclick=async()=>{
+      const patch={name:$('hi_name').value.trim(),siret:$('hi_siret').value.trim(),address:$('hi_address').value.trim(),phone:$('hi_phone').value.trim(),email:$('hi_email').value.trim(),website:$('hi_website').value.trim(),legal_representative:$('hi_rep').value.trim(),representative_role:$('hi_repRole').value.trim()};
+      $('hi_save').disabled=true;
+      try{
+        const updated=await BE.updateHotelInfo(hotelId,patch);
+        const idx=hotels.findIndex(h=>h.id===hotelId);
+        if(idx>=0) Object.assign(hotels[idx],updated);
+        flash('Établissement mis à jour');
+        _cfgTab='general'; renderConfig();
+      }catch(e){flash('Erreur : '+e.message,'ko');}
+      finally{$('hi_save').disabled=false;}
+    };
+  }
+  // Global prefs save
+  $('cfg_saveGlobal').onclick=()=>{
+    const cfg={weekStart:$('cfg_week').value,dateFmt:$('cfg_datefmt').value,timeFmt:$('cfg_timefmt').value,tz:$('cfg_tz').value,lang:$('cfg_lang').value,portal:$('cfg_portal').checked,notif:$('cfg_notif').checked,rappels:$('cfg_rappels').checked};
+    localStorage.setItem('fty_cfg_'+hotelId,JSON.stringify(cfg));
+    flash('Préférences enregistrées');
+  };
+  // Import Excel
+  $('importXlsxSettings').onclick=()=>$('xlsxFile').click();
+}
+
+/* ──────────────────────────────────────────────
+   ONGLET 2 · ORGANISATION
+────────────────────────────────────────────── */
+function _cfgOrg(){
+  $('cfgBody').innerHTML=`
     <div class="cols2">
       <div class="box"><h3><i class="fa-solid fa-layer-group"></i>Services</h3>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Glissez-déposez pour réordonner. Les services sont utilisés pour filtrer le planning et les rôles.</div>
         <div id="depList"></div>
         <div style="display:flex;gap:8px;margin-top:10px">
           <input type="text" id="newDep" placeholder="Nouveau service" style="flex:1">
           <button class="btn p" id="addDep"><i class="fa-solid fa-plus"></i></button>
-        </div></div>
-      <div class="box"><h3><i class="fa-solid fa-id-badge"></i>Rôles</h3>
+        </div>
+      </div>
+      <div class="box"><h3><i class="fa-solid fa-id-badge"></i>Rôles / Postes</h3>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Associez chaque rôle à un service. Utilisés dans les fiches salariés et les contrats.</div>
         <div id="rolList"></div>
         <div style="display:flex;gap:8px;margin-top:10px">
           <input type="text" id="newRol" placeholder="Nouveau rôle" style="flex:1">
           <select id="newRolDep" style="min-width:120px"></select>
           <button class="btn p" id="addRol"><i class="fa-solid fa-plus"></i></button>
-        </div></div>
+        </div>
+      </div>
+    </div>`;
+  _cfgDrawDeps(); _cfgDrawRols();
+  $('addDep').onclick=async()=>{const v=$('newDep').value.trim();if(!v)return;
+    try{const d=await BE.addDepartment(hotelId,v);deps.push(d);$('newDep').value='';_cfgDrawDeps();flash('Service ajouté');}catch(e){flash('Erreur : '+e.message);}};
+  $('addRol').onclick=async()=>{const v=$('newRol').value.trim();if(!v)return;
+    try{const r=await BE.addRole(hotelId,v,$('newRolDep').value||null);rols.push(r);$('newRol').value='';_cfgDrawRols();flash('Rôle ajouté');}catch(e){flash('Erreur : '+e.message);}};
+}
+
+function _cfgDrawDeps(){
+  const sorted=[...deps].sort((a,b)=>(a.sort_order??999)-(b.sort_order??999));
+  $('depList').innerHTML=sorted.map((d,i)=>`
+    <div class="dep-row" data-depid="${d.id}" draggable="true"
+      style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:9px;margin-bottom:6px;background:#fff;cursor:grab;transition:box-shadow .15s">
+      <i class="fa-solid fa-grip-vertical" style="color:#c4c4d4;font-size:13px;flex-shrink:0"></i>
+      <span style="flex:1;font-size:13px;font-weight:500">${d.name}</span>
+      <span style="font-size:10px;color:var(--muted);background:#f4f4f7;padding:2px 6px;border-radius:5px;font-weight:600">#${i+1}</span>
+      <button class="btn d" data-deldep="${d.id}" style="padding:4px 9px;font-size:11px"><i class="fa-solid fa-trash"></i></button>
+    </div>`).join('')||'<div style="color:var(--muted);font-size:12px;padding:8px 0">Aucun service défini.</div>';
+  if($('newRolDep')) $('newRolDep').innerHTML='<option value="">— Service —</option>'+sorted.map(d=>`<option value="${d.id}">${d.name}</option>`).join('');
+
+  const saveDeptOrder=async()=>{await Promise.all(deps.map((d,i)=>BE.updateDepartment(d.id,{sort_order:(i+1)*10}).catch(()=>{})));};
+  let dragSrc=null;
+  $('depList').querySelectorAll('.dep-row').forEach(row=>{
+    row.addEventListener('dragstart',e=>{dragSrc=row;row.style.opacity='.4';e.dataTransfer.effectAllowed='move';});
+    row.addEventListener('dragend',()=>{row.style.opacity='';});
+    row.addEventListener('dragover',e=>{e.preventDefault();e.dataTransfer.dropEffect='move';});
+    row.addEventListener('dragenter',()=>{if(row!==dragSrc)row.style.background='#f0eeff';});
+    row.addEventListener('dragleave',()=>{row.style.background='#fff';});
+    row.addEventListener('drop',e=>{
+      e.preventDefault(); if(!dragSrc||dragSrc===row)return;
+      row.style.background='#fff';
+      const list=$('depList');
+      const rows=[...list.querySelectorAll('.dep-row')];
+      const srcIdx=rows.indexOf(dragSrc),dstIdx=rows.indexOf(row);
+      if(srcIdx<dstIdx) list.insertBefore(dragSrc,row.nextSibling); else list.insertBefore(dragSrc,row);
+      const newOrder=[...list.querySelectorAll('.dep-row')].map(r=>r.dataset.depid);
+      newOrder.forEach((id,i)=>{const d=deps.find(x=>x.id===id);if(d)d.sort_order=(i+1)*10;});
+      list.querySelectorAll('.dep-row').forEach((r,i)=>{const b=r.querySelector('span[style*="background:#f4f4f7"]');if(b)b.textContent='#'+(i+1);});
+      saveDeptOrder().then(()=>flash('Ordre sauvegardé')).catch(()=>{});
+    });
+  });
+  $('depList').querySelectorAll('[data-deldep]').forEach(b=>b.onclick=async()=>{
+    if(!confirm('Supprimer ce service ?'))return;
+    try{await BE.deleteDepartment(b.dataset.deldep);deps=deps.filter(x=>x.id!==b.dataset.deldep);_cfgDrawDeps();}
+    catch(e){flash('Erreur : '+e.message);}
+  });
+}
+
+function _cfgDrawRols(){
+  $('rolList').innerHTML=rols.map(r=>{const dp=deps.find(d=>d.id===r.department_id);
+    return `<div style="display:flex;align-items:center;padding:7px 0;border-bottom:1px dashed var(--line);font-size:13px">
+      <span style="flex:1">${r.name}${dp?` <span class="tag gray">${dp.name}</span>`:''}</span>
+      <button class="btn d" data-delrol="${r.id}" style="padding:4px 9px;font-size:11px"><i class="fa-solid fa-trash"></i></button>
+    </div>`;}).join('')||'<div style="color:var(--muted);font-size:12px;padding:8px 0">Aucun rôle défini.</div>';
+  $('rolList').querySelectorAll('[data-delrol]').forEach(b=>b.onclick=async()=>{
+    if(!confirm('Supprimer ce rôle ?'))return;
+    try{await BE.deleteRole(b.dataset.delrol);rols=rols.filter(x=>x.id!==b.dataset.delrol);_cfgDrawRols();}
+    catch(e){flash('Erreur : '+e.message);}
+  });
+}
+
+/* ──────────────────────────────────────────────
+   ONGLET 3 · PLANNING
+────────────────────────────────────────────── */
+function _cfgPlanning(){
+  const ORIG=[['P','#E8F5E9','#1b5e20'],['PE','#FFF3E0','#E65100'],['CP','#C6EFCE','#0F5132'],
+    ['RTT','#BDD7EE','#1F4E78'],['MAL','#FFC7CE','#9C0006'],['MAT','#E1D5F0','#5B2A86'],
+    ['CSS','#D9D9D9','#3F3F3F'],['AE','#FFE699','#7F6000'],['F','#EDEDED','#6b7280'],
+    ['PAT','#E8E0F5','#4A2080'],['ABS','#FFD9D9','#7B0000'],['REC','#D4F0FC','#0C4A6E'],['FORM','#FEF3C7','#92400E']];
+
+  $('cfgBody').innerHTML=`
+    <div class="box" style="margin-bottom:16px">
+      <h3><i class="fa-solid fa-palette"></i>Couleurs des statuts du planning</h3>
+      <div style="font-size:12.5px;color:var(--ink2);margin-bottom:12px">Personnalisez la couleur de fond et de texte de chaque statut. Aperçu en temps réel.</div>
+      <div id="colorsGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px"></div>
+      <div style="display:flex;gap:8px;margin-top:14px">
+        <button class="btn p" id="saveColors"><i class="fa-solid fa-check"></i> Enregistrer les couleurs</button>
+        <button class="btn g" id="resetColors"><i class="fa-solid fa-rotate-left"></i> Réinitialiser</button>
+      </div>
     </div>
-    <!-- Service étages -->
-    <div class="box" id="hksBox" style="margin-top:14px">
+    <div class="box">
+      <h3><i class="fa-solid fa-file-import"></i>Import planning Excel</h3>
+      <div style="font-size:13px;color:var(--ink2);margin-bottom:14px;line-height:1.6">Importez un fichier <b>.xlsx / .xls</b> exporté depuis Flowtym pour pré-remplir le planning du mois courant. Les cellules déjà saisies ne sont pas écrasées.</div>
+      <button class="btn g" id="importXlsxSettings"><i class="fa-solid fa-file-import"></i> Importer un fichier Excel</button>
+    </div>`;
+
+  $('colorsGrid').innerHTML=CODES.map(c=>`
+    <div class="color-row" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:#fff">
+      <span style="background:${c[2]};color:${c[3]};padding:3px 10px;border-radius:6px;font-weight:700;font-size:12px;min-width:42px;text-align:center">${c[0]}</span>
+      <span style="flex:1;font-size:12.5px;color:var(--ink2)">${c[1]}</span>
+      <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted)">Fond<input type="color" class="col-bg" data-code="${c[0]}" value="${c[2]}" style="width:28px;height:28px;border:none;padding:0;cursor:pointer;border-radius:5px"></label>
+      <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted)">Texte<input type="color" class="col-fg" data-code="${c[0]}" value="${c[3]}" style="width:28px;height:28px;border:none;padding:0;cursor:pointer;border-radius:5px"></label>
+    </div>`).join('');
+
+  $('colorsGrid').querySelectorAll('input[type=color]').forEach(inp=>{
+    inp.oninput=()=>{
+      const row=inp.closest('.color-row');
+      const bg=row.querySelector('.col-bg').value, fg=row.querySelector('.col-fg').value;
+      const badge=row.querySelector('span'); badge.style.background=bg; badge.style.color=fg;
+    };
+  });
+  $('saveColors').onclick=()=>{
+    $('colorsGrid').querySelectorAll('.color-row').forEach(row=>{
+      const code=row.querySelector('.col-bg').dataset.code;
+      const bg=row.querySelector('.col-bg').value, fg=row.querySelector('.col-fg').value;
+      const ci=CODES.findIndex(c=>c[0]===code); if(ci<0)return;
+      CODES[ci][2]=bg; CODES[ci][3]=fg; CMAP[code].bg=bg; CMAP[code].fg=fg;
+    });
+    saveCustomColors(hotelId); flash('Couleurs enregistrées'); render();
+  };
+  $('resetColors').onclick=()=>{
+    if(!confirm('Réinitialiser toutes les couleurs ?'))return;
+    localStorage.removeItem('fty_colors_'+hotelId);
+    ORIG.forEach(([code,bg,fg])=>{const ci=CODES.findIndex(c=>c[0]===code);if(ci<0)return;CODES[ci][2]=bg;CODES[ci][3]=fg;CMAP[code].bg=bg;CMAP[code].fg=fg;});
+    flash('Couleurs réinitialisées'); _cfgTab='planning'; renderConfig();
+  };
+  $('importXlsxSettings').onclick=()=>$('xlsxFile').click();
+}
+
+/* ──────────────────────────────────────────────
+   ONGLET 4 · SERVICE ÉTAGES
+────────────────────────────────────────────── */
+async function _cfgEtages(){
+  $('cfgBody').innerHTML=`
+    <div class="box" style="margin-bottom:16px" id="hksBox">
       <h3><i class="fa-solid fa-broom"></i>Service Étages — Paramétrage des besoins</h3>
       <div style="font-size:13px;color:var(--ink2);margin-bottom:16px;line-height:1.6">
         Définissez le nombre minimum de femmes de chambre nécessaires par jour de la semaine. Ce paramétrage est utilisé dans le Dashboard pour détecter les jours en sous-effectif.
       </div>
-      <div class="row2" style="margin-bottom:14px">
-        <div class="fld"><label>Nom du service étages dans cet hôtel</label><input type="text" id="hksDept" value="" placeholder="Ex : Étage, Housekeeping…"></div>
-        <div class="fld"><label>Productivité PMS (chambres/pers./jour) <span style="font-size:10px;color:var(--muted)">— connecteur PMS à venir</span></label><input type="number" id="hksProd" min="1" max="30" value="14" style="width:80px"></div>
+      <div class="row2" style="margin-bottom:16px">
+        <div class="fld"><label>Nom du service étages dans cet hôtel</label><input type="text" id="hksDept" placeholder="Ex : Étage, Housekeeping…"></div>
+        <div class="fld"><label>Productivité PMS <span style="font-size:10px;color:var(--muted)">(chambres/pers./jour)</span></label><input type="number" id="hksProd" min="1" max="30" value="14" style="width:100px"></div>
       </div>
       <div style="font-size:12px;font-weight:600;color:var(--ink);margin-bottom:10px">Effectif minimum par jour</div>
       <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:8px;margin-bottom:16px" id="hksGrid">
@@ -4819,49 +5157,27 @@ async function renderConfig(){
       </div>
     </div>
 
-    <div class="box" style="margin-top:14px"><h3><i class="fa-solid fa-shield-halved"></i>Sécurité & multi-hôtel</h3>
-      <div style="font-size:13px;color:var(--ink2);line-height:1.6">
-        Toutes les tables RH disposent d'une RLS active. Vous ne voyez et ne modifiez que les données de l'hôtel sélectionné. Le contrôle des accès par rôle est appliqué côté frontend ET côté base via des fonctions <code>SECURITY DEFINER</code>.
-      </div></div>
-  </div>`;
+    <!-- Connexion PMS -->
+    <div class="box" style="opacity:.7">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+        <h3 style="margin:0"><i class="fa-solid fa-plug"></i>Connexion PMS</h3>
+        <span class="tag gray" style="font-size:10.5px">À venir</span>
+      </div>
+      <div style="font-size:13px;color:var(--ink2);line-height:1.6;margin-bottom:14px">
+        Connectez Flowtym RH à votre PMS hôtelier pour synchroniser automatiquement le taux d'occupation et calculer les besoins en femmes de chambre en temps réel.
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
+        ${['Mews','Opera','Protel','Medialog','Fols','Clock'].map(n=>`
+        <div style="padding:10px 14px;border:1px dashed var(--line);border-radius:10px;font-size:12.5px;font-weight:600;color:var(--muted);text-align:center">${n}</div>`).join('')}
+      </div>
+    </div>`;
 
-  // === Matrice permissions ===
-  const drawPermMatrix=()=>{
-    const allTabs=TABS.flatMap(g=>g[1]).filter(t=>!t[3]);
-    $('permRows').innerHTML=Object.entries(PERMS).map(([role,p])=>{
-      const tabLabel=p.tabs==='all'?'<span class="ok">Tous</span>':p.tabs.map(t=>{const f=allTabs.find(x=>x[0]===t);return f?f[1]:t;}).join(' · ');
-      const mkTog=(field,val)=>isAdmin?`<label class="tog-wrap"><input type="checkbox" class="perm-tog" data-role="${role}" data-field="${field}" ${val?'checked':''}><span class="tog-sw"></span></label>`:(val?'<span class="ok">Oui</span>':'<span style="color:var(--muted)">Non</span>');
-      return `<tr><td><b>${ROLE_LABELS[role]||role}</b></td><td style="font-size:11px">${tabLabel}</td><td>${mkTog('ficheFull',p.ficheFull)}</td><td>${mkTog('manageUsers',p.manageUsers)}</td></tr>`;
-    }).join('');
-    if(isAdmin){
-      $('permRows').querySelectorAll('.perm-tog').forEach(cb=>{
-        cb.onchange=()=>{
-          PERMS[cb.dataset.role][cb.dataset.field]=cb.checked;
-          saveCustomPerms(hotelId);
-        };
-      });
-      $('permReset')?.addEventListener('click',()=>{
-        if(!confirm('Réinitialiser toutes les permissions aux valeurs par défaut ?'))return;
-        localStorage.removeItem('fty_perms_'+hotelId);
-        location.reload();
-      });
-    }
-  };
-  drawPermMatrix();
-
-  // === Import Excel (depuis Paramètres) ===
-  $('importXlsxSettings').onclick=()=>$('xlsxFile').click();
-
-  // === Service Étages — charger + sauvegarder ===
   BE.listHousekeepingSettings(hotelId).then(hks=>{
     if(!hks) return;
     if($('hksDept')) $('hksDept').value=hks.dept_name||'Étage';
     if($('hksProd')) $('hksProd').value=hks.pms_productivity||14;
     const minS=hks.min_staff||{};
-    $('hksGrid').querySelectorAll('.hks-day').forEach(inp=>{
-      const wd=inp.dataset.wd;
-      if(minS[wd]!==undefined) inp.value=minS[wd];
-    });
+    $('hksGrid').querySelectorAll('.hks-day').forEach(inp=>{const wd=inp.dataset.wd;if(minS[wd]!==undefined)inp.value=minS[wd];});
   }).catch(()=>{});
 
   $('hksSave').onclick=async()=>{
@@ -4877,173 +5193,215 @@ async function renderConfig(){
     }catch(e){flash('Erreur : '+e.message);}
     finally{$('hksSave').disabled=false;}
   };
+}
 
-  // === Grille couleurs statuts ===
-  const DEFAULT_COLORS={};
-  const ORIG=[['P','#E8F5E9','#1b5e20'],['PE','#FFF3E0','#E65100'],['CP','#C6EFCE','#0F5132'],
-    ['RTT','#BDD7EE','#1F4E78'],['MAL','#FFC7CE','#9C0006'],['MAT','#E1D5F0','#5B2A86'],
-    ['CSS','#D9D9D9','#3F3F3F'],['AE','#FFE699','#7F6000'],['F','#EDEDED','#6b7280'],
-    ['PAT','#E8E0F5','#4A2080'],['ABS','#FFD9D9','#7B0000'],['REC','#D4F0FC','#0C4A6E'],['FORM','#FEF3C7','#92400E']];
-  ORIG.forEach(([code,bg,fg])=>DEFAULT_COLORS[code]={bg,fg});
-  $('colorsGrid').innerHTML=CODES.map(c=>`
-    <div class="color-row" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:#fff">
-      <span style="background:${c[2]};color:${c[3]};padding:3px 10px;border-radius:6px;font-weight:700;font-size:12px;min-width:42px;text-align:center">${c[0]}</span>
-      <span style="flex:1;font-size:12.5px;color:var(--ink2)">${c[1]}</span>
-      <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted)">Fond<input type="color" class="col-bg" data-code="${c[0]}" value="${c[2]}" style="width:28px;height:28px;border:none;padding:0;cursor:pointer;border-radius:5px"></label>
-      <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted)">Texte<input type="color" class="col-fg" data-code="${c[0]}" value="${c[3]}" style="width:28px;height:28px;border:none;padding:0;cursor:pointer;border-radius:5px"></label>
-    </div>`).join('');
+/* ──────────────────────────────────────────────
+   ONGLET 5 · DOCUMENTS RH
+────────────────────────────────────────────── */
+function _cfgDocs(){
+  const lsCfg = JSON.parse(localStorage.getItem('fty_cfg_'+hotelId)||'{}');
+  const alertDays = lsCfg.docAlertDays || 30;
 
-  // Live preview when color changes
-  $('colorsGrid').querySelectorAll('input[type=color]').forEach(inp=>{
-    inp.oninput=()=>{
-      const code=inp.dataset.code;
-      const row=inp.closest('.color-row');
-      const bg=row.querySelector('.col-bg').value;
-      const fg=row.querySelector('.col-fg').value;
-      const badge=row.querySelector('span');
-      badge.style.background=bg; badge.style.color=fg;
-    };
-  });
+  $('cfgBody').innerHTML=`
+    <div class="box" style="margin-bottom:16px">
+      <h3><i class="fa-solid fa-bell"></i>Alertes d'expiration</h3>
+      <div style="font-size:12.5px;color:var(--ink2);margin-bottom:14px">Configurez combien de jours avant l'expiration les alertes sont déclenchées.</div>
+      <div style="display:flex;align-items:center;gap:16px;margin-bottom:14px">
+        <div class="fld" style="flex:none">
+          <label>Jours avant expiration</label>
+          <input type="number" id="docAlertDays" value="${alertDays}" min="1" max="180" style="width:100px">
+        </div>
+        <div style="font-size:12.5px;color:var(--muted);padding-top:18px">Les documents expirables (titre de séjour, permis de travail, visite médicale…) déclencheront une alerte orange ${alertDays} jours avant leur date d'expiration.</div>
+      </div>
+      <button class="btn p" id="docAlertSave"><i class="fa-solid fa-check"></i> Enregistrer</button>
+    </div>
 
-  $('saveColors').onclick=()=>{
-    $('colorsGrid').querySelectorAll('.color-row').forEach(row=>{
-      const code=row.querySelector('.col-bg').dataset.code;
-      const bg=row.querySelector('.col-bg').value;
-      const fg=row.querySelector('.col-fg').value;
-      const ci=CODES.findIndex(c=>c[0]===code); if(ci<0)return;
-      CODES[ci][2]=bg; CODES[ci][3]=fg;
-      CMAP[code].bg=bg; CMAP[code].fg=fg;
+    <div class="box">
+      <h3><i class="fa-solid fa-list-check"></i>Types de documents actifs</h3>
+      <div style="font-size:12.5px;color:var(--ink2);margin-bottom:14px">Activez ou désactivez les types de documents affichés dans la matrice Documents RH.</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px">
+        ${DOC_TYPES.map(([code,lab,cat,hasExp])=>{
+          const isActive = lsCfg.docTypes ? lsCfg.docTypes[code]!==false : true;
+          return `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border:1px solid var(--line);border-radius:10px;gap:8px">
+            <div>
+              <div style="font-size:12.5px;font-weight:600">${lab}</div>
+              <div style="font-size:10.5px;color:var(--muted)">${hasExp?'Expirable':'Sans expiration'}</div>
+            </div>
+            <label class="tog-wrap"><input type="checkbox" class="doc-type-tog" data-code="${code}" ${isActive?'checked':''}><span class="tog-sw"></span></label>
+          </div>`;
+        }).join('')}
+      </div>
+      <button class="btn p" id="docTypesSave" style="margin-top:14px"><i class="fa-solid fa-check"></i> Enregistrer</button>
+    </div>`;
+
+  $('docAlertSave').onclick=()=>{
+    const cfg=JSON.parse(localStorage.getItem('fty_cfg_'+hotelId)||'{}');
+    cfg.docAlertDays=parseInt($('docAlertDays').value)||30;
+    localStorage.setItem('fty_cfg_'+hotelId,JSON.stringify(cfg));
+    flash('Alertes configurées');
+  };
+  $('docTypesSave').onclick=()=>{
+    const cfg=JSON.parse(localStorage.getItem('fty_cfg_'+hotelId)||'{}');
+    cfg.docTypes={};
+    $('cfgBody').querySelectorAll('.doc-type-tog').forEach(t=>{cfg.docTypes[t.dataset.code]=t.checked;});
+    localStorage.setItem('fty_cfg_'+hotelId,JSON.stringify(cfg));
+    flash('Types de documents enregistrés');
+  };
+}
+
+/* ──────────────────────────────────────────────
+   ONGLET 6 · CONTRATS
+────────────────────────────────────────────── */
+function _cfgContrats(){
+  $('cfgBody').innerHTML=`
+    <div class="box" style="margin-bottom:16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <h3 style="margin:0"><i class="fa-solid fa-file-lines"></i> Modèles de contrats</h3>
+        <button class="btn p" onclick="navTo('contracts');setTimeout(()=>document.querySelector('[data-tab=templates]')?.click(),300)">
+          <i class="fa-solid fa-arrow-right"></i> Gérer les modèles
+        </button>
+      </div>
+      <div style="font-size:13px;color:var(--ink2);line-height:1.6">
+        Les modèles de contrats sont gérés dans le module <b>Contrats</b>. Vous pouvez créer des modèles CDI, CDD et Extra avec variables dynamiques et aperçu A4.
+      </div>
+    </div>
+    <div class="box" style="margin-bottom:16px;opacity:.75">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+        <h3 style="margin:0"><i class="fa-solid fa-signature"></i> Signature électronique</h3>
+        <span class="tag gray" style="font-size:10.5px">Configuré</span>
+      </div>
+      <div style="font-size:13px;color:var(--ink2);line-height:1.6;margin-bottom:14px">
+        La signature électronique est activée via <b>YouSign</b>. Les contrats envoyés depuis Flowtym RH sont signés légalement en quelques clics.
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div style="padding:12px;border:1px solid var(--line);border-radius:10px">
+          <div style="font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:600;margin-bottom:4px">Prestataire</div>
+          <div style="font-size:13px;font-weight:600">YouSign</div>
+        </div>
+        <div style="padding:12px;border:1px solid var(--line);border-radius:10px">
+          <div style="font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:600;margin-bottom:4px">Statut</div>
+          <div style="font-size:13px;font-weight:600;color:#16a34a"><i class="fa-solid fa-circle-check"></i> Actif</div>
+        </div>
+      </div>
+    </div>
+    <div class="box">
+      <h3><i class="fa-solid fa-clock-rotate-left"></i>Archivage des contrats</h3>
+      <div style="font-size:13px;color:var(--ink2);line-height:1.6;margin-bottom:14px">
+        Les contrats signés sont archivés automatiquement dans le dossier du collaborateur. Ils restent accessibles depuis la fiche salarié.
+      </div>
+      <div style="display:flex;align-items:center;gap:14px">
+        <div class="fld" style="flex:none">
+          <label>Durée de rétention (années)</label>
+          <input type="number" value="10" min="1" max="50" style="width:80px">
+        </div>
+        <div style="font-size:12px;color:var(--muted);padding-top:18px">Conformément au Code du travail, les documents RH doivent être conservés au minimum 5 ans.</div>
+      </div>
+    </div>`;
+}
+
+/* ──────────────────────────────────────────────
+   ONGLET 7 · ACCÈS & PERMISSIONS
+────────────────────────────────────────────── */
+async function _cfgAccess(isAdmin){
+  $('cfgBody').innerHTML=`
+    <div class="box" style="margin-bottom:16px">
+      <h3><i class="fa-solid fa-users"></i>Utilisateurs de cet hôtel</h3>
+      <div id="accBox">Chargement…</div>
+    </div>
+    <div class="box">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <h3 style="margin:0"><i class="fa-solid fa-table-cells"></i> Matrice des permissions par rôle</h3>
+        ${isAdmin?`<button class="btn g" id="permReset" style="font-size:11.5px;padding:5px 10px"><i class="fa-solid fa-rotate-left"></i> Réinitialiser</button>`:''}
+      </div>
+      <table class="tbl" style="font-size:11.5px" id="permMatrix">
+        <thead><tr><th>Rôle</th><th>Onglets accessibles</th><th>Fiche complète</th><th>Gestion accès</th></tr></thead>
+        <tbody id="permRows"></tbody>
+      </table>
+    </div>`;
+
+  // Matrice
+  const allTabs=TABS.flatMap(g=>g[1]).filter(t=>!t[3]);
+  $('permRows').innerHTML=Object.entries(PERMS).map(([role,p])=>{
+    const tabLabel=p.tabs==='all'?'<span class="ok">Tous</span>':p.tabs.map(t=>{const f=allTabs.find(x=>x[0]===t);return f?f[1]:t;}).join(' · ');
+    const mkTog=(field,val)=>isAdmin?`<label class="tog-wrap"><input type="checkbox" class="perm-tog" data-role="${role}" data-field="${field}" ${val?'checked':''}><span class="tog-sw"></span></label>`:(val?'<span class="ok">Oui</span>':'<span style="color:var(--muted)">Non</span>');
+    return `<tr><td><b>${ROLE_LABELS[role]||role}</b></td><td style="font-size:11px">${tabLabel}</td><td>${mkTog('ficheFull',p.ficheFull)}</td><td>${mkTog('manageUsers',p.manageUsers)}</td></tr>`;
+  }).join('');
+  if(isAdmin){
+    $('permRows').querySelectorAll('.perm-tog').forEach(cb=>{cb.onchange=()=>{PERMS[cb.dataset.role][cb.dataset.field]=cb.checked;saveCustomPerms(hotelId);};});
+    $('permReset')?.addEventListener('click',()=>{if(!confirm('Réinitialiser toutes les permissions ?'))return;localStorage.removeItem('fty_perms_'+hotelId);location.reload();});
+  }
+
+  // Utilisateurs
+  const ROLES_OPTS=Object.keys(ROLE_LABELS);
+  try{
+    const list=await BE.listAccess(hotelId);
+    $('accBox').innerHTML=`
+      ${isAdmin?`<div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn p" id="inviteBtn"><i class="fa-solid fa-envelope"></i> Inviter un utilisateur</button></div>`:''}
+      <table class="tbl">
+        <thead><tr><th>Utilisateur</th><th>E-mail</th><th>Rôle</th><th>Depuis</th>${isAdmin?'<th></th>':''}</tr></thead>
+        <tbody>${list.map(u=>`<tr data-uid="${u.user_id}">
+          <td><b>${u.full_name||'—'}</b></td>
+          <td style="font-size:12px">${u.email}</td>
+          <td><select class="roleSel" data-uid="${u.user_id}" style="font-size:12.5px;padding:5px 8px" ${isAdmin?'':'disabled'}>
+            ${ROLES_OPTS.map(r=>`<option value="${r}" ${r===u.role?'selected':''}>${ROLE_LABELS[r]}</option>`).join('')}
+          </select></td>
+          <td style="font-size:11.5px;color:var(--muted)">${u.granted_at?u.granted_at.slice(0,10):'—'}</td>
+          ${isAdmin?`<td><button class="btn d revoke-btn" data-uid="${u.user_id}" data-name="${u.full_name||u.email}" style="padding:4px 8px;font-size:11px"><i class="fa-solid fa-user-xmark"></i></button></td>`:''}
+        </tr>`).join('')||`<tr><td colspan="${isAdmin?5:4}" style="padding:20px;text-align:center;color:var(--muted)">Aucun utilisateur affecté.</td></tr>`}
+        </tbody>
+      </table>`;
+    $('accBox').querySelectorAll('.roleSel').forEach(sel=>{
+      const init=sel.value;
+      sel.onchange=async()=>{
+        const newRole=sel.value, uid=sel.dataset.uid;
+        if(!confirm(`Confirmer le changement de rôle vers « ${ROLE_LABELS[newRole]} » ?`)){sel.value=init;return;}
+        try{await BE.updateAccess(hotelId,uid,newRole);flash('Rôle mis à jour');}
+        catch(e){flash('Erreur : '+(e.message||e));sel.value=init;}
+      };
     });
-    saveCustomColors(hotelId);
-    flash('Couleurs enregistrées');
-    render(); // Refresh planning if open
-  };
-
-  $('resetColors').onclick=()=>{
-    if(!confirm('Réinitialiser toutes les couleurs aux valeurs par défaut ?'))return;
-    localStorage.removeItem('fty_colors_'+hotelId);
-    ORIG.forEach(([code,bg,fg])=>{ const ci=CODES.findIndex(c=>c[0]===code); if(ci<0)return; CODES[ci][2]=bg; CODES[ci][3]=fg; CMAP[code].bg=bg; CMAP[code].fg=fg; });
-    flash('Couleurs réinitialisées');
-    renderConfig();
-  };
-
-  // === Bloc Accès et permissions ===
-  const reloadAccess=async()=>{
-    $('accBox').innerHTML='<div style="padding:14px;color:var(--muted);font-size:13px">Chargement…</div>';
-    try{
-      const list=await BE.listAccess(hotelId);
-      const ROLES_OPTS=Object.keys(ROLE_LABELS);
-      $('accBox').innerHTML=`
-        ${isAdmin?`<div style="display:flex;justify-content:flex-end;margin-bottom:10px">
-          <button class="btn p" id="inviteBtn"><i class="fa-solid fa-envelope"></i> Inviter un utilisateur</button>
-        </div>`:''}
-        <table class="tbl">
-          <thead><tr><th>Utilisateur</th><th>E-mail</th><th>Rôle</th><th>Depuis</th>${isAdmin?'<th></th>':''}</tr></thead>
-          <tbody>${list.map(u=>`<tr data-uid="${u.user_id}">
-            <td><b>${u.full_name||'—'}</b></td>
-            <td style="font-size:12px">${u.email}</td>
-            <td><select class="roleSel" data-uid="${u.user_id}" style="font-size:12.5px;padding:5px 8px" ${isAdmin?'':'disabled'}>
-              ${ROLES_OPTS.map(r=>`<option value="${r}" ${r===u.role?'selected':''}>${ROLE_LABELS[r]}</option>`).join('')}
-            </select></td>
-            <td style="font-size:11.5px;color:var(--muted)">${u.granted_at?u.granted_at.slice(0,10):'—'}</td>
-            ${isAdmin?`<td><button class="btn d revoke-btn" data-uid="${u.user_id}" data-name="${u.full_name||u.email}" title="Révoquer l'accès" style="padding:4px 8px;font-size:11px"><i class="fa-solid fa-user-xmark"></i></button></td>`:''}
-          </tr>`).join('')||`<tr><td colspan="${isAdmin?5:4}" style="padding:20px;text-align:center;color:var(--muted)">Aucun utilisateur affecté à cet hôtel.</td></tr>`}
-          </tbody>
-        </table>`;
-      // Changements de rôle
-      $('accBox').querySelectorAll('.roleSel').forEach(sel=>{
-        const initial=sel.value;
-        sel.onchange=async()=>{
-          const newRole=sel.value, uid=sel.dataset.uid;
-          if(!confirm(`Confirmer le changement de rôle vers « ${ROLE_LABELS[newRole]} » ?`)){sel.value=initial;return;}
-          try{ await BE.updateAccess(hotelId,uid,newRole); flash('Rôle mis à jour'); }
-          catch(e){ flash('Erreur : '+(e.message||e)); sel.value=initial; }
-        };
-      });
-      // Révocation
-      $('accBox').querySelectorAll('.revoke-btn').forEach(b=>b.onclick=async()=>{
-        if(!confirm(`Révoquer l'accès de « ${b.dataset.name} » à cet hôtel ?`))return;
-        try{ await BE.revokeAccess(hotelId,b.dataset.uid); flash('Accès révoqué'); reloadAccess(); }
-        catch(e){ flash('Erreur : '+(e.message||e)); }
-      });
-      // Invitation
-      const invBtn=$('inviteBtn');
-      if(invBtn) invBtn.onclick=()=>openInviteForm(reloadAccess);
-    }catch(e){
-      $('accBox').innerHTML=`<div style="padding:14px;color:var(--red);font-size:13px"><i class="fa-solid fa-triangle-exclamation"></i> Impossible de charger les accès : ${e.message||e}</div>`;
-    }
-  };
-  reloadAccess();
-
-  // Sauvegarde l'ordre des services en base (best-effort)
-  const saveDeptOrder=async()=>{
-    await Promise.all(deps.map((d,i)=>BE.updateDepartment(d.id,{sort_order:(i+1)*10}).catch(()=>{})));
-  };
-
-  const drawDeps=()=>{
-    const sorted=[...deps].sort((a,b)=>(a.sort_order??999)-(b.sort_order??999));
-    $('depList').innerHTML=sorted.map((d,i)=>`
-      <div class="dep-row" data-depid="${d.id}" draggable="true"
-        style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:9px;margin-bottom:6px;background:#fff;cursor:grab;transition:box-shadow .15s">
-        <i class="fa-solid fa-grip-vertical" style="color:#c4c4d4;font-size:13px;flex-shrink:0;cursor:grab"></i>
-        <span style="flex:1;font-size:13px;font-weight:500">${d.name}</span>
-        <span style="font-size:10px;color:var(--muted);background:#f4f4f7;padding:2px 6px;border-radius:5px;font-weight:600">#${i+1}</span>
-        <button class="btn d" data-deldep="${d.id}" style="padding:4px 9px;font-size:11px"><i class="fa-solid fa-trash"></i></button>
-      </div>`).join('')||'<div style="color:var(--muted);font-size:12px">Aucun service défini.</div>';
-    $('newRolDep').innerHTML='<option value="">— Service —</option>'+sorted.map(d=>`<option value="${d.id}">${d.name}</option>`).join('');
-
-    // Drag-and-drop ordonancement
-    let dragSrc=null;
-    $('depList').querySelectorAll('.dep-row').forEach(row=>{
-      row.addEventListener('dragstart',e=>{
-        dragSrc=row; row.style.opacity='.4';
-        e.dataTransfer.effectAllowed='move';
-      });
-      row.addEventListener('dragend',()=>{
-        row.style.opacity='';
-        $('depList').querySelectorAll('.dep-row').forEach(r=>r.classList.remove('drag-over'));
-      });
-      row.addEventListener('dragover',e=>{e.preventDefault();e.dataTransfer.dropEffect='move';});
-      row.addEventListener('dragenter',()=>{if(row!==dragSrc)row.style.background='#f0eeff';});
-      row.addEventListener('dragleave',()=>{row.style.background='#fff';});
-      row.addEventListener('drop',e=>{
-        e.preventDefault();
-        if(!dragSrc||dragSrc===row) return;
-        row.style.background='#fff';
-        const list=$('depList');
-        const rows=[...list.querySelectorAll('.dep-row')];
-        const srcIdx=rows.indexOf(dragSrc), dstIdx=rows.indexOf(row);
-        if(srcIdx<dstIdx) list.insertBefore(dragSrc,row.nextSibling);
-        else list.insertBefore(dragSrc,row);
-        // Mettre à jour deps[] dans le nouvel ordre
-        const newOrder=[...list.querySelectorAll('.dep-row')].map(r=>r.dataset.depid);
-        newOrder.forEach((id,i)=>{const d=deps.find(x=>x.id===id);if(d)d.sort_order=(i+1)*10;});
-        // Mettre à jour les badges #N
-        list.querySelectorAll('.dep-row').forEach((r,i)=>{
-          const badge=r.querySelector('span[style*="background:#f4f4f7"]');
-          if(badge) badge.textContent='#'+(i+1);
-        });
-        saveDeptOrder().then(()=>flash('Ordre des services sauvegardé')).catch(()=>flash('Erreur sauvegarde ordre'));
-      });
+    $('accBox').querySelectorAll('.revoke-btn').forEach(b=>b.onclick=async()=>{
+      if(!confirm(`Révoquer l'accès de « ${b.dataset.name} » ?`))return;
+      try{await BE.revokeAccess(hotelId,b.dataset.uid);flash('Accès révoqué');_cfgAccess(isAdmin);}
+      catch(e){flash('Erreur : '+(e.message||e));}
     });
+    const invBtn=$('inviteBtn');
+    if(invBtn) invBtn.onclick=()=>openInviteForm(()=>_cfgAccess(isAdmin));
+  }catch(e){$('accBox').innerHTML=`<div style="color:var(--red);padding:14px">${e.message}</div>`;}
+}
 
-    $('depList').querySelectorAll('[data-deldep]').forEach(b=>b.onclick=async()=>{
-      if(!confirm('Supprimer ce service ?'))return;
-      try{await BE.deleteDepartment(b.dataset.deldep);deps=deps.filter(x=>x.id!==b.dataset.deldep);drawDeps();}
-      catch(e){flash('Erreur : '+e.message);}
-    });
-  };
-  const drawRols=()=>{$('rolList').innerHTML=rols.map(r=>{const dp=deps.find(d=>d.id===r.department_id);
-    return `<div style="display:flex;align-items:center;padding:7px 0;border-bottom:1px dashed var(--line);font-size:13px">
-    <span style="flex:1">${r.name}${dp?` <span class="tag gray">${dp.name}</span>`:''}</span>
-    <button class="btn d" data-delrol="${r.id}" style="padding:4px 9px;font-size:11px"><i class="fa-solid fa-trash"></i></button></div>`;}).join('')||'<div style="color:var(--muted);font-size:12px">Aucun rôle défini.</div>';
-    $('rolList').querySelectorAll('[data-delrol]').forEach(b=>b.onclick=async()=>{if(!confirm('Supprimer ce rôle ?'))return;
-      try{await BE.deleteRole(b.dataset.delrol);rols=rols.filter(x=>x.id!==b.dataset.delrol);drawRols();}catch(e){flash('Erreur : '+e.message);}});};
-  drawDeps(); drawRols();
-  $('addDep').onclick=async()=>{const v=$('newDep').value.trim();if(!v)return;
-    try{const d=await BE.addDepartment(hotelId,v);deps.push(d);$('newDep').value='';drawDeps();flash('Service ajouté');}catch(e){flash('Erreur : '+e.message);}};
-  $('addRol').onclick=async()=>{const v=$('newRol').value.trim();if(!v)return;
-    try{const r=await BE.addRole(hotelId,v,$('newRolDep').value||null);rols.push(r);$('newRol').value='';drawRols();flash('Rôle ajouté');}catch(e){flash('Erreur : '+e.message);}};
+/* ──────────────────────────────────────────────
+   ONGLET 8 · SÉCURITÉ
+────────────────────────────────────────────── */
+function _cfgSecurity(hotel){
+  $('cfgBody').innerHTML=`
+    <div class="box" style="margin-bottom:16px">
+      <h3><i class="fa-solid fa-shield-halved"></i>Isolation des données (RLS)</h3>
+      <div style="font-size:13px;color:var(--ink2);line-height:1.8;margin-bottom:14px">
+        Toutes les tables RH disposent d'une <b>Row Level Security (RLS)</b> active côté Supabase. Vous ne voyez et ne modifiez que les données de l'hôtel sélectionné. Le contrôle des accès par rôle est appliqué côté frontend ET côté base via des fonctions <code>SECURITY DEFINER</code>.
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
+        ${[
+          ['fa-database','RLS Supabase','Active','#16a34a'],
+          ['fa-lock','Isolation multi-hôtel','Active','#16a34a'],
+          ['fa-key','Auth JWT','Active','#16a34a'],
+          ['fa-user-shield','RBAC frontend','Actif','#16a34a'],
+          ['fa-server','SECURITY DEFINER','Actif','#16a34a'],
+          ['fa-shield','Clé de service','Sécurisée (Edge fn.)','#16a34a'],
+        ].map(([ic,lab,val,col])=>`
+          <div style="padding:12px;border:1px solid var(--line);border-radius:10px;display:flex;gap:10px;align-items:flex-start">
+            <i class="fa-solid ${ic}" style="color:var(--violet);margin-top:2px;font-size:15px"></i>
+            <div>
+              <div style="font-size:12px;font-weight:600;margin-bottom:2px">${lab}</div>
+              <div style="font-size:11.5px;color:${col};font-weight:600">${val}</div>
+            </div>
+          </div>`).join('')}
+      </div>
+    </div>
+    <div class="box">
+      <h3><i class="fa-solid fa-scroll"></i>Journal d'audit</h3>
+      <div style="font-size:13px;color:var(--ink2);margin-bottom:12px">Les actions critiques (modifications de données, accès, suppressions) sont tracées dans le journal d'audit.</div>
+      <button class="btn g" onclick="navTo('reporting')"><i class="fa-solid fa-arrow-right"></i> Voir le reporting</button>
+    </div>`;
 }
 
 /* ===================== VUE POINTAGE ===================== */
