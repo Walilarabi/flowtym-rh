@@ -6510,39 +6510,74 @@ function toggleCycleDay(el){
   el.innerHTML=`J${el.dataset.cday}<br><span style="font-size:10px;font-weight:400">${cur==='work'?'Trav.':'Repos'}</span>`;
 }
 
-// Formate une Date locale en 'YYYY-MM-DD' sans conversion UTC (timezone-safe)
+// ─── SOURCE DE VÉRITÉ UNIQUE pour toutes les opérations de date-cycle ──────────
+//
+// Principe : les dates voyagent TOUJOURS comme des strings 'YYYY-MM-DD'.
+// Toute arithmétique utilise exclusivement les méthodes UTC de Date (getUTC*/setUTC*).
+// new Date('YYYY-MM-DD') est parsé en UTC midnight par le standard ECMAScript.
+// Aucune variable locale (T00:00:00, getDate, getMonth…) ne touche au chemin de cycle.
+//
+// Les seules fonctions qui font de l'arithmétique de date :
+//   addDays(str, n) → str         (avancer de n jours)
+//   dateDiffDays(a, b) → int      (différence en jours entiers)
+//   dateStrRange(from, to) → str[] (liste de toutes les dates de la période)
+//   weekdayOf(str) → 0-6          (0=dim, UTC-safe)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function addDays(dateStr, n){
+  // Parse en UTC midnight, ajoute n*86400s, retourne la date UTC résultante
+  const ms=new Date(dateStr).getTime()+n*86400000;
+  return new Date(ms).toISOString().slice(0,10);
+}
+
+function dateDiffDays(startStr, endStr){
+  // Différence exacte en jours entiers, immune timezone et DST
+  return Math.round((new Date(endStr).getTime()-new Date(startStr).getTime())/86400000);
+}
+
+function dateStrRange(fromStr, toStr){
+  // Retourne toutes les dates YYYY-MM-DD de fromStr à toStr inclus
+  const result=[];
+  let cur=fromStr;
+  while(cur<=toStr){ result.push(cur); cur=addDays(cur,1); }
+  return result;
+}
+
+function weekdayOf(dateStr){
+  // Jour de la semaine 0=dim, 1=lun … 6=sam — basé UTC, pas de conversion locale
+  return new Date(dateStr).getUTCDay();
+}
+
+// Formate une Date locale en 'YYYY-MM-DD' — UNIQUEMENT pour les cas où l'on
+// veut la date locale (affichage "aujourd'hui", labels). PAS pour le cycle.
 function localIso(d){
   return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
 }
 
-// Différence en jours entiers entre deux strings 'YYYY-MM-DD' (UTC-safe, immune DST)
-// new Date('YYYY-MM-DD') sans heure = UTC midnight en JS
-function dateDiffDays(startStr, endStr){
-  return Math.round((new Date(endStr).getTime()-new Date(startStr).getTime())/86400000);
-}
-
-// Calcule le code à appliquer pour un salarié à une date donnée
-// dateStr : string 'YYYY-MM-DD' (local, timezone-safe)
-// Retourne {code: 'P'|''|null, reason: string} ou null
+// ─── CALCUL DU CODE CYCLE ────────────────────────────────────────────────────
+//
+// Signature : computeCodeForDate(emp, dateStr, pattern)
+//   dateStr : 'YYYY-MM-DD'  ← toujours une string, jamais un Date object
+//   Retourne : {code: 'P'|'', reason: string} | null
+//
+// null = pas de règle applicable (avant le début du cycle, pattern invalide…)
+// ''   = repos
+// 'P'  = présent / travail
+//
 function computeCodeForDate(emp, dateStr, pattern){
   if(!pattern||pattern.pattern_type==='manual') return null;
 
   if(pattern.pattern_type==='fixed_days_off'){
-    // Construire depuis UTC midnight pour avoir le bon jour de semaine local
-    const [y,mo,dd]=dateStr.split('-').map(Number);
-    const wd=new Date(y,mo-1,dd).getDay(); // local date → bon getDay()
+    const wd=weekdayOf(dateStr); // 0=dim, 100% UTC, pas de local
     const fdo=pattern.fixed_days_off||[];
     return fdo.includes(wd)?{code:'',reason:'Repos fixe'}:{code:'P',reason:'Jour travaillé'};
   }
 
   if(pattern.pattern_type==='rotating_cycle'){
     if(!pattern.cycle_start_date||!pattern.cycle_length_days||!pattern.cycle_days?.length) return null;
-    // Diff en jours entiers, 100% UTC, immune aux DST
     const diffDays=dateDiffDays(pattern.cycle_start_date, dateStr);
-    if(diffDays<0) return null; // avant le début du cycle
-    // idx 0-based : idx=0 → J1, idx=1 → J2, ...
-    const idx=diffDays % pattern.cycle_length_days;
-    // cycle_days stocké avec day 1-indexed : J1→day:1, J2→day:2 …
+    if(diffDays<0) return null;                         // avant le début du cycle
+    const idx=diffDays % pattern.cycle_length_days;     // idx 0-based → J(idx+1)
     const entry=(pattern.cycle_days||[]).find(e=>+e.day===(idx+1));
     if(!entry) return null;
     return entry.status==='work'
@@ -6553,12 +6588,12 @@ function computeCodeForDate(emp, dateStr, pattern){
   return null;
 }
 
-// Auto-test silencieux au chargement (vérifie l'indexation du cycle)
+// ─── AUTO-TEST au chargement ─────────────────────────────────────────────────
+// Vérifie les 30 dates de septembre 2026 pour le cycle de référence (28j).
+// Résultat visible dans la console du navigateur (F12 → Console).
 ;(function selfTestCycle(){
-  const pattern={
-    pattern_type:'rotating_cycle',
-    cycle_start_date:'2026-09-01',
-    cycle_length_days:28,
+  const PAT={
+    pattern_type:'rotating_cycle',cycle_start_date:'2026-09-01',cycle_length_days:28,
     cycle_days:[
       {day:1,status:'off'},{day:2,status:'off'},{day:3,status:'work'},{day:4,status:'work'},
       {day:5,status:'off'},{day:6,status:'off'},{day:7,status:'off'},{day:8,status:'work'},
@@ -6569,7 +6604,7 @@ function computeCodeForDate(emp, dateStr, pattern){
       {day:25,status:'off'},{day:26,status:'work'},{day:27,status:'work'},{day:28,status:'work'},
     ]
   };
-  const expected={
+  const EXP={
     '2026-09-01':'','2026-09-02':'','2026-09-03':'P','2026-09-04':'P',
     '2026-09-05':'','2026-09-06':'','2026-09-07':'','2026-09-08':'P',
     '2026-09-09':'P','2026-09-10':'','2026-09-11':'','2026-09-12':'P',
@@ -6579,16 +6614,29 @@ function computeCodeForDate(emp, dateStr, pattern){
     '2026-09-25':'','2026-09-26':'P','2026-09-27':'P','2026-09-28':'P',
     '2026-09-29':'','2026-09-30':'',
   };
+  // Test cycle continu : vérifier aussi octobre (le cycle traverse deux mois)
+  const EXP_OCT={
+    '2026-10-01':'','2026-10-02':'P','2026-10-03':'P','2026-10-04':'',
+    '2026-10-05':'','2026-10-06':'P','2026-10-07':'P','2026-10-08':'P',
+  };
   let ok=true;
-  Object.entries(expected).forEach(([ds,exp])=>{
-    const res=computeCodeForDate(null,ds,pattern);
-    if((res?.code??null)!==exp){
-      console.error(`[cycle-test] ${ds}: attendu="${exp}" obtenu="${res?.code}"`,res);
-      ok=false;
-    }
+  [...Object.entries(EXP),...Object.entries(EXP_OCT)].forEach(([ds,exp])=>{
+    const got=computeCodeForDate(null,ds,PAT)?.code??null;
+    if(got!==exp){console.error(`[cycle-test] FAIL ${ds}: attendu="${exp}" obtenu="${got}"`);ok=false;}
   });
-  if(ok) console.log('[cycle-test] ✓ 30 dates septembre 2026 correctes');
-  else    console.error('[cycle-test] ✗ Des erreurs de cycle ont été détectées — vérifier computeCodeForDate');
+  // Test cycle avec date de début différente (vérifier généralité)
+  const PAT2={pattern_type:'rotating_cycle',cycle_start_date:'2026-11-15',cycle_length_days:7,
+    cycle_days:[{day:1,status:'work'},{day:2,status:'work'},{day:3,status:'off'},
+                {day:4,status:'off'},{day:5,status:'work'},{day:6,status:'work'},{day:7,status:'work'}]};
+  const EXP2={'2026-11-15':'P','2026-11-16':'P','2026-11-17':'','2026-11-18':'',
+    '2026-11-19':'P','2026-11-20':'P','2026-11-21':'P',
+    '2026-11-22':'P','2026-12-31':'','2027-01-01':'P'}; // traversée mois/année
+  Object.entries(EXP2).forEach(([ds,exp])=>{
+    const got=computeCodeForDate(null,ds,PAT2)?.code??null;
+    if(got!==exp){console.error(`[cycle-test2] FAIL ${ds}: attendu="${exp}" obtenu="${got}"`);ok=false;}
+  });
+  if(ok) console.log('[cycle-test] ✓ 38 dates vérifiées (sept/oct 2026, nov 2026–janv 2027) — 0 erreur');
+  else    console.error('[cycle-test] ✗ Des erreurs de cycle ont été détectées !');
 })();
 
 // Charge les patterns de tous les employés visibles en mémoire (cache léger)
@@ -6648,13 +6696,9 @@ async function openCreateCycleModal(){
     const empRows=rows.filter(r=>r.employee_id===eid);
     // Construire les len premiers jours à partir de startD
     extractedDays=[];
-    const startObj=new Date(startD); // UTC midnight — new Date('YYYY-MM-DD') = UTC
-    for(let i=0;i<len;i++){
-      const utcMs=startObj.getTime()+i*86400000;
-      const tmp=new Date(utcMs);
-      // Reconstruire la date en local pour éviter tout décalage DST
-      const ds=new Date(tmp.getUTCFullYear(),tmp.getUTCMonth(),tmp.getUTCDate());
-      const dsStr=localIso(ds);
+    const endD=addDays(startD,len-1);
+    let i=0;
+    for(const dsStr of dateStrRange(startD,endD)){
       const row=empRows.find(r=>r.day===dsStr);
       const code=row?.status||'';
       const isWork=code==='P'||code==='PE';
@@ -6662,6 +6706,7 @@ async function openCreateCycleModal(){
       let status=isWork?'work':(isOff?'off':null);
       if(!status&&PROTECTED_CODES.has(code)) status='off'; // congé = repos pour détecter le cycle
       extractedDays.push({day:i+1,date:dsStr,code,status:status||'off'});
+      i++;
     }
     const workCount=extractedDays.filter(d=>d.status==='work').length;
     const offCount=extractedDays.filter(d=>d.status==='off').length;
@@ -6774,9 +6819,7 @@ async function computeAutoFill(){
   const safeOnly=$('afSafe').checked;
   const protectAbs=$('afProtect').checked;
   if(!fromStr||!toStr){throw new Error('Dates de période requises');}
-  const fromD=new Date(fromStr+'T00:00:00');
-  const toD=new Date(toStr+'T00:00:00');
-  if(fromD>toD){throw new Error('Date de fin avant date de début');}
+  if(fromStr>toStr){throw new Error('Date de fin avant date de début');}
 
   // Sélectionner les employés
   let targetEmps=visibleRows;
@@ -6789,11 +6832,17 @@ async function computeAutoFill(){
     targetEmps=visibleRows.filter(s=>s.id===eid);
   }
 
-  // Charger les planning existants sur toute la période
-  // On charge mois par mois
+  // Charger les planning existants sur toute la période (mois par mois, UTC-safe)
   const months=new Set();
-  for(let d=new Date(fromD);d<=toD;d.setMonth(d.getMonth()+1)){
-    months.add(d.getFullYear()+'-'+(d.getMonth()));
+  {
+    let cur2=fromStr;
+    while(cur2<=toStr){
+      const [y2,m2]=cur2.split('-').map(Number);
+      months.add(y2+'-'+(m2-1)); // m2-1 = index JS
+      // avancer au premier jour du mois suivant
+      const nm=m2===12?`${y2+1}-01-01`:`${y2}-${String(m2+1).padStart(2,'0')}-01`;
+      cur2=nm;
+    }
   }
   const existingRows=[];
   for(const mk of months){
@@ -6827,8 +6876,7 @@ async function computeAutoFill(){
       continue;
     }
 
-    for(let d=new Date(fromD);d<=toD;d.setDate(d.getDate()+1)){
-      const ds=localIso(d); // timezone-safe : date locale, pas UTC
+    for(const ds of dateStrRange(fromStr,toStr)){
       const key=emp.id+'|'+ds;
       const existing=existMap.get(key);
 
