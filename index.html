@@ -2989,11 +2989,23 @@ function openTemplateForm(t, isNewVersion){
   </div>
   <div class="mact">
     <button class="btn g" id="tplCancel">Annuler</button>
+    <button class="btn g" id="tplReset" title="Réinitialiser au modèle par défaut pour ce type de contrat"><i class="fa-solid fa-rotate-left"></i> Réinitialiser</button>
     <button class="btn g" id="tplPreview"><i class="fa-solid fa-eye"></i> Aperçu fictif</button>
     <button class="btn p" id="tplSave"><i class="fa-solid fa-check"></i> ${isVer?'Créer la version':isEdit?'Enregistrer':'Créer'}</button>
   </div>`;
   $('modalbg').classList.add('on');
   $('tplCancel').onclick=closeModal;
+
+  // Réinitialiser au modèle par défaut
+  $('tplReset').onclick=()=>{
+    const tc=$('tc')?.value||'CDI';
+    let dflt;
+    if(tc==='CDD') dflt=DEFAULT_TEMPLATE_BODY_CDD;
+    else if(tc==='Extra'||tc==='Saisonnier') dflt=DEFAULT_TEMPLATE_BODY_EXTRA;
+    else dflt=DEFAULT_TEMPLATE_BODY;
+    if(confirm('Réinitialiser le contenu au modèle par défaut pour ce type de contrat ? Le contenu actuel sera perdu.'))
+      $('tb').value=dflt;
+  };
 
   // Variable picker — insertion au curseur
   $('modal').querySelectorAll('.tpl-var-btn').forEach(btn=>{
@@ -3929,10 +3941,72 @@ function detectMissingVars(templateHtml, ctx){
   return [...new Set(missing)];
 }
 
+/* ===== MIGRATION CONTENU NON STRUCTURÉ ===== */
+// Tente de convertir un template "brut" (tout dans <p> ou texte) vers HTML structuré.
+function _migrateUnstructuredContract(html){
+  // Flatten to plain text lines, preserving <br> as newline
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html.replace(/<br\s*\/?>/gi, '\n');
+  const raw = tmp.textContent || tmp.innerText || '';
+  const lines = raw.split('\n').map(l=>l.trim()).filter(Boolean);
+
+  let out = '';
+  let inBloc = ''; // 'emp' | 'sal' | ''
+  let blocLines = [];
+
+  const flushBloc = () => {
+    if(!inBloc || !blocLines.length) return;
+    const cls = inBloc==='emp' ? 'bloc-employeur' : 'bloc-salarie';
+    out += `<div class="${cls}">${blocLines.map(l=>`<strong>${l}</strong>`).join('<br>\n')}</div>\n\n`;
+    inBloc=''; blocLines=[];
+  };
+
+  let firstTitle = true;
+  for(let li=0; li<lines.length; li++){
+    const l = lines[li];
+    // Title: all-caps or starts with "CONTRAT"
+    if(firstTitle && /^(CONTRAT|CONTRACT)/i.test(l)){
+      out += `<h1>${l}</h1>\n\n`;
+      firstTitle=false; continue;
+    }
+    // Employer block trigger
+    if(/entre l.employ/i.test(l)||/d.une part/i.test(l)){
+      if(inBloc!=='emp'){ flushBloc(); inBloc='emp'; }
+      blocLines.push(l); continue;
+    }
+    // Employee block trigger
+    if(/et le salari/i.test(l)||/né\(?e\)? le /i.test(l)||/demeurant/i.test(l)||/numéro ss/i.test(l)){
+      if(inBloc!=='sal'){ flushBloc(); inBloc='sal'; }
+      blocLines.push(l); continue;
+    }
+    if(/d.autre part/i.test(l)){
+      if(inBloc==='sal') blocLines.push(l);
+      flushBloc(); continue;
+    }
+    // End of bloc when hitting "Il a été convenu"
+    if(/il a été convenu/i.test(l)){ flushBloc(); out+=`<p class="intro">${l}</p>\n\n`; continue; }
+    // Article headings
+    if(/^article\s+\d+\s*:/i.test(l)){ flushBloc(); out+=`<h2>${l}</h2>\n`; continue; }
+    // Signature
+    if(/fait en deux/i.test(l)){ flushBloc(); out+=`<p class="fait">${l}</p>\n`; continue; }
+    if(/^[Àà]?\s*[A-Z][a-z]+,?\s+le\s+/i.test(l)){ out+=`<p class="lieu">${l}</p>\n`; continue; }
+    if(/signature employ/i.test(l)||/signature salar/i.test(l)) continue; // skip, will be in sig-block
+    // Generic paragraph
+    if(inBloc){ blocLines.push(l); }
+    else { out += `<p>${l}</p>\n`; }
+  }
+  flushBloc();
+  return out || html;
+}
+
 /* ===== MOTEUR DE RENDU STRUCTURÉ DU CONTRAT ===== */
 // Parse le HTML du template en blocs sémantiques et émet du HTML 100% inline-styled.
 // Aucune dépendance CSS externe — fonctionne dans l'aperçu ET dans jsPDF.
 function transformContractHtml(html){
+  // Detect unstructured HTML: no h1/h2/bloc class → migrate to structured format first
+  if(!/(<h[12][\s>]|class=["'][^"']*bloc-)/i.test(html)){
+    html = _migrateUnstructuredContract(html);
+  }
   const tmp = document.createElement('div');
   tmp.innerHTML = html;
   let out = '';
