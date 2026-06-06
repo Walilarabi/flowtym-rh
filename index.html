@@ -2879,17 +2879,51 @@ function showTplPanel(t, list){
 }
 
 const TEMPLATE_VARS=[
-  ['employee_first_name','Prénom'],['employee_last_name','Nom'],['employee_full_name','Nom complet'],
-  ['birth_date','Date de naissance'],['birth_place','Lieu de naissance'],['nationality','Nationalité'],
-  ['social_security_number','N° sécurité sociale'],['residency_permit_number','N° titre de séjour'],
-  ['address','Adresse'],['phone','Téléphone'],['email','E-mail'],
-  ['job_title','Poste'],['department','Service'],['contract_type','Type de contrat'],
-  ['contract_start_date','Date de début'],['contract_end_date','Date de fin'],
-  ['trial_period','Période d\'essai'],['weekly_hours','Temps de travail'],['salary','Rémunération'],
-  ['work_location','Lieu de travail'],['manager_name','Responsable hiérarchique'],
-  ['collective_agreement','Convention collective'],
-  ['hotel_name','Nom de l\'hôtel'],['hotel_address','Adresse de l\'hôtel'],
-  ['today','Date du jour']
+  // ── Collaborateur ──────────────────────────────────────────────────────────
+  ['collaborateur.prenom','Prénom'],
+  ['collaborateur.nom','Nom de famille'],
+  ['collaborateur.nom_complet','Nom complet'],
+  ['collaborateur.date_naissance','Date de naissance'],
+  ['collaborateur.lieu_naissance','Lieu de naissance'],
+  ['collaborateur.nationalite','Nationalité'],
+  ['collaborateur.adresse','Adresse complète'],
+  ['collaborateur.telephone','Téléphone'],
+  ['collaborateur.email','E-mail'],
+  ['collaborateur.numero_secu','N° sécurité sociale'],
+  ['collaborateur.titre_sejour','N° titre de séjour'],
+  // ── Contrat ────────────────────────────────────────────────────────────────
+  ['contrat.type','Type de contrat'],
+  ['contrat.date_debut','Date de début'],
+  ['contrat.date_fin','Date de fin'],
+  ['contrat.periode_essai','Période d\'essai'],
+  ['contrat.duree_hebdomadaire','Durée hebdomadaire (ex : 35 h/sem)'],
+  // ── Poste ──────────────────────────────────────────────────────────────────
+  ['poste.service','Service / département'],
+  ['poste.intitule','Intitulé du poste'],
+  ['poste.responsable','Responsable hiérarchique'],
+  ['poste.lieu_travail','Lieu de travail'],
+  // ── Rémunération ──────────────────────────────────────────────────────────
+  ['remuneration.montant','Montant brut (ex : 2 100,00 €)'],
+  ['remuneration.type','Type de rémunération (brut mensuel / taux horaire)'],
+  // ── Hôtel / Employeur ──────────────────────────────────────────────────────
+  ['hotel.nom','Raison sociale de l\'hôtel'],
+  ['hotel.adresse','Adresse de l\'hôtel'],
+  ['hotel.siret','N° SIRET'],
+  ['hotel.representant','Représentant légal'],
+  ['hotel.convention_collective','Convention collective applicable'],
+  // ── Général ────────────────────────────────────────────────────────────────
+  ['today','Date du jour (auto)'],
+  // ── Anciens noms — rétrocompatibilité ──────────────────────────────────────
+  ['employee_first_name','Prénom (v1)'],['employee_last_name','Nom (v1)'],['employee_full_name','Nom complet (v1)'],
+  ['birth_date','Date naissance (v1)'],['birth_place','Lieu naissance (v1)'],['nationality','Nationalité (v1)'],
+  ['social_security_number','N° secu (v1)'],['residency_permit_number','Titre séjour (v1)'],
+  ['address','Adresse (v1)'],['phone','Téléphone (v1)'],['email','Email (v1)'],
+  ['job_title','Poste (v1)'],['department','Service (v1)'],['contract_type','Type contrat (v1)'],
+  ['contract_start_date','Date début (v1)'],['contract_end_date','Date fin (v1)'],
+  ['trial_period','Période essai (v1)'],['weekly_hours','Heures/sem (v1)'],['salary','Rémunération (v1)'],
+  ['work_location','Lieu travail (v1)'],['manager_name','Responsable (v1)'],
+  ['collective_agreement','Conv. collective (v1)'],
+  ['hotel_name','Nom hôtel (v1)'],['hotel_address','Adresse hôtel (v1)'],
 ];
 
 function openTemplateForm(t, isNewVersion){
@@ -2900,29 +2934,108 @@ function openTemplateForm(t, isNewVersion){
   const rolOpts = rols.map(r=>`<option value="${r.id}" ${(t&&t.role_id===r.id)?'selected':''}>${r.name}</option>`).join('');
   const typeOpts= CONTRACT_TYPES.map(c=>`<option ${(t&&t.contract_type===c)?'selected':''}>${c}</option>`).join('');
 
+  // Variables groupées pour le picker
+  const varGroups=[
+    {label:'Collaborateur',vars:TEMPLATE_VARS.filter(v=>v[0].startsWith('collaborateur.'))},
+    {label:'Contrat',vars:TEMPLATE_VARS.filter(v=>v[0].startsWith('contrat.'))},
+    {label:'Poste',vars:TEMPLATE_VARS.filter(v=>v[0].startsWith('poste.'))},
+    {label:'Rémunération',vars:TEMPLATE_VARS.filter(v=>v[0].startsWith('remuneration.'))},
+    {label:'Hôtel',vars:TEMPLATE_VARS.filter(v=>v[0].startsWith('hotel.'))},
+    {label:'Général',vars:[['today','Date du jour']]},
+  ];
+  const varPickerHTML=varGroups.map(g=>`
+    <div style="margin-bottom:8px">
+      <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">${g.label}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px">
+        ${g.vars.map(v=>`<button type="button" class="btn g tpl-var-btn" data-v="${v[0]}" title="${v[1]}" style="font-size:10.5px;padding:3px 7px;font-family:monospace;cursor:pointer">{{${v[0]}}}</button>`).join('')}
+      </div>
+    </div>`).join('');
+
+  const defaultBody = t?.body_html||(()=>{
+    const tc=(t?.contract_type||'CDI');
+    if(tc==='CDD') return DEFAULT_TEMPLATE_BODY_CDD;
+    if(tc==='Extra'||tc==='Saisonnier') return DEFAULT_TEMPLATE_BODY_EXTRA;
+    return DEFAULT_TEMPLATE_BODY;
+  })();
+
   $('modal').innerHTML = mhHTML('fa-regular fa-file-lines', title) + `
   <div class="mb">
-    <div class="fld"><label>Nom du modèle *</label>
-      <input type="text" id="tn" value="${t?.name||''}" placeholder="ex : CDI Réceptionniste"></div>
+    <div class="row2">
+      <div class="fld"><label>Nom du modèle *</label>
+        <input type="text" id="tn" value="${t?.name||''}" placeholder="ex : CDI Réceptionniste"></div>
+      <div class="fld"><label>Statut</label>
+        <select id="tstatus">
+          <option value="active" ${(!t||t?.status==='active')?'selected':''}>Actif</option>
+          <option value="draft" ${t?.status==='draft'?'selected':''}>Brouillon</option>
+          <option value="archived" ${t?.status==='archived'?'selected':''}>Archivé</option>
+        </select></div>
+    </div>
     <div class="row3">
-      <div class="fld"><label>Type de contrat</label><select id="tc">${typeOpts}</select></div>
+      <div class="fld"><label>Type de contrat</label><select id="tc" onchange="(()=>{const v=this.value;const ta=$('tb');if(!ta.value||ta.value===ta.dataset.dflt){if(v==='CDD')ta.value=DEFAULT_TEMPLATE_BODY_CDD;else if(v==='Extra'||v==='Saisonnier')ta.value=DEFAULT_TEMPLATE_BODY_EXTRA;else ta.value=DEFAULT_TEMPLATE_BODY;ta.dataset.dflt=ta.value;}})()">${typeOpts}</select></div>
       <div class="fld"><label>Service <span style="font-weight:400;color:var(--muted)">(facultatif)</span></label><select id="td"><option value="">— Tous —</option>${depOpts}</select></div>
       <div class="fld"><label>Rôle <span style="font-weight:400;color:var(--muted)">(facultatif)</span></label><select id="tr"><option value="">— Tous —</option>${rolOpts}</select></div>
     </div>
     <div class="fld">
-      <label>Corps HTML du modèle — utilisez <code style="background:#f4f2fd;color:var(--violet-d);padding:1px 5px;border-radius:4px;font-size:11.5px">{{variable}}</code></label>
-      <textarea id="tb" rows="16" style="font-family:'SFMono-Regular',Consolas,monospace;font-size:12px;line-height:1.5;min-height:280px">${t?.body_html||DEFAULT_TEMPLATE_BODY}</textarea>
+      <label>Variables disponibles — cliquez pour insérer</label>
+      <div style="background:#f8f7ff;border:1px solid #ede9fe;border-radius:8px;padding:10px 12px;max-height:140px;overflow-y:auto">${varPickerHTML}</div>
+    </div>
+    <div class="fld">
+      <label>Corps HTML du modèle</label>
+      <textarea id="tb" rows="16" data-dflt="${!t?'1':''}" style="font-family:'SFMono-Regular',Consolas,monospace;font-size:12px;line-height:1.5;min-height:280px">${defaultBody}</textarea>
+    </div>
+    <div style="font-size:11.5px;color:var(--muted);margin-top:4px">
+      <i class="fa-solid fa-circle-info"></i> Utilisez <code style="background:#f4f2fd;color:var(--violet-d);padding:1px 5px;border-radius:3px">{{collaborateur.prenom}}</code>, <code style="background:#f4f2fd;color:var(--violet-d);padding:1px 5px;border-radius:3px">&lt;div style="page-break-before:always"&gt;&lt;/div&gt;</code> pour un saut de page, <code style="background:#f4f2fd;color:var(--violet-d);padding:1px 5px;border-radius:3px">&lt;h2&gt;</code> pour les articles.
     </div>
   </div>
   <div class="mact">
     <button class="btn g" id="tplCancel">Annuler</button>
+    <button class="btn g" id="tplPreview"><i class="fa-solid fa-eye"></i> Aperçu fictif</button>
     <button class="btn p" id="tplSave"><i class="fa-solid fa-check"></i> ${isVer?'Créer la version':isEdit?'Enregistrer':'Créer'}</button>
   </div>`;
   $('modalbg').classList.add('on');
   $('tplCancel').onclick=closeModal;
+
+  // Variable picker — insertion au curseur
+  $('modal').querySelectorAll('.tpl-var-btn').forEach(btn=>{
+    btn.onclick=()=>{
+      const ta=$('tb'); if(!ta)return;
+      const v=`{{${btn.dataset.v}}}`;
+      const s=ta.selectionStart, e=ta.selectionEnd;
+      ta.value=ta.value.slice(0,s)+v+ta.value.slice(e);
+      ta.selectionStart=ta.selectionEnd=s+v.length;
+      ta.focus();
+    };
+  });
+
+  // Aperçu fictif
+  $('tplPreview').onclick=()=>{
+    const html=$('tb').value;
+    const hotel=hotels.find(h=>h.id===hotelId)||{};
+    const fictif={first_name:'Marie',last_name:'DUPONT',birth_date:'1990-06-15',birth_place:'Lyon',nationality:'Française',address:'12 rue de la Paix, 75001 Paris',phone:'06 00 00 00 00',email:'marie.dupont@example.com',social_security_number:'2 90 06 69 123 456 78',residency_permit_number:'',role:'Réceptionniste',department:'Réception'};
+    const ctx=buildContractContext(fictif,hotel,{contract_type:$('tc').value||'CDI',start_date:new Date().toISOString().slice(0,10),weekly_hours:'35',salary_amount:'2100',salary_type:'brut_mensuel',manager_name:'Jean MARTIN',work_location:hotel?.city||hotel?.name||'Paris'});
+    const rendered=substituteVariables(html,ctx);
+    const win=window.open('','_blank','width=900,height=700');
+    if(!win){flash('Autorisez les popups pour voir l\'aperçu');return;}
+    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Aperçu modèle</title>
+    <style>body{margin:0;background:#d1d5db;padding:24px;font-size:11pt}
+    .a4{width:210mm;min-height:297mm;padding:20mm 20mm 24mm 25mm;margin:0 auto;background:#fff;box-shadow:0 4px 20px rgba(0,0,0,.2);font-family:"Times New Roman",Times,serif;font-size:11pt;line-height:1.6;color:#111;box-sizing:border-box}
+    h1{font-size:16pt;margin:0 0 8pt;text-align:center}h2{font-size:12pt;margin:14pt 0 5pt;page-break-after:avoid}
+    p{margin:0 0 7pt}table{width:100%;border-collapse:collapse}
+    span[style*="fef3c7"]{background:#fef3c7;color:#92400e;padding:0 3px;border-radius:2px}
+    @media print{body{background:#fff;padding:0}.a4{box-shadow:none;width:100%;min-height:auto}}
+    </style></head><body>
+    <div style="text-align:center;margin-bottom:16px;font-family:sans-serif;font-size:12px;color:#555">
+      Aperçu fictif — <b>Marie DUPONT</b> · ${$('tc').value||'CDI'}
+      <button onclick="window.print()" style="margin-left:12px;padding:5px 14px;background:#7c3aed;color:#fff;border:none;border-radius:6px;cursor:pointer">Imprimer</button>
+    </div>
+    <div class="a4">${rendered}</div></body></html>`);
+    win.document.close();
+  };
+
   $('tplSave').onclick=async()=>{
     const payload={name:$('tn').value.trim(),contract_type:$('tc').value,
       department_id:$('td').value||null,role_id:$('tr').value||null,
+      status:$('tstatus').value,
       body_html:$('tb').value};
     if(!payload.name||!payload.body_html){flash('Nom et contenu sont obligatoires');return;}
     try{
@@ -3069,26 +3182,187 @@ async function convertPdf(file){
   }
 }
 
-const DEFAULT_TEMPLATE_BODY = `<h1>Contrat de travail à durée indéterminée</h1>
-<p><b>Entre les soussignés :</b></p>
-<p>{{hotel_name}}, sis {{hotel_address}}, représenté par {{manager_name}}, ci-après dénommé « l'Employeur »,</p>
-<p><b>Et :</b></p>
-<p>{{employee_full_name}}, né(e) le {{birth_date}} à {{birth_place}}, de nationalité {{nationality}},
-demeurant {{address}}, n° de sécurité sociale {{social_security_number}}, ci-après dénommé(e) « le Salarié ».</p>
-<h2>Article 1 — Engagement</h2>
-<p>Le Salarié est engagé en qualité de {{job_title}} ({{department}}) à compter du {{contract_start_date}}, en {{contract_type}}.</p>
-<h2>Article 2 — Période d'essai</h2>
-<p>Période d'essai : {{trial_period}}.</p>
-<h2>Article 3 — Durée du travail</h2>
-<p>{{weekly_hours}}</p>
-<h2>Article 4 — Rémunération</h2>
-<p>La rémunération brute mensuelle est de {{salary}}.</p>
-<h2>Article 5 — Lieu de travail</h2>
-<p>{{work_location}}</p>
-<h2>Article 6 — Convention collective</h2>
-<p>{{collective_agreement}}</p>
-<p style="margin-top:40px">Fait à {{hotel_address}}, le {{today}}, en deux exemplaires.</p>
-<table style="width:100%;margin-top:30px"><tr><td style="width:50%"><b>L'Employeur</b></td><td><b>Le Salarié</b></td></tr></table>`;
+const DEFAULT_TEMPLATE_BODY = `<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24pt;padding-bottom:12pt;border-bottom:2px solid #222">
+  <div>
+    <div style="font-size:14pt;font-weight:700">{{hotel.nom}}</div>
+    <div style="font-size:10pt;color:#444">{{hotel.adresse}}</div>
+    <div style="font-size:10pt;color:#444">SIRET : {{hotel.siret}}</div>
+  </div>
+  <div style="text-align:right;font-size:10pt;color:#444">
+    <div>Représentant légal : {{hotel.representant}}</div>
+    <div>Convention collective : {{hotel.convention_collective}}</div>
+  </div>
+</div>
+
+<h1 style="text-align:center;font-size:16pt;margin:0 0 6pt">CONTRAT DE TRAVAIL À DURÉE INDÉTERMINÉE</h1>
+<p style="text-align:center;font-size:10pt;color:#555;margin:0 0 24pt">Établi en deux exemplaires originaux</p>
+
+<p><strong>Entre les soussignés :</strong></p>
+
+<p>La société <strong>{{hotel.nom}}</strong>, dont le siège social est situé au {{hotel.adresse}}, immatriculée sous le numéro SIRET {{hotel.siret}}, représentée par <strong>{{hotel.representant}}</strong>, agissant en qualité de Directeur(trice),<br>
+ci-après dénommée <em>« l'Employeur »</em>,</p>
+
+<p><strong>Et :</strong></p>
+
+<p><strong>{{collaborateur.nom_complet}}</strong>, né(e) le {{collaborateur.date_naissance}} à {{collaborateur.lieu_naissance}}, de nationalité {{collaborateur.nationalite}}, demeurant au {{collaborateur.adresse}}, titulaire du numéro de sécurité sociale n° {{collaborateur.numero_secu}},<br>
+ci-après dénommé(e) <em>« le Salarié »</em>.</p>
+
+<p><strong>Il a été convenu ce qui suit :</strong></p>
+
+<h2 style="margin-top:18pt">Article 1 — Engagement et poste</h2>
+<p>L'Employeur engage le Salarié en qualité de <strong>{{poste.intitule}}</strong>, au sein du service <strong>{{poste.service}}</strong>, à compter du <strong>{{contrat.date_debut}}</strong>, pour une durée indéterminée.</p>
+<p>Le Salarié exercera ses fonctions sous la responsabilité directe de {{poste.responsable}}.</p>
+
+<h2 style="margin-top:14pt">Article 2 — Période d'essai</h2>
+<p>Le présent contrat est conclu sous réserve d'une période d'essai d'une durée de <strong>{{contrat.periode_essai}}</strong>, renouvelable une fois dans les conditions prévues par la convention collective applicable, à l'issue de laquelle le Salarié sera définitivement confirmé dans son poste.</p>
+<p>Durant cette période, chacune des parties pourra mettre fin au contrat à tout moment, sous réserve du respect d'un délai de prévenance.</p>
+
+<h2 style="margin-top:14pt">Article 3 — Durée et organisation du travail</h2>
+<p>Le Salarié sera occupé à temps complet, pour une durée de travail de <strong>{{contrat.duree_hebdomadaire}}</strong> conformément aux dispositions légales et conventionnelles en vigueur.</p>
+<p>Les horaires de travail seront fixés par la Direction en fonction des nécessités de service, dans le cadre défini par le règlement intérieur de l'établissement.</p>
+
+<h2 style="margin-top:14pt">Article 4 — Lieu de travail</h2>
+<p>Le Salarié exercera ses fonctions au sein de l'établissement situé au <strong>{{poste.lieu_travail}}</strong>. En cas de nécessité de service, le Salarié pourra être affecté temporairement dans tout autre établissement du groupe, sans que cela constitue une modification du contrat de travail.</p>
+
+<h2 style="margin-top:14pt">Article 5 — Rémunération</h2>
+<p>En contrepartie de son travail, le Salarié percevra une rémunération brute de <strong>{{remuneration.montant}}</strong> ({{remuneration.type}}), versée mensuellement.</p>
+<p>Cette rémunération inclut l'ensemble des éléments salariaux fixes et sera révisée annuellement en fonction des résultats individuels et des dispositions conventionnelles.</p>
+
+<h2 style="margin-top:14pt">Article 6 — Convention collective</h2>
+<p>Le présent contrat est soumis aux dispositions de la <strong>{{hotel.convention_collective}}</strong> ainsi qu'à l'ensemble des accords d'entreprise applicables au sein de l'établissement.</p>
+<p>Le Salarié reconnaît avoir pris connaissance du règlement intérieur de l'établissement, affiché à l'entrée des locaux.</p>
+
+<h2 style="margin-top:14pt">Article 7 — Obligations des parties</h2>
+<p>Le Salarié s'engage à exercer ses fonctions avec professionnalisme, diligence et loyauté. Il s'oblige à respecter les règles de confidentialité applicables à son poste ainsi que les procédures internes de l'établissement.</p>
+<p>L'Employeur s'engage à fournir au Salarié les moyens nécessaires à l'exercice de ses fonctions et à respecter l'ensemble des obligations légales et conventionnelles.</p>
+
+<h2 style="margin-top:14pt">Article 8 — Dispositions particulières</h2>
+<p>Toute modification substantielle du présent contrat fera l'objet d'un avenant écrit, signé par les deux parties.</p>
+<p>Le présent contrat est établi conformément au droit français du travail et aux dispositions conventionnelles applicables.</p>
+
+<div style="page-break-before:always"></div>
+
+<p style="margin-top:0">Fait à {{hotel.adresse}}, le <strong>{{today}}</strong>, en deux exemplaires originaux dont un remis à chaque partie.</p>
+
+<table style="width:100%;margin-top:32pt;border-collapse:collapse">
+  <tr>
+    <td style="width:50%;vertical-align:top;padding-right:20pt">
+      <p style="margin:0 0 6pt"><strong>Pour l'Employeur</strong></p>
+      <p style="margin:0 0 4pt;font-size:10pt;color:#555">{{hotel.representant}}</p>
+      <p style="margin:0 0 4pt;font-size:10pt;color:#555">{{hotel.nom}}</p>
+      <div style="margin-top:40pt;border-top:1px solid #333;padding-top:4pt;font-size:10pt;color:#666">Signature et cachet</div>
+    </td>
+    <td style="width:50%;vertical-align:top;padding-left:20pt">
+      <p style="margin:0 0 6pt"><strong>Le Salarié</strong></p>
+      <p style="margin:0 0 4pt;font-size:10pt;color:#555">{{collaborateur.nom_complet}}</p>
+      <p style="margin:0 0 4pt;font-size:10pt;color:#999;font-style:italic">Précédé de la mention manuscrite « Lu et approuvé »</p>
+      <div style="margin-top:40pt;border-top:1px solid #333;padding-top:4pt;font-size:10pt;color:#666">Signature</div>
+    </td>
+  </tr>
+</table>`;
+
+const DEFAULT_TEMPLATE_BODY_CDD = `<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24pt;padding-bottom:12pt;border-bottom:2px solid #222">
+  <div>
+    <div style="font-size:14pt;font-weight:700">{{hotel.nom}}</div>
+    <div style="font-size:10pt;color:#444">{{hotel.adresse}} — SIRET : {{hotel.siret}}</div>
+  </div>
+  <div style="text-align:right;font-size:10pt;color:#444">
+    <div>Représentant : {{hotel.representant}}</div>
+    <div>Conv. collective : {{hotel.convention_collective}}</div>
+  </div>
+</div>
+
+<h1 style="text-align:center;font-size:16pt;margin:0 0 6pt">CONTRAT DE TRAVAIL À DURÉE DÉTERMINÉE</h1>
+<p style="text-align:center;font-size:10pt;color:#555;margin:0 0 24pt">Établi en deux exemplaires originaux</p>
+
+<p><strong>Entre les soussignés :</strong></p>
+<p>La société <strong>{{hotel.nom}}</strong>, dont le siège est situé au {{hotel.adresse}}, SIRET {{hotel.siret}}, représentée par <strong>{{hotel.representant}}</strong>, ci-après dénommée <em>« l'Employeur »</em>,</p>
+<p><strong>Et :</strong></p>
+<p><strong>{{collaborateur.nom_complet}}</strong>, né(e) le {{collaborateur.date_naissance}} à {{collaborateur.lieu_naissance}}, de nationalité {{collaborateur.nationalite}}, demeurant au {{collaborateur.adresse}}, n° sécurité sociale {{collaborateur.numero_secu}}, ci-après dénommé(e) <em>« le Salarié »</em>.</p>
+
+<h2 style="margin-top:18pt">Article 1 — Motif du recours au CDD</h2>
+<p>Le présent contrat est conclu pour le motif suivant : <strong>accroissement temporaire de l'activité de l'établissement</strong>, conformément aux dispositions des articles L.1242-1 et suivants du Code du travail.</p>
+
+<h2 style="margin-top:14pt">Article 2 — Durée et terme du contrat</h2>
+<p>Le présent contrat est conclu pour une durée déterminée du <strong>{{contrat.date_debut}}</strong> au <strong>{{contrat.date_fin}}</strong> inclus.</p>
+<p>Le Salarié est engagé en qualité de <strong>{{poste.intitule}}</strong> au sein du service <strong>{{poste.service}}</strong>, sous la responsabilité de {{poste.responsable}}.</p>
+
+<h2 style="margin-top:14pt">Article 3 — Période d'essai</h2>
+<p>Le présent contrat comporte une période d'essai de <strong>{{contrat.periode_essai}}</strong> à compter de la date de prise de fonctions.</p>
+
+<h2 style="margin-top:14pt">Article 4 — Durée du travail</h2>
+<p>Le Salarié sera occupé pour une durée de <strong>{{contrat.duree_hebdomadaire}}</strong> conformément à l'horaire de l'établissement.</p>
+
+<h2 style="margin-top:14pt">Article 5 — Lieu de travail</h2>
+<p>Le Salarié exercera ses fonctions au <strong>{{poste.lieu_travail}}</strong>.</p>
+
+<h2 style="margin-top:14pt">Article 6 — Rémunération</h2>
+<p>Le Salarié percevra une rémunération brute de <strong>{{remuneration.montant}}</strong> ({{remuneration.type}}).</p>
+<p>À l'issue du contrat, le Salarié bénéficiera d'une indemnité de fin de contrat égale à 10 % de la rémunération brute totale perçue, sauf exceptions légales.</p>
+
+<h2 style="margin-top:14pt">Article 7 — Convention collective</h2>
+<p>Le présent contrat est soumis aux dispositions de la <strong>{{hotel.convention_collective}}</strong>.</p>
+
+<div style="page-break-before:always"></div>
+<p>Fait à {{hotel.adresse}}, le <strong>{{today}}</strong>, en deux exemplaires originaux.</p>
+<table style="width:100%;margin-top:32pt;border-collapse:collapse">
+  <tr>
+    <td style="width:50%;vertical-align:top;padding-right:20pt">
+      <p style="margin:0 0 6pt"><strong>Pour l'Employeur</strong></p>
+      <p style="margin:0 0 4pt;font-size:10pt;color:#555">{{hotel.representant}} — {{hotel.nom}}</p>
+      <div style="margin-top:40pt;border-top:1px solid #333;padding-top:4pt;font-size:10pt;color:#666">Signature et cachet</div>
+    </td>
+    <td style="width:50%;vertical-align:top;padding-left:20pt">
+      <p style="margin:0 0 6pt"><strong>Le Salarié</strong></p>
+      <p style="margin:0 0 4pt;font-size:10pt;color:#555">{{collaborateur.nom_complet}}</p>
+      <p style="margin:0 0 4pt;font-size:10pt;color:#999;font-style:italic">Précédé de la mention « Lu et approuvé »</p>
+      <div style="margin-top:40pt;border-top:1px solid #333;padding-top:4pt;font-size:10pt;color:#666">Signature</div>
+    </td>
+  </tr>
+</table>`;
+
+const DEFAULT_TEMPLATE_BODY_EXTRA = `<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20pt;padding-bottom:10pt;border-bottom:2px solid #222">
+  <div>
+    <div style="font-size:13pt;font-weight:700">{{hotel.nom}}</div>
+    <div style="font-size:10pt;color:#444">{{hotel.adresse}} — SIRET : {{hotel.siret}}</div>
+  </div>
+  <div style="text-align:right;font-size:10pt;color:#444">
+    <div>Repr. : {{hotel.representant}}</div>
+  </div>
+</div>
+
+<h1 style="text-align:center;font-size:15pt;margin:0 0 4pt">CONTRAT DE TRAVAIL EXTRA</h1>
+<p style="text-align:center;font-size:10pt;color:#555;margin:0 0 20pt">(Contrat d'usage — HCR)</p>
+
+<p><strong>{{hotel.nom}}</strong>, SIRET {{hotel.siret}}, représentée par {{hotel.representant}},</p>
+<p>engage à titre d'extra <strong>{{collaborateur.nom_complet}}</strong>, né(e) le {{collaborateur.date_naissance}}, n° secu {{collaborateur.numero_secu}},</p>
+
+<table style="width:100%;margin:14pt 0;border-collapse:collapse;font-size:11pt">
+  <tr><td style="padding:5pt 0;color:#555;width:160pt">Poste</td><td><strong>{{poste.intitule}}</strong></td></tr>
+  <tr><td style="padding:5pt 0;color:#555">Date d'intervention</td><td><strong>{{contrat.date_debut}}</strong></td></tr>
+  <tr><td style="padding:5pt 0;color:#555">Horaires</td><td>Selon planning communiqué</td></tr>
+  <tr><td style="padding:5pt 0;color:#555">Lieu</td><td><strong>{{poste.lieu_travail}}</strong></td></tr>
+  <tr><td style="padding:5pt 0;color:#555">Rémunération</td><td><strong>{{remuneration.montant}}</strong> ({{remuneration.type}})</td></tr>
+  <tr><td style="padding:5pt 0;color:#555">Convention collective</td><td>{{hotel.convention_collective}}</td></tr>
+</table>
+
+<p style="font-size:10pt;color:#444;margin-top:10pt">Ce contrat est conclu conformément à l'article L.1242-2 3° du Code du travail (secteur HCR — recours à l'extra d'usage constant). L'indemnité de fin de contrat de 10 % est applicable.</p>
+
+<p style="margin-top:20pt">Fait à {{hotel.adresse}}, le <strong>{{today}}</strong>.</p>
+<table style="width:100%;margin-top:24pt;border-collapse:collapse">
+  <tr>
+    <td style="width:50%;vertical-align:top;padding-right:16pt">
+      <p style="margin:0 0 4pt"><strong>Pour l'Employeur</strong></p>
+      <p style="margin:0 0 4pt;font-size:10pt;color:#555">{{hotel.representant}}</p>
+      <div style="margin-top:36pt;border-top:1px solid #333;padding-top:4pt;font-size:10pt;color:#666">Signature et cachet</div>
+    </td>
+    <td style="width:50%;vertical-align:top;padding-left:16pt">
+      <p style="margin:0 0 4pt"><strong>Le Salarié</strong></p>
+      <p style="margin:0 0 4pt;font-size:10pt;color:#555">{{collaborateur.nom_complet}}</p>
+      <div style="margin-top:36pt;border-top:1px solid #333;padding-top:4pt;font-size:10pt;color:#666">Signature</div>
+    </td>
+  </tr>
+</table>`;
 
 let genInlineState = {step:1, employee_id:'', template_id:'', fields:{contract_type:'CDI', start_date:'', end_date:'', trial_period:'', weekly_hours:'', salary_type:'brut_mensuel', salary_amount:'', manager_id:'', service_id:'', role_id:'', signature_method:'email'}, tplList:[]};
 
@@ -3136,15 +3410,19 @@ async function _genStep1(){
   // Build live preview
   let previewHtml = '';
   if(emp && tpl && tpl.body_html){
+    const mgrEmp = staff.find(x=>x.id===s.fields.manager_id);
     const ctx = buildContractContext(emp, hotel, {
       contract_type: s.fields.contract_type,
-      contract_start_date: s.fields.start_date,
-      contract_end_date: s.fields.end_date,
+      start_date: s.fields.start_date,
+      end_date: s.fields.end_date,
       trial_period: s.fields.trial_period,
-      weekly_hours: s.fields.weekly_hours ? s.fields.weekly_hours+' h/semaine' : '',
-      salary: s.fields.salary_amount ? s.fields.salary_amount+' €' : '',
-      manager_name: staff.find(x=>x.id===s.fields.manager_id) ? (staff.find(x=>x.id===s.fields.manager_id).first_name+' '+staff.find(x=>x.id===s.fields.manager_id).last_name) : '',
-      collective_agreement: 'HCR – Hôtels Cafés Restaurants'
+      weekly_hours: s.fields.weekly_hours,
+      salary_amount: s.fields.salary_amount,
+      salary_type: s.fields.salary_type,
+      manager_name: mgrEmp ? (mgrEmp.first_name+' '+mgrEmp.last_name) : '',
+      work_location: s.fields.work_location||hotel?.city||'',
+      job_title: (rols.find(r=>r.id===s.fields.role_id)||{}).name||emp.role||'',
+      department: (deps.find(d=>d.id===s.fields.service_id)||{}).name||emp.department||'',
     });
     previewHtml = substituteVariables(tpl.body_html, ctx);
   }
@@ -3174,6 +3452,7 @@ async function _genStep1(){
         <div class="fld"><label>Service</label><select id="gi_dept"><option value="">—</option>${deptOpts}</select></div>
         <div class="fld"><label>Rôle / Poste</label><select id="gi_role"><option value="">—</option>${roleOpts}</select></div>
         <div class="fld"><label>Responsable hiérarchique</label><select id="gi_mgr"><option value="">—</option>${mgrOpts}</select></div>
+        <div class="fld"><label>Lieu de travail</label><input type="text" id="gi_loc" value="${s.fields.work_location||hotel?.city||hotel?.name||''}" placeholder="ex : Paris 8e — Hôtel XYZ"></div>
       </div>
 
       <div class="box" style="padding:20px">
@@ -3216,78 +3495,103 @@ async function _genStep1(){
       </div>
     </div>
 
-    <!-- CENTER: PREVIEW -->
+    <!-- CENTER: PREVIEW A4 -->
     <div class="box" style="padding:0;overflow:hidden">
-      <div style="padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px">
-        <span style="font-size:13px;font-weight:700;flex:1">Aperçu du contrat</span>
-        <button class="btn g" style="padding:5px 10px;font-size:12px" title="Zoom -" onclick="_genZoom(-10)">−</button>
+      <div style="padding:12px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px;background:#f9f9fb">
+        <i class="fa-regular fa-file-lines" style="color:var(--violet)"></i>
+        <span style="font-size:13px;font-weight:700;flex:1;color:var(--ink)">Aperçu du contrat</span>
+        <button class="btn g" style="padding:4px 9px;font-size:12px" title="Réduire" onclick="_genZoom(-10)">−</button>
         <span id="gi_zoom_label" style="font-size:12px;color:var(--muted);min-width:40px;text-align:center">100%</span>
-        <button class="btn g" style="padding:5px 10px;font-size:12px" title="Zoom +" onclick="_genZoom(10)">+</button>
+        <button class="btn g" style="padding:4px 9px;font-size:12px" title="Agrandir" onclick="_genZoom(10)">+</button>
+        <button class="btn g" style="padding:4px 9px;font-size:11px" onclick="window.print()" title="Imprimer"><i class="fa-solid fa-print"></i></button>
       </div>
-      <div id="gi_preview" style="padding:20px;max-height:620px;overflow-y:auto;font-family:'Times New Roman',serif;font-size:13px;line-height:1.5;color:#222">
-        ${previewHtml || (emp && !tpl ? '<div style="text-align:center;color:var(--muted);padding:40px">Aucun modèle actif trouvé pour ce poste / type de contrat</div>' : '<div style="text-align:center;color:var(--muted);padding:40px">Sélectionnez un collaborateur pour voir l\'aperçu</div>')}
+      <div style="background:#d1d5db;padding:16px;overflow-y:auto;max-height:620px">
+        <div id="gi_preview" style="width:210mm;max-width:100%;min-height:100px;padding:20mm 20mm 24mm 25mm;margin:0 auto;background:#fff;box-shadow:0 2px 16px rgba(0,0,0,.15);font-family:'Times New Roman',Times,serif;font-size:11pt;line-height:1.6;color:#111;box-sizing:border-box">
+          ${previewHtml || (emp && !tpl
+            ? '<div style="text-align:center;color:#888;padding:40px 20px;font-family:sans-serif;font-size:13px"><i class="fa-solid fa-triangle-exclamation" style="font-size:24px;color:#f59e0b;display:block;margin-bottom:10px"></i>Aucun modèle actif trouvé.<br>Créez un modèle dans l\'onglet Modèles.</div>'
+            : '<div style="text-align:center;color:#888;padding:40px 20px;font-family:sans-serif;font-size:13px"><i class="fa-regular fa-file-lines" style="font-size:28px;color:#c4b5fd;display:block;margin-bottom:10px"></i>Sélectionnez un collaborateur<br>pour voir l\'aperçu en temps réel</div>')}
+        </div>
       </div>
     </div>
 
     <!-- RIGHT: RECAP + ACTIONS -->
     <div style="display:flex;flex-direction:column;gap:14px">
-      <div class="box" style="padding:18px">
-        <div style="display:flex;align-items:center;margin-bottom:12px">
-          <span style="font-size:13px;font-weight:700;flex:1">Récapitulatif</span>
-          <span style="font-size:12px;color:var(--violet);cursor:pointer" onclick="_genRefresh()">Modifier</span>
-        </div>
-        <div style="font-size:12.5px;line-height:2;color:var(--ink2)">
-          <div><span style="color:var(--muted)">Collaborateur</span> <b>${emp?emp.first_name+' '+emp.last_name:'—'}</b></div>
-          <div><span style="color:var(--muted)">Poste</span> <b>${(rols.find(r=>r.id===s.fields.role_id)||{}).name||emp?.role||'—'}</b></div>
-          <div><span style="color:var(--muted)">Service</span> <b>${(deps.find(d=>d.id===s.fields.service_id)||{}).name||emp?.department||'—'}</b></div>
-          <div><span style="color:var(--muted)">Type contrat</span> <b>${s.fields.contract_type||'—'}</b></div>
-          <div><span style="color:var(--muted)">Début</span> <b>${s.fields.start_date||'—'}</b></div>
-          <div><span style="color:var(--muted)">Durée/semaine</span> <b>${s.fields.weekly_hours?s.fields.weekly_hours+' h':'—'}</b></div>
-          <div><span style="color:var(--muted)">Rémunération</span> <b>${s.fields.salary_amount?s.fields.salary_amount+' €':'—'}</b></div>
+
+      <!-- Complétude du dossier -->
+      ${(()=>{
+        const checks=[
+          {label:'Collaborateur',ok:!!emp},
+          {label:'Type de contrat',ok:!!s.fields.contract_type},
+          {label:'Date de début',ok:!!s.fields.start_date},
+          {label:'Durée hebdo.',ok:!!s.fields.weekly_hours},
+          {label:'Rémunération',ok:!!s.fields.salary_amount},
+          {label:'Modèle actif',ok:!!tpl},
+        ];
+        const done=checks.filter(c=>c.ok).length;
+        const pct=Math.round(done/checks.length*100);
+        const color=pct===100?'var(--green)':pct>=50?'#f59e0b':'var(--red)';
+        return `<div class="box" style="padding:16px">
+          <div style="display:flex;align-items:center;margin-bottom:10px">
+            <span style="font-size:12.5px;font-weight:700;flex:1">Complétude du dossier</span>
+            <span style="font-size:13px;font-weight:800;color:${color}">${pct}%</span>
+          </div>
+          <div style="background:#eee;border-radius:4px;height:6px;margin-bottom:12px">
+            <div style="width:${pct}%;height:100%;border-radius:4px;background:${color};transition:width .3s"></div>
+          </div>
+          ${checks.map(c=>`<div style="display:flex;align-items:center;gap:6px;font-size:11.5px;margin-bottom:4px;color:${c.ok?'var(--ink2)':'var(--muted)'}">
+            <i class="fa-solid fa-${c.ok?'circle-check':'circle-xmark'}" style="color:${c.ok?'var(--green)':'#d1d5db'}"></i> ${c.label}
+          </div>`).join('')}
+        </div>`;
+      })()}
+
+      <div class="box" style="padding:16px">
+        <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">Récapitulatif</div>
+        <div style="font-size:12px;color:var(--ink2);line-height:1.9">
+          <div><span style="color:var(--muted)">Collaborateur</span><br><b>${emp?emp.first_name+' '+emp.last_name:'—'}</b></div>
+          <div><span style="color:var(--muted)">Poste</span><br><b>${(rols.find(r=>r.id===s.fields.role_id)||{}).name||emp?.role||'—'}</b></div>
+          <div><span style="color:var(--muted)">Service</span><br><b>${(deps.find(d=>d.id===s.fields.service_id)||{}).name||emp?.department||'—'}</b></div>
+          <div><span style="color:var(--muted)">Type contrat</span><br><b>${s.fields.contract_type||'—'}</b></div>
+          <div><span style="color:var(--muted)">Début</span><br><b>${s.fields.start_date||'—'}</b></div>
+          <div><span style="color:var(--muted)">Durée/semaine</span><br><b>${s.fields.weekly_hours?s.fields.weekly_hours+' h':'—'}</b></div>
+          <div><span style="color:var(--muted)">Rémunération</span><br><b>${s.fields.salary_amount?s.fields.salary_amount+' €':'—'}</b></div>
         </div>
       </div>
 
-      <div class="box" style="padding:18px">
-        <div style="font-size:13px;font-weight:700;margin-bottom:10px">Modèle utilisé</div>
+      <div class="box" style="padding:16px">
+        <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">Modèle utilisé</div>
         ${tpl ? `<div style="display:flex;align-items:center;gap:10px">
           <i class="fa-regular fa-file-lines" style="font-size:20px;color:var(--violet)"></i>
-          <div style="flex:1"><div style="font-size:13px;font-weight:600">${tpl.name}</div>
-            <span class="tag green" style="font-size:11px">Actif</span>
+          <div style="flex:1">
+            <div style="font-size:13px;font-weight:600">${tpl.name}</div>
+            <span class="tag green" style="font-size:10px">Actif</span>
+            ${tpl.contract_type?`<span class="tag" style="font-size:10px;margin-left:4px">${tpl.contract_type}</span>`:''}
           </div>
         </div>
-        <a style="font-size:12px;color:var(--violet);cursor:pointer;display:block;margin-top:8px" onclick="contractsSubTab='templates';renderContracts()">Voir le modèle</a>`
-        : '<div style="color:var(--muted);font-size:12.5px">Aucun modèle sélectionné</div>'}
+        <a style="font-size:11.5px;color:var(--violet);cursor:pointer;display:block;margin-top:8px" onclick="contractsSubTab='templates';renderContracts()"><i class="fa-solid fa-arrow-up-right-from-square" style="font-size:10px"></i> Voir le modèle</a>`
+        : `<div style="color:var(--red);font-size:12.5px"><i class="fa-solid fa-triangle-exclamation"></i> Aucun modèle actif — <a style="cursor:pointer;color:var(--violet)" onclick="contractsSubTab='templates';renderContracts()">créer un modèle</a></div>`}
       </div>
 
-      <div class="box" style="padding:18px">
-        <div style="font-size:13px;font-weight:700;margin-bottom:12px">Envoyer pour signature</div>
-        <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;cursor:pointer;font-size:12.5px">
+      <div class="box" style="padding:16px">
+        <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">Méthode de signature</div>
+        <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;cursor:pointer;font-size:12px">
           <input type="radio" name="gi_sigmethod" value="email" ${s.fields.signature_method==='email'?'checked':''} style="margin-top:2px">
-          <div><b>Par e-mail</b><br><span style="color:var(--muted)">Le collaborateur recevra un email pour signer le contrat.</span></div>
+          <div><b>Par e-mail</b><br><span style="color:var(--muted);font-size:11px">Email envoyé au collaborateur pour signer.</span></div>
         </label>
-        <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:12.5px">
+        <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:12px">
           <input type="radio" name="gi_sigmethod" value="portal" ${s.fields.signature_method==='portal'?'checked':''} style="margin-top:2px">
-          <div><b>Via le portail salarié</b><br><span style="color:var(--muted)">Le collaborateur signera depuis son portail salarié.</span></div>
+          <div><b>Via le portail salarié</b><br><span style="color:var(--muted);font-size:11px">Le salarié signe depuis son espace personnel.</span></div>
         </label>
       </div>
 
-      <div class="box" style="padding:18px">
-        <div style="font-size:13px;font-weight:700;margin-bottom:10px">Après signature</div>
-        <div style="font-size:12.5px;color:var(--ink2);line-height:1.8">
-          <div><i class="fa-solid fa-check" style="color:var(--green)"></i> Le contrat signé sera automatiquement archivé dans la fiche du salarié.</div>
-          <div><i class="fa-solid fa-check" style="color:var(--green)"></i> Vous serez notifié dès que le contrat est signé.</div>
-        </div>
-      </div>
-
-      <button class="btn p" id="gi_sign" style="width:100%;padding:12px;font-size:13.5px"><i class="fa-solid fa-pen-nib"></i> Envoyer pour signature</button>
-      <button class="btn g" id="gi_draft2" style="width:100%;padding:11px;font-size:13px">Enregistrer comme brouillon</button>
+      <button class="btn p" id="gi_sign" style="width:100%;padding:12px;font-size:13px"><i class="fa-solid fa-pen-nib"></i> Envoyer pour signature</button>
+      <button class="btn g" id="gi_draft2" style="width:100%;padding:10px;font-size:12.5px"><i class="fa-solid fa-floppy-disk"></i> Enregistrer comme brouillon</button>
     </div>
   </div>`;
 
   window._genZoomLevel = 100;
   window._genZoom = (delta)=>{
-    _genZoomLevel = Math.min(150, Math.max(70, _genZoomLevel+delta));
-    const pr = $('gi_preview'); if(pr) pr.style.fontSize = (_genZoomLevel/100*13)+'px';
+    _genZoomLevel = Math.min(150, Math.max(60, _genZoomLevel+delta));
+    const pr = $('gi_preview'); if(pr) pr.style.transform=`scale(${_genZoomLevel/100})`;
     const lb = $('gi_zoom_label'); if(lb) lb.textContent = _genZoomLevel+'%';
   };
   window._genRefresh = ()=> renderContractsGenerate();
@@ -3305,6 +3609,7 @@ async function _genStep1(){
     s.fields.weekly_hours = $('gi_hours')?.value||'';
     s.fields.salary_type = $('gi_saltype')?.value||'brut_mensuel';
     s.fields.salary_amount = $('gi_sal')?.value||'';
+    s.fields.work_location = $('gi_loc')?.value||'';
     s.template_id = '';  // force re-auto-select
     renderContractsGenerate();
   };
@@ -3328,6 +3633,7 @@ async function _genStep1(){
     genInlineState.fields.weekly_hours = $('gi_hours')?.value||'';
     genInlineState.fields.salary_type = $('gi_saltype')?.value||'brut_mensuel';
     genInlineState.fields.salary_amount = $('gi_sal')?.value||'';
+    genInlineState.fields.work_location = $('gi_loc')?.value||'';
     document.querySelectorAll('input[name="gi_sigmethod"]').forEach(r=>{ if(r.checked) genInlineState.fields.signature_method=r.value; });
   };
 
@@ -3376,33 +3682,79 @@ async function _genStep2(){
   const hotel = hotels.find(h=>h.id===hotelId)||{};
   const tpl = s.tplList.find(t=>t.id===s.template_id);
   if(!emp||!tpl){
-    $('genInlineBody').innerHTML='<div style="text-align:center;padding:40px;color:var(--red)">Données manquantes — retournez à l\'étape 1.</div><button class="btn g" onclick="genInlineState.step=1;renderContractsGenerate()">Retour</button>';
+    $('genInlineBody').innerHTML='<div style="text-align:center;padding:40px;color:var(--red)"><i class="fa-solid fa-circle-exclamation" style="font-size:28px;display:block;margin-bottom:12px"></i>Données manquantes — retournez à l\'étape 1.</div><div style="text-align:center"><button class="btn g" onclick="genInlineState.step=1;renderContractsGenerate()"><i class="fa-solid fa-arrow-left"></i> Retour</button></div>';
     return;
   }
+  const mgr = staff.find(x=>x.id===s.fields.manager_id);
   const ctx = buildContractContext(emp, hotel, {
-    contract_type:s.fields.contract_type, contract_start_date:s.fields.start_date, contract_end_date:s.fields.end_date,
-    trial_period:s.fields.trial_period, weekly_hours:s.fields.weekly_hours?s.fields.weekly_hours+' h/semaine':'',
-    salary:s.fields.salary_amount?s.fields.salary_amount+' €':'',
-    manager_name: staff.find(x=>x.id===s.fields.manager_id) ? staff.find(x=>x.id===s.fields.manager_id).first_name+' '+staff.find(x=>x.id===s.fields.manager_id).last_name : '',
-    collective_agreement:'HCR – Hôtels Cafés Restaurants'
+    contract_type:s.fields.contract_type,
+    contract_start_date:s.fields.start_date,
+    contract_end_date:s.fields.end_date,
+    trial_period:s.fields.trial_period,
+    weekly_hours:s.fields.weekly_hours,
+    salary_amount:s.fields.salary_amount,
+    salary_type:s.fields.salary_type,
+    manager_name: mgr ? (mgr.first_name+' '+mgr.last_name) : '',
+    work_location: s.fields.work_location||hotel?.city||hotel?.name||'',
+    job_title: (rols.find(r=>r.id===s.fields.role_id)||{}).name||emp.role||'',
+    department:(deps.find(d=>d.id===s.fields.service_id)||{}).name||emp.department||'',
   });
   const rendered = substituteVariables(tpl.body_html, ctx);
+  const missing = detectMissingVars(tpl.body_html, ctx);
+
+  const missingBanner = missing.length
+    ? `<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:10px 14px;font-size:12px;color:#92400e;margin-bottom:12px;display:flex;gap:10px;align-items:flex-start">
+        <i class="fa-solid fa-triangle-exclamation" style="margin-top:2px;flex-shrink:0"></i>
+        <div><b>${missing.length} variable${missing.length>1?'s':''} manquante${missing.length>1?'s':''}</b> — surlignée${missing.length>1?'s':''} en jaune dans le document : ${missing.map(k=>`<code style="background:#fef3c7;padding:1px 4px;border-radius:3px">${k}</code>`).join(' ')}</div>
+      </div>`
+    : `<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:8px;padding:10px 14px;font-size:12px;color:#065f46;margin-bottom:12px;display:flex;gap:8px;align-items:center">
+        <i class="fa-solid fa-circle-check"></i> <b>Toutes les variables sont renseignées.</b> Le contrat est prêt.
+      </div>`;
+
   $('genInlineBody').innerHTML=`
-    <div class="box" style="padding:20px;margin-bottom:16px">
-      <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Vérifiez votre contrat avant envoi. Les variables en jaune sont manquantes.</div>
-      <div style="font-family:'Times New Roman',serif;font-size:13px;line-height:1.6;color:#222;border:1px solid var(--line);border-radius:8px;padding:28px;max-height:65vh;overflow-y:auto">${rendered}</div>
-    </div>
-    <div style="display:flex;gap:10px;justify-content:space-between">
-      <button class="btn g" onclick="genInlineState.step=1;renderContractsGenerate()"><i class="fa-solid fa-arrow-left"></i> Retour</button>
-      <div style="display:flex;gap:10px">
-        <button class="btn g" id="gs2_pdf"><i class="fa-solid fa-file-pdf"></i> Télécharger PDF</button>
-        <button class="btn p" onclick="genInlineState.step=3;renderContractsGenerate()">Suivant <i class="fa-solid fa-arrow-right"></i></button>
+    ${missingBanner}
+    <div style="display:flex;gap:16px;align-items:flex-start">
+      <!-- A4 PREVIEW -->
+      <div style="flex:1;min-width:0">
+        <div style="background:#9ca3af;padding:16px;border-radius:8px;overflow-y:auto;max-height:68vh">
+          <div id="gs2_a4" style="width:210mm;max-width:100%;min-height:297mm;padding:20mm 20mm 24mm 25mm;margin:0 auto;background:#fff;box-shadow:0 4px 20px rgba(0,0,0,.25);font-family:'Times New Roman',Times,serif;font-size:11pt;line-height:1.6;color:#111;box-sizing:border-box">
+            ${rendered}
+          </div>
+        </div>
+      </div>
+      <!-- RECAP + ACTIONS -->
+      <div style="width:260px;flex-shrink:0;display:flex;flex-direction:column;gap:12px">
+        <div class="box" style="padding:16px">
+          <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">Récapitulatif</div>
+          <div style="font-size:12px;color:var(--ink2);line-height:2">
+            <div><span style="color:var(--muted)">Salarié</span><br><b>${emp.first_name} ${emp.last_name}</b></div>
+            <div><span style="color:var(--muted)">Poste</span><br><b>${ctx['poste.intitule']||'—'}</b></div>
+            <div><span style="color:var(--muted)">Type</span><br><b>${s.fields.contract_type}</b></div>
+            <div><span style="color:var(--muted)">Début</span><br><b>${ctx['contrat.date_debut']||'—'}</b></div>
+            ${s.fields.end_date?`<div><span style="color:var(--muted)">Fin</span><br><b>${ctx['contrat.date_fin']}</b></div>`:''}
+            <div><span style="color:var(--muted)">Rémunération</span><br><b>${ctx['remuneration.montant']||'—'} ${ctx['remuneration.montant']?'€':''}</b></div>
+          </div>
+        </div>
+        <div class="box" style="padding:16px">
+          <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">Modèle</div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <i class="fa-regular fa-file-lines" style="color:var(--violet);font-size:18px"></i>
+            <div><div style="font-size:12.5px;font-weight:600">${tpl.name}</div>
+            <span class="tag green" style="font-size:10px">Actif</span></div>
+          </div>
+        </div>
+        <div class="box" style="padding:16px;display:flex;flex-direction:column;gap:8px">
+          <button class="btn p" id="gs2_pdf" style="width:100%"><i class="fa-solid fa-file-pdf"></i> Télécharger PDF</button>
+          <button class="btn p" onclick="genInlineState.step=3;renderContractsGenerate()" style="width:100%;background:var(--green)"><i class="fa-solid fa-pen-nib"></i> Envoyer pour signature</button>
+          <button class="btn g" onclick="genInlineState.step=1;renderContractsGenerate()" style="width:100%"><i class="fa-solid fa-arrow-left"></i> Modifier</button>
+        </div>
       </div>
     </div>`;
+
   $('gs2_pdf').onclick=async()=>{
-    const btn=$('gs2_pdf'); btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';
+    const btn=$('gs2_pdf'); btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Génération…';
     try{
-      const pdfBlob=await renderHtmlToPdfBlob(rendered,`Contrat - ${emp.first_name} ${emp.last_name}`);
+      const pdfBlob=await renderHtmlToPdfBlob(rendered,`Contrat ${s.fields.contract_type} — ${emp.first_name} ${emp.last_name}`);
       const fn=`contrat_${emp.last_name}_${emp.first_name}_${new Date().toISOString().slice(0,10)}.pdf`;
       const url=URL.createObjectURL(pdfBlob); const a=document.createElement('a'); a.href=url; a.download=fn; a.click(); URL.revokeObjectURL(url);
     }catch(e){flash('Erreur PDF : '+e.message);}
@@ -3466,37 +3818,94 @@ function _genStep4(){
 
 /* ===== MOTEUR DE SUBSTITUTION DE VARIABLES ===== */
 function buildContractContext(emp, hotel, fields){
-  const fmt = v => v ? new Date(v).toLocaleDateString('fr-FR') : '';
-  return {
-    employee_first_name: emp.first_name||'',
-    employee_last_name : emp.last_name||'',
-    employee_full_name : `${emp.first_name||''} ${emp.last_name||''}`.trim(),
-    birth_date         : fmt(emp.birth_date),
-    birth_place        : emp.birth_place||'',
-    nationality        : emp.nationality||'',
-    social_security_number  : emp.social_security_number||'',
-    residency_permit_number : emp.residency_permit_number||'',
-    address            : emp.address||'',
-    phone              : emp.phone||'',
-    email              : emp.email||'',
-    job_title          : emp.role||'',
-    department         : emp.department||'',
-    contract_type      : fields.contract_type||emp.contract_type||'',
-    contract_start_date: fmt(fields.contract_start_date),
-    contract_end_date  : fmt(fields.contract_end_date),
-    trial_period       : fields.trial_period||'',
-    weekly_hours       : fields.weekly_hours||'',
-    salary             : fields.salary||'',
-    work_location      : fields.work_location||'',
-    manager_name       : fields.manager_name||'',
-    collective_agreement : fields.collective_agreement||'',
-    hotel_name         : hotel?.name||'',
-    hotel_address      : hotel?.city||'',
-    today              : new Date().toLocaleDateString('fr-FR'),
+  const fmt = v => {
+    if(!v) return '';
+    const d = new Date(v+'T00:00:00'); // force local midnight
+    return isNaN(d)?String(v):d.toLocaleDateString('fr-FR');
   };
+  const salaryLabel = fields.salary_type==='taux_horaire'
+    ? (fields.salary||fields.salary_amount||'')+ (fields.salary||fields.salary_amount?' € / heure':'')
+    : (fields.salary||fields.salary_amount||'')+(fields.salary||fields.salary_amount?' € brut / mois':'');
+  const hoursLabel = fields.weekly_hours
+    ? (fields.weekly_hours+' h / semaine')
+    : (fields.hours_per_week ? fields.hours_per_week+' h / semaine' : '');
+
+  const ctx = {
+    // ── Nouvelles variables dot-notation ───────────────────────────────
+    'collaborateur.prenom'      : emp.first_name||'',
+    'collaborateur.nom'         : emp.last_name||'',
+    'collaborateur.nom_complet' : `${emp.first_name||''} ${emp.last_name||''}`.trim(),
+    'collaborateur.date_naissance': fmt(emp.birth_date),
+    'collaborateur.lieu_naissance': emp.birth_place||'',
+    'collaborateur.nationalite' : emp.nationality||'',
+    'collaborateur.adresse'     : emp.address||'',
+    'collaborateur.telephone'   : emp.phone||'',
+    'collaborateur.email'       : emp.email||'',
+    'collaborateur.numero_secu' : emp.social_security_number||'',
+    'collaborateur.titre_sejour': emp.residency_permit_number||'',
+    'contrat.type'              : fields.contract_type||emp.contract_type||'',
+    'contrat.date_debut'        : fmt(fields.contract_start_date||fields.start_date),
+    'contrat.date_fin'          : fmt(fields.contract_end_date||fields.end_date),
+    'contrat.periode_essai'     : fields.trial_period||'',
+    'contrat.duree_hebdomadaire': hoursLabel,
+    'poste.service'             : fields.department||emp.department||'',
+    'poste.intitule'            : fields.job_title||emp.role||'',
+    'poste.responsable'         : fields.manager_name||'',
+    'poste.lieu_travail'        : fields.work_location||hotel?.city||hotel?.name||'',
+    'remuneration.montant'      : fields.salary||fields.salary_amount||'',
+    'remuneration.type'         : fields.salary_type==='taux_horaire'?'taux horaire':'brut mensuel',
+    'hotel.nom'                 : hotel?.name||'',
+    'hotel.adresse'             : hotel?.address||hotel?.city||'',
+    'hotel.siret'               : hotel?.siret||'',
+    'hotel.representant'        : hotel?.legal_representative||fields.manager_name||'',
+    'hotel.convention_collective': fields.collective_agreement||hotel?.collective_agreement||'HCR – Hôtels Cafés Restaurants',
+    // ── Anciens noms (rétrocompatibilité totale) ────────────────────────
+    employee_first_name         : emp.first_name||'',
+    employee_last_name          : emp.last_name||'',
+    employee_full_name          : `${emp.first_name||''} ${emp.last_name||''}`.trim(),
+    birth_date                  : fmt(emp.birth_date),
+    birth_place                 : emp.birth_place||'',
+    nationality                 : emp.nationality||'',
+    social_security_number      : emp.social_security_number||'',
+    residency_permit_number     : emp.residency_permit_number||'',
+    address                     : emp.address||'',
+    phone                       : emp.phone||'',
+    email                       : emp.email||'',
+    job_title                   : fields.job_title||emp.role||'',
+    department                  : fields.department||emp.department||'',
+    contract_type               : fields.contract_type||emp.contract_type||'',
+    contract_start_date         : fmt(fields.contract_start_date||fields.start_date),
+    contract_end_date           : fmt(fields.contract_end_date||fields.end_date),
+    trial_period                : fields.trial_period||'',
+    weekly_hours                : hoursLabel,
+    salary                      : fields.salary||fields.salary_amount||'',
+    work_location               : fields.work_location||hotel?.city||'',
+    manager_name                : fields.manager_name||'',
+    collective_agreement        : fields.collective_agreement||hotel?.collective_agreement||'HCR – Hôtels Cafés Restaurants',
+    hotel_name                  : hotel?.name||'',
+    hotel_address               : hotel?.address||hotel?.city||'',
+    today                       : new Date().toLocaleDateString('fr-FR'),
+  };
+  return ctx;
 }
-function substituteVariables(html, ctx){
-  return html.replace(/\{\{(\w+)\}\}/g, (m,k)=> ctx[k] !== undefined ? String(ctx[k]) : `<span style="background:#fef3c7;color:#92400e;padding:0 4px;border-radius:3px">${m}</span>`);
+
+function substituteVariables(html, ctx, stripUnresolved=false){
+  // Support both {{key}} and {{namespace.key}} syntax
+  return html.replace(/\{\{([\w.]+)\}\}/g, (m,k)=>{
+    if(ctx[k] !== undefined && ctx[k] !== '') return String(ctx[k]);
+    if(stripUnresolved) return '';
+    return `<span style="background:#fef3c7;color:#92400e;padding:0 4px;border-radius:3px;font-size:0.9em">${m}</span>`;
+  });
+}
+
+function detectMissingVars(templateHtml, ctx){
+  const missing=[];
+  const re=/\{\{([\w.]+)\}\}/g; let m;
+  while((m=re.exec(templateHtml))!==null){
+    const k=m[1];
+    if(ctx[k]===undefined||ctx[k]==='') missing.push(k);
+  }
+  return [...new Set(missing)];
 }
 
 /* ===== ASSISTANT DE GÉNÉRATION ===== */
@@ -3649,13 +4058,26 @@ async function renderHtmlToPdfBlob(html, title){
   }
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({orientation:'portrait', unit:'mm', format:'a4'});
-  // Conteneur invisible pour mesurer + rendu
   const wrap = document.createElement('div');
-  wrap.style.cssText = 'position:fixed;left:-9999px;top:0;width:170mm;padding:20px;font-family:"Times New Roman",serif;font-size:11pt;line-height:1.45;color:#000;background:#fff';
-  wrap.innerHTML = `<div style="margin-bottom:10mm;font-size:9pt;color:#999;text-align:right">${title}</div>${html}`;
+  wrap.style.cssText = 'position:fixed;left:-9999px;top:0;width:170mm;font-family:"Times New Roman",Times,serif;font-size:11pt;line-height:1.6;color:#111;background:#fff';
+  wrap.innerHTML = `<style>
+    h1{font-size:16pt;font-weight:700;margin:0 0 8pt;text-align:center}
+    h2{font-size:12pt;font-weight:700;margin:14pt 0 5pt;page-break-after:avoid}
+    h3{font-size:11pt;font-weight:700;margin:10pt 0 4pt;page-break-after:avoid}
+    p{margin:0 0 7pt;orphans:3;widows:3}
+    table{width:100%;border-collapse:collapse}
+    td{vertical-align:top;padding:3pt}
+    .no-break{page-break-inside:avoid}
+    div[style*="page-break-before:always"]{page-break-before:always}
+    strong,b{font-weight:700}
+    em,i{font-style:italic}
+    span[style*="fef3c7"]{background:none!important;color:#c00!important;font-weight:700}
+  </style>
+  <div style="text-align:right;font-size:8.5pt;color:#888;margin-bottom:8mm;padding-bottom:3mm;border-bottom:1px solid #ccc">${title} · Généré le ${new Date().toLocaleDateString('fr-FR')}</div>
+  ${html}`;
   document.body.appendChild(wrap);
   try{
-    await doc.html(wrap, {x:15, y:15, width:180, windowWidth:wrap.scrollWidth, autoPaging:'text'});
+    await doc.html(wrap, {x:15, y:15, width:180, windowWidth:wrap.scrollWidth, autoPaging:'text', margin:[15,15,15,15]});
   }finally{ document.body.removeChild(wrap); }
   return doc.output('blob');
 }
