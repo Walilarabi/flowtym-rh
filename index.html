@@ -3182,187 +3182,207 @@ async function convertPdf(file){
   }
 }
 
-const DEFAULT_TEMPLATE_BODY = `<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24pt;padding-bottom:12pt;border-bottom:2px solid #222">
-  <div>
-    <div style="font-size:14pt;font-weight:700">{{hotel.nom}}</div>
-    <div style="font-size:10pt;color:#444">{{hotel.adresse}}</div>
-    <div style="font-size:10pt;color:#444">SIRET : {{hotel.siret}}</div>
-  </div>
-  <div style="text-align:right;font-size:10pt;color:#444">
-    <div>Représentant légal : {{hotel.representant}}</div>
-    <div>Convention collective : {{hotel.convention_collective}}</div>
-  </div>
+const DEFAULT_TEMPLATE_BODY = `<h1>CONTRAT DE TRAVAIL À DURÉE INDÉTERMINÉE</h1>
+
+<div class="bloc-employeur">
+<strong>Entre l'employeur, {{hotel.nom}}</strong><br>
+<strong>{{hotel.adresse}},</strong><br>
+<strong>N° de Siret : {{hotel.siret}}</strong><br>
+<strong>représenté par {{hotel.representant}}</strong><br>
+<strong>d'une part,</strong>
 </div>
 
-<h1 style="text-align:center;font-size:16pt;margin:0 0 6pt">CONTRAT DE TRAVAIL À DURÉE INDÉTERMINÉE</h1>
-<p style="text-align:center;font-size:10pt;color:#555;margin:0 0 24pt">Établi en deux exemplaires originaux</p>
+<div class="bloc-salarie">
+Et le salarié {{collaborateur.nom_complet}}<br>
+Né(e) le {{collaborateur.date_naissance}} à {{collaborateur.lieu_naissance}}, de nationalité {{collaborateur.nationalite}},<br>
+Demeurant, {{collaborateur.adresse}}<br>
+Numéro ss : {{collaborateur.numero_secu}}<br>
+d'autre part,
+</div>
 
-<p><strong>Entre les soussignés :</strong></p>
+<p class="intro">Il a été convenu et arrêté ce qui suit :</p>
 
-<p>La société <strong>{{hotel.nom}}</strong>, dont le siège social est situé au {{hotel.adresse}}, immatriculée sous le numéro SIRET {{hotel.siret}}, représentée par <strong>{{hotel.representant}}</strong>, agissant en qualité de Directeur(trice),<br>
-ci-après dénommée <em>« l'Employeur »</em>,</p>
+<h2>Article 1 : Engagement</h2>
+<p>La société <strong>{{hotel.nom}}</strong> engage {{collaborateur.nom_complet}} en qualité de <strong>{{poste.intitule}}</strong>, au sein du service <strong>{{poste.service}}</strong>, à compter du <strong>{{contrat.date_debut}}</strong>, pour une durée indéterminée.</p>
+<p>Le Salarié exercera ses fonctions sous la responsabilité directe de <strong>{{poste.responsable}}</strong>.</p>
 
-<p><strong>Et :</strong></p>
+<h2>Article 2 : Période d'essai</h2>
+<p>Le présent contrat est conclu sous réserve d'une période d'essai d'une durée de <strong>{{contrat.periode_essai}}</strong>, renouvelable une fois dans les conditions prévues par la convention collective applicable. Durant cette période, chacune des parties pourra mettre fin au contrat à tout moment, sous réserve du respect d'un délai de prévenance.</p>
 
-<p><strong>{{collaborateur.nom_complet}}</strong>, né(e) le {{collaborateur.date_naissance}} à {{collaborateur.lieu_naissance}}, de nationalité {{collaborateur.nationalite}}, demeurant au {{collaborateur.adresse}}, titulaire du numéro de sécurité sociale n° {{collaborateur.numero_secu}},<br>
-ci-après dénommé(e) <em>« le Salarié »</em>.</p>
+<h2>Article 3 : Durée et organisation du travail</h2>
+<p>Le Salarié sera occupé à temps complet, pour une durée de travail de <strong>{{contrat.duree_hebdomadaire}}</strong>, conformément aux dispositions légales et conventionnelles en vigueur. Les horaires de travail seront fixés par la Direction en fonction des nécessités de service.</p>
 
-<p><strong>Il a été convenu ce qui suit :</strong></p>
+<h2>Article 4 : Lieu de travail</h2>
+<p>Le Salarié exercera ses fonctions au sein de l'établissement situé au <strong>{{poste.lieu_travail}}</strong>. En cas de nécessité de service, le Salarié pourra être affecté temporairement dans tout autre établissement du groupe.</p>
 
-<h2 style="margin-top:18pt">Article 1 — Engagement et poste</h2>
-<p>L'Employeur engage le Salarié en qualité de <strong>{{poste.intitule}}</strong>, au sein du service <strong>{{poste.service}}</strong>, à compter du <strong>{{contrat.date_debut}}</strong>, pour une durée indéterminée.</p>
-<p>Le Salarié exercera ses fonctions sous la responsabilité directe de {{poste.responsable}}.</p>
+<h2>Article 5 : Rémunération</h2>
+<p>En contrepartie de son travail, le Salarié percevra une rémunération brute de <strong>{{remuneration.montant}} €</strong> ({{remuneration.type}}), versée mensuellement. Cette rémunération sera révisée annuellement en fonction des résultats individuels et des dispositions conventionnelles.</p>
 
-<h2 style="margin-top:14pt">Article 2 — Période d'essai</h2>
-<p>Le présent contrat est conclu sous réserve d'une période d'essai d'une durée de <strong>{{contrat.periode_essai}}</strong>, renouvelable une fois dans les conditions prévues par la convention collective applicable, à l'issue de laquelle le Salarié sera définitivement confirmé dans son poste.</p>
-<p>Durant cette période, chacune des parties pourra mettre fin au contrat à tout moment, sous réserve du respect d'un délai de prévenance.</p>
+<h2>Article 6 : Congés payés</h2>
+<p>Le Salarié bénéficiera des congés payés légaux, soit 2,5 jours ouvrables par mois de travail effectif, conformément aux dispositions légales et conventionnelles applicables.</p>
 
-<h2 style="margin-top:14pt">Article 3 — Durée et organisation du travail</h2>
-<p>Le Salarié sera occupé à temps complet, pour une durée de travail de <strong>{{contrat.duree_hebdomadaire}}</strong> conformément aux dispositions légales et conventionnelles en vigueur.</p>
-<p>Les horaires de travail seront fixés par la Direction en fonction des nécessités de service, dans le cadre défini par le règlement intérieur de l'établissement.</p>
+<h2>Article 7 : Convention collective</h2>
+<p>Le présent contrat est soumis aux dispositions de la <strong>{{hotel.convention_collective}}</strong> ainsi qu'à l'ensemble des accords d'entreprise applicables au sein de l'établissement. Le Salarié reconnaît avoir pris connaissance du règlement intérieur affiché dans les locaux.</p>
 
-<h2 style="margin-top:14pt">Article 4 — Lieu de travail</h2>
-<p>Le Salarié exercera ses fonctions au sein de l'établissement situé au <strong>{{poste.lieu_travail}}</strong>. En cas de nécessité de service, le Salarié pourra être affecté temporairement dans tout autre établissement du groupe, sans que cela constitue une modification du contrat de travail.</p>
+<h2>Article 8 : Dispositions particulières</h2>
+<p>Toute modification substantielle du présent contrat fera l'objet d'un avenant écrit signé par les deux parties. Le présent contrat est établi conformément au droit français du travail et aux dispositions conventionnelles applicables.</p>
 
-<h2 style="margin-top:14pt">Article 5 — Rémunération</h2>
-<p>En contrepartie de son travail, le Salarié percevra une rémunération brute de <strong>{{remuneration.montant}}</strong> ({{remuneration.type}}), versée mensuellement.</p>
-<p>Cette rémunération inclut l'ensemble des éléments salariaux fixes et sera révisée annuellement en fonction des résultats individuels et des dispositions conventionnelles.</p>
+<p class="fait">Fait en deux exemplaires originaux</p>
 
-<h2 style="margin-top:14pt">Article 6 — Convention collective</h2>
-<p>Le présent contrat est soumis aux dispositions de la <strong>{{hotel.convention_collective}}</strong> ainsi qu'à l'ensemble des accords d'entreprise applicables au sein de l'établissement.</p>
-<p>Le Salarié reconnaît avoir pris connaissance du règlement intérieur de l'établissement, affiché à l'entrée des locaux.</p>
+<p class="lieu">A {{hotel.adresse}}<br>Le {{today}}</p>
 
-<h2 style="margin-top:14pt">Article 7 — Obligations des parties</h2>
-<p>Le Salarié s'engage à exercer ses fonctions avec professionnalisme, diligence et loyauté. Il s'oblige à respecter les règles de confidentialité applicables à son poste ainsi que les procédures internes de l'établissement.</p>
-<p>L'Employeur s'engage à fournir au Salarié les moyens nécessaires à l'exercice de ses fonctions et à respecter l'ensemble des obligations légales et conventionnelles.</p>
-
-<h2 style="margin-top:14pt">Article 8 — Dispositions particulières</h2>
-<p>Toute modification substantielle du présent contrat fera l'objet d'un avenant écrit, signé par les deux parties.</p>
-<p>Le présent contrat est établi conformément au droit français du travail et aux dispositions conventionnelles applicables.</p>
-
-<div style="page-break-before:always"></div>
-
-<p style="margin-top:0">Fait à {{hotel.adresse}}, le <strong>{{today}}</strong>, en deux exemplaires originaux dont un remis à chaque partie.</p>
-
-<table style="width:100%;margin-top:32pt;border-collapse:collapse">
+<div class="sig-block">
+<table>
   <tr>
-    <td style="width:50%;vertical-align:top;padding-right:20pt">
-      <p style="margin:0 0 6pt"><strong>Pour l'Employeur</strong></p>
-      <p style="margin:0 0 4pt;font-size:10pt;color:#555">{{hotel.representant}}</p>
-      <p style="margin:0 0 4pt;font-size:10pt;color:#555">{{hotel.nom}}</p>
-      <div style="margin-top:40pt;border-top:1px solid #333;padding-top:4pt;font-size:10pt;color:#666">Signature et cachet</div>
+    <td style="padding-right:20pt">
+      <p><strong>Signature Employeur</strong></p>
+      <p style="font-size:10pt;color:#555">{{hotel.representant}}<br>{{hotel.nom}}</p>
+      <div style="margin-top:48pt;border-top:1px solid #333;width:180pt;padding-top:5pt;font-size:9pt;color:#666">Signature et cachet</div>
     </td>
-    <td style="width:50%;vertical-align:top;padding-left:20pt">
-      <p style="margin:0 0 6pt"><strong>Le Salarié</strong></p>
-      <p style="margin:0 0 4pt;font-size:10pt;color:#555">{{collaborateur.nom_complet}}</p>
-      <p style="margin:0 0 4pt;font-size:10pt;color:#999;font-style:italic">Précédé de la mention manuscrite « Lu et approuvé »</p>
-      <div style="margin-top:40pt;border-top:1px solid #333;padding-top:4pt;font-size:10pt;color:#666">Signature</div>
+    <td style="padding-left:20pt">
+      <p><strong>Signature Salarié</strong><br><em style="font-size:10pt;color:#555">précédée de la mention manuscrite<br>« lu et approuvé » de la main du salarié</em></p>
+      <p style="font-size:10pt;color:#555">{{collaborateur.nom_complet}}</p>
+      <div style="margin-top:32pt;border-top:1px solid #333;width:180pt;padding-top:5pt;font-size:9pt;color:#666">Signature</div>
     </td>
   </tr>
-</table>`;
+</table>
+</div>`;
 
-const DEFAULT_TEMPLATE_BODY_CDD = `<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24pt;padding-bottom:12pt;border-bottom:2px solid #222">
-  <div>
-    <div style="font-size:14pt;font-weight:700">{{hotel.nom}}</div>
-    <div style="font-size:10pt;color:#444">{{hotel.adresse}} — SIRET : {{hotel.siret}}</div>
-  </div>
-  <div style="text-align:right;font-size:10pt;color:#444">
-    <div>Représentant : {{hotel.representant}}</div>
-    <div>Conv. collective : {{hotel.convention_collective}}</div>
-  </div>
+const DEFAULT_TEMPLATE_BODY_CDD = `<h1>CONTRAT DE TRAVAIL À DURÉE DÉTERMINÉE</h1>
+
+<div class="bloc-employeur">
+<strong>Entre l'employeur, {{hotel.nom}}</strong><br>
+<strong>{{hotel.adresse}},</strong><br>
+<strong>N° de Siret : {{hotel.siret}}</strong><br>
+<strong>représenté par {{hotel.representant}}</strong><br>
+<strong>d'une part,</strong>
 </div>
 
-<h1 style="text-align:center;font-size:16pt;margin:0 0 6pt">CONTRAT DE TRAVAIL À DURÉE DÉTERMINÉE</h1>
-<p style="text-align:center;font-size:10pt;color:#555;margin:0 0 24pt">Établi en deux exemplaires originaux</p>
+<div class="bloc-salarie">
+Et le salarié {{collaborateur.nom_complet}}<br>
+Né(e) le {{collaborateur.date_naissance}} à {{collaborateur.lieu_naissance}}, de nationalité {{collaborateur.nationalite}},<br>
+Demeurant, {{collaborateur.adresse}}<br>
+Numéro ss : {{collaborateur.numero_secu}}<br>
+d'autre part,
+</div>
 
-<p><strong>Entre les soussignés :</strong></p>
-<p>La société <strong>{{hotel.nom}}</strong>, dont le siège est situé au {{hotel.adresse}}, SIRET {{hotel.siret}}, représentée par <strong>{{hotel.representant}}</strong>, ci-après dénommée <em>« l'Employeur »</em>,</p>
-<p><strong>Et :</strong></p>
-<p><strong>{{collaborateur.nom_complet}}</strong>, né(e) le {{collaborateur.date_naissance}} à {{collaborateur.lieu_naissance}}, de nationalité {{collaborateur.nationalite}}, demeurant au {{collaborateur.adresse}}, n° sécurité sociale {{collaborateur.numero_secu}}, ci-après dénommé(e) <em>« le Salarié »</em>.</p>
+<p class="intro">Il a été convenu et arrêté ce qui suit :</p>
 
-<h2 style="margin-top:18pt">Article 1 — Motif du recours au CDD</h2>
+<h2>Article 1 : Motif du recours au CDD</h2>
 <p>Le présent contrat est conclu pour le motif suivant : <strong>accroissement temporaire de l'activité de l'établissement</strong>, conformément aux dispositions des articles L.1242-1 et suivants du Code du travail.</p>
 
-<h2 style="margin-top:14pt">Article 2 — Durée et terme du contrat</h2>
-<p>Le présent contrat est conclu pour une durée déterminée du <strong>{{contrat.date_debut}}</strong> au <strong>{{contrat.date_fin}}</strong> inclus.</p>
-<p>Le Salarié est engagé en qualité de <strong>{{poste.intitule}}</strong> au sein du service <strong>{{poste.service}}</strong>, sous la responsabilité de {{poste.responsable}}.</p>
+<h2>Article 2 : Engagement</h2>
+<p>La société <strong>{{hotel.nom}}</strong> engage {{collaborateur.nom_complet}} en qualité de <strong>{{poste.intitule}}</strong>, au sein du service <strong>{{poste.service}}</strong>, sous la responsabilité de <strong>{{poste.responsable}}</strong>.</p>
 
-<h2 style="margin-top:14pt">Article 3 — Période d'essai</h2>
+<h2>Article 3 : Durée du contrat</h2>
+<p>Le présent contrat est conclu pour une durée déterminée du <strong>{{contrat.date_debut}}</strong> au <strong>{{contrat.date_fin}}</strong> inclus.</p>
+<p>Le contrat prend fin automatiquement au terme fixé, sans qu'il soit nécessaire de donner congé.</p>
+
+<h2>Article 4 : Période d'essai</h2>
 <p>Le présent contrat comporte une période d'essai de <strong>{{contrat.periode_essai}}</strong> à compter de la date de prise de fonctions.</p>
 
-<h2 style="margin-top:14pt">Article 4 — Durée du travail</h2>
-<p>Le Salarié sera occupé pour une durée de <strong>{{contrat.duree_hebdomadaire}}</strong> conformément à l'horaire de l'établissement.</p>
+<h2>Article 5 : Durée du travail</h2>
+<p>{{collaborateur.nom_complet}} sera occupé(e) pour une durée de <strong>{{contrat.duree_hebdomadaire}}</strong>, conformément à l'horaire de l'établissement.</p>
 
-<h2 style="margin-top:14pt">Article 5 — Lieu de travail</h2>
-<p>Le Salarié exercera ses fonctions au <strong>{{poste.lieu_travail}}</strong>.</p>
+<h2>Article 6 : Lieu de travail</h2>
+<p>{{collaborateur.nom_complet}} exercera ses fonctions au <strong>{{poste.lieu_travail}}</strong>.</p>
 
-<h2 style="margin-top:14pt">Article 6 — Rémunération</h2>
-<p>Le Salarié percevra une rémunération brute de <strong>{{remuneration.montant}}</strong> ({{remuneration.type}}).</p>
-<p>À l'issue du contrat, le Salarié bénéficiera d'une indemnité de fin de contrat égale à 10 % de la rémunération brute totale perçue, sauf exceptions légales.</p>
+<h2>Article 7 : Rémunération</h2>
+<p>{{collaborateur.nom_complet}} percevra une rémunération brute de <strong>{{remuneration.montant}} €</strong> ({{remuneration.type}}).</p>
+<p>À l'issue du contrat, {{collaborateur.nom_complet}} bénéficiera d'une indemnité de fin de contrat égale à 10 % de la rémunération brute totale perçue, sauf exceptions légales.</p>
 
-<h2 style="margin-top:14pt">Article 7 — Convention collective</h2>
-<p>Le présent contrat est soumis aux dispositions de la <strong>{{hotel.convention_collective}}</strong>.</p>
+<h2>Article 8 : Congés payés</h2>
+<p>{{collaborateur.nom_complet}} a droit à une indemnité compensatrice de congés payés égale à 10 % de la rémunération brute totale perçue pendant la durée du contrat.</p>
 
-<div style="page-break-before:always"></div>
-<p>Fait à {{hotel.adresse}}, le <strong>{{today}}</strong>, en deux exemplaires originaux.</p>
-<table style="width:100%;margin-top:32pt;border-collapse:collapse">
+<h2>Article 9 : Convention collective</h2>
+<p>Le présent contrat est soumis aux dispositions de la <strong>{{hotel.convention_collective}}</strong>. {{collaborateur.nom_complet}} s'engage à se conformer aux dispositions du règlement intérieur de l'établissement.</p>
+
+<p class="fait">Fait en deux exemplaires originaux</p>
+
+<p class="lieu">A {{hotel.adresse}}<br>Le {{today}}</p>
+
+<div class="sig-block">
+<table>
   <tr>
-    <td style="width:50%;vertical-align:top;padding-right:20pt">
-      <p style="margin:0 0 6pt"><strong>Pour l'Employeur</strong></p>
-      <p style="margin:0 0 4pt;font-size:10pt;color:#555">{{hotel.representant}} — {{hotel.nom}}</p>
-      <div style="margin-top:40pt;border-top:1px solid #333;padding-top:4pt;font-size:10pt;color:#666">Signature et cachet</div>
+    <td style="padding-right:20pt">
+      <p><strong>Signature Employeur</strong></p>
+      <p style="font-size:10pt;color:#555">{{hotel.representant}}<br>{{hotel.nom}}</p>
+      <div style="margin-top:48pt;border-top:1px solid #333;width:180pt;padding-top:5pt;font-size:9pt;color:#666">Signature et cachet</div>
     </td>
-    <td style="width:50%;vertical-align:top;padding-left:20pt">
-      <p style="margin:0 0 6pt"><strong>Le Salarié</strong></p>
-      <p style="margin:0 0 4pt;font-size:10pt;color:#555">{{collaborateur.nom_complet}}</p>
-      <p style="margin:0 0 4pt;font-size:10pt;color:#999;font-style:italic">Précédé de la mention « Lu et approuvé »</p>
-      <div style="margin-top:40pt;border-top:1px solid #333;padding-top:4pt;font-size:10pt;color:#666">Signature</div>
+    <td style="padding-left:20pt">
+      <p><strong>Signature Salarié</strong><br><em style="font-size:10pt;color:#555">précédée de la mention manuscrite<br>« lu et approuvé » de la main du salarié</em></p>
+      <p style="font-size:10pt;color:#555">{{collaborateur.nom_complet}}</p>
+      <div style="margin-top:32pt;border-top:1px solid #333;width:180pt;padding-top:5pt;font-size:9pt;color:#666">Signature</div>
     </td>
   </tr>
-</table>`;
+</table>
+</div>`;
 
-const DEFAULT_TEMPLATE_BODY_EXTRA = `<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20pt;padding-bottom:10pt;border-bottom:2px solid #222">
-  <div>
-    <div style="font-size:13pt;font-weight:700">{{hotel.nom}}</div>
-    <div style="font-size:10pt;color:#444">{{hotel.adresse}} — SIRET : {{hotel.siret}}</div>
-  </div>
-  <div style="text-align:right;font-size:10pt;color:#444">
-    <div>Repr. : {{hotel.representant}}</div>
-  </div>
+const DEFAULT_TEMPLATE_BODY_EXTRA = `<h1>CONTRAT D'EXTRA</h1>
+
+<div class="bloc-employeur">
+<strong>Entre l'employeur, {{hotel.nom}}</strong><br>
+<strong>{{hotel.adresse}},</strong><br>
+<strong>N° de Siret : {{hotel.siret}}</strong><br>
+<strong>représenté par {{hotel.representant}}</strong><br>
+<strong>d'une part,</strong>
 </div>
 
-<h1 style="text-align:center;font-size:15pt;margin:0 0 4pt">CONTRAT DE TRAVAIL EXTRA</h1>
-<p style="text-align:center;font-size:10pt;color:#555;margin:0 0 20pt">(Contrat d'usage — HCR)</p>
+<div class="bloc-salarie">
+Et le salarié {{collaborateur.nom_complet}}<br>
+Né(e) le {{collaborateur.date_naissance}} à {{collaborateur.lieu_naissance}}, de nationalité {{collaborateur.nationalite}},<br>
+Demeurant, {{collaborateur.adresse}}<br>
+Numéro ss : {{collaborateur.numero_secu}}<br>
+d'autre part,
+</div>
 
-<p><strong>{{hotel.nom}}</strong>, SIRET {{hotel.siret}}, représentée par {{hotel.representant}},</p>
-<p>engage à titre d'extra <strong>{{collaborateur.nom_complet}}</strong>, né(e) le {{collaborateur.date_naissance}}, n° secu {{collaborateur.numero_secu}},</p>
+<p class="intro">Il a été convenu et arrêté ce qui suit :</p>
 
-<table style="width:100%;margin:14pt 0;border-collapse:collapse;font-size:11pt">
-  <tr><td style="padding:5pt 0;color:#555;width:160pt">Poste</td><td><strong>{{poste.intitule}}</strong></td></tr>
-  <tr><td style="padding:5pt 0;color:#555">Date d'intervention</td><td><strong>{{contrat.date_debut}}</strong></td></tr>
-  <tr><td style="padding:5pt 0;color:#555">Horaires</td><td>Selon planning communiqué</td></tr>
-  <tr><td style="padding:5pt 0;color:#555">Lieu</td><td><strong>{{poste.lieu_travail}}</strong></td></tr>
-  <tr><td style="padding:5pt 0;color:#555">Rémunération</td><td><strong>{{remuneration.montant}}</strong> ({{remuneration.type}})</td></tr>
-  <tr><td style="padding:5pt 0;color:#555">Convention collective</td><td>{{hotel.convention_collective}}</td></tr>
-</table>
+<h2>Article 1 : Objet</h2>
+<p>La société <strong>{{hotel.nom}}</strong> engage {{collaborateur.nom_complet}} pour un contrat extra, emploi temporaire par nature, conformément à l'article L.1242-2 3° du Code du travail (secteur HCR — recours à l'extra d'usage constant).</p>
 
-<p style="font-size:10pt;color:#444;margin-top:10pt">Ce contrat est conclu conformément à l'article L.1242-2 3° du Code du travail (secteur HCR — recours à l'extra d'usage constant). L'indemnité de fin de contrat de 10 % est applicable.</p>
+<h2>Article 2 : Fonction</h2>
+<p>{{collaborateur.nom_complet}} est embauché(e) en qualité de <strong>{{poste.intitule}}</strong> au sein du service <strong>{{poste.service}}</strong>.</p>
 
-<p style="margin-top:20pt">Fait à {{hotel.adresse}}, le <strong>{{today}}</strong>.</p>
-<table style="width:100%;margin-top:24pt;border-collapse:collapse">
+<h2>Article 3 : Durée du contrat</h2>
+<p>{{collaborateur.nom_complet}} est embauché(e) pour le jour suivant : le <strong>{{contrat.date_debut}}</strong>.</p>
+<p>La durée de travail sera de <strong>{{contrat.duree_hebdomadaire}}</strong>.</p>
+
+<h2>Article 4 : Rémunération</h2>
+<p>{{collaborateur.nom_complet}} percevra une rémunération brute de <strong>{{remuneration.montant}} €</strong> ({{remuneration.type}}), plus les avantages en nature.</p>
+
+<h2>Article 5 : Congés payés</h2>
+<p>{{collaborateur.nom_complet}} a droit à une indemnité de congés payés qui sera égale à 10 % de sa rémunération brute perçue.</p>
+
+<h2>Article 6 : Caisse de retraite et de prévoyance</h2>
+<p>{{collaborateur.nom_complet}} sera affilié(e) à la caisse de retraite complémentaire et bénéficiera d'un régime de prévoyance complémentaire, conformément aux dispositions de la convention collective applicable.</p>
+
+<h2>Article 7 : Règlement intérieur</h2>
+<p>{{collaborateur.nom_complet}} s'engage à se conformer aux dispositions du règlement intérieur de l'établissement.</p>
+
+<h2>Article 8 : Convention collective</h2>
+<p>La convention collective applicable est la <strong>{{hotel.convention_collective}}</strong>.</p>
+
+<p class="fait">Fait en deux exemplaires</p>
+
+<p class="lieu">A {{poste.lieu_travail}}<br>Le {{today}}</p>
+
+<div class="sig-block">
+<table>
   <tr>
-    <td style="width:50%;vertical-align:top;padding-right:16pt">
-      <p style="margin:0 0 4pt"><strong>Pour l'Employeur</strong></p>
-      <p style="margin:0 0 4pt;font-size:10pt;color:#555">{{hotel.representant}}</p>
-      <div style="margin-top:36pt;border-top:1px solid #333;padding-top:4pt;font-size:10pt;color:#666">Signature et cachet</div>
+    <td style="padding-right:20pt">
+      <p><strong>Signature Employeur</strong></p>
+      <p style="font-size:10pt;color:#555">{{hotel.representant}}<br>{{hotel.nom}}</p>
+      <div style="margin-top:48pt;border-top:1px solid #333;width:180pt;padding-top:5pt;font-size:9pt;color:#666">Signature et cachet</div>
     </td>
-    <td style="width:50%;vertical-align:top;padding-left:16pt">
-      <p style="margin:0 0 4pt"><strong>Le Salarié</strong></p>
-      <p style="margin:0 0 4pt;font-size:10pt;color:#555">{{collaborateur.nom_complet}}</p>
-      <div style="margin-top:36pt;border-top:1px solid #333;padding-top:4pt;font-size:10pt;color:#666">Signature</div>
+    <td style="padding-left:20pt">
+      <p><strong>Signature Salarié</strong><br><em style="font-size:10pt;color:#555">précédée de la mention manuscrite<br>« lu et approuvé » de la main du salarié</em></p>
+      <p style="font-size:10pt;color:#555">{{collaborateur.nom_complet}}</p>
+      <div style="margin-top:32pt;border-top:1px solid #333;width:180pt;padding-top:5pt;font-size:9pt;color:#666">Signature</div>
     </td>
   </tr>
-</table>`;
+</table>
+</div>`;
 
 let genInlineState = {step:1, employee_id:'', template_id:'', fields:{contract_type:'CDI', start_date:'', end_date:'', trial_period:'', weekly_hours:'', salary_type:'brut_mensuel', salary_amount:'', manager_id:'', service_id:'', role_id:'', signature_method:'email'}, tplList:[]};
 
@@ -3424,7 +3444,7 @@ async function _genStep1(){
       job_title: (rols.find(r=>r.id===s.fields.role_id)||{}).name||emp.role||'',
       department: (deps.find(d=>d.id===s.fields.service_id)||{}).name||emp.department||'',
     });
-    previewHtml = substituteVariables(tpl.body_html, ctx);
+    previewHtml = wrapContractHtml(substituteVariables(tpl.body_html, ctx));
   }
 
   const empOpts = activeStaff.map(e=>`<option value="${e.id}" ${e.id===s.employee_id?'selected':''}>${e.first_name} ${e.last_name}${e.role?' · '+e.role:''}</option>`).join('');
@@ -3699,7 +3719,8 @@ async function _genStep2(){
     job_title: (rols.find(r=>r.id===s.fields.role_id)||{}).name||emp.role||'',
     department:(deps.find(d=>d.id===s.fields.service_id)||{}).name||emp.department||'',
   });
-  const rendered = substituteVariables(tpl.body_html, ctx);
+  const renderedRaw = substituteVariables(tpl.body_html, ctx);
+  const rendered = wrapContractHtml(renderedRaw);
   const missing = detectMissingVars(tpl.body_html, ctx);
 
   const missingBanner = missing.length
@@ -3908,6 +3929,27 @@ function detectMissingVars(templateHtml, ctx){
   return [...new Set(missing)];
 }
 
+/* ===== WRAPPER TYPOGRAPHIQUE DU CONTRAT ===== */
+function wrapContractHtml(html){
+  return `<style>
+    .ct h1{text-align:center;font-size:17pt;font-weight:700;text-decoration:underline;letter-spacing:.3px;margin:0 0 32pt}
+    .ct .bloc-employeur{margin-bottom:24pt;line-height:2.1}
+    .ct .bloc-salarie{margin-bottom:32pt;line-height:2.1}
+    .ct p{margin:0 0 9pt;text-align:justify;line-height:1.75}
+    .ct p.intro{font-weight:700;margin:24pt 0 14pt;text-align:left}
+    .ct p.fait{font-weight:700;margin-top:24pt;margin-bottom:8pt;text-align:left}
+    .ct p.lieu{margin-bottom:2pt;text-align:left}
+    .ct h2{font-size:11pt;font-weight:700;margin:18pt 0 6pt;page-break-after:avoid;break-after:avoid}
+    .ct .sig-block{page-break-inside:avoid;break-inside:avoid;margin-top:32pt}
+    .ct .sig-block table{width:100%;border-collapse:collapse}
+    .ct .sig-block td{vertical-align:top;padding:0;width:50%}
+    .ct strong,.ct b{font-weight:700}
+    .ct em,.ct i{font-style:italic}
+    span[style*="fef3c7"]{background:#fef3c7!important;color:#c00!important;padding:1px 3px;border-radius:2px}
+  </style>
+  <div class="ct">${html}</div>`;
+}
+
 /* ===== ASSISTANT DE GÉNÉRATION ===== */
 let genState = {step:1, employee_id:'', template_id:'', fields:{}};
 
@@ -4061,16 +4103,22 @@ async function renderHtmlToPdfBlob(html, title){
   const wrap = document.createElement('div');
   wrap.style.cssText = 'position:fixed;left:-9999px;top:0;width:170mm;font-family:"Times New Roman",Times,serif;font-size:11pt;line-height:1.6;color:#111;background:#fff';
   wrap.innerHTML = `<style>
-    h1{font-size:16pt;font-weight:700;margin:0 0 8pt;text-align:center}
-    h2{font-size:12pt;font-weight:700;margin:14pt 0 5pt;page-break-after:avoid}
-    h3{font-size:11pt;font-weight:700;margin:10pt 0 4pt;page-break-after:avoid}
-    p{margin:0 0 7pt;orphans:3;widows:3}
-    table{width:100%;border-collapse:collapse}
-    td{vertical-align:top;padding:3pt}
-    .no-break{page-break-inside:avoid}
-    div[style*="page-break-before:always"]{page-break-before:always}
+    /* Base */
+    body,div{box-sizing:border-box}
     strong,b{font-weight:700}
     em,i{font-style:italic}
+    table{width:100%;border-collapse:collapse}
+    td{vertical-align:top;padding:0}
+    /* Typographie du contrat */
+    .ct h1{text-align:center;font-size:17pt;font-weight:700;text-decoration:underline;letter-spacing:.3px;margin:0 0 32pt}
+    .ct .bloc-employeur{margin-bottom:24pt;line-height:2.1}
+    .ct .bloc-salarie{margin-bottom:32pt;line-height:2.1}
+    .ct p{margin:0 0 9pt;text-align:justify;line-height:1.75;orphans:3;widows:3}
+    .ct p.intro{font-weight:700;margin:24pt 0 14pt;text-align:left}
+    .ct p.fait{font-weight:700;margin-top:24pt;margin-bottom:8pt;text-align:left}
+    .ct p.lieu{margin-bottom:2pt;text-align:left}
+    .ct h2{font-size:11pt;font-weight:700;margin:18pt 0 6pt;page-break-after:avoid}
+    .ct .sig-block{page-break-inside:avoid;margin-top:32pt}
     span[style*="fef3c7"]{background:none!important;color:#c00!important;font-weight:700}
   </style>
   <div style="text-align:right;font-size:8.5pt;color:#888;margin-bottom:8mm;padding-bottom:3mm;border-bottom:1px solid #ccc">${title} · Généré le ${new Date().toLocaleDateString('fr-FR')}</div>
