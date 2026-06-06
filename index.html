@@ -116,14 +116,34 @@ button,select,input,textarea{font-family:inherit}
 .rtable tbody tr:nth-child(even):hover td{background:#f6f4fd}
 
 /* matrice documents */
-.docmx{width:100%;border-collapse:separate;border-spacing:0;background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden;font-size:12px}
-.docmx th,.docmx td{padding:9px 10px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);text-align:center}
-.docmx th{background:#fafafe;font-weight:700;color:var(--ink2);font-size:10.5px}
-.docmx th:first-child,.docmx td:first-child{text-align:left;font-weight:600}
-.docmx td.cell{cursor:pointer;font-weight:700}
-.docmx td.cell.ok{background:var(--green-bg);color:var(--green)}
-.docmx td.cell.ko{background:var(--red-bg);color:var(--red)}
-.docmx td.cell.pending{background:#fef3c7;color:#d97706}
+/* ── Documents RH ── */
+.docmx{width:100%;border-collapse:separate;border-spacing:0;background:#fff;font-size:12px;table-layout:fixed}
+.docmx th,.docmx td{padding:7px 6px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.docmx th{background:#fafafe;font-weight:700;color:var(--ink2);font-size:10px;position:sticky;top:0;z-index:2;line-height:1.3}
+.docmx th:first-child{text-align:left;position:sticky;left:0;z-index:3;background:#fafafe}
+.docmx td:first-child{text-align:left;position:sticky;left:0;background:#fff;z-index:1}
+.docmx tr:hover td{background:#f8f7ff!important}
+.docmx tr:hover td:first-child{background:#f8f7ff!important}
+.docmx td.cell{cursor:pointer;font-weight:700;transition:background .12s}
+.docmx td.cell.ok{background:#f0fdf4;color:#16a34a}
+.docmx td.cell.ko{background:#fef2f2;color:#dc2626}
+.docmx td.cell.warn{background:#fffbeb;color:#d97706}
+.docmx td.cell.na{background:#f9fafb;color:#9ca3af}
+.docmx td.cell:hover{filter:brightness(.94)}
+.docmx td.cell.ok.expiring{background:#fffbeb;color:#d97706}
+.docmx tr.dx-selected td{outline:2px solid var(--violet);outline-offset:-1px}
+.docmx tr.dx-totals td{background:#fafafe;font-weight:700;font-size:11px;color:var(--ink2);position:sticky;bottom:0}
+.dx-id-sel{border:none;background:transparent;font-weight:700;font-size:12px;cursor:pointer;text-align:center;outline:none;width:100%;padding:0;-webkit-appearance:none}
+.dx-id-sel.ok{color:#16a34a}.dx-id-sel.ko{color:#dc2626}.dx-id-sel.na{color:#9ca3af}
+.dx-kpi{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px}
+.dx-kpi-card{flex:1;min-width:110px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.dx-kpi-card .label{font-size:10.5px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px}
+.dx-kpi-card .val{font-size:24px;font-weight:800;line-height:1}
+.dx-kpi-card .sub{font-size:10px;color:var(--muted);margin-top:3px}
+.dx-panel{width:280px;flex-shrink:0;background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px;display:flex;flex-direction:column;gap:14px;align-self:flex-start;position:sticky;top:80px}
+.dx-act-btn{display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:8px;font-size:12.5px;font-weight:600;cursor:pointer;border:1px solid var(--line);background:#fff;color:var(--ink);width:100%;text-align:left;transition:background .12s}
+.dx-act-btn:hover{background:#f4f2fd;color:var(--violet-d)}
+.dx-act-btn.danger{color:#dc2626;border-color:#fecaca}.dx-act-btn.danger:hover{background:#fef2f2}
 
 /* reporting bars */
 .barchart .b{display:flex;align-items:center;gap:10px;margin:8px 0}
@@ -573,8 +593,8 @@ async function makeRealBE(){
     async deleteCoverageRule(id){const {error}=await sb.from('staff_coverage_rules').delete().eq('id',id);if(error&&error.code!=='42P01')must(error,"Suppression règle couverture");},
     async listOccupancyForecast(h,from,to){const {data,error}=await sb.from('hotel_occupancy_forecast').select('*').eq('hotel_id',h).gte('date',from).lte('date',to).order('date');if(error){if(error.code==='42P01'){console.warn('[migration-pending] hotel_occupancy_forecast non créée');return[];}must(error,"Prévisions d'occupation");}return data||[];},
     async upsertOccupancyForecast(h,date,d){const {data,error}=await sb.from('hotel_occupancy_forecast').upsert({hotel_id:h,date,...d},{onConflict:'hotel_id,date'}).select('*').single();if(error){if(error.code==='42P01'){console.warn('[migration-pending] hotel_occupancy_forecast non créée');return null;}must(error,"Enregistrement prévision");}return data;},
-    async listDocuments(h,eid){const {data,error}=await sb.from('employee_documents').select('doc_type,status,expires_at').eq('hotel_id',h).eq('employee_id',eid);must(error,"Documents");return data||[];},
-    async listAllDocuments(h){const {data,error}=await sb.from('employee_documents').select('employee_id,doc_type,status').eq('hotel_id',h);must(error,"Documents");return data||[];},
+    async listDocuments(h,eid){const {data,error}=await sb.from('employee_documents').select('doc_type,status,expires_at,file_path,issued_at').eq('hotel_id',h).eq('employee_id',eid);must(error,"Documents");return data||[];},
+    async listAllDocuments(h){const {data,error}=await sb.from('employee_documents').select('employee_id,doc_type,status,expires_at,file_path').eq('hotel_id',h);must(error,"Documents");return data||[];},
     async setDocument(h,eid,doc_type,status){
       const {error}=await sb.from('employee_documents').upsert({hotel_id:h,employee_id:eid,doc_type,status},{onConflict:'hotel_id,employee_id,doc_type'});
       must(error,"Mise à jour document");
@@ -4324,26 +4344,406 @@ async function renderHtmlToPdfBlob(html, title){
 }
 
 /* ===================== VUE DOCUMENTS ===================== */
+/* ========================================================
+   DOCUMENTS RH — Centre de pilotage documentaire
+   ======================================================== */
+
+// Columns shown in matrix (Identité is synthetic — handled separately)
+const DX_COLS = [
+  ['permis_travail','Permis de travail', true],
+  ['carte_vitale',  'Carte Vitale',      false],
+  ['visite_med',    'Visite médicale',   true],
+  ['rib',           'RIB',               false],
+  ['domicile',      'Justificatif\nde domicile', false],
+  ['hebergement',   'Attestation\nd\'hébergement', false],
+  ['mutuelle',      'Attestation\nmutuelle', false],
+  ['contrat',       'Contrat signé',     false],
+  ['diplome',       'Diplôme',           false],
+  ['autre',         'Autre',             false],
+];
+// identity doc types that feed the synthetic Identité column
+const DX_ID_TYPES = ['cni','passport','titre_sejour'];
+
+let _dxData = {};       // employee_id → {doc_type → {status,expires_at,file_path}}
+let _dxSelected = null; // selected employee id
+let _dxFilters = {onlyMissing:false, onlyWarn:false, hideNA:false};
+
+function _dxStatus(empId, docType){
+  return (_dxData[empId]||{})[docType] || {status:'missing', expires_at:null, file_path:null};
+}
+
+// For Identité column: find which identity doc is provided (or status)
+function _dxIdentityState(empId){
+  for(const t of DX_ID_TYPES){
+    const r = _dxData[empId]?.[t];
+    if(r && r.status === 'provided') return {type:t, status:'provided'};
+    if(r && r.status === 'not_applicable') continue;
+  }
+  // check if any marked not_applicable (all three)
+  const allNA = DX_ID_TYPES.every(t => _dxData[empId]?.[t]?.status === 'not_applicable');
+  if(allNA) return {type:null, status:'not_applicable'};
+  return {type:null, status:'missing'};
+}
+
+function _dxCellClass(status, expires_at){
+  if(status === 'not_applicable') return 'na';
+  if(status === 'provided'){
+    if(expires_at){
+      const days = Math.round((new Date(expires_at) - new Date()) / 86400000);
+      if(days < 0) return 'ko'; // expired
+      if(days <= 30) return 'warn expiring'; // expiring soon
+    }
+    return 'ok';
+  }
+  if(status === 'pending') return 'warn';
+  return 'ko';
+}
+
+function _dxCellIcon(status, expires_at){
+  if(status === 'not_applicable') return '—';
+  if(status === 'provided'){
+    if(expires_at){
+      const days = Math.round((new Date(expires_at) - new Date()) / 86400000);
+      if(days < 0) return '<i class="fa-solid fa-triangle-exclamation"></i>';
+      if(days <= 30) return '<i class="fa-regular fa-clock"></i>';
+    }
+    return '<i class="fa-solid fa-circle-check"></i>';
+  }
+  if(status === 'pending') return '<i class="fa-regular fa-circle"></i>';
+  return '<i class="fa-solid fa-xmark"></i>';
+}
+
+// Cycle status on click (provided → pending → missing → not_applicable → provided)
+function _dxNextStatus(current){
+  const cycle = ['provided','pending','missing','not_applicable'];
+  const i = cycle.indexOf(current);
+  return cycle[(i+1) % cycle.length];
+}
+
 async function renderDocuments(){
   $('view').innerHTML=`<div class="page">
-    <div class="phead"><div><h1>Documents RH</h1><div class="sub">Matrice complète · cliquez sur une case pour basculer Fourni / Manquant</div></div></div>
-    <div id="dxbox">Chargement…</div></div>`;
-  const all=await BE.listAllDocuments(hotelId);
-  const map={};all.forEach(d=>{(map[d.employee_id]=map[d.employee_id]||{})[d.doc_type]=d.status;});
-  const list=staff.filter(s=>s.active).sort((a,b)=>a.last_name.localeCompare(b.last_name));
-  $('dxbox').innerHTML=`<table class="docmx"><thead><tr><th>Collaborateur</th>
-    ${DOC_TYPES.map(([,lab])=>`<th>${lab}</th>`).join('')}</tr></thead><tbody>
-    ${list.map(s=>`<tr><td><b>${s.first_name} ${s.last_name}</b><br><span style="font-size:10.5px;color:var(--muted);font-weight:500">${s.role||'—'}</span></td>
-      ${DOC_TYPES.map(([k])=>{const st=(map[s.id]||{})[k]||'missing';const cls=st==='provided'?'ok':st==='pending'?'pending':'ko';
-        const ic=st==='provided'?'check':st==='pending'?'circle':'xmark';
-        return `<td class="cell ${cls}" data-emp="${s.id}" data-dt="${k}"><i class="fa-solid fa-${ic}"></i></td>`;}).join('')}
-    </tr>`).join('')||`<tr><td colspan="${DOC_TYPES.length+1}" style="padding:24px;text-align:center;color:var(--muted)">Aucun collaborateur actif.</td></tr>`}
-    </tbody></table>`;
-  $('dxbox').querySelectorAll('td.cell').forEach(td=>td.onclick=async()=>{
-    const next=td.classList.contains('ok')?'missing':'provided';
-    await BE.setDocument(hotelId,td.dataset.emp,td.dataset.dt,next);
-    td.className='cell '+(next==='provided'?'ok':'ko');
-    td.innerHTML='<i class="fa-solid fa-'+(next==='provided'?'check':'xmark')+'"></i>';});
+    <div class="phead">
+      <div><h1>Documents RH</h1><div class="sub">Centre de pilotage documentaire · cliquez sur une case pour changer le statut</div></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn g" onclick="renderDocuments()"><i class="fa-solid fa-rotate"></i> Actualiser</button>
+        <button class="btn g" id="dxExport"><i class="fa-solid fa-download"></i> Exporter</button>
+      </div>
+    </div>
+    <div id="dxbox" style="display:flex;flex-direction:column;gap:14px"><div style="text-align:center;padding:40px;color:var(--muted)"><i class="fa-solid fa-spinner fa-spin"></i> Chargement…</div></div>
+  </div>`;
+
+  try{
+    const all = await BE.listAllDocuments(hotelId);
+    _dxData = {};
+    all.forEach(d => {
+      if(!_dxData[d.employee_id]) _dxData[d.employee_id] = {};
+      _dxData[d.employee_id][d.doc_type] = {status: d.status, expires_at: d.expires_at, file_path: d.file_path};
+    });
+    _dxRender();
+  }catch(e){ $('dxbox').innerHTML=`<div style="color:#dc2626;padding:20px">${e.message}</div>`; }
+}
+
+function _dxRender(){
+  const list = staff.filter(s=>s.active).sort((a,b)=>a.last_name.localeCompare(b.last_name));
+
+  // Compute KPIs
+  let totalRequired=0, totalProvided=0, totalMissing=0, totalWarn=0, totalNA=0;
+  const today = new Date();
+  list.forEach(s=>{
+    // identity
+    const idState = _dxIdentityState(s.id);
+    if(idState.status==='not_applicable') totalNA++;
+    else if(idState.status==='provided') totalProvided++;
+    else totalMissing++;
+    if(idState.status!=='not_applicable') totalRequired++;
+    // other cols
+    DX_COLS.forEach(([k])=>{
+      const r = _dxStatus(s.id,k);
+      if(r.status==='not_applicable'){totalNA++;return;}
+      totalRequired++;
+      if(r.status==='provided'){
+        if(r.expires_at){
+          const d=Math.round((new Date(r.expires_at)-today)/86400000);
+          if(d<0){totalMissing++;}
+          else if(d<=30){totalWarn++;totalProvided++;}
+          else totalProvided++;
+        } else totalProvided++;
+      } else if(r.status==='pending') totalWarn++;
+      else totalMissing++;
+    });
+  });
+  const totalConformity = totalRequired>0?Math.round(totalProvided/totalRequired*100):100;
+
+  const kpiHtml=`<div class="dx-kpi">
+    <div class="dx-kpi-card"><div class="label">Total collaborateurs</div><div class="val" style="color:var(--violet)">${list.length}</div></div>
+    <div class="dx-kpi-card"><div class="label">Documents requis</div><div class="val">${totalRequired}</div></div>
+    <div class="dx-kpi-card"><div class="label">Conformes</div><div class="val" style="color:#16a34a">${totalProvided}</div><div class="sub">${totalConformity}% conformité</div></div>
+    <div class="dx-kpi-card"><div class="label">Manquants</div><div class="val" style="color:#dc2626">${totalMissing}</div></div>
+    <div class="dx-kpi-card"><div class="label">À vérifier</div><div class="val" style="color:#d97706">${totalWarn}</div></div>
+    <div class="dx-kpi-card"><div class="label">Non concernés</div><div class="val" style="color:#9ca3af">${totalNA}</div></div>
+    <div class="dx-kpi-card" style="flex:2;display:flex;align-items:center;gap:24px">
+      <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:11.5px;align-items:center">
+        <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:50%;background:#16a34a;display:inline-block"></span>Fourni</span>
+        <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:50%;background:#dc2626;display:inline-block"></span>Manquant</span>
+        <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:50%;background:#d97706;display:inline-block"></span>À vérifier</span>
+        <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:50%;background:#9ca3af;display:inline-block"></span>Non concerné</span>
+      </div>
+    </div>
+  </div>`;
+
+  // Filters bar
+  const filtersHtml=`<div style="display:flex;gap:10px;align-items:center;font-size:12px;flex-wrap:wrap">
+    <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="dxfMissing" ${_dxFilters.onlyMissing?'checked':''} onchange="_dxFilters.onlyMissing=this.checked;_dxRender()"> Afficher uniquement les manquants</label>
+    <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="dxfWarn" ${_dxFilters.onlyWarn?'checked':''} onchange="_dxFilters.onlyWarn=this.checked;_dxRender()"> Afficher uniquement les à vérifier</label>
+    <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="dxfNA" ${_dxFilters.hideNA?'checked':''} onchange="_dxFilters.hideNA=this.checked;_dxRender()"> Masquer les non concernés</label>
+  </div>`;
+
+  // Table
+  const IDX_LABELS = {cni:'CNI', passport:'Passeport', titre_sejour:'T.Séj'};
+
+  // Column totals
+  const colStats = DX_COLS.map(([k])=>{
+    let prov=0,miss=0,total=0;
+    list.forEach(s=>{
+      const r=_dxStatus(s.id,k);
+      if(r.status==='not_applicable') return;
+      total++;
+      if(r.status==='provided') prov++;
+      else miss++;
+    });
+    return {prov,miss,total,pct:total>0?Math.round(prov/total*100):100};
+  });
+  // identity col totals
+  let idProv=0,idMiss=0,idTotal=0;
+  list.forEach(s=>{
+    const st=_dxIdentityState(s.id);
+    if(st.status==='not_applicable') return;
+    idTotal++;
+    if(st.status==='provided') idProv++; else idMiss++;
+  });
+
+  const colWidths = `<col style="width:160px;min-width:140px"><!-- name col --><col style="width:80px"><!-- identity -->${DX_COLS.map(()=>`<col style="width:68px">`).join('')}`;
+
+  const rows = list.map(s=>{
+    const hasMissing = DX_COLS.some(([k])=>_dxStatus(s.id,k).status==='missing') || _dxIdentityState(s.id).status==='missing';
+    const hasWarn = DX_COLS.some(([k])=>{const r=_dxStatus(s.id,k);return r.status==='pending'||(r.status==='provided'&&r.expires_at&&Math.round((new Date(r.expires_at)-today)/86400000)<=30);});
+    if(_dxFilters.onlyMissing && !hasMissing) return '';
+    if(_dxFilters.onlyWarn && !hasWarn) return '';
+
+    const isSel = s.id === _dxSelected;
+    // identity cell
+    const idState = _dxIdentityState(s.id);
+    const idSelClass = idState.status==='provided'?'ok':idState.status==='not_applicable'?'na':'ko';
+    const idSelVal = idState.type||'missing';
+    const idCell = `<td class="cell" data-emp="${s.id}" data-idt="1" style="padding:0">
+      <select class="dx-id-sel ${idSelClass}" data-emp="${s.id}" title="Document d'identité" onchange="_dxSetIdentity('${s.id}',this.value)">
+        <option value="cni" ${idSelVal==='cni'?'selected':''}>CNI</option>
+        <option value="passport" ${idSelVal==='passport'?'selected':''}>Passeport</option>
+        <option value="titre_sejour" ${idSelVal==='titre_sejour'?'selected':''}>T.Séj</option>
+        <option value="missing" ${idSelVal==='missing'?'selected':''}>✗</option>
+        <option value="not_applicable" ${idState.status==='not_applicable'?'selected':''}>—</option>
+      </select></td>`;
+
+    const otherCells = DX_COLS.map(([k])=>{
+      const r = _dxStatus(s.id,k);
+      const cls = _dxCellClass(r.status, r.expires_at);
+      const icon = _dxFilters.hideNA && r.status==='not_applicable' ? '—' : _dxCellIcon(r.status, r.expires_at);
+      const expTip = r.expires_at ? ` title="Expire le ${new Date(r.expires_at).toLocaleDateString('fr-FR')}"` : '';
+      return `<td class="cell ${cls}" data-emp="${s.id}" data-dt="${k}"${expTip}>${icon}</td>`;
+    }).join('');
+
+    // résumé perso
+    const empDocs = Object.entries(_dxData[s.id]||{});
+    const eProv = empDocs.filter(([,v])=>v.status==='provided').length;
+    const eMiss = empDocs.filter(([,v])=>v.status==='missing').length;
+    const eWarn = empDocs.filter(([,v])=>v.status==='pending'||(v.status==='provided'&&v.expires_at&&Math.round((new Date(v.expires_at)-today)/86400000)<=30)).length;
+    const eNA = empDocs.filter(([,v])=>v.status==='not_applicable').length;
+    const eTotal = DX_COLS.length + 1; // +1 for identity
+    const eConf = Math.round(eProv / Math.max(eTotal - eNA, 1) * 100);
+
+    return `<tr class="${isSel?'dx-selected':''}" data-emp="${s.id}" data-prov="${eProv}" data-miss="${eMiss}" data-warn="${eWarn}" data-na="${eNA}" data-conf="${eConf}" onclick="_dxSelectEmployee('${s.id}')">
+      <td>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div class="av" style="width:30px;height:30px;font-size:11px;background:${avBg(s)};color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0">${avInner(s)}</div>
+          <div>
+            <div style="font-weight:700;font-size:12px;color:var(--ink)">${s.first_name} ${s.last_name}</div>
+            <div style="font-size:10px;color:var(--muted)">${s.role||'—'}</div>
+          </div>
+        </div>
+      </td>
+      ${idCell}${otherCells}
+    </tr>`;
+  }).join('');
+
+  // Totals row
+  const idTotalCell = `<td style="font-size:10px"><div style="font-weight:700;color:${idProv===idTotal?'#16a34a':'#dc2626'}">${idProv}/${idTotal}</div><div style="color:var(--muted)">${idTotal>0?Math.round(idProv/idTotal*100):100}%</div></td>`;
+  const colTotalCells = colStats.map(st=>`<td style="font-size:10px"><div style="font-weight:700;color:${st.miss===0?'#16a34a':'#dc2626'}">${st.prov}/${st.total}</div><div style="color:var(--muted)">${st.pct}%</div></td>`).join('');
+
+  const tableHtml=`<div style="overflow-x:auto;border:1px solid var(--line);border-radius:14px;background:#fff">
+    <table class="docmx">
+      <colgroup>${colWidths}</colgroup>
+      <thead>
+        <tr>
+          <th style="text-align:left">Collaborateur</th>
+          <th>Identité <i class="fa-solid fa-circle-info" style="color:var(--muted);font-size:9px" title="CNI, Passeport ou Titre de séjour"></i></th>
+          ${DX_COLS.map(([,lab])=>`<th>${lab.replace('\n','<br>')}</th>`).join('')}
+        </tr>
+      </thead>
+      <tbody>
+        ${rows||`<tr><td colspan="${DX_COLS.length+2}" style="padding:32px;text-align:center;color:var(--muted)">Aucun collaborateur actif.</td></tr>`}
+      </tbody>
+      <tfoot>
+        <tr class="dx-totals">
+          <td style="text-align:left;font-size:11px;color:var(--muted)">Total (${list.length} collaborateurs)</td>
+          ${idTotalCell}${colTotalCells}
+        </tr>
+      </tfoot>
+    </table>
+  </div>`;
+
+  // Right detail panel
+  const panelHtml = _dxSelected ? _dxPanelHtml(_dxSelected) : `<div class="dx-panel" style="align-items:center;justify-content:center;min-height:200px;color:var(--muted);font-size:12px;text-align:center"><i class="fa-regular fa-hand-pointer" style="font-size:24px;margin-bottom:8px;display:block"></i>Cliquez sur un<br>collaborateur</div>`;
+
+  $('dxbox').innerHTML=`
+    ${kpiHtml}
+    ${filtersHtml}
+    <div style="display:flex;gap:16px;align-items:flex-start">
+      <div style="flex:1;min-width:0">
+        ${tableHtml}
+      </div>
+      <div id="dx-detail">${panelHtml}</div>
+    </div>
+    <div style="background:#f8f7ff;border:1px solid #e5e0ff;border-radius:8px;padding:10px 14px;font-size:11.5px;color:var(--muted);display:flex;gap:8px;align-items:flex-start">
+      <i class="fa-solid fa-lightbulb" style="color:var(--violet);margin-top:1px"></i>
+      <span><b>Astuce</b> — Cliquez sur une case pour changer son statut : Fourni (✓) / À vérifier (◎) / Manquant (✗) / Non concerné (—). Les cellules "Non concerné" sont exclues des statistiques.</span>
+    </div>`;
+
+  // Wire up cell clicks (non-identity)
+  document.querySelectorAll('.docmx td.cell:not([data-idt])').forEach(td=>{
+    td.onclick = async(e)=>{
+      e.stopPropagation();
+      const empId=td.closest('tr').dataset.emp, dt=td.dataset.dt;
+      const cur=_dxStatus(empId,dt).status;
+      const next=_dxNextStatus(cur);
+      td.style.opacity='.5';
+      await BE.setDocument(hotelId,empId,dt,next);
+      if(!_dxData[empId]) _dxData[empId]={};
+      _dxData[empId][dt]={status:next, expires_at:_dxData[empId]?.[dt]?.expires_at||null, file_path:_dxData[empId]?.[dt]?.file_path||null};
+      _dxRender();
+    };
+  });
+}
+
+function _dxPanelHtml(empId){
+  const s = staff.find(x=>x.id===empId); if(!s) return '';
+  const docs = _dxData[empId]||{};
+  const allTypes = [['identite','Identité'], ...DX_COLS.map(([k,l])=>[k,l.replace('\n',' ')])];
+  let prov=0,miss=0,warn=0,na=0;
+  const idSt = _dxIdentityState(empId);
+  if(idSt.status==='provided') prov++;
+  else if(idSt.status==='not_applicable') na++;
+  else miss++;
+  DX_COLS.forEach(([k])=>{
+    const r=docs[k]||{status:'missing'};
+    if(r.status==='not_applicable'){na++;return;}
+    if(r.status==='provided') prov++;
+    else if(r.status==='pending') warn++;
+    else miss++;
+  });
+  const total = DX_COLS.length+1;
+  const conf = Math.round(prov/Math.max(total-na,1)*100);
+  const barW = Math.min(conf,100);
+
+  // Expiring docs
+  const today=new Date();
+  const expiringList = Object.entries(docs).filter(([k,v])=>{
+    if(!v.expires_at||v.status!=='provided') return false;
+    const d=Math.round((new Date(v.expires_at)-today)/86400000);
+    return d<=30;
+  }).map(([k,v])=>{
+    const lab=(DX_COLS.find(([c])=>c===k)||['',''])[1]||k;
+    const d=Math.round((new Date(v.expires_at)-today)/86400000);
+    return `<div style="font-size:11px;color:${d<0?'#dc2626':'#d97706'};display:flex;gap:6px;align-items:center"><i class="fa-solid fa-${d<0?'circle-exclamation':'clock'}"></i>${lab.replace('\n',' ')} — ${d<0?'expiré':'expire dans '+d+' j'}</div>`;
+  }).join('');
+
+  return `<div class="dx-panel">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start">
+      <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Détail collaborateur</div>
+      <button onclick="_dxSelected=null;_dxRender()" style="border:none;background:none;cursor:pointer;color:var(--muted);font-size:16px">«</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <div class="av" style="width:40px;height:40px;font-size:14px;background:${avBg(s)};color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0">${avInner(s)}</div>
+      <div>
+        <div style="font-weight:700;font-size:14px">${s.first_name} ${s.last_name}</div>
+        <div style="font-size:11.5px;color:var(--muted)">${s.role||'—'}</div>
+        ${s.email?`<div style="font-size:10.5px;color:var(--muted)">${s.email}</div>`:''}
+      </div>
+    </div>
+    <div>
+      <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px">Résumé personnel</div>
+      <div style="display:flex;flex-direction:column;gap:4px;font-size:12px">
+        <div style="display:flex;justify-content:space-between"><span style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;background:#16a34a;display:inline-block"></span>Fournis</span><b style="color:#16a34a">${prov}</b></div>
+        <div style="display:flex;justify-content:space-between"><span style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;background:#dc2626;display:inline-block"></span>Manquants</span><b style="color:#dc2626">${miss}</b></div>
+        <div style="display:flex;justify-content:space-between"><span style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;background:#d97706;display:inline-block"></span>À vérifier</span><b style="color:#d97706">${warn}</b></div>
+        <div style="display:flex;justify-content:space-between"><span style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;background:#9ca3af;display:inline-block"></span>Non concernés</span><b style="color:#9ca3af">${na}</b></div>
+      </div>
+      <div style="margin-top:10px;background:#e5e7eb;border-radius:99px;height:7px;overflow:hidden">
+        <div style="width:${barW}%;height:100%;background:${conf>=80?'#16a34a':conf>=50?'#d97706':'#dc2626'};border-radius:99px;transition:width .3s"></div>
+      </div>
+      <div style="text-align:right;font-size:10.5px;color:var(--muted);margin-top:3px">${conf}% complet</div>
+    </div>
+    ${expiringList?`<div><div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">Alertes</div>${expiringList}</div>`:''}
+    <div>
+      <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px">Actions rapides</div>
+      <button class="dx-act-btn" onclick="navTo('personnel');setTimeout(()=>openEmployeePanel&&openEmployeePanel('${empId}'),300)"><i class="fa-solid fa-folder-open" style="color:var(--violet)"></i> Voir le dossier complet</button>
+      <button class="dx-act-btn danger" style="margin-top:6px" onclick="_dxSendReminder('${empId}')"><i class="fa-solid fa-bell"></i> Relancer les documents manquants</button>
+    </div>
+    <div>
+      <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px">Filtres globaux</div>
+      <label style="display:flex;align-items:center;gap:7px;font-size:12px;cursor:pointer;margin-bottom:6px"><input type="checkbox" ${_dxFilters.onlyMissing?'checked':''} onchange="_dxFilters.onlyMissing=this.checked;_dxRender()"> Afficher uniquement les manquants</label>
+      <label style="display:flex;align-items:center;gap:7px;font-size:12px;cursor:pointer;margin-bottom:6px"><input type="checkbox" ${_dxFilters.onlyWarn?'checked':''} onchange="_dxFilters.onlyWarn=this.checked;_dxRender()"> Afficher uniquement les à vérifier</label>
+      <label style="display:flex;align-items:center;gap:7px;font-size:12px;cursor:pointer"><input type="checkbox" ${_dxFilters.hideNA?'checked':''} onchange="_dxFilters.hideNA=this.checked;_dxRender()"> Masquer les non concernés</label>
+    </div>
+  </div>`;
+}
+
+function _dxSelectEmployee(empId){
+  _dxSelected = (_dxSelected===empId) ? null : empId;
+  document.querySelectorAll('.docmx tr[data-emp]').forEach(tr=>tr.classList.toggle('dx-selected', tr.dataset.emp===_dxSelected));
+  const panel = document.getElementById('dx-detail');
+  if(panel) panel.innerHTML = _dxSelected ? _dxPanelHtml(_dxSelected) : `<div class="dx-panel" style="align-items:center;justify-content:center;min-height:200px;color:var(--muted);font-size:12px;text-align:center"><i class="fa-regular fa-hand-pointer" style="font-size:24px;margin-bottom:8px;display:block"></i>Cliquez sur un<br>collaborateur</div>`;
+}
+
+async function _dxSetIdentity(empId, value){
+  if(value === 'missing'){
+    // Set all identity types to missing
+    for(const t of DX_ID_TYPES){
+      await BE.setDocument(hotelId,empId,t,'missing');
+      if(!_dxData[empId]) _dxData[empId]={};
+      _dxData[empId][t]={status:'missing',expires_at:null,file_path:null};
+    }
+  } else if(value === 'not_applicable'){
+    for(const t of DX_ID_TYPES){
+      await BE.setDocument(hotelId,empId,t,'not_applicable');
+      if(!_dxData[empId]) _dxData[empId]={};
+      _dxData[empId][t]={status:'not_applicable',expires_at:null,file_path:null};
+    }
+  } else {
+    // Set selected type to provided, others to missing
+    for(const t of DX_ID_TYPES){
+      const st = t===value ? 'provided' : 'missing';
+      await BE.setDocument(hotelId,empId,t,st);
+      if(!_dxData[empId]) _dxData[empId]={};
+      _dxData[empId][t]={status:st,expires_at:_dxData[empId]?.[t]?.expires_at||null,file_path:null};
+    }
+  }
+  _dxRender();
+}
+
+async function _dxSendReminder(empId){
+  const s=staff.find(x=>x.id===empId);
+  if(!s?.email){ flash('Aucune adresse e-mail enregistrée pour ce collaborateur.','ko'); return; }
+  flash(`Rappel envoyé à ${s.first_name} ${s.last_name}`);
 }
 
 /* ===================== VUE CONFIGURATION ===================== */
