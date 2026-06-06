@@ -981,6 +981,12 @@ async function loadDocs(){
     .select('*,psr:portal_signature_requests(id,status,yousign_sr_id,signed_document_path)')
     .eq('employee_id',employee.id).order('created_at',{ascending:false});
 
+  // Charger les demandes de documents RH (portal_document_requests)
+  const {data:docReqs} = await sb.from('portal_document_requests')
+    .select('*')
+    .eq('employee_id',employee.id)
+    .order('created_at',{ascending:false});
+
   // Construire l'affichage par catégorie
   const byDir={employer:[],employee:[]};
 
@@ -1013,6 +1019,26 @@ async function loadDocs(){
     h+=toSign.map(d=>docRow(d)).join('');
     h+=`</div>`;
   }
+  // Documents demandés par RH
+  const pendingReqs=(docReqs||[]).filter(r=>r.status==='pending');
+  if(pendingReqs.length){
+    h+=`<div class="card" style="border-color:#f59e0b;background:#fffbeb">
+      <div class="card-title" style="color:#d97706"><i class="fa-solid fa-bell"></i>Documents demandés par RH (${pendingReqs.length})</div>`;
+    h+=pendingReqs.map(r=>{
+      const DOC_LABELS={'cni':'Carte Nationale d\'Identité','passport':'Passeport','titre_sejour':'Titre de séjour','permis_travail':'Permis de travail','carte_vitale':'Carte Vitale','visite_med':'Visite médicale','rib':'RIB','domicile':'Justificatif de domicile','hebergement':'Attestation d\'hébergement','mutuelle':'Attestation mutuelle','contrat':'Contrat signé','diplome':'Diplôme','autre':'Autre'};
+      return `<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px dashed #f59e0b">
+        <i class="fa-solid fa-file-circle-question" style="color:#d97706;font-size:18px;margin-top:2px"></i>
+        <div style="flex:1">
+          <div style="font-weight:600;font-size:13px">${DOC_LABELS[r.doc_type]||r.doc_type}</div>
+          ${r.message?`<div style="font-size:11.5px;color:var(--ink2);margin-top:2px;white-space:pre-wrap">${esc(r.message.split('\n').slice(0,3).join('\n'))}</div>`:''}
+          <div style="font-size:11px;color:#d97706;margin-top:4px">Demandé le ${new Date(r.created_at).toLocaleDateString('fr-FR')}</div>
+        </div>
+        <button class="btn btn-p" style="font-size:11px;padding:5px 10px;flex-shrink:0" onclick="openUploadDoc('${r.doc_type}')"><i class="fa-solid fa-upload"></i> Déposer</button>
+      </div>`;
+    }).join('');
+    h+=`</div>`;
+  }
+
   if(byDir.employer.length){
     h+=`<div class="card"><div class="card-title"><i class="fa-solid fa-building"></i>De votre employeur</div>`;
     h+=byDir.employer.filter(d=>d.signature_status!=='pending').map(d=>docRow(d)).join('');
@@ -1151,13 +1177,13 @@ window.openSignatureIframe=async(yousignSrId, documentId)=>{
   window.addEventListener('message',onMsg);
 };
 
-window.openUploadDoc=()=>{
+window.openUploadDoc=(preselectedType)=>{
   openModal(`
     <div class="modal-title"><i class="fa-solid fa-upload" style="color:var(--vi)"></i>Ajouter un document</div>
     <div class="field"><label>Type de document</label>
       <select id="docTypeSelect">
         ${Object.entries(DOC_TYPES).filter(([,v])=>v.dir==='employee')
-          .map(([k,v])=>`<option value="${k}">${v.label}</option>`).join('')}
+          .map(([k,v])=>`<option value="${k}"${k===preselectedType?' selected':''}>${v.label}</option>`).join('')}
       </select>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0">
@@ -1210,6 +1236,8 @@ window.handleDocUpload=async(file)=>{
     } else {
       await sb.from('employee_documents').insert(payload);
     }
+    // Marquer portal_document_requests comme soumis si applicable
+    await sb.from('portal_document_requests').update({status:'submitted',submitted_at:new Date().toISOString()}).eq('employee_id',employee.id).eq('doc_type',docType).eq('status','pending').catch(()=>{});
     // Notifier RH via portal_messages
     await sb.from('portal_messages').insert({hotel_id:employee.hotel_id,employee_id:employee.id,direction:'employee_to_manager',body:`Nouveau document déposé : ${docType}. En attente de validation RH.`,read_at:null}).catch(()=>{});
   }catch(eDb){ console.warn('employee_documents insert:', eDb); }
