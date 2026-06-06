@@ -580,6 +580,7 @@ async function makeRealBE(){
       must(error,"Mise à jour document");
     },
     async addDepartment(h,name){const {data,error}=await sb.from('staff_departments').insert({hotel_id:h,name}).select('*').single();must(error,"Création département");return data;},
+    async updateDepartment(id,patch){const {error}=await sb.from('staff_departments').update(patch).eq('id',id);must(error,"Mise à jour service");},
     async deleteDepartment(id){const {error}=await sb.from('staff_departments').delete().eq('id',id);must(error,"Suppression département");},
     async addRole(h,name,department_id){const {data,error}=await sb.from('staff_roles').insert({hotel_id:h,name,department_id:department_id||null}).select('*').single();must(error,"Création rôle");return data;},
     async deleteRole(id){const {error}=await sb.from('staff_roles').delete().eq('id',id);must(error,"Suppression rôle");},
@@ -3911,12 +3912,64 @@ async function renderConfig(){
   };
   reloadAccess();
 
-  const drawDeps=()=>{$('depList').innerHTML=deps.map(d=>`<div style="display:flex;align-items:center;padding:7px 0;border-bottom:1px dashed var(--line);font-size:13px">
-    <span style="flex:1">${d.name}</span>
-    <button class="btn d" data-deldep="${d.id}" style="padding:4px 9px;font-size:11px"><i class="fa-solid fa-trash"></i></button></div>`).join('')||'<div style="color:var(--muted);font-size:12px">Aucun service défini.</div>';
-    $('newRolDep').innerHTML='<option value="">— Service —</option>'+deps.map(d=>`<option value="${d.id}">${d.name}</option>`).join('');
-    $('depList').querySelectorAll('[data-deldep]').forEach(b=>b.onclick=async()=>{if(!confirm('Supprimer ce service ?'))return;
-      try{await BE.deleteDepartment(b.dataset.deldep);deps=deps.filter(x=>x.id!==b.dataset.deldep);drawDeps();}catch(e){flash('Erreur : '+e.message);}});};
+  // Sauvegarde l'ordre des services en base (best-effort)
+  const saveDeptOrder=async()=>{
+    await Promise.all(deps.map((d,i)=>BE.updateDepartment(d.id,{sort_order:(i+1)*10}).catch(()=>{})));
+  };
+
+  const drawDeps=()=>{
+    const sorted=[...deps].sort((a,b)=>(a.sort_order??999)-(b.sort_order??999));
+    $('depList').innerHTML=sorted.map((d,i)=>`
+      <div class="dep-row" data-depid="${d.id}" draggable="true"
+        style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:9px;margin-bottom:6px;background:#fff;cursor:grab;transition:box-shadow .15s">
+        <i class="fa-solid fa-grip-vertical" style="color:#c4c4d4;font-size:13px;flex-shrink:0;cursor:grab"></i>
+        <span style="flex:1;font-size:13px;font-weight:500">${d.name}</span>
+        <span style="font-size:10px;color:var(--muted);background:#f4f4f7;padding:2px 6px;border-radius:5px;font-weight:600">#${i+1}</span>
+        <button class="btn d" data-deldep="${d.id}" style="padding:4px 9px;font-size:11px"><i class="fa-solid fa-trash"></i></button>
+      </div>`).join('')||'<div style="color:var(--muted);font-size:12px">Aucun service défini.</div>';
+    $('newRolDep').innerHTML='<option value="">— Service —</option>'+sorted.map(d=>`<option value="${d.id}">${d.name}</option>`).join('');
+
+    // Drag-and-drop ordonancement
+    let dragSrc=null;
+    $('depList').querySelectorAll('.dep-row').forEach(row=>{
+      row.addEventListener('dragstart',e=>{
+        dragSrc=row; row.style.opacity='.4';
+        e.dataTransfer.effectAllowed='move';
+      });
+      row.addEventListener('dragend',()=>{
+        row.style.opacity='';
+        $('depList').querySelectorAll('.dep-row').forEach(r=>r.classList.remove('drag-over'));
+      });
+      row.addEventListener('dragover',e=>{e.preventDefault();e.dataTransfer.dropEffect='move';});
+      row.addEventListener('dragenter',()=>{if(row!==dragSrc)row.style.background='#f0eeff';});
+      row.addEventListener('dragleave',()=>{row.style.background='#fff';});
+      row.addEventListener('drop',e=>{
+        e.preventDefault();
+        if(!dragSrc||dragSrc===row) return;
+        row.style.background='#fff';
+        const list=$('depList');
+        const rows=[...list.querySelectorAll('.dep-row')];
+        const srcIdx=rows.indexOf(dragSrc), dstIdx=rows.indexOf(row);
+        if(srcIdx<dstIdx) list.insertBefore(dragSrc,row.nextSibling);
+        else list.insertBefore(dragSrc,row);
+        // Mettre à jour deps[] dans le nouvel ordre
+        const newOrder=[...list.querySelectorAll('.dep-row')].map(r=>r.dataset.depid);
+        newOrder.forEach((id,i)=>{const d=deps.find(x=>x.id===id);if(d)d.sort_order=(i+1)*10;});
+        // Mettre à jour les badges #N
+        list.querySelectorAll('.dep-row').forEach((r,i)=>{
+          const badge=r.querySelector('span[style*="background:#f4f4f7"]');
+          if(badge) badge.textContent='#'+(i+1);
+        });
+        saveDeptOrder().then(()=>flash('Ordre des services sauvegardé')).catch(()=>flash('Erreur sauvegarde ordre'));
+      });
+    });
+
+    $('depList').querySelectorAll('[data-deldep]').forEach(b=>b.onclick=async()=>{
+      if(!confirm('Supprimer ce service ?'))return;
+      try{await BE.deleteDepartment(b.dataset.deldep);deps=deps.filter(x=>x.id!==b.dataset.deldep);drawDeps();}
+      catch(e){flash('Erreur : '+e.message);}
+    });
+  };
   const drawRols=()=>{$('rolList').innerHTML=rols.map(r=>{const dp=deps.find(d=>d.id===r.department_id);
     return `<div style="display:flex;align-items:center;padding:7px 0;border-bottom:1px dashed var(--line);font-size:13px">
     <span style="flex:1">${r.name}${dp?` <span class="tag gray">${dp.name}</span>`:''}</span>
