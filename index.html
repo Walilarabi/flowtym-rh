@@ -4279,26 +4279,48 @@ async function drawGenStep4(){
 }
 
 async function renderHtmlToPdfBlob(html, title){
+  // Load dependencies
   if(!(window.jspdf && window.jspdf.jsPDF)){
     await loadScript('https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js');
   }
+  if(!window.html2canvas){
+    await loadScript('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js');
+  }
   const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({orientation:'portrait', unit:'mm', format:'a4'});
+
+  // Render into a hidden A4-sized div (same dimensions as preview)
   const wrap = document.createElement('div');
-  wrap.style.cssText = 'position:fixed;left:-9999px;top:0;width:170mm;font-family:"Times New Roman",Times,serif;font-size:11pt;line-height:1.6;color:#111;background:#fff';
-  wrap.innerHTML = `<style>
-    strong,b{font-weight:700}
-    em,i{font-style:italic}
-    table{border-collapse:collapse}
-    td{vertical-align:top}
-  </style>
-  <div style="text-align:right;font-size:8.5pt;color:#888;margin-bottom:8mm;padding-bottom:3mm;border-bottom:1px solid #ccc">${title} · Généré le ${new Date().toLocaleDateString('fr-FR')}</div>
-  ${html}`;
+  wrap.style.cssText = 'position:fixed;left:-9999px;top:0;width:794px;background:#fff;padding:75px 76px 90px 95px;font-family:"Times New Roman",Times,serif;font-size:14.7px;line-height:1.6;color:#111;box-sizing:border-box';
+  wrap.innerHTML = `<div style="text-align:right;font-size:11px;color:#888;margin-bottom:10px;padding-bottom:4px;border-bottom:1px solid #ccc">${title} · Généré le ${new Date().toLocaleDateString('fr-FR')}</div>${html}`;
   document.body.appendChild(wrap);
-  try{
-    await doc.html(wrap, {x:15, y:15, width:180, windowWidth:wrap.scrollWidth, autoPaging:'text', margin:[15,15,15,15]});
-  }finally{ document.body.removeChild(wrap); }
-  return doc.output('blob');
+
+  try {
+    const canvas = await window.html2canvas(wrap, {
+      backgroundColor: '#ffffff',
+      scale: 2,
+      useCORS: true,
+      logging: false,
+      width: wrap.scrollWidth,
+      height: wrap.scrollHeight,
+    });
+
+    const doc = new jsPDF({ orientation:'portrait', unit:'mm', format:'a4' });
+    const A4_W = 210, A4_H = 297;
+    const imgData = canvas.toDataURL('image/jpeg', 0.95);
+    const canvasW = canvas.width;
+    const canvasH = canvas.height;
+    const ratio = A4_W / (canvasW / 2); // canvas is @2x
+    const totalMmH = canvasH / 2 * ratio;
+    const pageCount = Math.ceil(totalMmH / A4_H);
+
+    for(let pg = 0; pg < pageCount; pg++){
+      if(pg > 0) doc.addPage();
+      doc.addImage(imgData, 'JPEG', 0, -pg * A4_H, A4_W, totalMmH);
+    }
+    return doc.output('blob');
+  } finally {
+    document.body.removeChild(wrap);
+  }
 }
 
 /* ===================== VUE DOCUMENTS ===================== */
