@@ -182,6 +182,7 @@ button,select,input,textarea{font-family:inherit}
 .badge-st.expired{background:var(--red-bg);color:var(--red)}
 .badge-st.expiring_soon{background:#fef3c7;color:#92400e}
 .badge-st.missing{background:#f1f1f5;color:var(--muted)}
+.badge-st.pending{background:#fef3c7;color:#92400e}
 .docitem .acts{display:flex;gap:4px}
 .docitem .acts button{border:0;background:transparent;color:var(--ink2);cursor:pointer;padding:5px 8px;border-radius:6px;font-size:12px}
 .docitem .acts button:hover{background:#f4f2fd;color:var(--violet)}
@@ -716,6 +717,17 @@ async function makeRealBE(){
     async listDocumentTypes(){const {data,error}=await sb.from('document_types').select('*').eq('active',true).order('sort_order');must(error,'Types');return data||[];},
     async listDocumentAlerts(h){const {data,error}=await sb.from('v_employee_documents_alerts').select('*').eq('hotel_id',h).not('alert_kind','is',null).order('days_until_expiry',{nullsFirst:false});must(error,'Alertes');return data||[];},
 
+    async getHotelSettings(h){const {data}=await sb.from('hotel_settings').select('*').eq('hotel_id',h).maybeSingle();return data||null;},
+    async saveHotelSettings(h,patch){const {error}=await sb.from('hotel_settings').upsert({hotel_id:h,...patch,updated_at:new Date().toISOString()},{onConflict:'hotel_id'});must(error,'Paramètres hôtel');},
+
+    async listDocumentSettings(h){const {data}=await sb.from('hotel_document_settings').select('*').eq('hotel_id',h);return data||[];},
+    async saveDocumentSetting(h,doc_type,patch){const {error}=await sb.from('hotel_document_settings').upsert({hotel_id:h,doc_type,...patch,updated_at:new Date().toISOString()},{onConflict:'hotel_id,doc_type'});must(error,'Config document');},
+
+    async listPortalDocRequests(h){const {data,error}=await sb.from('portal_document_requests').select('*,employees(first_name,last_name)').eq('hotel_id',h).order('created_at',{ascending:false});must(error,'Demandes portail');return data||[];},
+    async createPortalDocRequest(h,employee_id,doc_type,message){const {data,error}=await sb.from('portal_document_requests').insert({hotel_id:h,employee_id,doc_type,message,status:'pending'}).select('*').single();must(error,'Création demande');return data;},
+    async updatePortalDocRequest(id,patch){const {error}=await sb.from('portal_document_requests').update(patch).eq('id',id);must(error,'Mise à jour demande');},
+    async sendPortalMessage(h,employee_id,body){const {error}=await sb.from('portal_messages').insert({hotel_id:h,employee_id,direction:'manager_to_employee',body,read_at:null});must(error,'Message portail');},
+
     /* --- AUDIT --- */
     async logAudit(action,entity_type,entity_id,employee_id,details){
       try{
@@ -1197,6 +1209,34 @@ function renderShell(){
     LS.set('rh_sidebar',sidebarCollapsed?'1':'0');
     setTimeout(()=>{if(typeof applyStickyWidths==='function')applyStickyWidths();},280);};
   goView(view);
+}
+
+// Alias pour navTo (utilisé dans les templates HTML inline)
+function navTo(v){ goView(v); }
+
+// Ouvre la fiche d'un collaborateur (depuis Documents RH, Dashboard, etc.)
+// docType optionnel : scroll vers ce type de document dans la fiche
+function openEmployeePanel(empId, docType){
+  if(!empId) return;
+  goView('personnel');
+  // openFiche est async — attendre que le DOM soit prêt
+  setTimeout(async()=>{
+    await openFiche(empId);
+    if(docType){
+      // Ouvrir le drawer et scroller jusqu'au doc type concerné
+      setTimeout(()=>{
+        const drawer=$('drawer');
+        if(!drawer) return;
+        drawer.classList.add('on');
+        // Trouver la section doc correspondante
+        const docItems=drawer.querySelectorAll('[data-doctype]');
+        const target=[...docItems].find(el=>el.dataset.doctype===docType);
+        if(target){ target.scrollIntoView({behavior:'smooth',block:'center'}); target.style.outline='2px solid var(--violet)'; setTimeout(()=>target.style.outline='',2500); }
+      },400);
+    } else {
+      const drawer=$('drawer'); if(drawer) drawer.classList.add('on');
+    }
+  },200);
 }
 
 function goView(v){
@@ -4624,18 +4664,32 @@ function _dxRender(){
     </div>`;
 
   // Wire up cell clicks (non-identity)
+  // - Simple click  → cycle status (provided→pending→missing→not_applicable)
+  // - Double click  → ouvrir la fiche salarié sur l'onglet Documents
   document.querySelectorAll('.docmx td.cell:not([data-idt])').forEach(td=>{
+    let clickTimer=null;
     td.onclick = async(e)=>{
       e.stopPropagation();
-      const empId=td.closest('tr').dataset.emp, dt=td.dataset.dt;
-      const cur=_dxStatus(empId,dt).status;
-      const next=_dxNextStatus(cur);
-      td.style.opacity='.5';
-      await BE.setDocument(hotelId,empId,dt,next);
-      if(!_dxData[empId]) _dxData[empId]={};
-      _dxData[empId][dt]={status:next, expires_at:_dxData[empId]?.[dt]?.expires_at||null, file_path:_dxData[empId]?.[dt]?.file_path||null};
-      _dxRender();
+      if(clickTimer){ clearTimeout(clickTimer); clickTimer=null; return; } // double-click handled below
+      clickTimer=setTimeout(async()=>{
+        clickTimer=null;
+        const empId=td.closest('tr').dataset.emp, dt=td.dataset.dt;
+        const cur=_dxStatus(empId,dt).status;
+        const next=_dxNextStatus(cur);
+        td.style.opacity='.5';
+        await BE.setDocument(hotelId,empId,dt,next);
+        if(!_dxData[empId]) _dxData[empId]={};
+        _dxData[empId][dt]={status:next, expires_at:_dxData[empId]?.[dt]?.expires_at||null, file_path:_dxData[empId]?.[dt]?.file_path||null};
+        _dxRender();
+      },220);
     };
+    td.ondblclick = (e)=>{
+      e.stopPropagation();
+      if(clickTimer){ clearTimeout(clickTimer); clickTimer=null; }
+      const empId=td.closest('tr').dataset.emp, dt=td.dataset.dt;
+      openEmployeePanel(empId, dt);
+    };
+    td.title = 'Clic : changer statut · Double-clic : ouvrir le dossier';
   });
 }
 
@@ -4746,9 +4800,39 @@ async function _dxSetIdentity(empId, value){
 }
 
 async function _dxSendReminder(empId){
-  const s=staff.find(x=>x.id===empId);
-  if(!s?.email){ flash('Aucune adresse e-mail enregistrée pour ce collaborateur.','ko'); return; }
-  flash(`Rappel envoyé à ${s.first_name} ${s.last_name}`);
+  const s=staff.find(x=>x.id===empId); if(!s) return;
+
+  // Identifier les docs manquants ou expirés
+  const docs=_dxData[empId]||{};
+  const missing=[];
+  const idSt=_dxIdentityState(empId);
+  if(idSt.status==='missing') missing.push('Identité (CNI, Passeport ou Titre de séjour)');
+  DX_COLS.forEach(([k,lab])=>{
+    const r=docs[k]||{status:'missing'};
+    if(r.status==='missing'||r.status==='pending'||(r.status==='provided'&&r.expires_at&&Math.round((new Date(r.expires_at)-new Date())/86400000)<0))
+      missing.push(lab.replace('\n',' '));
+  });
+  if(!missing.length){ flash('Aucun document manquant ou expiré pour ce collaborateur.'); return; }
+
+  try{
+    // Créer une demande de document dans portal_document_requests
+    const docTypes=Object.entries(docs).filter(([,v])=>v.status==='missing').map(([k])=>k);
+    const msg=`Bonjour ${s.first_name},\n\nNous vous demandons de fournir les documents suivants manquants à votre dossier RH :\n• ${missing.join('\n• ')}\n\nMerci de les déposer depuis votre portail salarié.\n\nCordialement,\nLe service RH`;
+
+    // Envoyer un message portail
+    if(BE.sendPortalMessage){
+      await BE.sendPortalMessage(hotelId, empId, msg).catch(()=>{});
+    }
+    // Créer les demandes de documents
+    for(const dt of docTypes){
+      await BE.createPortalDocRequest(hotelId, empId, dt, msg).catch(()=>{});
+    }
+    flash(`Rappel envoyé à ${s.first_name} ${s.last_name} (${missing.length} document${missing.length>1?'s':''} demandé${missing.length>1?'s':''})`);
+    // Rafraîchir le panneau détail
+    if(_dxSelected===empId){ const panel=$('dx-detail'); if(panel) panel.innerHTML=_dxPanelHtml(empId); }
+  }catch(e){
+    flash('Rappel envoyé (erreur backend : '+e.message+')');
+  }
 }
 
 /* ===================== VUE CONFIGURATION ===================== */
@@ -4795,8 +4879,12 @@ async function renderConfig(){
    ONGLET 1 · GÉNÉRAL
 ────────────────────────────────────────────── */
 async function _cfgGeneral(hotel, isAdmin){
-  // Lire les paramètres locaux
+  // Lire les paramètres depuis la DB, avec fallback localStorage
+  let dbCfg = null;
+  try{ dbCfg = await BE.getHotelSettings(hotelId); }catch(e){}
   const lsCfg = JSON.parse(localStorage.getItem('fty_cfg_'+hotelId)||'{}');
+  // Merge: DB prend la priorité sur localStorage
+  const cfg = {...lsCfg, ...(dbCfg||{})};
   const allHotels = hotels; // multi-hôtel
 
   $('cfgBody').innerHTML=`
@@ -4846,23 +4934,23 @@ async function _cfgGeneral(hotel, isAdmin){
           <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding-bottom:10px">
             <span style="color:var(--ink2)">Début de la semaine</span>
             <select id="cfg_week" style="font-size:12.5px;padding:5px 10px;border:1px solid var(--line);border-radius:8px">
-              <option value="1" ${(lsCfg.weekStart||'1')==='1'?'selected':''}>Lundi</option>
-              <option value="0" ${lsCfg.weekStart==='0'?'selected':''}>Dimanche</option>
+              <option value="1" ${(String(cfg.week_start||cfg.weekStart||'1'))==='1'?'selected':''}>Lundi</option>
+              <option value="0" ${String(cfg.week_start??cfg.weekStart??'1')==='0'?'selected':''}>Dimanche</option>
             </select>
           </div>
           <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding-bottom:10px">
             <span style="color:var(--ink2)">Format de la date</span>
             <select id="cfg_datefmt" style="font-size:12.5px;padding:5px 10px;border:1px solid var(--line);border-radius:8px">
-              <option value="DD/MM/YYYY" ${(lsCfg.dateFmt||'DD/MM/YYYY')==='DD/MM/YYYY'?'selected':''}>DD/MM/YYYY</option>
-              <option value="MM/DD/YYYY" ${lsCfg.dateFmt==='MM/DD/YYYY'?'selected':''}>MM/DD/YYYY</option>
-              <option value="YYYY-MM-DD" ${lsCfg.dateFmt==='YYYY-MM-DD'?'selected':''}>YYYY-MM-DD</option>
+              <option value="DD/MM/YYYY" ${(cfg.date_format||cfg.dateFmt||'DD/MM/YYYY')==='DD/MM/YYYY'?'selected':''}>DD/MM/YYYY</option>
+              <option value="MM/DD/YYYY" ${(cfg.date_format||cfg.dateFmt||'')==='MM/DD/YYYY'?'selected':''}>MM/DD/YYYY</option>
+              <option value="YYYY-MM-DD" ${(cfg.date_format||cfg.dateFmt||'')==='YYYY-MM-DD'?'selected':''}>YYYY-MM-DD</option>
             </select>
           </div>
           <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding-bottom:10px">
             <span style="color:var(--ink2)">Format de l'heure</span>
             <select id="cfg_timefmt" style="font-size:12.5px;padding:5px 10px;border:1px solid var(--line);border-radius:8px">
-              <option value="24h" ${(lsCfg.timeFmt||'24h')==='24h'?'selected':''}>24 heures</option>
-              <option value="12h" ${lsCfg.timeFmt==='12h'?'selected':''}>12 heures (AM/PM)</option>
+              <option value="24h" ${(cfg.time_format||cfg.timeFmt||'24h')==='24h'?'selected':''}>24 heures</option>
+              <option value="12h" ${(cfg.time_format||cfg.timeFmt||'')==='12h'?'selected':''}>12 heures (AM/PM)</option>
             </select>
           </div>
           <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding-bottom:10px">
@@ -4882,15 +4970,15 @@ async function _cfgGeneral(hotel, isAdmin){
           </div>
           <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding-bottom:10px">
             <span style="color:var(--ink2)">Activer les demandes portail salarié</span>
-            <label class="tog-wrap"><input type="checkbox" id="cfg_portal" ${lsCfg.portal!==false?'checked':''}><span class="tog-sw"></span></label>
+            <label class="tog-wrap"><input type="checkbox" id="cfg_portal" ${(cfg.portal_enabled!==false&&cfg.portal!==false)?'checked':''}><span class="tog-sw"></span></label>
           </div>
           <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding-bottom:10px">
             <span style="color:var(--ink2)">Activer les notifications par email</span>
-            <label class="tog-wrap"><input type="checkbox" id="cfg_notif" ${lsCfg.notif!==false?'checked':''}><span class="tog-sw"></span></label>
+            <label class="tog-wrap"><input type="checkbox" id="cfg_notif" ${(cfg.notif_email!==false&&cfg.notif!==false)?'checked':''}><span class="tog-sw"></span></label>
           </div>
           <div style="display:flex;justify-content:space-between;align-items:center">
             <span style="color:var(--ink2)">Activer les rappels automatiques</span>
-            <label class="tog-wrap"><input type="checkbox" id="cfg_rappels" ${lsCfg.rappels!==false?'checked':''}><span class="tog-sw"></span></label>
+            <label class="tog-wrap"><input type="checkbox" id="cfg_rappels" ${(cfg.auto_reminders!==false&&cfg.rappels!==false)?'checked':''}><span class="tog-sw"></span></label>
           </div>
         </div>
         <button class="btn p" id="cfg_saveGlobal" style="margin-top:14px"><i class="fa-solid fa-check"></i> Enregistrer les préférences</button>
@@ -4978,9 +5066,15 @@ async function _cfgGeneral(hotel, isAdmin){
     };
   }
   // Global prefs save
-  $('cfg_saveGlobal').onclick=()=>{
-    const cfg={weekStart:$('cfg_week').value,dateFmt:$('cfg_datefmt').value,timeFmt:$('cfg_timefmt').value,tz:$('cfg_tz').value,lang:$('cfg_lang').value,portal:$('cfg_portal').checked,notif:$('cfg_notif').checked,rappels:$('cfg_rappels').checked};
-    localStorage.setItem('fty_cfg_'+hotelId,JSON.stringify(cfg));
+  $('cfg_saveGlobal').onclick=async()=>{
+    const patch={week_start:parseInt($('cfg_week').value)||1,date_format:$('cfg_datefmt').value,time_format:$('cfg_timefmt').value,timezone:$('cfg_tz').value,language:$('cfg_lang').value,portal_enabled:$('cfg_portal').checked,notif_email:$('cfg_notif').checked,auto_reminders:$('cfg_rappels').checked};
+    // Persist to DB + keep localStorage mirror
+    try{
+      await BE.saveHotelSettings(hotelId, patch);
+    }catch(e){ console.warn('saveHotelSettings:', e.message); }
+    const lsMirror=JSON.parse(localStorage.getItem('fty_cfg_'+hotelId)||'{}');
+    Object.assign(lsMirror,{weekStart:String(patch.week_start),dateFmt:patch.date_format,timeFmt:patch.time_format,tz:patch.timezone,lang:patch.language,portal:patch.portal_enabled,notif:patch.notif_email,rappels:patch.auto_reminders});
+    localStorage.setItem('fty_cfg_'+hotelId,JSON.stringify(lsMirror));
     flash('Préférences enregistrées');
   };
   // Import Excel
@@ -5198,55 +5292,130 @@ async function _cfgEtages(){
 /* ──────────────────────────────────────────────
    ONGLET 5 · DOCUMENTS RH
 ────────────────────────────────────────────── */
-function _cfgDocs(){
-  const lsCfg = JSON.parse(localStorage.getItem('fty_cfg_'+hotelId)||'{}');
-  const alertDays = lsCfg.docAlertDays || 30;
+async function _cfgDocs(){
+  $('cfgBody').innerHTML=`<div style="text-align:center;padding:40px;color:var(--muted)"><i class="fa-solid fa-spinner fa-spin"></i> Chargement…</div>`;
+
+  // Charger les settings depuis la DB
+  let dbSettings = [];
+  try{ dbSettings = await BE.listDocumentSettings(hotelId); }catch(e){}
+  const settingsMap = {};
+  dbSettings.forEach(s=>{ settingsMap[s.doc_type]=s; });
+
+  // Valeurs par défaut pour chaque type
+  const defaultSettings = (code, hasExp) => ({
+    is_required: !['hebergement','diplome','autre'].includes(code),
+    has_expiry: hasExp,
+    alert_days: 30,
+    active: true,
+    ...(settingsMap[code]||{}),
+  });
 
   $('cfgBody').innerHTML=`
     <div class="box" style="margin-bottom:16px">
-      <h3><i class="fa-solid fa-bell"></i>Alertes d'expiration</h3>
-      <div style="font-size:12.5px;color:var(--ink2);margin-bottom:14px">Configurez combien de jours avant l'expiration les alertes sont déclenchées.</div>
-      <div style="display:flex;align-items:center;gap:16px;margin-bottom:14px">
-        <div class="fld" style="flex:none">
-          <label>Jours avant expiration</label>
-          <input type="number" id="docAlertDays" value="${alertDays}" min="1" max="180" style="width:100px">
-        </div>
-        <div style="font-size:12.5px;color:var(--muted);padding-top:18px">Les documents expirables (titre de séjour, permis de travail, visite médicale…) déclencheront une alerte orange ${alertDays} jours avant leur date d'expiration.</div>
+      <h3><i class="fa-solid fa-list-check"></i>Configuration des types de documents</h3>
+      <div style="font-size:12.5px;color:var(--ink2);margin-bottom:16px">
+        Définissez pour chaque type de document : s'il est obligatoire, expirable, et combien de jours avant expiration l'alerte est déclenchée.
       </div>
-      <button class="btn p" id="docAlertSave"><i class="fa-solid fa-check"></i> Enregistrer</button>
+      <div style="overflow-x:auto">
+        <table class="tbl" style="font-size:12px">
+          <thead>
+            <tr>
+              <th style="text-align:left;min-width:160px">Document</th>
+              <th>Actif</th>
+              <th>Obligatoire</th>
+              <th>Expirable</th>
+              <th style="min-width:130px">Alerte avant expiration</th>
+            </tr>
+          </thead>
+          <tbody id="docSettingsBody"></tbody>
+        </table>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:14px">
+        <button class="btn p" id="docSettingsSave"><i class="fa-solid fa-check"></i> Enregistrer toutes les règles</button>
+        <button class="btn g" id="docSettingsReset"><i class="fa-solid fa-rotate-left"></i> Réinitialiser</button>
+      </div>
+    </div>
+
+    <div class="box" style="margin-bottom:16px">
+      <h3><i class="fa-solid fa-clock"></i>Paliers d'alertes d'expiration</h3>
+      <div style="font-size:12.5px;color:var(--ink2);margin-bottom:12px">
+        En plus du délai configuré par document, les alertes visuelles suivantes s'appliquent automatiquement :
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:10px">
+        ${[['fa-circle-check','#16a34a','Valide','Plus de 30 jours avant expiration'],
+           ['fa-clock','#d97706','Expire bientôt','Entre 1 et 30 jours (paramétrable)'],
+           ['fa-triangle-exclamation','#dc2626','Expiré','Date d\'expiration dépassée'],
+           ['fa-xmark','#6b7280','Manquant','Document non fourni']].map(([ic,col,lab,desc])=>`
+          <div style="display:flex;gap:10px;align-items:flex-start;padding:10px 14px;border:1px solid var(--line);border-radius:10px;flex:1;min-width:180px">
+            <i class="fa-solid ${ic}" style="color:${col};font-size:18px;margin-top:2px"></i>
+            <div><div style="font-weight:600;font-size:12.5px">${lab}</div><div style="font-size:11px;color:var(--muted)">${desc}</div></div>
+          </div>`).join('')}
+      </div>
     </div>
 
     <div class="box">
-      <h3><i class="fa-solid fa-list-check"></i>Types de documents actifs</h3>
-      <div style="font-size:12.5px;color:var(--ink2);margin-bottom:14px">Activez ou désactivez les types de documents affichés dans la matrice Documents RH.</div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px">
-        ${DOC_TYPES.map(([code,lab,cat,hasExp])=>{
-          const isActive = lsCfg.docTypes ? lsCfg.docTypes[code]!==false : true;
-          return `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border:1px solid var(--line);border-radius:10px;gap:8px">
-            <div>
-              <div style="font-size:12.5px;font-weight:600">${lab}</div>
-              <div style="font-size:10.5px;color:var(--muted)">${hasExp?'Expirable':'Sans expiration'}</div>
-            </div>
-            <label class="tog-wrap"><input type="checkbox" class="doc-type-tog" data-code="${code}" ${isActive?'checked':''}><span class="tog-sw"></span></label>
-          </div>`;
-        }).join('')}
+      <h3><i class="fa-solid fa-paper-plane"></i>Modèles de relance salarié</h3>
+      <div style="font-size:12.5px;color:var(--ink2);margin-bottom:14px">
+        Message envoyé au salarié via le portail quand un document est manquant ou sur le point d'expirer.
       </div>
-      <button class="btn p" id="docTypesSave" style="margin-top:14px"><i class="fa-solid fa-check"></i> Enregistrer</button>
+      <div class="fld">
+        <label>Message de relance par défaut</label>
+        <textarea id="reminderTemplate" rows="5" style="font-size:12.5px;resize:vertical">Bonjour {{prénom}},
+
+Nous vous demandons de fournir les documents suivants manquants à votre dossier RH :
+• {{documents}}
+
+Merci de les déposer depuis votre portail salarié dès que possible.
+
+Cordialement,
+Le service RH</textarea>
+      </div>
+      <button class="btn p" id="reminderSave" style="margin-top:10px"><i class="fa-solid fa-check"></i> Enregistrer le modèle</button>
     </div>`;
 
-  $('docAlertSave').onclick=()=>{
-    const cfg=JSON.parse(localStorage.getItem('fty_cfg_'+hotelId)||'{}');
-    cfg.docAlertDays=parseInt($('docAlertDays').value)||30;
-    localStorage.setItem('fty_cfg_'+hotelId,JSON.stringify(cfg));
-    flash('Alertes configurées');
+  // Remplir le tableau
+  const tbody=$('docSettingsBody');
+  tbody.innerHTML=DOC_TYPES.map(([code,lab,cat,hasExp])=>{
+    const s=defaultSettings(code,hasExp);
+    return `<tr data-code="${code}">
+      <td style="text-align:left;font-weight:600">${lab}<br><span style="font-size:10px;color:var(--muted);font-weight:400">${cat}</span></td>
+      <td><label class="tog-wrap"><input type="checkbox" class="ds-active" ${s.active?'checked':''}><span class="tog-sw"></span></label></td>
+      <td><label class="tog-wrap"><input type="checkbox" class="ds-required" ${s.is_required?'checked':''}><span class="tog-sw"></span></label></td>
+      <td><label class="tog-wrap"><input type="checkbox" class="ds-expiry" ${s.has_expiry?'checked':''}><span class="tog-sw"></span></label></td>
+      <td><div style="display:flex;align-items:center;gap:6px">
+        <input type="number" class="ds-days" value="${s.alert_days}" min="1" max="365" style="width:70px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;font-size:12px">
+        <span style="font-size:11px;color:var(--muted)">jours</span>
+      </div></td>
+    </tr>`;
+  }).join('');
+
+  $('docSettingsSave').onclick=async()=>{
+    $('docSettingsSave').disabled=true;
+    try{
+      const rows=[...tbody.querySelectorAll('tr[data-code]')];
+      await Promise.all(rows.map(row=>{
+        const code=row.dataset.code;
+        return BE.saveDocumentSetting(hotelId, code, {
+          active: row.querySelector('.ds-active').checked,
+          is_required: row.querySelector('.ds-required').checked,
+          has_expiry: row.querySelector('.ds-expiry').checked,
+          alert_days: parseInt(row.querySelector('.ds-days').value)||30,
+        });
+      }));
+      flash('Règles de documents enregistrées');
+    }catch(e){flash('Erreur : '+e.message,'ko');}
+    finally{$('docSettingsSave').disabled=false;}
   };
-  $('docTypesSave').onclick=()=>{
+  $('docSettingsReset').onclick=()=>{if(confirm('Réinitialiser toutes les règles aux valeurs par défaut ?')) _cfgTab='docs', renderConfig();};
+  $('reminderSave').onclick=()=>{
     const cfg=JSON.parse(localStorage.getItem('fty_cfg_'+hotelId)||'{}');
-    cfg.docTypes={};
-    $('cfgBody').querySelectorAll('.doc-type-tog').forEach(t=>{cfg.docTypes[t.dataset.code]=t.checked;});
+    cfg.reminderTemplate=$('reminderTemplate').value;
     localStorage.setItem('fty_cfg_'+hotelId,JSON.stringify(cfg));
-    flash('Types de documents enregistrés');
+    flash('Modèle de relance enregistré');
   };
+  // Charger le modèle sauvegardé
+  const lsCfg=JSON.parse(localStorage.getItem('fty_cfg_'+hotelId)||'{}');
+  if(lsCfg.reminderTemplate) $('reminderTemplate').value=lsCfg.reminderTemplate;
 }
 
 /* ──────────────────────────────────────────────
@@ -7561,7 +7730,8 @@ async function drawEmployeeDocs(s){
       if(diff<0){status='expired';statusLabel=`Expiré ${-diff} j`;}
       else if(diff<30){status='expiring_soon';statusLabel=`Expire dans ${diff} j`;}
     }
-    return `<div class="docitem" data-did="${d.id}">
+    if(d.status==='pending'){status='pending';statusLabel='À vérifier';}
+    return `<div class="docitem" data-did="${d.id}" data-doctype="${code}">
       <div class="ic ${category}"><i class="fa-solid fa-file-lines"></i></div>
       <div style="flex:1;min-width:0">
         <div class="nm">${label}</div>
@@ -7573,6 +7743,7 @@ async function drawEmployeeDocs(s){
       </div>
       <span class="badge-st ${status}">${statusLabel}</span>
       <div class="acts">
+        ${d.status==='pending'?'<button data-act="approve" title="Valider ce document" style="color:#16a34a;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:3px 8px;font-size:11px;font-weight:600;cursor:pointer">✓ Valider</button><button data-act="reject" title="Refuser ce document" style="color:#dc2626;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:3px 8px;font-size:11px;font-weight:600;cursor:pointer">✗ Refuser</button>':''}
         ${d.file_path?'<button data-act="dl" title="Télécharger"><i class="fa-solid fa-download"></i></button>':''}
         ${d.file_path&&d.signature_status==='none'?'<button data-act="sign" title="Envoyer pour signature électronique" style="color:#7c3aed"><i class="fa-solid fa-pen-nib"></i></button>':''}
         ${d.signature_status==='pending'?'<span title="En attente de signature" style="font-size:11px;color:#d97706;font-weight:600;padding:2px 6px;background:#fffbeb;border-radius:6px">⏳ Signature</span>':''}
@@ -7585,7 +7756,26 @@ async function drawEmployeeDocs(s){
   $('docs').querySelectorAll('.docitem').forEach(it=>{
     const did=it.dataset.did; const d=list.find(x=>x.id===did);
     it.querySelectorAll('button[data-act]').forEach(b=>b.onclick=async ev=>{ev.stopPropagation();const act=b.dataset.act;
-      if(act==='dl'){
+      if(act==='approve'){
+        if(!confirm('Valider ce document ?'))return;
+        try{
+          await BE.setDocument(hotelId,s.id,d.doc_type,'provided');
+          await BE.logAudit('document_approve','employee_document',d.id,s.id,{doc_type:d.doc_type});
+          flash('Document validé');drawEmployeeDocs(s);
+          // Mettre à jour la matrice Documents RH si ouverte
+          if(_dxData[s.id]) {_dxData[s.id][d.doc_type]={status:'provided',expires_at:d.expires_at,file_path:d.file_path}; if(typeof _dxRender==='function') try{_dxRender();}catch(ex){} }
+        }catch(e){flash('Erreur : '+e.message);}
+      }else if(act==='reject'){
+        const reason=prompt('Motif de refus (optionnel) :','');
+        if(reason===null)return;
+        try{
+          await BE.setDocument(hotelId,s.id,d.doc_type,'missing');
+          if(reason) await BE.sendPortalMessage(hotelId,s.id,`Votre document "${d.doc_type}" a été refusé.${reason?' Motif : '+reason:''} Merci de le déposer à nouveau depuis votre portail.`).catch(()=>{});
+          await BE.logAudit('document_reject','employee_document',d.id,s.id,{doc_type:d.doc_type,reason});
+          flash('Document refusé');drawEmployeeDocs(s);
+          if(_dxData[s.id]) {_dxData[s.id][d.doc_type]={status:'missing',expires_at:null,file_path:null}; if(typeof _dxRender==='function') try{_dxRender();}catch(ex){} }
+        }catch(e){flash('Erreur : '+e.message);}
+      }else if(act==='dl'){
         try{const url=await BE.getSignedDocUrl(d.file_path);await BE.logAudit('document_download','employee_document',d.id,s.id,{doc_type:d.doc_type});window.open(url,'_blank');}
         catch(e){flash('Erreur : '+(e.message||e));}
       }else if(act==='sign'){

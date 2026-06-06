@@ -1160,6 +1160,10 @@ window.openUploadDoc=()=>{
           .map(([k,v])=>`<option value="${k}">${v.label}</option>`).join('')}
       </select>
     </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0">
+      <div class="field"><label style="font-size:11.5px">Date d'émission <span style="color:#9ca3af">(optionnel)</span></label><input type="date" id="docIssuedAt" style="font-size:12px"></div>
+      <div class="field"><label style="font-size:11.5px">Date d'expiration <span style="color:#9ca3af">(optionnel)</span></label><input type="date" id="docExpiresAt" style="font-size:12px"></div>
+    </div>
     <div class="dropzone" id="uploadZone" onclick="$('docFile').click()">
       <i class="fa-solid fa-cloud-arrow-up"></i>
       Appuyez pour choisir un fichier<br>
@@ -1194,7 +1198,23 @@ window.handleDocUpload=async(file)=>{
     if(prog) prog.innerHTML=`<div class="err-box"><i class="fa-solid fa-triangle-exclamation"></i>${esc(error.message)}</div>`;
     return;
   }
-  if(prog) prog.innerHTML=`<div class="info-box" style="background:#f0fdf4;color:#16a34a"><i class="fa-solid fa-check"></i>Document envoyé avec succès</div>`;
+
+  // Enregistrer dans employee_documents avec statut "pending" (à vérifier par RH)
+  try{
+    const expiresAtInput=$('docExpiresAt');
+    const issuedAtInput=$('docIssuedAt');
+    const {data:existing}=await sb.from('employee_documents').select('id').eq('hotel_id',employee.hotel_id).eq('employee_id',employee.id).eq('doc_type',docType).maybeSingle();
+    const payload={hotel_id:employee.hotel_id,employee_id:employee.id,doc_type:docType,status:'pending',file_path:path,file_size:file.size,file_mime:file.type,expires_at:expiresAtInput?.value||null,issued_at:issuedAtInput?.value||null,notes:`Déposé depuis le portail salarié`};
+    if(existing?.id){
+      await sb.from('employee_documents').update(payload).eq('id',existing.id);
+    } else {
+      await sb.from('employee_documents').insert(payload);
+    }
+    // Notifier RH via portal_messages
+    await sb.from('portal_messages').insert({hotel_id:employee.hotel_id,employee_id:employee.id,direction:'employee_to_manager',body:`Nouveau document déposé : ${docType}. En attente de validation RH.`,read_at:null}).catch(()=>{});
+  }catch(eDb){ console.warn('employee_documents insert:', eDb); }
+
+  if(prog) prog.innerHTML=`<div class="info-box" style="background:#f0fdf4;color:#16a34a"><i class="fa-solid fa-check"></i>Document envoyé — en attente de validation RH</div>`;
   auditLog('upload_doc',{filename:safeName,docType,size:file.size});
   setTimeout(()=>{closeModal();loadDocs();},1200);
 };
