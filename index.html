@@ -5851,7 +5851,7 @@ async function computeAutoFill(){
         continue;
       }
 
-      toCreate.push({hotel_id:hotelId,employee_id:emp.id,day:ds,status:result.code,duration:result.code==='P'?1:0,reason:result.reason,old_value:existing||''});
+      toCreate.push({hotel_id:hotelId,employee_id:emp.id,day:ds,status:result.code,duration:result.code==='P'?1:null,reason:result.reason,old_value:existing||''});
     }
   }
 
@@ -5880,8 +5880,11 @@ function renderAutoFillSummary(r){
 async function applyAutoFill(r){
   if(!r.toCreate.length) return;
   // Sauvegarder le planning
-  const upserts=r.toCreate.map(x=>({hotel_id:x.hotel_id,employee_id:x.employee_id,day:x.day,status:x.status,duration:x.status==='P'?1:0}));
-  await BE.savePlanning(hotelId, upserts, []);
+  // Repos = cellule vide = pas de ligne en base (delete). Séparer en 2 listes.
+  const toInsert=r.toCreate.filter(x=>x.status==='P');
+  const toDelete=r.toCreate.filter(x=>x.status==='').map(x=>({hotel_id:x.hotel_id,employee_id:x.employee_id,day:x.day}));
+  const upserts=toInsert.map(x=>({hotel_id:x.hotel_id,employee_id:x.employee_id,day:x.day,status:'P',duration:1}));
+  await BE.savePlanning(hotelId, upserts, toDelete);
   // Sauvegarder l'historique du run (best-effort)
   try{
     const run=await BE.saveGenerationRun(hotelId,{
