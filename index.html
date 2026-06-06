@@ -2046,10 +2046,7 @@ async function drawDashboardAlerts(){
     console.warn('Dashboard async error:', e);
   }
 }
-  }catch(e){
-    $('alertList').innerHTML=`<div style="padding:12px;color:var(--red);font-size:12px">Erreur chargement alertes : ${e.message||e}</div>`;
-  }
-}
+
 
 /* ===================== VUE REPORTING ===================== */
 function barRows(rows,color){if(!rows.length)return '<div style="padding:14px;color:var(--muted);font-size:13px">Aucune donnée.</div>';
