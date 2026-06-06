@@ -3013,16 +3013,16 @@ function openTemplateForm(t, isNewVersion){
     const hotel=hotels.find(h=>h.id===hotelId)||{};
     const fictif={first_name:'Marie',last_name:'DUPONT',birth_date:'1990-06-15',birth_place:'Lyon',nationality:'Française',address:'12 rue de la Paix, 75001 Paris',phone:'06 00 00 00 00',email:'marie.dupont@example.com',social_security_number:'2 90 06 69 123 456 78',residency_permit_number:'',role:'Réceptionniste',department:'Réception'};
     const ctx=buildContractContext(fictif,hotel,{contract_type:$('tc').value||'CDI',start_date:new Date().toISOString().slice(0,10),weekly_hours:'35',salary_amount:'2100',salary_type:'brut_mensuel',manager_name:'Jean MARTIN',work_location:hotel?.city||hotel?.name||'Paris'});
-    const rendered=substituteVariables(html,ctx);
-    const win=window.open('','_blank','width=900,height=700');
+    const renderedRaw=substituteVariables(html,ctx);
+    const rendered=transformContractHtml(renderedRaw);
+    const win=window.open('','_blank','width=950,height=750');
     if(!win){flash('Autorisez les popups pour voir l\'aperçu');return;}
     win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Aperçu modèle</title>
-    <style>body{margin:0;background:#d1d5db;padding:24px;font-size:11pt}
-    .a4{width:210mm;min-height:297mm;padding:20mm 20mm 24mm 25mm;margin:0 auto;background:#fff;box-shadow:0 4px 20px rgba(0,0,0,.2);font-family:"Times New Roman",Times,serif;font-size:11pt;line-height:1.6;color:#111;box-sizing:border-box}
-    h1{font-size:16pt;margin:0 0 8pt;text-align:center}h2{font-size:12pt;margin:14pt 0 5pt;page-break-after:avoid}
-    p{margin:0 0 7pt}table{width:100%;border-collapse:collapse}
-    span[style*="fef3c7"]{background:#fef3c7;color:#92400e;padding:0 3px;border-radius:2px}
-    @media print{body{background:#fff;padding:0}.a4{box-shadow:none;width:100%;min-height:auto}}
+    <style>
+      body{margin:0;background:#d1d5db;padding:24px;font-family:"Times New Roman",Times,serif;font-size:11pt;color:#111}
+      .a4{width:210mm;min-height:297mm;padding:22mm 22mm 26mm 28mm;margin:0 auto;background:#fff;box-shadow:0 4px 20px rgba(0,0,0,.2);box-sizing:border-box}
+      strong,b{font-weight:700} em,i{font-style:italic} table{border-collapse:collapse} td{vertical-align:top}
+      @media print{body{background:#fff;padding:0}.a4{box-shadow:none;width:100%;min-height:auto;padding:15mm 20mm 20mm 25mm}}
     </style></head><body>
     <div style="text-align:center;margin-bottom:16px;font-family:sans-serif;font-size:12px;color:#555">
       Aperçu fictif — <b>Marie DUPONT</b> · ${$('tc').value||'CDI'}
@@ -3444,7 +3444,7 @@ async function _genStep1(){
       job_title: (rols.find(r=>r.id===s.fields.role_id)||{}).name||emp.role||'',
       department: (deps.find(d=>d.id===s.fields.service_id)||{}).name||emp.department||'',
     });
-    previewHtml = wrapContractHtml(substituteVariables(tpl.body_html, ctx));
+    previewHtml = transformContractHtml(substituteVariables(tpl.body_html, ctx));
   }
 
   const empOpts = activeStaff.map(e=>`<option value="${e.id}" ${e.id===s.employee_id?'selected':''}>${e.first_name} ${e.last_name}${e.role?' · '+e.role:''}</option>`).join('');
@@ -3720,7 +3720,7 @@ async function _genStep2(){
     department:(deps.find(d=>d.id===s.fields.service_id)||{}).name||emp.department||'',
   });
   const renderedRaw = substituteVariables(tpl.body_html, ctx);
-  const rendered = wrapContractHtml(renderedRaw);
+  const rendered = transformContractHtml(renderedRaw);
   const missing = detectMissingVars(tpl.body_html, ctx);
 
   const missingBanner = missing.length
@@ -3929,25 +3929,135 @@ function detectMissingVars(templateHtml, ctx){
   return [...new Set(missing)];
 }
 
-/* ===== WRAPPER TYPOGRAPHIQUE DU CONTRAT ===== */
-function wrapContractHtml(html){
-  return `<style>
-    .ct h1{text-align:center;font-size:17pt;font-weight:700;text-decoration:underline;letter-spacing:.3px;margin:0 0 32pt}
-    .ct .bloc-employeur{margin-bottom:24pt;line-height:2.1}
-    .ct .bloc-salarie{margin-bottom:32pt;line-height:2.1}
-    .ct p{margin:0 0 9pt;text-align:justify;line-height:1.75}
-    .ct p.intro{font-weight:700;margin:24pt 0 14pt;text-align:left}
-    .ct p.fait{font-weight:700;margin-top:24pt;margin-bottom:8pt;text-align:left}
-    .ct p.lieu{margin-bottom:2pt;text-align:left}
-    .ct h2{font-size:11pt;font-weight:700;margin:18pt 0 6pt;page-break-after:avoid;break-after:avoid}
-    .ct .sig-block{page-break-inside:avoid;break-inside:avoid;margin-top:32pt}
-    .ct .sig-block table{width:100%;border-collapse:collapse}
-    .ct .sig-block td{vertical-align:top;padding:0;width:50%}
-    .ct strong,.ct b{font-weight:700}
-    .ct em,.ct i{font-style:italic}
-    span[style*="fef3c7"]{background:#fef3c7!important;color:#c00!important;padding:1px 3px;border-radius:2px}
-  </style>
-  <div class="ct">${html}</div>`;
+/* ===== MOTEUR DE RENDU STRUCTURÉ DU CONTRAT ===== */
+// Parse le HTML du template en blocs sémantiques et émet du HTML 100% inline-styled.
+// Aucune dépendance CSS externe — fonctionne dans l'aperçu ET dans jsPDF.
+function transformContractHtml(html){
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html;
+  let out = '';
+  const els = Array.from(tmp.children);
+  let i = 0;
+
+  while(i < els.length){
+    const el = els[i];
+    const tag = (el.tagName||'').toUpperCase();
+    const cls = el.className||'';
+
+    // ── Titre du contrat (h1) ─────────────────────────────────────────────
+    if(tag === 'H1'){
+      out += `<div style="text-align:center;font-size:17pt;font-weight:700;text-decoration:underline;letter-spacing:.4px;margin:0 0 44pt;font-family:inherit">${el.textContent.trim()}</div>`;
+    }
+
+    // ── Bloc employeur ────────────────────────────────────────────────────
+    else if(cls.includes('bloc-employeur')){
+      const lines = el.innerHTML.split(/<br\s*\/?>\s*/i).map(s=>s.trim()).filter(Boolean);
+      out += `<div style="margin-bottom:28pt">${
+        lines.map(l=>`<div style="font-weight:700;line-height:2.05;font-size:11pt">${l}</div>`).join('')
+      }</div>`;
+    }
+
+    // ── Bloc salarié ──────────────────────────────────────────────────────
+    else if(cls.includes('bloc-salarie')){
+      const lines = el.innerHTML.split(/<br\s*\/?>\s*/i).map(s=>s.trim()).filter(Boolean);
+      out += `<div style="margin-bottom:36pt">${
+        lines.map(l=>`<div style="line-height:2.05;font-size:11pt">${l}</div>`).join('')
+      }</div>`;
+    }
+
+    // ── Introduction "Il a été convenu…" ──────────────────────────────────
+    else if(tag === 'P' && cls.includes('intro')){
+      out += `<div style="font-weight:700;font-size:11pt;margin:26pt 0 16pt">${el.innerHTML}</div>`;
+    }
+
+    // ── Article : h2 + paragraphes suivants ───────────────────────────────
+    else if(tag === 'H2'){
+      let bodies = '';
+      let j = i + 1;
+      while(j < els.length){
+        const nx = els[j];
+        const nt = (nx.tagName||'').toUpperCase();
+        const nc = nx.className||'';
+        if(nt==='H2' || nc.includes('sig-block') || nc.includes('fait') || nc.includes('lieu')) break;
+        if(nt==='P'){
+          bodies += `<div style="text-align:justify;font-size:11pt;line-height:1.78;margin:0 0 8pt">${nx.innerHTML}</div>`;
+          j++;
+        } else break;
+      }
+      i = j - 1;
+      out += `<div style="margin-bottom:20pt;page-break-inside:avoid">`
+           + `<div style="font-weight:700;font-size:11pt;margin:0 0 8pt">${el.innerHTML}</div>`
+           + bodies
+           + `</div>`;
+    }
+
+    // ── "Fait en deux exemplaires" ────────────────────────────────────────
+    else if(tag === 'P' && cls.includes('fait')){
+      out += `<div style="font-weight:700;font-size:11pt;margin:32pt 0 8pt">${el.innerHTML}</div>`;
+    }
+
+    // ── Lieu et date ──────────────────────────────────────────────────────
+    else if(tag === 'P' && cls.includes('lieu')){
+      const lines = el.innerHTML.split(/<br\s*\/?>\s*/i).map(s=>s.trim()).filter(Boolean);
+      out += `<div style="margin-bottom:10pt">${
+        lines.map(l=>`<div style="font-size:11pt;line-height:2">${l}</div>`).join('')
+      }</div>`;
+    }
+
+    // ── Bloc signatures ───────────────────────────────────────────────────
+    else if(cls.includes('sig-block')){
+      const tds = Array.from(el.querySelectorAll('table td'));
+
+      const renderSigTd = (td)=>{
+        let r = '';
+        Array.from(td.children).forEach(child=>{
+          const ct = (child.tagName||'').toUpperCase();
+          if(ct === 'P'){
+            const strong = child.querySelector('strong');
+            const em     = child.querySelector('em');
+            if(strong && !em){
+              r += `<div style="font-weight:700;font-size:11pt;margin:0 0 7pt">${child.innerHTML}</div>`;
+            } else if(em){
+              r += `<div style="font-size:10pt;font-style:italic;color:#444;margin:0 0 6pt">${child.innerHTML}</div>`;
+            } else {
+              r += `<div style="font-size:10pt;color:#555;margin:0 0 4pt">${child.textContent}</div>`;
+            }
+          } else if(ct === 'DIV'){
+            r += `<div style="margin-top:52pt;border-top:1px solid #333;max-width:180pt;padding-top:5pt;font-size:9pt;color:#777">${child.textContent}</div>`;
+          }
+        });
+        return r;
+      };
+
+      if(tds.length >= 2){
+        out += `<div style="page-break-inside:avoid;margin-top:38pt">`
+             + `<table style="width:100%;border-collapse:collapse"><tr>`
+             + `<td style="vertical-align:top;width:50%;padding-right:24pt">${renderSigTd(tds[0])}</td>`
+             + `<td style="vertical-align:top;width:50%;padding-left:24pt">${renderSigTd(tds[1])}</td>`
+             + `</tr></table></div>`;
+      } else {
+        out += `<div style="page-break-inside:avoid;margin-top:38pt">${el.innerHTML}</div>`;
+      }
+    }
+
+    // ── Saut de page explicite ─────────────────────────────────────────────
+    else if(tag === 'DIV' && el.style && el.style.pageBreakBefore === 'always'){
+      out += `<div style="page-break-before:always"></div>`;
+    }
+
+    // ── Contenu générique (templates custom) ──────────────────────────────
+    else {
+      if(tag === 'P'){
+        out += `<div style="text-align:justify;font-size:11pt;line-height:1.75;margin:0 0 8pt">${el.innerHTML}</div>`;
+      } else {
+        out += el.outerHTML;
+      }
+    }
+
+    i++;
+  }
+
+  return out || '<div style="color:#888;font-size:11pt;padding:20pt">Aucun contenu.</div>';
 }
 
 /* ===== ASSISTANT DE GÉNÉRATION ===== */
@@ -4103,23 +4213,10 @@ async function renderHtmlToPdfBlob(html, title){
   const wrap = document.createElement('div');
   wrap.style.cssText = 'position:fixed;left:-9999px;top:0;width:170mm;font-family:"Times New Roman",Times,serif;font-size:11pt;line-height:1.6;color:#111;background:#fff';
   wrap.innerHTML = `<style>
-    /* Base */
-    body,div{box-sizing:border-box}
     strong,b{font-weight:700}
     em,i{font-style:italic}
-    table{width:100%;border-collapse:collapse}
-    td{vertical-align:top;padding:0}
-    /* Typographie du contrat */
-    .ct h1{text-align:center;font-size:17pt;font-weight:700;text-decoration:underline;letter-spacing:.3px;margin:0 0 32pt}
-    .ct .bloc-employeur{margin-bottom:24pt;line-height:2.1}
-    .ct .bloc-salarie{margin-bottom:32pt;line-height:2.1}
-    .ct p{margin:0 0 9pt;text-align:justify;line-height:1.75;orphans:3;widows:3}
-    .ct p.intro{font-weight:700;margin:24pt 0 14pt;text-align:left}
-    .ct p.fait{font-weight:700;margin-top:24pt;margin-bottom:8pt;text-align:left}
-    .ct p.lieu{margin-bottom:2pt;text-align:left}
-    .ct h2{font-size:11pt;font-weight:700;margin:18pt 0 6pt;page-break-after:avoid}
-    .ct .sig-block{page-break-inside:avoid;margin-top:32pt}
-    span[style*="fef3c7"]{background:none!important;color:#c00!important;font-weight:700}
+    table{border-collapse:collapse}
+    td{vertical-align:top}
   </style>
   <div style="text-align:right;font-size:8.5pt;color:#888;margin-bottom:8mm;padding-bottom:3mm;border-bottom:1px solid #ccc">${title} · Généré le ${new Date().toLocaleDateString('fr-FR')}</div>
   ${html}`;
