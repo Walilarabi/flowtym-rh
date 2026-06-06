@@ -627,6 +627,15 @@ async function makeRealBE(){
     async saveGeneratedContract(h,payload){const {data,error}=await sb.from('generated_contracts').insert({hotel_id:h,...payload}).select('*').single();must(error,'Contrat créer');return data;},
     async updateGeneratedContract(id,patch){const {data,error}=await sb.from('generated_contracts').update(patch).eq('id',id).select('*').single();must(error,'Contrat màj');return data;},
 
+    /* --- RYTHMES DE TRAVAIL --- */
+    async listWorkPattern(h,eid){const {data,error}=await sb.from('employee_work_patterns').select('*').eq('hotel_id',h).eq('employee_id',eid).maybeSingle();if(error&&error.code!=='42P01')must(error,'Rythme de travail');return data||null;},
+    async saveWorkPattern(h,eid,patch){
+      const {data,error}=await sb.from('employee_work_patterns').upsert({hotel_id:h,employee_id:eid,...patch},{onConflict:'hotel_id,employee_id'}).select('*').single();
+      if(error&&error.code!=='42P01')must(error,'Sauvegarde rythme');return data;
+    },
+    async saveGenerationRun(h,run){const {data,error}=await sb.from('planning_generation_runs').insert({hotel_id:h,...run}).select('*').single();if(error&&error.code!=='42P01')must(error,'Sauvegarde run');return data;},
+    async saveGenerationItems(items){if(!items.length)return;const {error}=await sb.from('planning_generation_items').insert(items);if(error&&error.code!=='42P01')must(error,'Sauvegarde items');},
+
     /* --- DOCUMENTS ENRICHIS + STORAGE --- */
     async listDocumentsForEmployee(h,eid){const {data,error}=await sb.from('employee_documents').select('*').eq('hotel_id',h).eq('employee_id',eid).order('created_at',{ascending:false});must(error,'Documents');return data||[];},
     async uploadEmployeeDocument(hotel_id, employee_id, doc_type_code, file, opts){
@@ -1184,6 +1193,8 @@ function renderPlanning(){
         <button class="btn g ${editMode?'on':''}" id="editToggle"><i class="fa-solid fa-pen-to-square"></i> Édition</button>
         <button class="btn g" id="exportXlsx" title="Exporter le planning au format Excel"><i class="fa-solid fa-file-excel"></i> Excel</button>
         <button class="btn g" id="exportPdf" title="Exporter le planning en PDF (paysage, pleine page)"><i class="fa-regular fa-file-pdf"></i> PDF</button>
+        <button class="btn g" id="btnCreateCycle" title="Créer un cycle depuis le mois affiché"><i class="fa-solid fa-arrows-rotate"></i> Créer cycle</button>
+        <button class="btn g" id="btnAutoFill" title="Générer le planning automatiquement"><i class="fa-solid fa-wand-magic-sparkles"></i> Auto-remplir</button>
         <button class="btn p" id="addEmp"><i class="fa-solid fa-user-plus"></i> Collaborateur</button>
       </div>
       <div class="legend" id="legend"></div>
@@ -1202,6 +1213,8 @@ function renderPlanning(){
   $('addEmp').onclick=()=>openEmpForm(null);
   $('exportXlsx').onclick=exportExcel;
   $('exportPdf').onclick=exportPDF;
+  $('btnCreateCycle').onclick=openCreateCycleModal;
+  $('btnAutoFill').onclick=openAutoFillModal;
   $('grid').addEventListener('mousedown',gridMouseDown);
   $('grid').addEventListener('mouseover',gridMouseOver);
   document.querySelectorAll('.pvswitch button').forEach(b=>b.onclick=()=>switchPlanView(b.dataset.pv));
@@ -1758,79 +1771,292 @@ async function saveChanges(){
 function cancelChanges(){pending.clear(); pendingShifts.clear(); renderCurrentPlanView(); flash('Modifications annulées');}
 
 /* ===================== VUE TABLEAU DE BORD ===================== */
-function aggCommitted(){let trav=0,cp=0,abs=0;const counts={};
-  committed.forEach(v=>{if(!v.status)return;counts[v.status]=(counts[v.status]||0)+Number(v.duration||1);
-    const c=CMAP[v.status];if(!c)return;
-    if(c.cat==='worked')trav+=Number(v.duration||1);
-    else if(c.cat==='paid')cp+=Number(v.duration||1);
-    else if(c.cat==='abs')abs+=Number(v.duration||1);});
-  return {trav,cp,abs,counts};}
+const DAY_NAMES_FR=['dimanche','lundi','mardi','mercredi','jeudi','vendredi','samedi'];
+const DAY_SHORT_FR=['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'];
 
 function renderDashboard(){
-  const m=cur.getMonth(),y=cur.getFullYear();
-  const actifs=staff.filter(s=>s.active).length;
-  const partis=staff.filter(s=>!s.active).length;
-  const {trav,cp,abs}=aggCommitted();
-  const alerts=staff.filter(s=>s.active && !s.emergency_contact).length;
-  const team=staff.filter(s=>s.active).slice(0,7);
-  const recent=[];committed.forEach((v,k)=>{const [eid,day]=k.split('|');const s=staff.find(x=>x.id===eid);
-    if(s)recent.push({day, name:`${s.first_name} ${s.last_name}`, status:v.status});});
-  recent.sort((a,b)=>b.day.localeCompare(a.day));
-  $('view').innerHTML=`<div class="page">
-    <div class="phead"><div><h1>Tableau de bord</h1><div class="sub">${hotels.find(h=>h.id===hotelId)?.name||''} · ${MONTHS[m]} ${y}</div></div>
-      <div class="actions"><button class="btn p" id="goPlan"><i class="fa-regular fa-calendar"></i> Ouvrir le planning</button></div></div>
-    <div class="kpis">
-      <div class="kpi v"><div class="ic"><i class="fa-solid fa-users"></i></div><div class="n">${actifs}</div><div class="l">Collaborateurs actifs</div></div>
-      <div class="kpi g"><div class="ic"><i class="fa-regular fa-clock"></i></div><div class="n">${Math.round(trav)}</div><div class="l">Jours travaillés ce mois</div></div>
-      <div class="kpi b"><div class="ic"><i class="fa-regular fa-plane"></i></div><div class="n">${Math.round(cp)}</div><div class="l">CP pris ce mois</div></div>
-      <div class="kpi a"><div class="ic"><i class="fa-solid fa-triangle-exclamation"></i></div><div class="n">${alerts}</div><div class="l">Fiches incomplètes</div></div>
+  const hotel = hotels.find(h=>h.id===hotelId);
+  const hName = hotel?.name||'';
+  const now = new Date();
+  const dateStr = `${DAY_NAMES_FR[now.getDay()]} ${now.getDate()} ${MONTHS[now.getMonth()]} ${now.getFullYear()}`;
+
+  // KPI: actifs
+  const actifs = staff.filter(s=>s.active).length;
+  const newThisMonth = staff.filter(s=>{
+    if(!s.hire_date||!s.active) return false;
+    const h=new Date(s.hire_date);
+    return h.getFullYear()===now.getFullYear()&&h.getMonth()===now.getMonth();
+  }).length;
+
+  // KPI: présents aujourd'hui (planning committed)
+  const todayKey = now.toISOString().slice(0,10);
+  let presentsToday=0, reposToday=0, maladeToday=0;
+  committed.forEach((v,k)=>{
+    const [,day]=k.split('|'); if(day!==todayKey) return;
+    const c=CMAP[v.status];
+    if(!c) return;
+    if(c.cat==='worked') presentsToday++;
+    else if(v.status==='R'||v.status==='RH') reposToday++;
+    else if(v.status==='AM'||v.status==='AT') maladeToday++;
+  });
+
+  // KPI: docs manquants (loaded async)
+  // KPI: candidatures (loaded async)
+
+  // Week planning
+  const weekStart = new Date(now);
+  weekStart.setDate(now.getDate() - ((now.getDay()+6)%7)); // Monday
+  const weekDays = Array.from({length:7},(_,i)=>{
+    const d=new Date(weekStart); d.setDate(weekStart.getDate()+i); return d;
+  });
+  const weekCounts = weekDays.map(d=>{
+    const dk=d.toISOString().slice(0,10);
+    let n=0; committed.forEach((v,k)=>{const [,day]=k.split('|');const c=CMAP[v.status];if(day===dk&&c&&c.cat==='worked')n++;});
+    return n;
+  });
+  const weekLabel = `Semaine du ${weekStart.getDate()} au ${weekDays[6].getDate()} ${MONTHS[weekDays[6].getMonth()]} ${weekDays[6].getFullYear()}`;
+
+  // Today's team (shifts)
+  const todayTeam = staff.filter(s=>{
+    if(!s.active) return false;
+    const v=committed.get(`${s.id}|${todayKey}`);
+    return v && CMAP[v.status]?.cat==='worked';
+  }).slice(0,8);
+
+  $('view').innerHTML=`<div class="page" id="dashPage">
+    <!-- Header -->
+    <div style="margin-bottom:24px">
+      <h1 style="font-size:24px;font-weight:800;margin-bottom:4px">Bonjour, Directeur 👋</h1>
+      <div style="color:var(--ink2);font-size:13.5px">${dateStr} • ${hName}</div>
     </div>
-    <div class="cols2">
-      <div class="box"><h3><i class="fa-regular fa-user"></i>Équipe active</h3><div class="tlist">
-        ${team.length?team.map(s=>`<div class="it"><div class="av" style="background:${avBg(s)}">${avInner(s)}</div>
-          <div><div class="nm">${s.first_name} ${s.last_name}</div><div class="sub">${s.role||'—'} · ${s.department||'—'}</div></div>
-          <div class="right">${s.contract_type||'CDI'}</div></div>`).join(''):'<div style="padding:14px;color:var(--muted)">Aucun collaborateur — ajoutez-en depuis Personnel.</div>'}
-      </div></div>
-      <div class="box"><h3><i class="fa-regular fa-rectangle-list"></i>Activité récente du mois</h3><div class="tlist">
-        ${recent.slice(0,7).map(r=>{const c=CMAP[r.status];return `<div class="it"><span class="tag" style="background:${c?.bg};color:${c?.fg}">${r.status}</span>
-          <div><div class="nm">${r.name}</div><div class="sub">${r.day}</div></div></div>`;}).join('')||'<div style="padding:14px;color:var(--muted)">Aucune saisie pour le mois.</div>'}
-      </div></div>
+
+    <!-- KPI cards -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:22px">
+      <!-- Collaborateurs actifs -->
+      <div style="background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:var(--shadow);position:relative">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px">
+          <div style="width:38px;height:38px;background:#ede9fe;border-radius:10px;display:grid;place-items:center">
+            <i class="fa-solid fa-user-group" style="color:#7c3aed;font-size:15px"></i>
+          </div>
+          ${newThisMonth>0?`<span style="background:#dcfce7;color:#16a34a;font-size:11px;font-weight:700;padding:3px 8px;border-radius:99px">+${newThisMonth} ce mois</span>`:''}
+        </div>
+        <div style="font-size:32px;font-weight:800;margin-bottom:4px">${actifs}</div>
+        <div style="font-size:13px;font-weight:600;color:var(--ink)">Collaborateurs actifs</div>
+        <div style="font-size:11.5px;color:var(--muted)">sur ${staff.length} total</div>
+      </div>
+      <!-- Présents aujourd'hui -->
+      <div style="background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:var(--shadow)">
+        <div style="margin-bottom:16px">
+          <div style="width:38px;height:38px;background:#dcfce7;border-radius:10px;display:grid;place-items:center">
+            <i class="fa-regular fa-clock" style="color:#16a34a;font-size:15px"></i>
+          </div>
+        </div>
+        <div style="font-size:32px;font-weight:800;margin-bottom:4px">${presentsToday}</div>
+        <div style="font-size:13px;font-weight:600;color:var(--ink)">Présents aujourd'hui</div>
+        <div style="font-size:11.5px;color:var(--muted)">${reposToday} en repos, ${maladeToday} malade</div>
+      </div>
+      <!-- Documents manquants -->
+      <div style="background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:var(--shadow)">
+        <div style="margin-bottom:16px">
+          <div style="width:38px;height:38px;background:#fef9c3;border-radius:10px;display:grid;place-items:center">
+            <i class="fa-solid fa-triangle-exclamation" style="color:#ca8a04;font-size:15px"></i>
+          </div>
+        </div>
+        <div style="font-size:32px;font-weight:800;margin-bottom:4px" id="dashDocCount">…</div>
+        <div style="font-size:13px;font-weight:600;color:var(--ink)">Documents manquants</div>
+        <div style="font-size:11.5px;color:var(--muted)">À régulariser</div>
+      </div>
+      <!-- Nouvelles candidatures -->
+      <div style="background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:var(--shadow);position:relative">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px">
+          <div style="width:38px;height:38px;background:#dcfce7;border-radius:10px;display:grid;place-items:center">
+            <i class="fa-solid fa-user-plus" style="color:#16a34a;font-size:15px"></i>
+          </div>
+          <span id="dashCandBadge" style="display:none;background:#fee2e2;color:#dc2626;font-size:11px;font-weight:700;padding:3px 8px;border-radius:99px"></span>
+        </div>
+        <div style="font-size:32px;font-weight:800;margin-bottom:4px" id="dashCandCount">…</div>
+        <div style="font-size:13px;font-weight:600;color:var(--ink)">Nouvelles candidatures</div>
+        <div style="font-size:11.5px;color:var(--muted)">En attente de traitement</div>
+      </div>
     </div>
-    ${canFicheFull()?`<div class="box" style="margin-top:14px"><h3><i class="fa-solid fa-bell"></i>Alertes documents <span id="alertCount" style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:5px;font-size:11px;font-weight:700;margin-left:6px">…</span></h3>
-      <div id="alertList">Chargement…</div></div>`:''}
-    ${partis?`<div class="box" style="margin-top:14px"><h3><i class="fa-regular fa-circle-question"></i>Partis</h3>
-      <div style="font-size:13px;color:var(--ink2)">${partis} collaborateur(s) ne sont plus actifs. Allez dans Personnel + filtre « Partis » pour les consulter ou les réactiver.</div></div>`:''}
+
+    <!-- 3 cols: Actions | Equipe du jour | Activité -->
+    <div style="display:grid;grid-template-columns:1.1fr 1fr 1fr;gap:16px;margin-bottom:18px">
+      <!-- Actions rapides -->
+      <div style="background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:var(--shadow)">
+        <div style="font-size:15px;font-weight:700;margin-bottom:16px">Actions rapides</div>
+        ${[
+          {icon:'fa-calendar-days',bg:'#ede9fe',fg:'#7c3aed',label:'Voir le planning',action:"goView('planning')"},
+          {icon:'fa-user-plus',bg:'#dbeafe',fg:'#2563eb',label:'Ajouter un collaborateur',action:"goView('personnel');setTimeout(()=>openEmpForm(null),300)"},
+          {icon:'fa-file-contract',bg:'#fef9c3',fg:'#ca8a04',label:'Générer un contrat',action:"goView('contracts');contractsSubTab='generate';setTimeout(renderContracts,100)"},
+          {icon:'fa-magnifying-glass-chart',bg:'#dcfce7',fg:'#16a34a',label:'Voir les candidats',action:"goView('recruitment')"},
+        ].map(a=>`<div onclick="${a.action}" style="display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:12px;cursor:pointer;margin-bottom:8px;transition:.15s" onmouseover="this.style.background='#f8f8fc'" onmouseout="this.style.background='transparent'">
+          <div style="width:36px;height:36px;background:${a.bg};border-radius:10px;display:grid;place-items:center;flex-shrink:0">
+            <i class="fa-solid ${a.icon}" style="color:${a.fg};font-size:14px"></i>
+          </div>
+          <div style="flex:1;font-size:13.5px;font-weight:600;color:var(--ink)">${a.label}</div>
+          <i class="fa-solid fa-chevron-right" style="color:var(--muted);font-size:11px"></i>
+        </div>`).join('')}
+      </div>
+
+      <!-- Equipe du jour -->
+      <div style="background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:var(--shadow)">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+          <div style="font-size:15px;font-weight:700">Équipe du jour</div>
+          <span style="background:#f1f1f5;color:var(--ink2);font-size:11.5px;font-weight:600;padding:4px 10px;border-radius:8px">${DAY_SHORT_FR[now.getDay()]}. ${now.getDate()} ${MONTHS[now.getMonth()].slice(0,4).toLowerCase()}</span>
+        </div>
+        ${todayTeam.length ? todayTeam.map(s=>`
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)">
+            <div class="av" style="background:${avBg(s)};width:32px;height:32px;border-radius:8px;font-size:11px;flex-shrink:0">${avInner(s)}</div>
+            <div>
+              <div style="font-size:13px;font-weight:600">${s.first_name} ${s.last_name}</div>
+              <div style="font-size:11.5px;color:var(--muted)">${s.role||'—'}</div>
+            </div>
+          </div>`).join('')
+          : `<div style="text-align:center;padding:32px 0;color:var(--muted);font-size:13px">
+              <i class="fa-regular fa-calendar-xmark" style="font-size:24px;margin-bottom:10px;display:block"></i>
+              Aucun shift prévu aujourd'hui
+            </div>`}
+      </div>
+
+      <!-- Activité récente -->
+      <div style="background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:var(--shadow)">
+        <div style="font-size:15px;font-weight:700;margin-bottom:16px">Activité récente</div>
+        <div id="dashActivity">
+          ${(()=>{
+            const items=[]; committed.forEach((v,k)=>{const [eid,day]=k.split('|');const s=staff.find(x=>x.id===eid);const c=CMAP[v.status];if(s&&c)items.push({day,name:`${s.first_name} ${s.last_name}`,label:c.label||v.status,cat:c.cat});});
+            items.sort((a,b)=>b.day.localeCompare(a.day));
+            if(!items.length) return `<div style="color:var(--muted);font-size:13px;text-align:center;padding:32px 0">Aucune activité récente</div>`;
+            return items.slice(0,6).map(it=>{
+              const dotColor=it.cat==='worked'?'#16a34a':it.cat==='paid'?'#ca8a04':'#9aa0ad';
+              const daysAgo=Math.max(0,Math.floor((new Date()-new Date(it.day))/(1000*86400)));
+              const when=daysAgo===0?'Aujourd\'hui':daysAgo===1?'Hier':`Il y a ${daysAgo}j`;
+              return `<div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:14px">
+                <div style="width:8px;height:8px;border-radius:50%;background:${dotColor};flex-shrink:0;margin-top:5px"></div>
+                <div>
+                  <div style="font-size:13px;font-weight:600;color:var(--ink)">${it.name} - ${it.label}</div>
+                  <div style="font-size:11.5px;color:var(--muted)">${when}</div>
+                </div>
+              </div>`;
+            }).join('');
+          })()}
+        </div>
+      </div>
+    </div>
+
+    <!-- Alertes RH -->
+    <div id="dashAlertBanner" style="display:none;border-radius:14px;padding:14px 20px;margin-bottom:18px;display:flex;align-items:center;gap:12px;background:#fff7ed;border:1px solid #fed7aa">
+      <i class="fa-solid fa-triangle-exclamation" style="color:#f97316;font-size:16px;flex-shrink:0"></i>
+      <div style="flex:1">
+        <span style="font-weight:700;color:#c2410c;font-size:13.5px" id="dashAlertTitle">alertes RH à traiter</span>
+        <span style="font-size:12.5px;color:#c2410c;margin-left:8px" id="dashAlertDetails"></span>
+      </div>
+      <button onclick="goView('documents')" class="btn" style="background:#fff;border:1px solid #fed7aa;color:#c2410c;font-weight:700;font-size:12.5px;padding:7px 14px;border-radius:8px;cursor:pointer">
+        Gérer <i class="fa-solid fa-chevron-right" style="font-size:10px"></i>
+      </button>
+    </div>
+
+    <!-- Planning cette semaine -->
+    <div style="background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:var(--shadow)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
+        <div>
+          <div style="font-size:15px;font-weight:700">Planning cette semaine</div>
+          <div style="font-size:12px;color:var(--muted)">${weekLabel}</div>
+        </div>
+        <button onclick="goView('planning')" style="background:none;border:none;color:var(--violet-d);font-size:13px;font-weight:600;cursor:pointer">
+          Voir le planning complet <i class="fa-solid fa-chevron-right" style="font-size:10px"></i>
+        </button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:8px">
+        ${weekDays.map((d,i)=>{
+          const isToday=d.toISOString().slice(0,10)===todayKey;
+          const isWknd=i>=5;
+          const count=weekCounts[i];
+          return `<div style="text-align:center;padding:14px 8px;border-radius:12px;background:${isToday?'var(--violet-bg)':isWknd?'#faf9ff':'#fafafe'};border:1px solid ${isToday?'var(--violet)':'transparent'}">
+            <div style="font-size:11.5px;font-weight:600;color:${isWknd?'var(--violet-d)':isToday?'var(--violet-d)':'var(--ink2)'};margin-bottom:4px">${DAY_SHORT_FR[(d.getDay()+6)%7+1]||DAY_SHORT_FR[d.getDay()]} ${d.getDate()}</div>
+            <div style="font-size:26px;font-weight:800;color:${isWknd?'var(--violet)':isToday?'var(--violet)':'var(--ink)'}">${count}</div>
+            <div style="font-size:11px;color:var(--muted)">présents</div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
   </div>`;
-  $('goPlan').onclick=()=>goView('planning');
-  if(canFicheFull()) drawDashboardAlerts();
+
+  // Load async data
+  drawDashboardAlerts();
 }
 
 async function drawDashboardAlerts(){
   try{
-    const list = await BE.listDocumentAlerts(hotelId);
-    $('alertCount').textContent = list.length;
-    if(!list.length){$('alertList').innerHTML='<div style="padding:14px;color:var(--muted);font-size:13px"><i class="fa-solid fa-circle-check" style="color:var(--green);margin-right:6px"></i>Aucune alerte. Tous les documents sont à jour.</div>';return;}
-    const top = list.slice(0,10);
-    $('alertList').innerHTML = top.map(a=>{
-      const fullName = `${a.first_name||'?'} ${a.last_name||''}`.trim();
-      let label='', cls='valid';
-      if(a.alert_kind==='expired'){label=`Expiré il y a ${-a.days_until_expiry} j`; cls='expired';}
-      else if(a.alert_kind==='expiring_soon'){label=`Expire dans ${a.days_until_expiry} j`; cls='expiring_soon';}
-      else if(a.alert_kind==='missing'){label='Manquant'; cls='missing';}
-      return `<div class="alertrow" data-eid="${a.employee_id}" style="cursor:pointer">
-        <div class="av" style="background:${avBg(staff.find(x=>x.id===a.employee_id))}">${avInner(staff.find(x=>x.id===a.employee_id)||{first_name:a.first_name||'?',last_name:a.last_name||''})}</div>
-        <div style="flex:1"><div class="nm">${fullName}</div><div class="sub">${a.doc_label||a.doc_type_code}${a.expires_at?` · ${a.expires_at}`:''}</div></div>
-        <span class="badge-st ${cls}">${label}</span>
-      </div>`;
-    }).join('');
-    if(list.length>top.length){
-      $('alertList').innerHTML += `<div style="text-align:center;padding:10px 0 0;font-size:12px;color:var(--muted)">… et ${list.length-top.length} autre(s).</div>`;
+    const [alerts, candidates] = await Promise.all([
+      BE.listDocumentAlerts(hotelId).catch(()=>[]),
+      BE.listCandidates(hotelId).catch(()=>[]),
+    ]);
+
+    // Docs manquants
+    const docEl=$('dashDocCount');
+    if(docEl) docEl.textContent=alerts.filter(a=>a.alert_kind==='missing').length;
+
+    // Candidatures en attente
+    const newCands=candidates.filter(c=>c.status==='nouveau'||c.status==='new'||!c.status);
+    const candEl=$('dashCandCount');
+    if(candEl) candEl.textContent=newCands.length;
+    const badgeEl=$('dashCandBadge');
+    if(badgeEl&&newCands.length>0){badgeEl.textContent='+'+newCands.length;badgeEl.style.display='inline';}
+
+    // Alert banner
+    if(alerts.length>0){
+      const banner=$('dashAlertBanner');
+      if(banner){
+        banner.style.display='flex';
+        const titleEl=$('dashAlertTitle');
+        if(titleEl) titleEl.textContent=`${alerts.length} alerte${alerts.length>1?'s':''} RH à traiter`;
+        const detEl=$('dashAlertDetails');
+        if(detEl){
+          const top=alerts.slice(0,3).map(a=>{
+            const s=staff.find(x=>x.id===a.employee_id);
+            const name=s?`${s.first_name} ${s.last_name}`:`${a.first_name||''} ${a.last_name||''}`.trim();
+            return `${name} - ${a.doc_label||a.doc_type_code} ${a.alert_kind==='missing'?'manquante':a.alert_kind==='expired'?'expirée':'bientôt expirée'}`;
+          });
+          detEl.textContent='• '+top.join(' • ');
+        }
+      }
     }
-    $('alertList').querySelectorAll('.alertrow').forEach(r=>r.onclick=()=>openFiche(r.dataset.eid));
+
+    // Activité récente enrichie avec audit logs
+    const auditLogs = await BE.listAuditLogs(hotelId, 10).catch(()=>[]);
+    if(auditLogs.length>0){
+      const actEl=$('dashActivity');
+      if(actEl){
+        const actionLabels={
+          'invite_user':'Accès accordé',
+          'contract_generate':'Contrat généré',
+          'document_upload':'Document ajouté',
+          'template_upload':'Modèle importé',
+          'template_update':'Modèle mis à jour',
+          'employee_create':'Collaborateur ajouté',
+        };
+        actEl.innerHTML=auditLogs.slice(0,6).map(log=>{
+          const label=actionLabels[log.action]||log.action||'Action';
+          const dotColor=log.action?.includes('contract')?'#16a34a':log.action?.includes('doc')?'#ca8a04':'#8B5CF6';
+          const d=new Date(log.created_at);
+          const diffH=Math.floor((Date.now()-d)/3600000);
+          const when=diffH<1?'Il y a moins d\'1h':diffH<24?`Il y a ${diffH}h`:diffH<48?'Hier':`${Math.floor(diffH/24)}j`;
+          return `<div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:14px">
+            <div style="width:8px;height:8px;border-radius:50%;background:${dotColor};flex-shrink:0;margin-top:5px"></div>
+            <div>
+              <div style="font-size:13px;font-weight:600;color:var(--ink)">${label}</div>
+              <div style="font-size:11.5px;color:var(--muted)">${when}</div>
+            </div>
+          </div>`;
+        }).join('');
+      }
+    }
   }catch(e){
-    $('alertList').innerHTML=`<div style="padding:12px;color:var(--red);font-size:12px">Erreur chargement alertes : ${e.message||e}</div>`;
+    console.warn('Dashboard async error:', e);
   }
 }
+
 
 /* ===================== VUE REPORTING ===================== */
 function barRows(rows,color){if(!rows.length)return '<div style="padding:14px;color:var(--muted);font-size:13px">Aucune donnée.</div>';
@@ -5849,10 +6075,36 @@ function openEmpForm(s){
         </select></div>
         <div class="fld" id="edepWrap" style="${s?.active===false?'':'display:none'}"><label>Date de départ</label><input type="date" id="edep" value="${s?.departure_date||''}"></div>
       </div>
-      <div class="fld"><label>Jours de repos habituels</label>
-        <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--ink2)">
-          ${['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'].map((n,i)=>`<label style="display:inline-flex;gap:5px;align-items:center"><input type="checkbox" data-rest="${i}" ${restSel(i)}> ${n}</label>`).join('')}
-        </div></div>
+      <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--line)">
+        <div style="font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:10px"><i class="fa-solid fa-calendar-days" style="margin-right:5px"></i>Rythme de travail / Repos</div>
+        <div class="fld"><label>Mode de planification</label>
+          <select id="ewpType">
+            <option value="manual" ${(!s?.work_pattern_type||s?.work_pattern_type==='manual')?'selected':''}>Manuel uniquement (aucune génération auto)</option>
+            <option value="fixed_days_off" ${s?.work_pattern_type==='fixed_days_off'?'selected':''}>Jours de repos fixes</option>
+            <option value="rotating_cycle" ${s?.work_pattern_type==='rotating_cycle'?'selected':''}>Cycle tournant</option>
+          </select>
+        </div>
+        <div id="ewpFixedWrap" style="${s?.work_pattern_type==='fixed_days_off'?'':'display:none'}">
+          <div class="fld"><label>Jours de repos hebdomadaires</label>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--ink2)">
+              ${['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'].map((n,i)=>`<label style="display:inline-flex;gap:5px;align-items:center"><input type="checkbox" data-rest="${i}" ${(s?.rest_days||[]).includes(i)?'checked':''}> ${n}</label>`).join('')}
+            </div>
+          </div>
+        </div>
+        <div id="ewpCycleWrap" style="${s?.work_pattern_type==='rotating_cycle'?'':'display:none'}">
+          <div class="row2">
+            <div class="fld"><label>Date de début du cycle</label><input type="date" id="ewpCycleStart" value="${s?.cycle_start_date||''}"></div>
+            <div class="fld"><label>Longueur du cycle</label>
+              <select id="ewpCycleLen">
+                ${[7,14,21,28].map(n=>`<option value="${n}" ${s?.cycle_length_days==n?'selected':''}>${n} jours</option>`).join('')}
+              </select>
+            </div>
+          </div>
+          <div class="fld" id="ewpCycleDaysWrap"><label>Détail du cycle (Travail / Repos par jour)</label>
+            <div id="ewpCycleDays" style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-top:6px"></div>
+          </div>
+        </div>
+      </div>
       <div class="row2">
         <div class="fld"><label>Téléphone</label><input type="tel" id="ep" value="${s?.phone||''}"></div>
         <div class="fld"><label>E-mail</label><input type="email" id="em" value="${s?.email||''}"></div>
@@ -5909,14 +6161,424 @@ function openEmpForm(s){
     if(!p.first_name||!p.last_name){flash('Prénom et nom requis');return;}
     $('esave').disabled=true;
     try{
-      if(isNew){const created=await BE.addEmployee(hotelId,p); staff.push(created);}
-      else {await BE.updateEmployee(s.id,p); Object.assign(s,p);}
+      let empId;
+      if(isNew){const created=await BE.addEmployee(hotelId,p); staff.push(created); empId=created.id;}
+      else {await BE.updateEmployee(s.id,p); Object.assign(s,p); empId=s.id;}
+      // Sauvegarder le rythme de travail
+      const wpt=$('ewpType').value;
+      if(wpt==='fixed_days_off'){
+        const fdo=[...$('modal').querySelectorAll('#ewpFixedWrap input[data-rest]:checked')].map(c=>+c.dataset.rest);
+        await BE.saveWorkPattern(hotelId,empId,{pattern_type:'fixed_days_off',fixed_days_off:fdo,cycle_start_date:null,cycle_length_days:null,cycle_days:null});
+        if(s){s.work_pattern_type='fixed_days_off';s.rest_days=fdo;}
+      } else if(wpt==='rotating_cycle'){
+        const csd=$('ewpCycleStart').value||null;
+        const clen=parseInt($('ewpCycleLen').value)||14;
+        const cdays=[...$('ewpCycleDays').querySelectorAll('[data-cday]')].map(el=>({day:+el.dataset.cday,status:el.dataset.status||'work'}));
+        if(!csd){flash('Date de début du cycle requise');$('esave').disabled=false;return;}
+        if(cdays.length!==clen){flash('Cycle incomplet — remplissez tous les jours');$('esave').disabled=false;return;}
+        await BE.saveWorkPattern(hotelId,empId,{pattern_type:'rotating_cycle',cycle_start_date:csd,cycle_length_days:clen,cycle_days:cdays,fixed_days_off:null});
+        if(s){s.work_pattern_type='rotating_cycle';s.cycle_start_date=csd;s.cycle_length_days=clen;s.cycle_days=cdays;}
+      } else {
+        await BE.saveWorkPattern(hotelId,empId,{pattern_type:'manual',fixed_days_off:null,cycle_start_date:null,cycle_length_days:null,cycle_days:null});
+        if(s) s.work_pattern_type='manual';
+      }
       closeModal(); render(); flash(isNew?'Collaborateur ajouté':'Collaborateur mis à jour');
     }catch(e){flash('Erreur : '+e.message);console.error(e);}
     finally{$('esave').disabled=false;}
   };
+  // Comportement dynamique du sélecteur de mode
+  $('ewpType').onchange=()=>{
+    const v=$('ewpType').value;
+    $('ewpFixedWrap').style.display=v==='fixed_days_off'?'':'none';
+    $('ewpCycleWrap').style.display=v==='rotating_cycle'?'':'none';
+    if(v==='rotating_cycle') buildCycleDaysGrid($('ewpCycleLen').value, s?.cycle_days||[]);
+  };
+  $('ewpCycleLen').onchange=()=>buildCycleDaysGrid($('ewpCycleLen').value, []);
+  // Charger rythme existant depuis BD si salarié existant
+  if(!isNew && s){
+    BE.listWorkPattern(hotelId,s.id).then(wp=>{
+      if(!wp)return;
+      $('ewpType').value=wp.pattern_type||'manual';
+      $('ewpFixedWrap').style.display=wp.pattern_type==='fixed_days_off'?'':'none';
+      $('ewpCycleWrap').style.display=wp.pattern_type==='rotating_cycle'?'':'none';
+      if(wp.pattern_type==='fixed_days_off'&&wp.fixed_days_off){
+        $('ewpFixedWrap').querySelectorAll('input[data-rest]').forEach(cb=>{cb.checked=(wp.fixed_days_off||[]).includes(+cb.dataset.rest);});
+      }
+      if(wp.pattern_type==='rotating_cycle'){
+        if(wp.cycle_start_date) $('ewpCycleStart').value=wp.cycle_start_date;
+        if(wp.cycle_length_days) $('ewpCycleLen').value=wp.cycle_length_days;
+        buildCycleDaysGrid(wp.cycle_length_days||14, wp.cycle_days||[]);
+      }
+      // Stocker dans l'objet pour algo auto-remplissage
+      Object.assign(s,{work_pattern_type:wp.pattern_type,fixed_days_off:wp.fixed_days_off,cycle_start_date:wp.cycle_start_date,cycle_length_days:wp.cycle_length_days,cycle_days:wp.cycle_days});
+    }).catch(()=>{});
+  }
 }
 function closeModal(){$('modalbg').classList.remove('on');}
+
+/* ===================== RYTHMES DE TRAVAIL — HELPERS ===================== */
+
+// Constantes codes protégés (ne jamais écraser)
+const PROTECTED_CODES = new Set(['CP','RTT','MAL','MAT','CSS','AE','F','PAT','ABS','REC','FORM']);
+
+function buildCycleDaysGrid(len, existing){
+  const el=$('ewpCycleDays'); if(!el)return;
+  const n=parseInt(len)||14;
+  el.style.gridTemplateColumns=`repeat(${Math.min(n,7)},1fr)`;
+  const existMap=Object.fromEntries((existing||[]).map(d=>[d.day,d.status]));
+  el.innerHTML=Array.from({length:n},(_,i)=>{
+    const day=i+1;
+    const st=existMap[day]||'work';
+    return `<div data-cday="${day}" data-status="${st}"
+      onclick="toggleCycleDay(this)"
+      style="text-align:center;padding:6px 4px;border-radius:8px;cursor:pointer;font-size:11px;font-weight:600;border:1.5px solid ${st==='work'?'var(--violet)':'#d1d5db'};background:${st==='work'?'#ede9fe':'#f9fafb'};color:${st==='work'?'var(--violet)':'#6b7280'}">
+      J${day}<br><span style="font-size:10px;font-weight:400">${st==='work'?'Trav.':'Repos'}</span>
+    </div>`;
+  }).join('');
+}
+
+function toggleCycleDay(el){
+  const cur=el.dataset.status==='work'?'off':'work';
+  el.dataset.status=cur;
+  el.style.border=`1.5px solid ${cur==='work'?'var(--violet)':'#d1d5db'}`;
+  el.style.background=cur==='work'?'#ede9fe':'#f9fafb';
+  el.style.color=cur==='work'?'var(--violet)':'#6b7280';
+  el.innerHTML=`J${el.dataset.cday}<br><span style="font-size:10px;font-weight:400">${cur==='work'?'Trav.':'Repos'}</span>`;
+}
+
+// Calcule le code à appliquer pour un salarié à une date donnée
+// Retourne {code: 'P'|''|null, reason: string}
+// null = pas de règle, '' = repos, 'P' = travail
+function computeCodeForDate(emp, dateObj, pattern){
+  if(!pattern||pattern.pattern_type==='manual') return null;
+
+  if(pattern.pattern_type==='fixed_days_off'){
+    const wd=dateObj.getDay(); // 0=dim
+    const fdo=pattern.fixed_days_off||[];
+    return fdo.includes(wd)?{code:'',reason:'Repos fixe'}:{code:'P',reason:'Jour travaillé'};
+  }
+
+  if(pattern.pattern_type==='rotating_cycle'){
+    if(!pattern.cycle_start_date||!pattern.cycle_length_days||!pattern.cycle_days?.length) return null;
+    const start=new Date(pattern.cycle_start_date+'T00:00:00');
+    const diffMs=dateObj.getTime()-start.getTime();
+    if(diffMs<0) return null; // avant le début du cycle
+    const diffDays=Math.floor(diffMs/86400000);
+    const idx=(diffDays % pattern.cycle_length_days);
+    const entry=(pattern.cycle_days||[]).find(d=>d.day===(idx+1));
+    if(!entry) return null;
+    return entry.status==='work'?{code:'P',reason:`Cycle J${idx+1} travail`}:{code:'',reason:`Cycle J${idx+1} repos`};
+  }
+
+  return null;
+}
+
+// Charge les patterns de tous les employés visibles en mémoire (cache léger)
+let workPatternsCache = {}; // empId → pattern object
+
+async function loadWorkPatternsForVisible(){
+  const ids=visibleRows.map(s=>s.id);
+  await Promise.all(ids.map(async id=>{
+    if(workPatternsCache[id]===undefined){
+      workPatternsCache[id]=await BE.listWorkPattern(hotelId,id).catch(()=>null);
+    }
+  }));
+}
+
+/* ===================== MODALE : CRÉER CYCLE DEPUIS CE MOIS ===================== */
+async function openCreateCycleModal(){
+  // Demander l'employé cible
+  const empChoices=visibleRows.map(s=>`<option value="${s.id}">${s.last_name} ${s.first_name}${s.department?' · '+s.department:''}</option>`).join('');
+  if(!empChoices){flash('Aucun collaborateur visible');return;}
+
+  $('modal').innerHTML=mhHTML('fa-solid fa-arrows-rotate','Créer un cycle depuis ce mois',`Mois affiché : ${MONTHS[cur.getMonth()]} ${cur.getFullYear()}`)+`
+  <div class="mb">
+    <div class="fld"><label>Collaborateur</label><select id="ccEmp">${empChoices}</select></div>
+    <div class="fld"><label>Longueur du cycle probable</label>
+      <select id="ccLen">
+        <option value="7">7 jours</option>
+        <option value="14" selected>14 jours</option>
+        <option value="21">21 jours</option>
+        <option value="28">28 jours</option>
+      </select>
+    </div>
+    <div class="fld"><label>Date de début du cycle (premier jour J1)</label>
+      <input type="date" id="ccStart" value="${iso(cur.getFullYear(),cur.getMonth(),1)}">
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">Conseil : entrez la date réelle du premier jour du cycle (pas forcément le 1er du mois).</div>
+    </div>
+    <div id="ccPreview" style="margin-top:16px;padding:14px;background:#f8f7ff;border-radius:10px;border:1px solid var(--line)">
+      <div style="font-size:12px;font-weight:600;color:var(--violet);margin-bottom:10px"><i class="fa-solid fa-eye"></i> Aperçu du cycle extrait du planning</div>
+      <div id="ccPreviewBody" style="font-size:12px;color:var(--ink2)">Sélectionnez un collaborateur et cliquez sur Aperçu.</div>
+    </div>
+  </div>
+  <div class="mact">
+    <button class="btn g" onclick="closeModal()">Annuler</button>
+    <button class="btn g" id="ccPreviewBtn"><i class="fa-solid fa-eye"></i> Aperçu</button>
+    <button class="btn p" id="ccSave" disabled><i class="fa-solid fa-check"></i> Enregistrer ce cycle</button>
+  </div>`;
+  $('modalbg').classList.add('on');
+
+  let extractedDays=[];
+
+  $('ccPreviewBtn').onclick=async()=>{
+    const eid=$('ccEmp').value;
+    const len=parseInt($('ccLen').value)||14;
+    const startD=$('ccStart').value;
+    if(!startD){flash('Date de début requise');return;}
+    // Lire le planning du mois affiché pour cet employé
+    const rows=await BE.listMonthPlanning(hotelId,cur.getFullYear(),cur.getMonth()).catch(()=>[]);
+    const empRows=rows.filter(r=>r.employee_id===eid);
+    // Construire les len premiers jours à partir de startD
+    extractedDays=[];
+    const startObj=new Date(startD+'T00:00:00');
+    for(let i=0;i<len;i++){
+      const d=new Date(startObj.getTime()+i*86400000);
+      const ds=d.toISOString().slice(0,10);
+      const row=empRows.find(r=>r.day===ds);
+      const code=row?.status||'';
+      const isWork=code==='P'||code==='PE';
+      const isOff=!code||code==='';
+      let status=isWork?'work':(isOff?'off':null);
+      if(!status&&PROTECTED_CODES.has(code)) status='off'; // congé = repos pour détecter le cycle
+      extractedDays.push({day:i+1,date:ds,code,status:status||'off'});
+    }
+    const workCount=extractedDays.filter(d=>d.status==='work').length;
+    const offCount=extractedDays.filter(d=>d.status==='off').length;
+    $('ccPreviewBody').innerHTML=`
+      <div style="font-size:11px;color:var(--ink2);margin-bottom:8px">Cycle extrait : <b>${workCount}</b> jours travaillés, <b>${offCount}</b> jours de repos sur ${len} jours.</div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">
+        ${extractedDays.map(d=>`<div style="text-align:center;padding:5px 3px;border-radius:7px;font-size:11px;border:1.5px solid ${d.status==='work'?'var(--violet)':'#d1d5db'};background:${d.status==='work'?'#ede9fe':'#f9fafb'};color:${d.status==='work'?'var(--violet)':'#6b7280'}">
+          J${d.day}<br><span style="font-size:9px">${d.date.slice(5)}</span><br><span style="font-size:9px">${d.code||'—'}</span>
+        </div>`).join('')}
+      </div>
+      <div style="font-size:11px;color:#92400e;background:#fef3c7;border-radius:6px;padding:8px;margin-top:10px"><i class="fa-solid fa-triangle-exclamation"></i> Vérifiez et ajustez si nécessaire. Le cycle sera enregistré tel quel.</div>
+    `;
+    $('ccSave').disabled=false;
+  };
+
+  $('ccSave').onclick=async()=>{
+    const eid=$('ccEmp').value;
+    const len=parseInt($('ccLen').value)||14;
+    const startD=$('ccStart').value;
+    if(!extractedDays.length){flash('Cliquez sur Aperçu d\'abord');return;}
+    $('ccSave').disabled=true;
+    try{
+      const cycleDays=extractedDays.map(d=>({day:d.day,status:d.status}));
+      await BE.saveWorkPattern(hotelId,eid,{pattern_type:'rotating_cycle',cycle_start_date:startD,cycle_length_days:len,cycle_days:cycleDays,fixed_days_off:null});
+      workPatternsCache[eid]=null; // invalider cache
+      const emp=staff.find(s=>s.id===eid);
+      if(emp){Object.assign(emp,{work_pattern_type:'rotating_cycle',cycle_start_date:startD,cycle_length_days:len,cycle_days:cycleDays});}
+      closeModal(); flash('Cycle enregistré dans la fiche collaborateur');
+    }catch(e){flash('Erreur : '+e.message);}
+    finally{$('ccSave').disabled=false;}
+  };
+}
+
+/* ===================== MODALE : AUTO-REMPLIR ===================== */
+async function openAutoFillModal(){
+  const y=cur.getFullYear(), m=cur.getMonth();
+  const now=new Date();
+
+  $('modal').innerHTML=mhHTML('fa-solid fa-wand-magic-sparkles','Générer le planning automatiquement',`Basé sur les rythmes paramétrés dans les fiches collaborateurs`)+`
+  <div class="mb">
+    <div style="font-size:12px;font-weight:600;color:var(--ink);margin-bottom:12px">Périmètre</div>
+    <div class="fld"><label>Collaborateurs concernés</label>
+      <select id="afScope">
+        <option value="all">Tous les collaborateurs visibles (${visibleRows.length})</option>
+        <option value="dept">Par service…</option>
+        <option value="emp">Un collaborateur…</option>
+      </select>
+    </div>
+    <div id="afDeptWrap" style="display:none" class="fld"><label>Service</label>
+      <select id="afDept"><option value="">— Sélectionner —</option>${[...new Set(staff.map(s=>s.department||'Sans service'))].map(d=>`<option>${d}</option>`).join('')}</select>
+    </div>
+    <div id="afEmpWrap" style="display:none" class="fld"><label>Collaborateur</label>
+      <select id="afEmp">${visibleRows.map(s=>`<option value="${s.id}">${s.last_name} ${s.first_name}</option>`).join('')}</select>
+    </div>
+    <div style="margin-top:14px;font-size:12px;font-weight:600;color:var(--ink);margin-bottom:8px">Période</div>
+    <div class="row2">
+      <div class="fld"><label>Du</label><input type="date" id="afFrom" value="${iso(y,m,1)}"></div>
+      <div class="fld"><label>Au</label><input type="date" id="afTo" value="${iso(y,m,dim(y,m))}"></div>
+    </div>
+    <div style="margin-top:14px;font-size:12px;font-weight:600;color:var(--ink);margin-bottom:8px">Mode sécurisé</div>
+    <div style="display:flex;flex-direction:column;gap:8px;font-size:12px;color:var(--ink2)">
+      <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="afSafe" checked> Ne remplir que les cellules vides (recommandé)</label>
+      <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="afProtect" checked> Protéger CP, RTT, MAL, MAT, ABS, et tous congés/absences</label>
+    </div>
+    <div id="afSummary" style="display:none;margin-top:16px;padding:14px;background:#f8f7ff;border-radius:10px;border:1px solid var(--line)"></div>
+  </div>
+  <div class="mact">
+    <button class="btn g" onclick="closeModal()">Annuler</button>
+    <button class="btn g" id="afPreviewBtn"><i class="fa-solid fa-eye"></i> Prévisualiser</button>
+    <button class="btn p" id="afApplyBtn" disabled><i class="fa-solid fa-wand-magic-sparkles"></i> Appliquer</button>
+  </div>`;
+  $('modalbg').classList.add('on');
+
+  $('afScope').onchange=()=>{
+    $('afDeptWrap').style.display=$('afScope').value==='dept'?'':'none';
+    $('afEmpWrap').style.display=$('afScope').value==='emp'?'':'none';
+  };
+
+  let previewResult=null;
+
+  $('afPreviewBtn').onclick=async()=>{
+    $('afPreviewBtn').disabled=true;
+    $('afPreviewBtn').textContent='Calcul…';
+    try{
+      previewResult=await computeAutoFill();
+      renderAutoFillSummary(previewResult);
+      $('afApplyBtn').disabled=previewResult.toCreate.length===0;
+    }catch(e){flash('Erreur prévisualisation : '+e.message);console.error(e);}
+    finally{$('afPreviewBtn').disabled=false;$('afPreviewBtn').innerHTML='<i class="fa-solid fa-eye"></i> Prévisualiser';}
+  };
+
+  $('afApplyBtn').onclick=async()=>{
+    if(!previewResult){flash('Prévisualisez d\'abord');return;}
+    $('afApplyBtn').disabled=true;
+    $('afApplyBtn').textContent='Application…';
+    try{
+      await applyAutoFill(previewResult);
+      await loadMonth();
+      closeModal();
+      flash(`Planning généré : ${previewResult.toCreate.length} cellules remplies`);
+    }catch(e){flash('Erreur application : '+e.message);console.error(e);}
+    finally{$('afApplyBtn').disabled=false;$('afApplyBtn').innerHTML='<i class="fa-solid fa-wand-magic-sparkles"></i> Appliquer';}
+  };
+}
+
+async function computeAutoFill(){
+  const scope=$('afScope').value;
+  const fromStr=$('afFrom').value;
+  const toStr=$('afTo').value;
+  const safeOnly=$('afSafe').checked;
+  const protectAbs=$('afProtect').checked;
+  if(!fromStr||!toStr){throw new Error('Dates de période requises');}
+  const fromD=new Date(fromStr+'T00:00:00');
+  const toD=new Date(toStr+'T00:00:00');
+  if(fromD>toD){throw new Error('Date de fin avant date de début');}
+
+  // Sélectionner les employés
+  let targetEmps=visibleRows;
+  if(scope==='dept'){
+    const dept=$('afDept').value;
+    if(!dept){throw new Error('Sélectionnez un service');}
+    targetEmps=visibleRows.filter(s=>(s.department||'Sans service')===dept);
+  } else if(scope==='emp'){
+    const eid=$('afEmp').value;
+    targetEmps=visibleRows.filter(s=>s.id===eid);
+  }
+
+  // Charger les planning existants sur toute la période
+  // On charge mois par mois
+  const months=new Set();
+  for(let d=new Date(fromD);d<=toD;d.setMonth(d.getMonth()+1)){
+    months.add(d.getFullYear()+'-'+(d.getMonth()));
+  }
+  const existingRows=[];
+  for(const mk of months){
+    const [y,m]=mk.split('-').map(Number);
+    const rows=await BE.listMonthPlanning(hotelId,y,m).catch(()=>[]);
+    existingRows.push(...rows);
+  }
+  const existMap=new Map(existingRows.map(r=>[r.employee_id+'|'+r.day,r.status||'']));
+
+  // Charger les patterns
+  const patternMap={};
+  await Promise.all(targetEmps.map(async emp=>{
+    patternMap[emp.id]=await BE.listWorkPattern(hotelId,emp.id).catch(()=>null);
+  }));
+
+  const toCreate=[];
+  const skipped=[];
+  const protected_=[];
+  const noRule=[];
+  const conflicts=[];
+
+  // Itérer sur chaque (employé, date)
+  for(const emp of targetEmps){
+    const pat=patternMap[emp.id];
+    if(!pat||pat.pattern_type==='manual'){
+      noRule.push({emp,reason:'Mode manuel / aucune règle'});
+      continue;
+    }
+    if(pat.pattern_type==='rotating_cycle'&&(!pat.cycle_start_date||!pat.cycle_length_days||!pat.cycle_days?.length)){
+      noRule.push({emp,reason:'Cycle incomplet (manque date de départ ou jours)'});
+      continue;
+    }
+
+    for(let d=new Date(fromD);d<=toD;d.setDate(d.getDate()+1)){
+      const ds=d.toISOString().slice(0,10);
+      const key=emp.id+'|'+ds;
+      const existing=existMap.get(key);
+
+      // Protéger les absences/congés
+      if(protectAbs&&existing!==undefined&&PROTECTED_CODES.has(existing)){
+        protected_.push({emp,date:ds,existing,reason:'Absence/congé protégé'});
+        continue;
+      }
+
+      // Mode sécurisé : ne toucher que les vides
+      if(safeOnly&&existing!==undefined&&existing!==''){
+        skipped.push({emp,date:ds,existing,reason:'Cellule déjà renseignée'});
+        continue;
+      }
+
+      const result=computeCodeForDate(emp, new Date(d), pat);
+      if(result===null){
+        // Avant le cycle — ignorer silencieusement
+        continue;
+      }
+
+      toCreate.push({hotel_id:hotelId,employee_id:emp.id,day:ds,status:result.code,duration:result.code==='P'?1:null,reason:result.reason,old_value:existing||''});
+    }
+  }
+
+  return {toCreate,skipped,protected_,noRule,conflicts,targetEmps,patternMap,fromStr,toStr};
+}
+
+function renderAutoFillSummary(r){
+  const workCount=r.toCreate.filter(x=>x.status==='P').length;
+  const offCount=r.toCreate.filter(x=>x.status==='').length;
+  const noRuleNames=[...new Set(r.noRule.map(x=>`${x.emp.last_name} ${x.emp.first_name}`))];
+  const summary=$('afSummary');
+  summary.style.display='';
+  summary.innerHTML=`
+    <div style="font-size:12px;font-weight:700;color:var(--violet);margin-bottom:10px"><i class="fa-solid fa-list-check"></i> Prévisualisation</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;margin-bottom:12px">
+      <div style="background:#e8f5e9;border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:700;color:#1b5e20">${workCount}</div><div style="color:#2e7d32">Cellules P (travail)</div></div>
+      <div style="background:#f1f0fb;border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:700;color:var(--violet)">${offCount}</div><div style="color:var(--violet-d)">Cellules vides (repos)</div></div>
+      <div style="background:#fef3c7;border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:700;color:#92400e">${r.skipped.length}</div><div style="color:#78350f">Ignorées (déjà saisies)</div></div>
+      <div style="background:#fce7f3;border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:700;color:#9d174d">${r.protected_.length}</div><div style="color:#831843">Protégées (absences)</div></div>
+    </div>
+    ${noRuleNames.length?`<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:10px;font-size:12px;color:#9a3412"><i class="fa-solid fa-triangle-exclamation"></i> <b>Sans règle paramétrée (ignorés) :</b> ${noRuleNames.join(', ')}</div>`:''}
+    ${r.toCreate.length===0?'<div style="color:#dc2626;font-size:12px;margin-top:8px;font-weight:600">Aucune cellule à générer. Vérifiez que les rythmes sont bien paramétrés.</div>':''}
+  `;
+}
+
+async function applyAutoFill(r){
+  if(!r.toCreate.length) return;
+  // Sauvegarder le planning
+  // Repos = cellule vide = pas de ligne en base (delete). Séparer en 2 listes.
+  const toInsert=r.toCreate.filter(x=>x.status==='P');
+  const toDelete=r.toCreate.filter(x=>x.status==='').map(x=>({hotel_id:x.hotel_id,employee_id:x.employee_id,day:x.day}));
+  const upserts=toInsert.map(x=>({hotel_id:x.hotel_id,employee_id:x.employee_id,day:x.day,status:'P',duration:1}));
+  await BE.savePlanning(hotelId, upserts, toDelete);
+  // Sauvegarder l'historique du run (best-effort)
+  try{
+    const run=await BE.saveGenerationRun(hotelId,{
+      scope_type:$('afScope').value==='all'?'establishment':($('afScope').value==='dept'?'service':'employee'),
+      scope_id:$('afScope').value==='dept'?$('afDept').value:($('afScope').value==='emp'?$('afEmp').value:null),
+      period_start:r.fromStr, period_end:r.toStr,
+      mode:$('afSafe').checked?'safe':'force',
+      status:'done',
+      summary_json:{created:r.toCreate.length,skipped:r.skipped.length,protected:r.protected_.length,no_rule:r.noRule.length}
+    });
+    if(run?.id){
+      const items=r.toCreate.map(x=>({run_id:run.id,employee_id:x.employee_id,date:x.day,old_value:x.old_value||'',new_value:x.status,action:'created',reason:x.reason}));
+      await BE.saveGenerationItems(items);
+    }
+  }catch(e){console.warn('Historique génération non sauvegardé:',e);}
+}
 
 /* ---- Helper : en-tête standard de modale ----
    icon    = classe Font Awesome  ex: 'fa-solid fa-upload'
@@ -6239,6 +6901,7 @@ window.__rh={
   myRole:()=>myRole,
   staff:()=>staff,
   openFiche, openEmpForm, openTemplateForm, openGenerateWizard,
+  toggleCycleDay, openCreateCycleModal, openAutoFillModal,
   substituteVariables, buildContractContext,
   TEMPLATE_VARS, DOC_TYPES, CONTRACT_TYPES,
   setContractsSubTab:(t)=>{contractsSubTab=t;},
