@@ -400,7 +400,7 @@ async function loadEmployee(){
     hotel = h;
 
     // Mettre à jour last_login_at + journal d'audit
-    sb.from('employees').update({last_login_at: new Date().toISOString()}).eq('id',employee.id).catch(()=>{});
+    sb.from('employees').update({last_login_at: new Date().toISOString()}).eq('id',employee.id).then(null,()=>{});
     auditLog('login').catch(()=>{});
 
     renderShell();
@@ -553,7 +553,7 @@ function renderSetPassword(){
     const {error} = await sb.auth.updateUser({password: pwd});
     if(error){ showErr('Erreur : '+error.message); return; }
     if(employee?.id){
-      await sb.from('employees').update({must_change_password:false, last_login_at: new Date().toISOString()}).eq('id', employee.id).catch(()=>{});
+      await sb.from('employees').update({must_change_password:false, last_login_at: new Date().toISOString()}).eq('id', employee.id).then(null,()=>{});
     }
     employee = {...employee, must_change_password:false};
     const {data:h} = await sb.from('hotels').select('id,name,city').eq('id',employee.hotel_id).single();
@@ -1284,9 +1284,9 @@ window.handleDocUpload=async(file)=>{
       await sb.from('employee_documents').insert(payload);
     }
     // Marquer portal_document_requests comme soumis si applicable
-    await sb.from('portal_document_requests').update({status:'submitted',submitted_at:new Date().toISOString()}).eq('employee_id',employee.id).eq('doc_type',docType).eq('status','pending').catch(()=>{});
+    await sb.from('portal_document_requests').update({status:'submitted',submitted_at:new Date().toISOString()}).eq('employee_id',employee.id).eq('doc_type',docType).eq('status','pending').then(null,()=>{});
     // Notifier RH via portal_messages
-    await sb.from('portal_messages').insert({hotel_id:employee.hotel_id,employee_id:employee.id,direction:'employee_to_manager',body:`Nouveau document déposé : ${docType}. En attente de validation RH.`,read_at:null}).catch(()=>{});
+    await sb.from('portal_messages').insert({hotel_id:employee.hotel_id,employee_id:employee.id,direction:'employee_to_manager',body:`Nouveau document déposé : ${docType}. En attente de validation RH.`,read_at:null}).then(null,()=>{});
   }catch(eDb){ console.warn('employee_documents insert:', eDb); }
 
   if(prog) prog.innerHTML=`<div class="info-box" style="background:#f0fdf4;color:#16a34a"><i class="fa-solid fa-check"></i>Document envoyé — en attente de validation RH</div>`;
