@@ -11,12 +11,22 @@ const ALLOWED = [
   'http://localhost','http://localhost:3000','http://localhost:5173',
   'https://flowtym.com','https://app.flowtym.com','https://rh.flowtym.com',
   'https://hzrzkvdebaadditvbqis.supabase.co',
+  // Vercel deployments (production alias + branch previews)
+  'https://flowtym-rh-git-main-walis-projects-e22749ce.vercel.app',
+  'https://flowtym-rh.vercel.app',
 ];
-const cors = (o: string|null) => ({
-  'Access-Control-Allow-Origin': (o && ALLOWED.some(a=>o.startsWith(a))) ? o : ALLOWED[0],
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-});
+const cors = (o: string|null) => {
+  const allowed = o && (
+    ALLOWED.some(a => o.startsWith(a)) ||
+    // Allow any flowtym Vercel preview deploy
+    /^https:\/\/flowtym-[a-z0-9]+-walis-projects-e22749ce\.vercel\.app$/.test(o)
+  ) ? o : ALLOWED[0];
+  return {
+    'Access-Control-Allow-Origin': allowed,
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  };
+};
 
 const VALID_ROLES = ['direction','admin_hotel','comptabilite','revenue_manager',
   'reception','gouvernante','maintenance','breakfast','femme_de_chambre'];
@@ -28,7 +38,7 @@ Deno.serve(async (req) => {
     new Response(JSON.stringify(b), { status:s, headers:{...h,'Content-Type':'application/json'} });
 
   try {
-    const { email, full_name, role, hotel_id, access_type = 'manager' } = await req.json();
+    const { email, full_name, role, hotel_id, access_type = 'manager', employee_id } = await req.json();
 
     if (!email || !role || !hotel_id) return json({error:'email, role et hotel_id sont requis'},400);
     if (!VALID_ROLES.includes(role))  return json({error:`Rôle inconnu : ${role}`},400);
@@ -57,7 +67,7 @@ Deno.serve(async (req) => {
     const redirectTo = access_type === 'salarie' ? REDIRECT_SALARIE : REDIRECT_MANAGER;
 
     // --- Chercher si l'utilisateur existe déjà dans Auth ---
-    const { data: listData } = await admin.auth.admin.listUsers();
+    const { data: listData } = await admin.auth.admin.listUsers({ perPage: 1000 });
     const existing = (listData?.users ?? []).find((u: {email?:string;id:string}) =>
       (u.email ?? '').toLowerCase() === email.toLowerCase());
 
@@ -66,7 +76,6 @@ Deno.serve(async (req) => {
     let magicLinkSent  = false;
 
     if (existing) {
-      // Utilisateur existant : juste mettre à jour l'accès, envoyer un magic link
       alreadyExisted = true;
       targetAuthId = existing.id;
 
@@ -78,7 +87,6 @@ Deno.serve(async (req) => {
       magicLinkSent = !mlErr;
 
     } else {
-      // Nouvel utilisateur : inviter par e-mail (l'utilisateur définit son mdp)
       const { data: inv, error: invErr } = await admin.auth.admin.inviteUserByEmail(email, {
         redirectTo,
         data: {
@@ -95,48 +103,46 @@ Deno.serve(async (req) => {
 
     if (!targetAuthId) return json({error:"Impossible de retrouver l'utilisateur Auth"},500);
 
-    // --- Upsert atomique public.users + user_hotels ---
-    const { data: userId, error: rpcErr } = await admin.rpc('rh_grant_hotel_access', {
-      p_auth_id:   targetAuthId,
-      p_email:     email,
-      p_full_name: full_name || '',
-      p_hotel_id:  hotel_id,
-      p_role:      role,
-    });
-    if (rpcErr) return json({error:'Erreur base de données : '+rpcErr.message},500);
+    let userId: string|null = null;
 
-    // --- Pour le portail salarié : lier le compte Auth à la fiche employé ---
     if (access_type === 'salarie') {
-      await admin.from('employees')
-        .update({ portal_auth_id: targetAuthId, portal_enabled: true })
-        .eq('email', email)
-        .eq('hotel_id', hotel_id);
+      // --- Portail salarié : lier le compte Auth à la fiche employé UNIQUEMENT ---
+      // On NE crée PAS de user_hotels : le salarié ne doit pas avoir accès manager.
+      // On identifie l'employé par employee_id (priorité) ou par email.
+      const empPatch = { portal_auth_id: targetAuthId, portal_enabled: true, must_change_password: true };
+      const empQuery = employee_id
+        ? admin.from('employees').update(empPatch).eq('id', employee_id).eq('hotel_id', hotel_id)
+        : admin.from('employees').update(empPatch).eq('email', email).eq('hotel_id', hotel_id);
+
+      const { error: empErr } = await empQuery;
+      if (empErr) console.error('employees portal link error:', empErr.message);
+
+      userId = targetAuthId;
+
+    } else {
+      // --- Manager : upsert public.users + user_hotels ---
+      const { data: uid, error: rpcErr } = await admin.rpc('rh_grant_hotel_access', {
+        p_auth_id:   targetAuthId,
+        p_email:     email,
+        p_full_name: full_name || '',
+        p_hotel_id:  hotel_id,
+        p_role:      role,
+      });
+      if (rpcErr) return json({error:'Erreur base de données : '+rpcErr.message},500);
+      userId = uid;
     }
 
     // --- Audit log (best-effort) ---
     try {
-      await admin.rpc('gen_audit_log_invite', {
-        p_hotel_id:    hotel_id,
-        p_actor_id:    cu.id,
-        p_actor_email: user.email,
-        p_entity_id:   userId,
-        p_details:     JSON.stringify({ email, role, access_type, already_existed: alreadyExisted }),
+      await admin.from('hr_document_audit_logs').insert({
+        hotel_id,
+        actor_user_id: cu.id,
+        actor_email:   user.email,
+        action:        'invite_user',
+        entity_type:   access_type === 'salarie' ? 'employee_portal' : 'user',
+        details:       { email, role, access_type, already_existed: alreadyExisted },
       });
-    } catch(_) {
-      // Fallback direct insert si la RPC n'existe pas
-      try {
-        await admin.from('hr_document_audit_logs').insert({
-          id:            crypto.randomUUID(),
-          hotel_id,
-          actor_user_id: cu.id,
-          actor_email:   user.email,
-          action:        'invite_user',
-          entity_type:   'user',
-          entity_id:     userId ?? undefined,
-          details:       { email, role, access_type, already_existed: alreadyExisted },
-        });
-      } catch(_2) {}
-    }
+    } catch(_) {}
 
     return json({
       success: true,
