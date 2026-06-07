@@ -475,8 +475,6 @@ function saveCustomColors(hid){
   CODES.forEach(c=>{ s[c[0]]={bg:c[2],fg:c[3]}; });
   localStorage.setItem('fty_colors_'+hid, JSON.stringify(s));
 }
-// Default PERMS snapshot for reset
-const DEFAULT_PERMS_JSON = null; // filled after PERMS defined
 function applyCustomPerms(hid){
   // localStorage permissions overrides supprimés (vecteur d'attaque).
   // Les permissions sont définies uniquement par PERMS (hardcodé).
@@ -9245,7 +9243,7 @@ window.__rh={
   setMonth:(y,m)=>{cur=new Date(y,m,1);loadMonth();},
   mapCode, sameName, normName,
   exportExcel, exportPDF,
-  PERMS, ROLE_LABELS, canSee, canFicheFull, canManageUsers,
+  DEFAULT_PERMISSIONS, ROLE_LABELS, canSee, canDo, canFicheFull, canManageUsers,
   setRole:(r)=>{ myRole=r; renderShell(); },
   myRole:()=>myRole,
   staff:()=>staff,
