@@ -469,12 +469,12 @@ function wireAuthStep1(){
       email,
       options:{
         emailRedirectTo: window.location.href,
-        shouldCreateUser: false,  // Seuls les comptes invités peuvent se connecter
+        shouldCreateUser: true,  // Crée le compte si premier accès (activé côté RH)
         data:{ portal_login: true }
       }
     });
     if(error){
-      flash('Erreur : ' + (error.message==='Signups not allowed for otp'?'Email non reconnu — contactez votre RH':error.message));
+      flash('Erreur : ' + error.message);
       $('authSend').disabled=false;
       $('authSend').innerHTML='<i class="fa-solid fa-paper-plane"></i> Recevoir le lien';
       return;

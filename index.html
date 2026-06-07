@@ -614,8 +614,8 @@ async function makeRealBE(){
     async listAccess(h){const {data,error}=await sb.rpc('rh_list_users_for_hotel',{p_hotel:h});must(error,"Liste des accès");return data||[];},
     async updateAccess(h,user_id,role){const {error}=await sb.rpc('rh_update_user_role',{p_hotel:h,p_user_id:user_id,p_role:role});must(error,"Modification du rôle");},
     async revokeAccess(h,user_id){const {error}=await sb.rpc('rh_revoke_user_access',{p_hotel:h,p_user_id:user_id});must(error,"Révocation accès");},
-    async inviteUser(h,email,full_name,role,access_type='manager'){
-      const {data,error}=await sb.functions.invoke('invite-user',{body:{hotel_id:h,email,full_name,role,access_type}});
+    async inviteUser(h,email,full_name,role,access_type='manager',employee_id=null){
+      const {data,error}=await sb.functions.invoke('invite-user',{body:{hotel_id:h,email,full_name,role,access_type,...(employee_id?{employee_id}:{})}});
       if(error){
         let msg=error.message||'Erreur inconnue';
         try{const ctx=error.context;if(ctx?.json){const j=await ctx.json();if(j?.error)msg=j.error;}
@@ -1121,8 +1121,8 @@ const PERMS = {
   admin_hotel:      { tabs:'all',                                                                                                                                                                              ficheFull:true,  manageUsers:true  },
   comptabilite:     { tabs:['dashboard','reporting','personnel','contracts','absences','pointage','tracking','payroll','equipment'],                                                                           ficheFull:true,  manageUsers:false },
   revenue_manager:  { tabs:['dashboard','reporting'],                                                                                                                                                          ficheFull:false, manageUsers:false },
-  reception:        { tabs:['dashboard','planning','personnel','absences','portal_inbox'],                                                                                                                     ficheFull:false, manageUsers:false },
-  gouvernante:      { tabs:['dashboard','planning','personnel','absences','portal_inbox'],                                                                                                                     ficheFull:false, manageUsers:false },
+  reception:        { tabs:['dashboard','planning','personnel','absences','pointage','orgchart','portal_inbox'],                                                                                                 ficheFull:false, manageUsers:false },
+  gouvernante:      { tabs:['dashboard','planning','personnel','absences','pointage','orgchart','portal_inbox'],                                                                                                 ficheFull:false, manageUsers:false },
   maintenance:      { tabs:['dashboard','planning','personnel','absences','portal_inbox'],                                                                                                                     ficheFull:false, manageUsers:false },
   breakfast:        { tabs:['dashboard','planning','personnel','absences','portal_inbox'],                                                                                                                     ficheFull:false, manageUsers:false },
   femme_de_chambre: { tabs:['dashboard','planning'],                                                                                                                                                           ficheFull:false, manageUsers:false }
@@ -1240,8 +1240,24 @@ function openEmployeePanel(empId, docType){
   },200);
 }
 
+function renderAccessDenied(v){
+  $('view').innerHTML=`<div class="page" style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:60vh;gap:16px;text-align:center">
+    <i class="fa-solid fa-shield-halved" style="font-size:48px;color:var(--muted)"></i>
+    <h2 style="margin:0;color:var(--ink2)">Accès non autorisé</h2>
+    <p style="color:var(--muted);font-size:14px;max-width:320px">Votre rôle (<b>${ROLE_LABELS[myRole]||myRole||'—'}</b>) ne vous permet pas d'accéder à ce module.</p>
+    <button class="btn p" onclick="goView('dashboard')"><i class="fa-solid fa-house"></i> Retour au tableau de bord</button>
+    <button class="btn g" onclick="BE.signOut().then(()=>location.reload())"><i class="fa-solid fa-right-from-bracket"></i> Se déconnecter</button>
+  </div>`;
+}
+
 function goView(v){
-  if(!canSee(v)) v='dashboard';   // garde-fou : ne jamais ouvrir un onglet non autorisé
+  if(!canSee(v)){
+    // Afficher une page "Accès refusé" propre plutôt que rediriger silencieusement
+    view=v;
+    $('nav').querySelectorAll('.it').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
+    renderAccessDenied(v);
+    return;
+  }
   view=v;
   $('nav').querySelectorAll('.it').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
   const r={dashboard:renderDashboard, planning:renderPlanning, reporting:renderReporting,
@@ -7603,8 +7619,8 @@ async function invitePortal(eid, email){
   const full_name=((s.first_name||'')+' '+(s.last_name||'')).trim();
   try{
     // Appel de l'edge function invite-user (service_role côté serveur)
-    // access_type='salarie' → redirectTo = /salarie/auth/callback + MAJ portal_auth_id
-    await BE.inviteUser(hotelId, email, full_name, s.role||'reception', 'salarie');
+    // access_type='salarie' → invitation email, lien portal_auth_id, SANS user_hotels
+    await BE.inviteUser(hotelId, email, full_name, s.role||'reception', 'salarie', eid);
     flash('Invitation portail envoyée à '+email+' ✓');
     if(s){s.portal_enabled=true;loadPortalSection(s);}
   }catch(e){
