@@ -79,12 +79,25 @@ Deno.serve(async (req) => {
       alreadyExisted = true;
       targetAuthId = existing.id;
 
-      const { error: mlErr } = await admin.auth.admin.generateLink({
-        type: 'magiclink',
-        email,
-        options: { redirectTo },
-      });
-      magicLinkSent = !mlErr;
+      // Pour les utilisateurs existants et confirmés, generateLink ne déclenche PAS
+      // d'envoi d'email (c'est une API "lien personnalisé"). On utilise resetPasswordForEmail
+      // via le client anon, qui envoie réellement l'email de réinitialisation.
+      const isConfirmed = !!(existing as {email_confirmed_at?: string}).email_confirmed_at;
+      if (isConfirmed) {
+        const anonClient = createClient(SUPABASE_URL, ANON_KEY);
+        const { error: resetErr } = await anonClient.auth.resetPasswordForEmail(email, {
+          redirectTo,
+        });
+        magicLinkSent = !resetErr;
+      } else {
+        // Compte non confirmé → re-générer le lien d'invitation
+        const { error: mlErr } = await admin.auth.admin.generateLink({
+          type: 'invite',
+          email,
+          options: { redirectTo },
+        });
+        magicLinkSent = !mlErr;
+      }
 
     } else {
       const { data: inv, error: invErr } = await admin.auth.admin.inviteUserByEmail(email, {
