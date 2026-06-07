@@ -620,15 +620,23 @@ function goTo(tab){
   document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('on', b.dataset.tab===tab));
   const v = $('view');
   v.scrollTop = 0;
-  ({
+  const fn = {
     planning: renderPlanning,
     clock:    renderClock,
     docs:     renderDocs,
     requests: renderRequests,
     messages: renderMessages,
     profile:  renderProfile,
-  }[tab]||renderPlanning)();
-  refreshBadges();
+  }[tab] || renderPlanning;
+  Promise.resolve(fn()).catch(e=>{
+    v.innerHTML=`<div style="padding:32px 16px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:12px">
+      <i class="fa-solid fa-triangle-exclamation" style="font-size:32px;color:var(--amber)"></i>
+      <div style="font-weight:700;color:var(--ink)">Erreur de chargement</div>
+      <div style="font-size:12.5px;color:var(--ink2);word-break:break-all">${esc(e.message||String(e))}</div>
+      <button class="btn btn-g" onclick="goTo('${tab}')"><i class="fa-solid fa-rotate"></i> Réessayer</button>
+    </div>`;
+  });
+  refreshBadges().catch(()=>{});
 }
 
 async function refreshBadges(){
@@ -800,6 +808,7 @@ function tickClock(){
 }
 
 async function loadClockings(){
+  try{
   const today=new Date().toISOString().slice(0,10);
   const weekStart=new Date(); weekStart.setDate(weekStart.getDate()-weekStart.getDay()+1);
   const wFrom=weekStart.toISOString().slice(0,10);
@@ -854,6 +863,9 @@ async function loadClockings(){
     <div style="font-size:12px;font-weight:600">${r.clock_out_ts?durationStr(r.clock_in_ts,r.clock_out_ts,r.break_minutes):'—'}</div>
   </div>`).join(''):
     '<div style="text-align:center;padding:16px;color:var(--ink2);font-size:13px">Aucun pointage cette semaine</div>';
+  }catch(e){
+    const tod=$('clockToday'); if(tod) tod.innerHTML=`<div style="color:var(--red);padding:12px;font-size:13px">${esc(e.message)}</div>`;
+  }
 }
 
 function durationStr(inTs,outTs,brk=0){
@@ -1018,7 +1030,7 @@ async function renderDocs(){
 
 async function loadDocs(){
   const el=$('docsContent'); if(!el) return;
-
+  try{
   // Charger les fichiers du bucket portal-documents/{hotel_id}/{employee_id}/
   const prefix=`${employee.hotel_id}/${employee.id}/`;
   const {data:files,error} = await sb.storage.from('portal-documents').list(prefix,{limit:200,sortBy:{column:'created_at',order:'desc'}});
@@ -1119,6 +1131,7 @@ async function loadDocs(){
   </div>`;
 
   el.innerHTML=h;
+  }catch(e){el.innerHTML=`<div style="color:var(--red);padding:16px;font-size:13px"><i class="fa-solid fa-triangle-exclamation"></i> ${esc(e.message)}</div>`;}
 }
 
 function docRow(d){
@@ -1307,6 +1320,7 @@ async function renderRequests(){
 
 async function loadRequests(){
   const el=$('reqList'); if(!el) return;
+  try{
   const {data,error}=await sb.from('portal_requests')
     .select('*')
     .eq('employee_id',employee.id)
@@ -1341,6 +1355,7 @@ async function loadRequests(){
     h+=`</div>`;
   });
   el.innerHTML=h;
+  }catch(e){el.innerHTML=`<div style="color:var(--red);padding:16px;font-size:13px"><i class="fa-solid fa-triangle-exclamation"></i> ${esc(e.message)}</div>`;}
 }
 
 window.openNewRequest=()=>{
@@ -1563,14 +1578,16 @@ window.sendMessage=async()=>{
 // ── Profil ────────────────────────────────────────────────────────────────────
 async function renderProfile(){
   const v=$('view');
+  v.innerHTML=`<div class="page"><div class="loading" style="padding:48px 0"><div class="spinner"></div></div></div>`;
+
   const initials=((employee.first_name||'?')[0]+(employee.last_name||'?')[0]).toUpperCase();
 
-  // Soldes CP
+  // Soldes CP (best-effort — table peut ne pas exister)
   const year=new Date().getFullYear();
   const {data:bal}=await sb.from('portal_leave_balances').select('*')
     .eq('employee_id',employee.id)
     .eq('year_start',`${year}-01-01`)
-    .single();
+    .maybeSingle();
 
   v.innerHTML=`<div class="page">
     <div class="profile-hero">
