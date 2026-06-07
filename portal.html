@@ -277,6 +277,7 @@ html,body{height:100%;background:var(--bg);font-family:-apple-system,BlinkMacSys
 
 const SUPABASE_URL  = "https://hzrzkvdebaadditvbqis.supabase.co";
 const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh6cnprdmRlYmFhZGRpdHZicWlzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxMjEwMTQsImV4cCI6MjA5MjY5NzAxNH0.IDFFWHNNIeBReWRTeVj8RlRpyz5J4XaStFhGVEYEBU8";
+const FUNCTIONS_URL = "https://hzrzkvdebaadditvbqis.supabase.co/functions/v1";
 
 let sbModule;
 try{
@@ -351,7 +352,15 @@ async function boot(){
   const {data:{session:s}} = await sb.auth.getSession();
   session = s;
 
-  if(!session){ renderAuth(); return; }
+  if(!session){
+    // Si l'URL contient un token QR (scan via appareil photo), mémoriser pour après connexion
+    const qp=new URLSearchParams(window.location.search);
+    if(qp.get('action')==='clock'&&qp.get('token')){
+      sessionStorage.setItem('pending_clock_token', qp.get('token'));
+      window.history.replaceState(null,'','/salarie');
+    }
+    renderAuth(); return;
+  }
   await loadEmployee();
 }
 
@@ -404,7 +413,17 @@ async function loadEmployee(){
     auditLog('login').catch(()=>{});
 
     renderShell();
-    goTo('planning');
+
+    // Si un token QR était en attente (scan via appareil photo avant connexion)
+    const pendingToken = sessionStorage.getItem('pending_clock_token');
+    if(pendingToken){
+      sessionStorage.removeItem('pending_clock_token');
+      goTo('clock');
+      // Déclencher le pointage automatiquement après chargement de la vue
+      setTimeout(()=>submitQrCode(pendingToken), 600);
+    } else {
+      goTo('planning');
+    }
   }catch(e){
     renderError(e.message);
   }
@@ -979,28 +998,65 @@ async function startQrScanner(){
 }
 
 async function submitQrCode(raw){
-  if(!raw) return;
-  // Format attendu : FTY-{hotel_id_court} ou URL contenant hotel_id
-  // On pointe simplement l'employé sur l'hôtel validé
-  const now=new Date();
-  const btn=$('clockBtn');
-  const isOut = btn?.dataset.openId;
+  if(!raw){flash('QR Code vide');return;}
+
+  // Extraire le token (URL: ?action=clock&token=xxx  ou  UUID brut)
+  let qrToken = raw.trim();
   try{
-    if(isOut){
-      await sb.from('staff_clockings').update({clock_out_ts:now.toISOString(),source:'qr'}).eq('id',btn.dataset.openId);
-      flash('Sortie pointée via QR ✓');
-      auditLog('clock_out_qr',{raw});
-    } else {
-      await sb.from('staff_clockings').insert({
-        hotel_id:employee.hotel_id,employee_id:employee.id,
-        day:now.toISOString().slice(0,10),
-        clock_in_ts:now.toISOString(),source:'qr'
-      });
-      flash('Entrée pointée via QR ✓');
-      auditLog('clock_in_qr',{raw});
-    }
+    const u=new URL(raw);
+    const t=u.searchParams.get('token');
+    if(t) qrToken=t;
+  }catch(_){}
+  if(!qrToken){flash('Format QR Code invalide');return;}
+
+  closeModal();
+  flash('Obtention de la position GPS…');
+
+  // Demander la géolocalisation
+  const getGps=()=>new Promise((resolve,reject)=>{
+    if(!navigator.geolocation){resolve({lat:null,lng:null,accuracy:null});return;}
+    navigator.geolocation.getCurrentPosition(
+      p=>resolve({lat:p.coords.latitude,lng:p.coords.longitude,accuracy:p.coords.accuracy}),
+      e=>{
+        if(e.code===1) reject(new Error('Géolocalisation refusée. Autorisez votre position dans les réglages du navigateur.'));
+        else resolve({lat:null,lng:null,accuracy:null}); // timeout/indisponible → on tente quand même
+      },
+      {enableHighAccuracy:true,timeout:10000,maximumAge:0}
+    );
+  });
+
+  let gps;
+  try{ gps=await getGps(); }
+  catch(e){ flash(e.message); return; }
+
+  flash('Validation en cours…');
+  try{
+    const {data:{session}}=await sb.auth.getSession();
+    if(!session) throw new Error('Session expirée, reconnectez-vous');
+
+    const resp=await fetch(`${FUNCTIONS_URL}/clock-portal`,{
+      method:'POST',
+      headers:{
+        'Authorization':`Bearer ${session.access_token}`,
+        'Content-Type':'application/json',
+        'apikey':SUPABASE_ANON,
+      },
+      body:JSON.stringify({
+        qr_token:qrToken,
+        gps_lat:gps.lat,
+        gps_lng:gps.lng,
+        gps_accuracy:gps.accuracy,
+        device_info:navigator.userAgent,
+      }),
+    });
+    const result=await resp.json();
+    if(!resp.ok||!result.success) throw new Error(result.error||'Erreur inconnue');
+
+    flash(result.message);
+    if(result.anomalies?.length) flash(`⚠️ Anomalie détectée : ${result.anomalies.join(', ')}`);
+    auditLog(result.action+'_qr',{token:qrToken,distance:result.distance_meters});
     await loadClockings();
-  }catch(e){flash('Erreur pointage : '+e.message);}
+  }catch(e){ flash('Erreur pointage : '+e.message); }
 }
 
 // ── Coffre-fort documents ─────────────────────────────────────────────────────

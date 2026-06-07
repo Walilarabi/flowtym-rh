@@ -5018,6 +5018,7 @@ async function renderConfig(){
     ['etages',    'fa-broom',              'Service Étages'],
     ['docs',      'fa-folder-open',        'Documents RH'],
     ['contrats',  'fa-file-signature',     'Contrats'],
+    ['pointage',  'fa-qrcode',             'Pointage QR'],
     ['access',    'fa-user-shield',        'Accès & Permissions'],
     ['security',  'fa-shield-halved',      'Sécurité'],
   ];
@@ -5039,6 +5040,7 @@ async function renderConfig(){
   else if(_cfgTab==='etages') await _cfgEtages();
   else if(_cfgTab==='docs')   _cfgDocs();
   else if(_cfgTab==='contrats') _cfgContrats();
+  else if(_cfgTab==='pointage') await _cfgPointage(hotel, isAdmin);
   else if(_cfgTab==='access') await _cfgAccess(isAdmin);
   else if(_cfgTab==='security') _cfgSecurity(hotel);
 }
@@ -5644,7 +5646,200 @@ function _cfgContrats(){
 }
 
 /* ──────────────────────────────────────────────
-   ONGLET 7 · ACCÈS & PERMISSIONS
+   ONGLET 7 · POINTAGE QR
+────────────────────────────────────────────── */
+async function _cfgPointage(hotel, isAdmin){
+  $('cfgBody').innerHTML=`
+    <div class="box" style="margin-bottom:16px">
+      <h3 style="margin:0 0 16px"><i class="fa-solid fa-toggle-on"></i> Activation</h3>
+      <div style="display:flex;align-items:center;gap:14px">
+        <label class="tog-wrap" id="qrEnabledTogWrap">
+          <input type="checkbox" id="qrEnabled" ${hotel.qr_clocking_enabled?'checked':''} ${isAdmin?'':'disabled'}>
+          <span class="tog-sw"></span>
+        </label>
+        <span style="font-size:13.5px;font-weight:500" id="qrEnabledLbl">${hotel.qr_clocking_enabled?'Pointage QR activé':'Pointage QR désactivé'}</span>
+      </div>
+      <p style="font-size:12.5px;color:var(--muted);margin:10px 0 0;max-width:560px">
+        Quand activé, les salariés peuvent pointer depuis leur portail en scannant le QR Code de l'hôtel. La géolocalisation est obligatoire si les coordonnées GPS sont renseignées.
+      </p>
+    </div>
+
+    <div class="box" style="margin-bottom:16px">
+      <h3 style="margin:0 0 16px"><i class="fa-solid fa-location-dot"></i> Géofence — Localisation de l'hôtel</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;max-width:640px">
+        <div class="fld"><label>Latitude</label>
+          <input type="number" id="hotelLat" value="${hotel.latitude??''}" step="0.000001" placeholder="ex: 48.856600" ${isAdmin?'':'readonly'}>
+        </div>
+        <div class="fld"><label>Longitude</label>
+          <input type="number" id="hotelLng" value="${hotel.longitude??''}" step="0.000001" placeholder="ex: 2.352200" ${isAdmin?'':'readonly'}>
+        </div>
+        <div class="fld"><label>Rayon autorisé (mètres)</label>
+          <input type="number" id="hotelRadius" value="${hotel.geofence_radius_meters??150}" min="30" max="2000" step="10" ${isAdmin?'':'readonly'}>
+        </div>
+      </div>
+      ${isAdmin?`<button class="btn g" id="geolocBtn" style="margin-top:8px;font-size:12px;padding:5px 10px"><i class="fa-solid fa-crosshairs"></i> Utiliser ma position actuelle</button>`:''}
+      <p style="font-size:12px;color:var(--muted);margin:8px 0 0">Si latitude et longitude sont vides, la géolocalisation n'est pas vérifiée (déconseillé).</p>
+    </div>
+
+    <div class="box" style="margin-bottom:16px">
+      <h3 style="margin:0 0 4px"><i class="fa-solid fa-sliders"></i> Tolérances</h3>
+      <p style="font-size:12.5px;color:var(--muted);margin:0 0 14px">Pour la détection d'anomalies dans l'historique (n'empêche pas le pointage).</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;max-width:420px">
+        <div class="fld"><label>Tolérance retard (min)</label>
+          <input type="number" id="clockLate" value="${hotel.clock_late_tolerance_minutes??15}" min="0" max="120" ${isAdmin?'':'readonly'}>
+        </div>
+        <div class="fld"><label>Tolérance départ anticipé (min)</label>
+          <input type="number" id="clockEarly" value="${hotel.clock_early_departure_tolerance_minutes??15}" min="0" max="120" ${isAdmin?'':'readonly'}>
+        </div>
+      </div>
+    </div>
+
+    ${isAdmin?`<div style="margin-bottom:16px">
+      <button class="btn p" id="saveQrSettings" style="padding:9px 18px"><i class="fa-solid fa-floppy-disk"></i> Enregistrer les paramètres</button>
+    </div>`:''}
+
+    <div class="box" style="margin-bottom:16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+        <h3 style="margin:0"><i class="fa-solid fa-qrcode"></i> QR Code de l'hôtel</h3>
+        ${isAdmin?`<div style="display:flex;gap:8px">
+          <button class="btn g" id="regenQrBtn" style="font-size:12px;padding:5px 10px"><i class="fa-solid fa-rotate"></i> Régénérer</button>
+          <button class="btn g" id="printQrBtn" style="font-size:12px;padding:5px 10px"><i class="fa-solid fa-print"></i> Imprimer</button>
+        </div>`:''}
+      </div>
+      <div id="qrCodeBox" style="text-align:center;padding:16px">Chargement…</div>
+    </div>
+
+    <div class="box">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+        <h3 style="margin:0"><i class="fa-solid fa-triangle-exclamation" style="color:#f59e0b"></i> Anomalies récentes</h3>
+        <span id="anomalyCount" style="font-size:12px;color:var(--muted)">Chargement…</span>
+      </div>
+      <div id="anomalyBox">Chargement…</div>
+    </div>`;
+
+  // ── Chargement dynamique de qrcodejs ────────────────────────────────────
+  async function ensureQrLib(){
+    if(window.QRCode) return;
+    await new Promise((res,rej)=>{
+      const s=document.createElement('script');
+      s.src='https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js';
+      s.onload=res; s.onerror=rej; document.head.appendChild(s);
+    });
+  }
+
+  // ── Afficher le QR Code ─────────────────────────────────────────────────
+  async function renderQrCode(){
+    const box=$('qrCodeBox');
+    const {data:tokens}=await BE.sb.from('hotel_qr_tokens')
+      .select('id,token,created_at,expires_at,is_active')
+      .eq('hotel_id',hotelId).eq('is_active',true).order('created_at',{ascending:false}).limit(1);
+    const tok=tokens?.[0];
+    if(!tok){
+      box.innerHTML=`<div style="color:var(--muted);font-size:13px;padding:20px">
+        Aucun QR Code généré.${isAdmin?' Cliquez sur <b>Régénérer</b> pour en créer un.':''}</div>`;
+      return;
+    }
+    const url=`https://rh.flowtym.com/salarie?action=clock&token=${tok.token}`;
+    box.innerHTML=`<div id="qrCanvas" style="display:inline-block;padding:16px;background:#fff;border:1px solid var(--line);border-radius:12px;margin-bottom:12px"></div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:6px">Token actif depuis le ${new Date(tok.created_at).toLocaleDateString('fr-FR')}</div>
+      ${tok.expires_at?`<div style="font-size:11px;color:#b45309">Expire le ${new Date(tok.expires_at).toLocaleDateString('fr-FR')}</div>`:''}
+      <div style="font-size:10.5px;color:var(--muted);margin-top:6px;word-break:break-all;max-width:320px;margin-inline:auto">${esc(url)}</div>`;
+    await ensureQrLib();
+    new window.QRCode($('qrCanvas'),{text:url,width:200,height:200,colorDark:'#1a1a2e',colorLight:'#ffffff'});
+  }
+
+  // ── Générer/Régénérer le QR Code ────────────────────────────────────────
+  async function generateQrToken(){
+    // Désactiver les anciens tokens
+    await BE.sb.from('hotel_qr_tokens').update({is_active:false}).eq('hotel_id',hotelId).then(null,()=>{});
+    // Créer un nouveau token (expires_at = dans 90 jours)
+    const expiresAt=new Date(Date.now()+90*24*60*60*1000).toISOString();
+    const {error}=await BE.sb.from('hotel_qr_tokens').insert({
+      hotel_id:hotelId, is_active:true, expires_at:expiresAt, created_by_email:userEmail,
+    });
+    if(error) throw error;
+    flash('QR Code généré');
+    await renderQrCode();
+  }
+
+  // ── Anomalies ───────────────────────────────────────────────────────────
+  async function renderAnomalies(){
+    const {data}=await BE.sb.from('time_clock_anomalies')
+      .select('*,employees(first_name,last_name)')
+      .eq('hotel_id',hotelId).order('created_at',{ascending:false}).limit(50);
+    const rows=data||[];
+    $('anomalyCount').textContent=`${rows.length} anomalie${rows.length!==1?'s':''} (30 derniers jours)`;
+    const ANOM_LABELS={
+      gps_too_far:'GPS trop loin', gps_refused:'GPS refusé', gps_imprecise:'GPS imprécis',
+      wrong_hotel:'Mauvais hôtel', double_clocking:'Double pointage',
+      invalid_token:'Token invalide', no_gps:'Sans GPS',
+    };
+    $('anomalyBox').innerHTML=rows.length?`<table class="tbl" style="font-size:12px">
+      <thead><tr><th>Date</th><th>Salarié</th><th>Type</th><th>Détails</th></tr></thead>
+      <tbody>${rows.map(a=>`<tr>
+        <td style="white-space:nowrap;color:var(--muted)">${new Date(a.created_at).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</td>
+        <td>${esc((a.employees?.first_name||'')+' '+(a.employees?.last_name||''))}</td>
+        <td><span style="font-size:11px;background:#fef3c7;color:#92400e;padding:2px 7px;border-radius:6px;font-weight:600">${ANOM_LABELS[a.anomaly_type]||a.anomaly_type}</span></td>
+        <td style="font-size:11px;color:var(--muted)">${a.details?.distance_meters?`${a.details.distance_meters}m`:'—'}</td>
+      </tr>`).join('')}</tbody>
+    </table>`:'<div style="padding:16px;text-align:center;color:var(--muted);font-size:13px">Aucune anomalie détectée.</div>';
+  }
+
+  // ── Wiring ──────────────────────────────────────────────────────────────
+  $('qrEnabled')?.addEventListener('change',async function(){
+    if(!isAdmin) return;
+    $('qrEnabledLbl').textContent=this.checked?'Pointage QR activé':'Pointage QR désactivé';
+  });
+
+  $('geolocBtn')?.addEventListener('click',()=>{
+    if(!navigator.geolocation){flash('Géolocalisation non supportée');return;}
+    navigator.geolocation.getCurrentPosition(pos=>{
+      $('hotelLat').value=pos.coords.latitude.toFixed(6);
+      $('hotelLng').value=pos.coords.longitude.toFixed(6);
+      flash('Position récupérée');
+    },()=>flash('Impossible de récupérer la position'));
+  });
+
+  $('saveQrSettings')?.addEventListener('click',async()=>{
+    const patch={
+      qr_clocking_enabled: $('qrEnabled').checked,
+      latitude: parseFloat($('hotelLat').value)||null,
+      longitude: parseFloat($('hotelLng').value)||null,
+      geofence_radius_meters: parseInt($('hotelRadius').value)||150,
+      clock_late_tolerance_minutes: parseInt($('clockLate').value)||15,
+      clock_early_departure_tolerance_minutes: parseInt($('clockEarly').value)||15,
+    };
+    const {error}=await BE.sb.from('hotels').update(patch).eq('id',hotelId);
+    if(error) flash('Erreur : '+error.message);
+    else{ flash('Paramètres enregistrés'); renderConfig(); }
+  });
+
+  $('regenQrBtn')?.addEventListener('click',async()=>{
+    if(!confirm('Régénérer le QR Code ? L\'ancien sera désactivé immédiatement.')) return;
+    try{ await generateQrToken(); }catch(e){ flash('Erreur : '+(e.message||e)); }
+  });
+
+  $('printQrBtn')?.addEventListener('click',()=>{
+    const canvas=$('qrCanvas')?.querySelector('canvas');
+    const img=$('qrCanvas')?.querySelector('img');
+    const src=canvas?canvas.toDataURL():(img?.src||'');
+    if(!src){flash('QR Code non encore généré');return;}
+    const w=window.open('');
+    const hotelName=hotels.find(h=>h.id===hotelId)?.name||'Hôtel';
+    w.document.write(`<!DOCTYPE html><html><head><title>QR Code Pointage — ${hotelName}</title>
+      <style>body{font-family:sans-serif;text-align:center;padding:40px}h2{margin-bottom:8px}p{color:#666;font-size:14px}img{margin:20px 0}</style></head>
+      <body><h2>${hotelName}</h2><p>Scannez ce QR Code depuis votre Portail Salarié pour pointer</p>
+      <br><img src="${src}" style="width:240px;height:240px"><br>
+      <p style="font-size:12px">Flowtym RH — Pointage QR</p></body></html>`);
+    w.document.close(); w.print();
+  });
+
+  // Charger QR + anomalies en parallèle
+  await Promise.all([renderQrCode(), renderAnomalies()]);
+}
+
+/* ──────────────────────────────────────────────
+   ONGLET 8 · ACCÈS & PERMISSIONS
 ────────────────────────────────────────────── */
 async function _cfgAccess(isAdmin){
   const allRoleLabels=()=>({...ROLE_LABELS,...customRoles});
