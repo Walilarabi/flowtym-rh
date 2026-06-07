@@ -616,6 +616,13 @@ async function makeRealBE(){
     async revokeAccess(h,user_id){const {error}=await sb.rpc('rh_revoke_user_access',{p_hotel:h,p_user_id:user_id});must(error,"Révocation accès");},
     async listPortalEmployees(h){const {data,error}=await sb.from('employees').select('id,first_name,last_name,email,portal_enabled,portal_auth_id,must_change_password,last_login_at').eq('hotel_id',h).eq('portal_enabled',true).order('last_name');must(error,"Liste salariés portail");return data||[];},
     async revokePortalAccess(eid){const {error}=await sb.from('employees').update({portal_enabled:false,portal_auth_id:null,must_change_password:false}).eq('id',eid);must(error,"Révocation portail");},
+    async saveRolePermissions(h,role,permissions,actorEmail){const {error}=await sb.from('hotel_role_permissions').upsert({hotel_id:h,role,permissions,updated_at:new Date().toISOString(),updated_by_email:actorEmail},{onConflict:'hotel_id,role'});must(error,"Sauvegarde permissions");},
+    async deleteRolePermissions(h,role){const {error}=await sb.from('hotel_role_permissions').delete().eq('hotel_id',h).eq('role',role);must(error,"Suppression surcharges permissions");},
+    async logPermAudit(h,actorEmail,role,oldP,newP){await sb.from('permission_audit_logs').insert({hotel_id:h,actor_email:actorEmail,role,old_permissions:oldP,new_permissions:newP}).then(null,()=>{});},
+    async loadPermAudit(h){const {data,error}=await sb.from('permission_audit_logs').select('*').eq('hotel_id',h).order('changed_at',{ascending:false}).limit(50);must(error,"Historique permissions");return data||[];},
+    async listCustomRoles(h){const {data,error}=await sb.from('hotel_custom_roles').select('*').eq('hotel_id',h);must(error,"Rôles personnalisés");return data||[];},
+    async createCustomRole(h,roleKey,roleLabel,baseRole){const {error}=await sb.from('hotel_custom_roles').insert({hotel_id:h,role_key:roleKey,role_label:roleLabel,base_role:baseRole||null});must(error,"Création rôle personnalisé");},
+    async deleteCustomRole(h,roleKey){const {error}=await sb.from('hotel_custom_roles').delete().eq('hotel_id',h).eq('role_key',roleKey);must(error,"Suppression rôle personnalisé");},
     async inviteUser(h,email,full_name,role,access_type='manager',employee_id=null){
       const {data,error}=await sb.functions.invoke('invite-user',{body:{hotel_id:h,email,full_name,role,access_type,...(employee_id?{employee_id}:{})}});
       if(error){
@@ -894,6 +901,13 @@ function makeTestBE(){
     async revokeAccess(h,user_id){/* no-op en test */ return; },
     async listPortalEmployees(h){return [];},
     async revokePortalAccess(eid){return;},
+    async saveRolePermissions(h,role,permissions,actorEmail){},
+    async deleteRolePermissions(h,role){},
+    async logPermAudit(h,actorEmail,role,oldP,newP){},
+    async loadPermAudit(h){return [];},
+    async listCustomRoles(h){return [];},
+    async createCustomRole(h,roleKey,roleLabel,baseRole){},
+    async deleteCustomRole(h,roleKey){},
     async inviteUser(h,email,full_name,role,access_type='manager'){
       return {success:true,user_id:'inv-'+Date.now(),already_existed:false};
     },
@@ -1106,34 +1120,101 @@ async function start(){
 let view='planning';
 let userEmail='—';
 let myRole=null;          // rôle de l'utilisateur connecté pour l'hôtel actif
+let _cfgPermRole=null;    // rôle sélectionné dans l'UI de la matrice des permissions
 const LS={get(k){try{return localStorage.getItem(k);}catch(e){return null;}},set(k,v){try{localStorage.setItem(k,v);}catch(e){}}};
 let sidebarCollapsed = LS.get('rh_sidebar')==='1';
 
 /* ===== PERMISSIONS PAR RÔLE =====
-   - tabs : 'all' ou liste explicite des onglets visibles
-   - ficheFull : true = voit toutes les infos d'un collaborateur (docs, adresse, contact urgence)
-                 false = ne voit que les infos opérationnelles (nom, poste, téléphone, email, dates)
-   - manageUsers : true = peut accéder à Paramètres et gérer les accès et référentiels
+   DEFAULT_PERMISSIONS : matrice par défaut pour chaque rôle système.
+   hotelPerms : surcharges chargées depuis hotel_role_permissions (DB).
+   effectivePerms(role, module) : DEFAULT fusionné avec les surcharges DB.
+   Actions : view, create, edit, delete, export, validate, sensitive
 */
 const ROLE_LABELS = {
   direction:'Direction', admin_hotel:'Admin hôtel', comptabilite:'Comptabilité',
   revenue_manager:'Revenue manager', reception:'Réception', gouvernante:'Gouvernante',
   maintenance:'Maintenance', breakfast:'Petit-déjeuner', femme_de_chambre:'Femme de chambre'
 };
-const PERMS = {
-  direction:        { tabs:'all',                                                                                                                                                                              ficheFull:true,  manageUsers:true  },
-  admin_hotel:      { tabs:'all',                                                                                                                                                                              ficheFull:true,  manageUsers:true  },
-  comptabilite:     { tabs:['dashboard','reporting','personnel','contracts','absences','pointage','tracking','payroll','equipment'],                                                                           ficheFull:true,  manageUsers:false },
-  revenue_manager:  { tabs:['dashboard','reporting'],                                                                                                                                                          ficheFull:false, manageUsers:false },
-  reception:        { tabs:['dashboard','planning','personnel','absences','pointage','orgchart','portal_inbox'],                                                                                                 ficheFull:false, manageUsers:false },
-  gouvernante:      { tabs:['dashboard','planning','personnel','absences','pointage','orgchart','portal_inbox'],                                                                                                 ficheFull:false, manageUsers:false },
-  maintenance:      { tabs:['dashboard','planning','personnel','absences','portal_inbox'],                                                                                                                     ficheFull:false, manageUsers:false },
-  breakfast:        { tabs:['dashboard','planning','personnel','absences','portal_inbox'],                                                                                                                     ficheFull:false, manageUsers:false },
-  femme_de_chambre: { tabs:['dashboard','planning'],                                                                                                                                                           ficheFull:false, manageUsers:false }
+const MODULE_LABELS = {
+  dashboard:'Tableau de bord', planning:'Planning', reporting:'Reporting',
+  personnel:'Personnel', contracts:'Contrats', documents:'Documents RH',
+  absences:'Absences', pointage:'Pointage', tracking:'Suivi du temps',
+  payroll:'Paie', recruitment:'Recrutement', training:'Formations',
+  medical:'Visites médicales', equipment:'Matériel remis',
+  orgchart:'Organigramme', portal_inbox:'Demandes portail', config:'Paramètres',
 };
-function canSee(tab){if(!myRole)return false;const p=PERMS[myRole];if(!p)return false;if(p.tabs==='all')return true;return p.tabs.includes(tab);}
-function canFicheFull(){return PERMS[myRole]?.ficheFull===true;}
-function canManageUsers(){return PERMS[myRole]?.manageUsers===true;}
+const ALL_MODULES = Object.keys(MODULE_LABELS);
+const PERM_ACTIONS = [
+  ['view','Voir'],['create','Créer'],['edit','Modifier'],['delete','Supprimer'],
+  ['export','Exporter'],['validate','Valider'],['sensitive','Docs sensibles'],
+];
+function _p(v,c,e,d,x,val,s){return{view:!!v,create:!!c,edit:!!e,delete:!!d,export:!!x,validate:!!val,sensitive:!!s};}
+const _0=_p(0,0,0,0,0,0,0), _v=_p(1,0,0,0,0,0,0), _vc=_p(1,1,0,0,0,0,0), _all=_p(1,1,1,1,1,1,1);
+const _fullAccess=()=>Object.fromEntries(ALL_MODULES.map(m=>[m,{..._all}]));
+const DEFAULT_PERMISSIONS={
+  direction:   _fullAccess(),
+  admin_hotel: _fullAccess(),
+  comptabilite:{
+    dashboard:_p(1,0,0,0,1,0,0), planning:_v,                  reporting:_p(1,0,0,0,1,0,0),
+    personnel:_p(1,0,0,0,1,0,1), contracts:_p(1,0,0,0,1,0,1), documents:_p(1,0,0,0,1,0,1),
+    absences:_p(1,0,0,0,1,1,0),  pointage:_p(1,0,0,0,1,0,0),  tracking:_p(1,0,0,0,1,0,0),
+    payroll:_p(1,1,1,1,1,0,1),   recruitment:_0, training:_0,  medical:_0,
+    equipment:_v, orgchart:_v,    portal_inbox:_0, config:_0,
+  },
+  revenue_manager:{
+    dashboard:_v, planning:_v,   reporting:_p(1,0,0,0,1,0,0),
+    personnel:_0, contracts:_0,  documents:_0, absences:_0,
+    pointage:_0,  tracking:_0,   payroll:_0,   recruitment:_0,
+    training:_0,  medical:_0,    equipment:_0, orgchart:_0,
+    portal_inbox:_0, config:_0,
+  },
+  reception:{
+    dashboard:_v, planning:_v,   reporting:_0,
+    personnel:_v, contracts:_0,  documents:_0,
+    absences:_0,  pointage:_vc,  tracking:_0, payroll:_0,
+    recruitment:_0, training:_0, medical:_0,
+    equipment:_0, orgchart:_v,   portal_inbox:_0, config:_0,
+  },
+  gouvernante:{
+    dashboard:_v, planning:_p(1,1,1,0,0,0,0), reporting:_0,
+    personnel:_v, contracts:_0,               documents:_0,
+    absences:_p(1,0,0,0,0,1,0), pointage:_vc, tracking:_0, payroll:_0,
+    recruitment:_0, training:_0, medical:_0,
+    equipment:_0, orgchart:_v, portal_inbox:_p(1,0,0,0,0,1,0), config:_0,
+  },
+  maintenance:{
+    dashboard:_v, planning:_v,   reporting:_0,
+    personnel:_v, contracts:_0,  documents:_0,
+    absences:_0,  pointage:_0,   tracking:_0, payroll:_0,
+    recruitment:_0, training:_0, medical:_0,
+    equipment:_v, orgchart:_0,   portal_inbox:_v, config:_0,
+  },
+  breakfast:{
+    dashboard:_v, planning:_v,   reporting:_0,
+    personnel:_v, contracts:_0,  documents:_0,
+    absences:_0,  pointage:_0,   tracking:_0, payroll:_0,
+    recruitment:_0, training:_0, medical:_0,
+    equipment:_0, orgchart:_0,   portal_inbox:_v, config:_0,
+  },
+  femme_de_chambre:{
+    dashboard:_v, planning:_v,   reporting:_0,
+    personnel:_0, contracts:_0,  documents:_0,
+    absences:_0,  pointage:_0,   tracking:_0, payroll:_0,
+    recruitment:_0, training:_0, medical:_0,
+    equipment:_0, orgchart:_0,   portal_inbox:_0, config:_0,
+  },
+};
+let hotelPerms=null;    // surcharges DB chargées au boot
+let customRoles={};     // rôles personnalisés {roleKey: roleLabel}
+function effectivePerms(role,mod){
+  const db=hotelPerms?.[role]?.[mod];
+  if(db) return db;
+  return DEFAULT_PERMISSIONS[role]?.[mod]||{..._0};
+}
+function canSee(tab){if(!myRole)return false;return effectivePerms(myRole,tab).view===true;}
+function canDo(tab,action){if(!myRole)return false;return effectivePerms(myRole,tab)[action]===true;}
+function canFicheFull(){return canDo('personnel','sensitive');}
+function canManageUsers(){return canDo('config','edit');}
 
 const TABS=[
   ['Pilotage',[
@@ -1579,6 +1660,7 @@ function fillFilters(){
 async function loadHotel(){
   if(!BE.isTest) await BE.setActiveHotel(hotelId);
   await loadMyRole();
+  await loadRolePermissions();
   [deps, rols, staff, absenceTypes] = await Promise.all([
     BE.listDepartments(hotelId),
     BE.listRoles(hotelId),
@@ -1599,6 +1681,19 @@ async function loadMyRole(){
     if(error) throw error;
     myRole = data || null;
   }catch(e){ myRole=null; console.warn('Impossible de charger le rôle:', e); }
+}
+async function loadRolePermissions(){
+  if(BE.isTest){ hotelPerms=null; customRoles={}; return; }
+  try{
+    const [{data:hrp},{data:hcr}]=await Promise.all([
+      BE.sb.from('hotel_role_permissions').select('role,permissions').eq('hotel_id',hotelId),
+      BE.sb.from('hotel_custom_roles').select('role_key,role_label').eq('hotel_id',hotelId),
+    ]);
+    hotelPerms=null;
+    if(hrp&&hrp.length){hotelPerms={};hrp.forEach(r=>{hotelPerms[r.role]=r.permissions;});}
+    customRoles={};
+    (hcr||[]).forEach(r=>{customRoles[r.role_key]=r.role_label;});
+  }catch(e){hotelPerms=null;customRoles={};console.warn('loadRolePermissions:',e);}
 }
 async function loadMonth(){
   pending.clear(); selection.clear();
@@ -5500,6 +5595,8 @@ function _cfgContrats(){
    ONGLET 7 · ACCÈS & PERMISSIONS
 ────────────────────────────────────────────── */
 async function _cfgAccess(isAdmin){
+  const allRoleLabels=()=>({...ROLE_LABELS,...customRoles});
+
   $('cfgBody').innerHTML=`
     <div class="box" style="margin-bottom:16px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
@@ -5514,35 +5611,99 @@ async function _cfgAccess(isAdmin){
       </div>
       <div id="portalBox">Chargement…</div>
     </div>
-    <div class="box">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-        <h3 style="margin:0"><i class="fa-solid fa-table-cells"></i> Matrice des permissions par rôle</h3>
-        ${isAdmin?`<button class="btn g" id="permReset" style="font-size:11.5px;padding:5px 10px"><i class="fa-solid fa-rotate-left"></i> Réinitialiser</button>`:''}
+    <div class="box" style="margin-bottom:16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+        <h3 style="margin:0"><i class="fa-solid fa-shield-halved"></i> Permissions par rôle</h3>
+        ${isAdmin?`<div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn g" id="permCreateRoleBtn" style="font-size:11.5px;padding:5px 10px"><i class="fa-solid fa-plus"></i> Créer un rôle</button>
+          <button class="btn g" id="permDupeBtn" style="font-size:11.5px;padding:5px 10px"><i class="fa-solid fa-copy"></i> Dupliquer</button>
+          <button class="btn g" id="permResetBtn" style="font-size:11.5px;padding:5px 10px"><i class="fa-solid fa-rotate-left"></i> Restaurer par défaut</button>
+          <button class="btn p" id="permSaveBtn" style="font-size:11.5px;padding:5px 10px"><i class="fa-solid fa-floppy-disk"></i> Enregistrer</button>
+        </div>`:''}
       </div>
-      <table class="tbl" style="font-size:11.5px" id="permMatrix">
-        <thead><tr><th>Rôle</th><th>Onglets accessibles</th><th>Fiche complète</th><th>Gestion accès</th></tr></thead>
-        <tbody id="permRows"></tbody>
-      </table>
-    </div>`;
+      <div style="display:flex;gap:0;border:1px solid var(--line);border-radius:12px;overflow:hidden;min-height:320px">
+        <div style="width:190px;flex-shrink:0;border-right:1px solid var(--line);background:var(--bg2)" id="permRoleList">Chargement…</div>
+        <div style="flex:1;overflow-x:auto" id="permMatrixWrap"></div>
+      </div>
+    </div>
+    ${isAdmin?`<div class="box">
+      <h3 style="margin:0 0 12px"><i class="fa-solid fa-clock-rotate-left"></i> Historique des modifications</h3>
+      <div id="permAuditContent">Chargement…</div>
+    </div>`:''}`;
 
-  // Matrice des permissions
-  const allTabs=TABS.flatMap(g=>g[1]).filter(t=>!t[3]);
-  $('permRows').innerHTML=Object.entries(PERMS).map(([role,p])=>{
-    const tabLabel=p.tabs==='all'?'<span class="ok">Tous</span>':p.tabs.map(t=>{const f=allTabs.find(x=>x[0]===t);return f?f[1]:t;}).join(' · ');
-    const mkTog=(field,val)=>isAdmin?`<label class="tog-wrap"><input type="checkbox" class="perm-tog" data-role="${role}" data-field="${field}" ${val?'checked':''}><span class="tog-sw"></span></label>`:(val?'<span class="ok">Oui</span>':'<span style="color:var(--muted)">Non</span>');
-    return `<tr><td><b>${ROLE_LABELS[role]||role}</b></td><td style="font-size:11px">${tabLabel}</td><td>${mkTog('ficheFull',p.ficheFull)}</td><td>${mkTog('manageUsers',p.manageUsers)}</td></tr>`;
-  }).join('');
-  if(isAdmin){
-    $('permRows').querySelectorAll('.perm-tog').forEach(cb=>{cb.onchange=()=>{PERMS[cb.dataset.role][cb.dataset.field]=cb.checked;saveCustomPerms(hotelId);};});
-    $('permReset')?.addEventListener('click',()=>{if(!confirm('Réinitialiser toutes les permissions ?'))return;localStorage.removeItem('fty_perms_'+hotelId);location.reload();});
+  // Fonctions internes de rendu
+  function _renderPermRoleList(){
+    const rl=allRoleLabels();
+    $('permRoleList').innerHTML=Object.entries(rl).map(([k,lab])=>{
+      const isSelected=k===_cfgPermRole;
+      const hasOverride=!!(hotelPerms?.[k]);
+      const isSuper=k==='direction'||k==='admin_hotel';
+      return `<button class="perm-role-item" data-role="${k}" style="
+        display:flex;align-items:center;gap:8px;width:100%;padding:10px 14px;
+        border:none;border-bottom:1px solid var(--line);
+        background:${isSelected?'var(--violet-bg)':'transparent'};
+        color:${isSelected?'var(--violet-d)':'var(--ink2)'};
+        font-size:12.5px;font-weight:${isSelected?'600':'400'};
+        text-align:left;cursor:pointer;transition:background .15s">
+        <i class="fa-solid ${isSuper?'fa-crown':'fa-user-tie'}" style="font-size:10px;opacity:.6;flex-shrink:0"></i>
+        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(lab)}</span>
+        ${hasOverride?`<span title="Permissions personnalisées" style="width:7px;height:7px;border-radius:50%;background:var(--violet);flex-shrink:0"></span>`:''}
+        ${!isSuper&&Object.keys(customRoles).includes(k)?`<span title="Rôle personnalisé" style="font-size:9px;background:#fef9c3;color:#854d0e;padding:1px 5px;border-radius:4px;font-weight:600">perso</span>`:''}
+      </button>`;
+    }).join('');
+    $('permRoleList').querySelectorAll('.perm-role-item').forEach(b=>{
+      b.onmouseenter=()=>{if(b.dataset.role!==_cfgPermRole) b.style.background='var(--bg3)';};
+      b.onmouseleave=()=>{if(b.dataset.role!==_cfgPermRole) b.style.background='transparent';};
+      b.onclick=()=>{_cfgPermRole=b.dataset.role;_renderPermRoleList();_renderPermMatrix();};
+    });
+  }
+
+  function _renderPermMatrix(){
+    const role=_cfgPermRole;
+    if(!role){$('permMatrixWrap').innerHTML='<div style="padding:32px;text-align:center;color:var(--muted)">Sélectionnez un rôle</div>';return;}
+    const rl=allRoleLabels();
+    const roleLabel=rl[role]||role;
+    const isSuper=role==='direction'||role==='admin_hotel';
+    const editable=isAdmin&&!isSuper;
+    const thStyle=`padding:9px 10px;text-align:center;font-size:10.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;white-space:nowrap;border-bottom:1px solid var(--line);background:var(--bg2)`;
+    const tdCenStyle=`text-align:center;padding:7px 10px;border-bottom:1px solid var(--line)`;
+    $('permMatrixWrap').innerHTML=`
+      ${isSuper?`<div style="padding:10px 16px;background:#ede9fe;color:#5b21b6;font-size:12px;font-weight:600;border-bottom:1px solid var(--line)"><i class="fa-solid fa-crown" style="margin-right:6px"></i>${roleLabel} — Accès complet non révocable</div>`:''}
+      <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+        <thead><tr>
+          <th style="padding:9px 14px;text-align:left;font-size:10.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--line);background:var(--bg2);white-space:nowrap">Module</th>
+          ${PERM_ACTIONS.map(([,lab])=>`<th style="${thStyle}">${lab}</th>`).join('')}
+        </tr></thead>
+        <tbody>
+          ${ALL_MODULES.map((mod,i)=>{
+            const mp=effectivePerms(role,mod);
+            return `<tr style="${i%2===0?'background:#fff':'background:var(--bg2)'}">
+              <td style="padding:8px 14px;font-weight:500;color:var(--ink1);white-space:nowrap;border-bottom:1px solid var(--line)">${MODULE_LABELS[mod]}</td>
+              ${PERM_ACTIONS.map(([act])=>{
+                const val=mp[act];
+                if(isSuper) return `<td style="${tdCenStyle}"><i class="fa-solid fa-lock" style="color:#8b5cf6;font-size:11px" title="Accès complet"></i></td>`;
+                if(!editable) return `<td style="${tdCenStyle}">${val?'<i class="fa-solid fa-check" style="color:#16a34a;font-size:12px"></i>':'<i class="fa-solid fa-minus" style="color:#d1d5db;font-size:12px"></i>'}</td>`;
+                return `<td style="${tdCenStyle}"><label style="cursor:pointer;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px">
+                  <input type="checkbox" class="perm-cb" data-mod="${mod}" data-act="${act}" ${val?'checked':''}
+                    style="width:14px;height:14px;cursor:pointer;accent-color:#7c3aed">
+                </label></td>`;
+              }).join('')}
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>`;
   }
 
   // Section managers
   const ROLES_OPTS=Object.keys(ROLE_LABELS);
   try{
-    const list=await BE.listAccess(hotelId);
-    const portalEmp=await BE.listPortalEmployees(hotelId);
+    const [list,portalEmp,auditLog]=await Promise.all([
+      BE.listAccess(hotelId),
+      BE.listPortalEmployees(hotelId),
+      isAdmin?BE.loadPermAudit(hotelId):Promise.resolve([]),
+    ]);
 
+    // ── Managers ───────────────────────────────────────────────────────────
     $('accBox').innerHTML=`
       <table class="tbl">
         <thead><tr><th>Utilisateur</th><th>E-mail</th><th>Rôle</th><th>Depuis</th>${isAdmin?'<th></th>':''}</tr></thead>
@@ -5573,12 +5734,10 @@ async function _cfgAccess(isAdmin){
     });
     if(isAdmin) $('inviteBtn')?.addEventListener('click',()=>openInviteForm(()=>_cfgAccess(isAdmin)));
 
-    // Section portail salariés
-    const portalStatusBadge = emp => {
-      if(!emp.portal_auth_id)
-        return `<span style="font-size:10.5px;background:#fef9c3;color:#854d0e;padding:2px 8px;border-radius:6px;font-weight:600"><i class="fa-solid fa-clock"></i> Invitation envoyée</span>`;
-      if(emp.must_change_password)
-        return `<span style="font-size:10.5px;background:#ede9fe;color:#6d28d9;padding:2px 8px;border-radius:6px;font-weight:600"><i class="fa-solid fa-key"></i> Mot de passe à définir</span>`;
+    // ── Portail salariés ───────────────────────────────────────────────────
+    const portalStatusBadge=emp=>{
+      if(!emp.portal_auth_id) return `<span style="font-size:10.5px;background:#fef9c3;color:#854d0e;padding:2px 8px;border-radius:6px;font-weight:600"><i class="fa-solid fa-clock"></i> Invitation envoyée</span>`;
+      if(emp.must_change_password) return `<span style="font-size:10.5px;background:#ede9fe;color:#6d28d9;padding:2px 8px;border-radius:6px;font-weight:600"><i class="fa-solid fa-key"></i> Mot de passe à définir</span>`;
       return `<span style="font-size:10.5px;background:#dcfce7;color:#166534;padding:2px 8px;border-radius:6px;font-weight:600"><i class="fa-solid fa-circle-check"></i> Actif</span>`;
     };
     $('portalBox').innerHTML=`
@@ -5599,7 +5758,7 @@ async function _cfgAccess(isAdmin){
     if(isAdmin){
       $('portalBox').querySelectorAll('.reinvite-portal-btn').forEach(b=>b.onclick=async()=>{
         const s=staff.find(x=>x.id===b.dataset.eid);
-        if(s) await reinvitePortal(s.id, b.dataset.email);
+        if(s) await reinvitePortal(s.id,b.dataset.email);
         else flash('Salarié introuvable dans le planning actuel');
       });
       $('portalBox').querySelectorAll('.revoke-portal-btn').forEach(b=>b.onclick=async()=>{
@@ -5608,9 +5767,130 @@ async function _cfgAccess(isAdmin){
         catch(e){flash('Erreur : '+(e.message||e));}
       });
     }
+
+    // ── Matrice des permissions ────────────────────────────────────────────
+    if(!_cfgPermRole) _cfgPermRole=Object.keys(allRoleLabels())[0];
+    _renderPermRoleList();
+    _renderPermMatrix();
+
+    if(isAdmin){
+      // Enregistrer
+      $('permSaveBtn')?.addEventListener('click',async()=>{
+        const role=_cfgPermRole;
+        if(!role||role==='direction'||role==='admin_hotel') return flash('Ce rôle ne peut pas être modifié');
+        const newPerms={};
+        ALL_MODULES.forEach(mod=>{
+          const mp={};
+          PERM_ACTIONS.forEach(([act])=>{
+            const cb=$('permMatrixWrap').querySelector(`input[data-mod="${mod}"][data-act="${act}"]`);
+            mp[act]=cb?cb.checked:effectivePerms(role,mod)[act];
+          });
+          newPerms[mod]=mp;
+        });
+        const oldPerms=hotelPerms?.[role]||null;
+        try{
+          await BE.saveRolePermissions(hotelId,role,newPerms,userEmail);
+          await BE.logPermAudit(hotelId,userEmail,role,oldPerms,newPerms);
+          if(!hotelPerms) hotelPerms={};
+          hotelPerms[role]=newPerms;
+          flash(`Permissions « ${allRoleLabels()[role]||role} » enregistrées`);
+          _renderPermRoleList();
+        }catch(e){flash('Erreur : '+(e.message||e));}
+      });
+
+      // Restaurer par défaut
+      $('permResetBtn')?.addEventListener('click',async()=>{
+        const role=_cfgPermRole;
+        if(!role) return;
+        if(!DEFAULT_PERMISSIONS[role]&&!customRoles[role]) return flash('Rôle introuvable dans les défauts');
+        if(!confirm(`Restaurer les permissions par défaut pour « ${allRoleLabels()[role]||role} » ?`)) return;
+        try{
+          const oldPerms=hotelPerms?.[role]||null;
+          await BE.deleteRolePermissions(hotelId,role);
+          await BE.logPermAudit(hotelId,userEmail,role,oldPerms,null);
+          if(hotelPerms) delete hotelPerms[role];
+          flash(`Permissions de « ${allRoleLabels()[role]||role} » réinitialisées`);
+          _renderPermRoleList();
+          _renderPermMatrix();
+        }catch(e){flash('Erreur : '+(e.message||e));}
+      });
+
+      // Créer un rôle personnalisé
+      $('permCreateRoleBtn')?.addEventListener('click',()=>{
+        const label=prompt('Nom du nouveau rôle (ex: Chef Réception, Responsable Étage) :');
+        if(!label||!label.trim()) return;
+        const key='custom_'+label.trim().toLowerCase().replace(/[^a-z0-9]+/g,'_').slice(0,30);
+        if(customRoles[key]||ROLE_LABELS[key]) return flash('Un rôle avec cette clé existe déjà');
+        const base=prompt(`Copier les permissions d'un rôle existant ? (laisser vide pour partir de zéro)\nRôles disponibles : ${Object.keys(ROLE_LABELS).join(', ')}`)||null;
+        BE.createCustomRole(hotelId,key,label.trim(),base||null).then(async()=>{
+          customRoles[key]=label.trim();
+          if(base&&DEFAULT_PERMISSIONS[base]){
+            const basePerms=hotelPerms?.[base]||DEFAULT_PERMISSIONS[base];
+            await BE.saveRolePermissions(hotelId,key,basePerms,userEmail);
+            if(!hotelPerms) hotelPerms={};
+            hotelPerms[key]={...basePerms};
+          }
+          _cfgPermRole=key;
+          _renderPermRoleList();
+          _renderPermMatrix();
+          flash(`Rôle « ${label.trim()} » créé`);
+        }).catch(e=>flash('Erreur : '+(e.message||e)));
+      });
+
+      // Dupliquer le rôle sélectionné
+      $('permDupeBtn')?.addEventListener('click',()=>{
+        const role=_cfgPermRole;
+        if(!role) return flash('Sélectionnez un rôle à dupliquer');
+        const label=prompt(`Nom du rôle dupliqué depuis « ${allRoleLabels()[role]||role} » :`);
+        if(!label||!label.trim()) return;
+        const key='custom_'+label.trim().toLowerCase().replace(/[^a-z0-9]+/g,'_').slice(0,30);
+        if(customRoles[key]||ROLE_LABELS[key]) return flash('Un rôle avec cette clé existe déjà');
+        const srcPerms=hotelPerms?.[role]||DEFAULT_PERMISSIONS[role]||{};
+        const dupPerms={};
+        ALL_MODULES.forEach(mod=>{dupPerms[mod]={...(srcPerms[mod]||{..._0})};});
+        BE.createCustomRole(hotelId,key,label.trim(),role).then(async()=>{
+          await BE.saveRolePermissions(hotelId,key,dupPerms,userEmail);
+          customRoles[key]=label.trim();
+          if(!hotelPerms) hotelPerms={};
+          hotelPerms[key]=dupPerms;
+          _cfgPermRole=key;
+          _renderPermRoleList();
+          _renderPermMatrix();
+          flash(`Rôle « ${label.trim()} » créé par duplication`);
+        }).catch(e=>flash('Erreur : '+(e.message||e)));
+      });
+    }
+
+    // ── Historique des modifications ───────────────────────────────────────
+    if(isAdmin){
+      const auditEl=$('permAuditContent');
+      if(auditLog.length){
+        auditEl.innerHTML=`<table class="tbl" style="font-size:12px">
+          <thead><tr><th>Date</th><th>Auteur</th><th>Rôle modifié</th><th>Détails</th></tr></thead>
+          <tbody>${auditLog.map(a=>{
+            const rl=allRoleLabels();
+            const mods=Object.keys(a.new_permissions||{}).filter(m=>{
+              const o=a.old_permissions?.[m]||{};const n=(a.new_permissions||{})[m]||{};
+              return PERM_ACTIONS.some(([ac])=>o[ac]!==n[ac]);
+            });
+            const diff=mods.length?mods.map(m=>MODULE_LABELS[m]||m).join(', '):'Réinitialisation';
+            return `<tr>
+              <td style="color:var(--muted);white-space:nowrap">${a.changed_at?new Date(a.changed_at).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}):'—'}</td>
+              <td>${esc(a.actor_email||'—')}</td>
+              <td><b>${esc(rl[a.role]||a.role)}</b></td>
+              <td style="font-size:11.5px;color:var(--muted)">${esc(diff)}</td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table>`;
+      } else {
+        auditEl.innerHTML='<div style="padding:16px;text-align:center;color:var(--muted);font-size:13px">Aucune modification enregistrée.</div>';
+      }
+    }
+
   }catch(e){
     $('accBox').innerHTML=`<div style="color:var(--red);padding:14px">${e.message}</div>`;
     $('portalBox').innerHTML='';
+    console.error('_cfgAccess error:',e);
   }
 }
 
