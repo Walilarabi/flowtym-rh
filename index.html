@@ -538,6 +538,7 @@ async function saveEmployeePhoto(s, file){
   return dataUrl;
 }
 const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
 /* ===================== BACKEND ===================== */
 async function makeRealBE(){
@@ -4956,16 +4957,16 @@ async function _cfgGeneral(hotel, isAdmin){
           <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding-bottom:10px">
             <span style="color:var(--ink2)">Fuseau horaire</span>
             <select id="cfg_tz" style="font-size:12.5px;padding:5px 10px;border:1px solid var(--line);border-radius:8px">
-              <option value="Europe/Paris">Europe/Paris</option>
-              <option value="Europe/London">Europe/London</option>
-              <option value="America/New_York">America/New_York</option>
+              <option value="Europe/Paris" ${(cfg.timezone||cfg.tz||'Europe/Paris')==='Europe/Paris'?'selected':''}>Europe/Paris</option>
+              <option value="Europe/London" ${(cfg.timezone||cfg.tz||'')==='Europe/London'?'selected':''}>Europe/London</option>
+              <option value="America/New_York" ${(cfg.timezone||cfg.tz||'')==='America/New_York'?'selected':''}>America/New_York</option>
             </select>
           </div>
           <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding-bottom:10px">
             <span style="color:var(--ink2)">Langue par défaut</span>
             <select id="cfg_lang" style="font-size:12.5px;padding:5px 10px;border:1px solid var(--line);border-radius:8px">
-              <option value="fr">Français</option>
-              <option value="en">English</option>
+              <option value="fr" ${(cfg.language||cfg.lang||'fr')==='fr'?'selected':''}>Français</option>
+              <option value="en" ${(cfg.language||cfg.lang||'')==='en'?'selected':''}>English</option>
             </select>
           </div>
           <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding-bottom:10px">
@@ -5031,21 +5032,22 @@ async function _cfgGeneral(hotel, isAdmin){
       <h3><i class="fa-solid fa-mobile-screen"></i> Paramètres portail salarié</h3>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
         ${[
-          ['Autoriser les demandes d\'absence','Les salariés peuvent soumettre des demandes depuis leur portail.','cfg_ps_absence'],
-          ['Autoriser le téléchargement de documents','Les salariés peuvent déposer leurs documents RH.','cfg_ps_docs'],
-          ['Affichage du planning','Afficher le planning et les horaires sur le portail.','cfg_ps_planning'],
-          ['Notifications','Les salariés reçoivent des notifications sur les événements importants.','cfg_ps_notifs'],
-          ['Solde et compteurs','Afficher les soldes d\'absences et compteurs sur le portail.','cfg_ps_solde'],
-          ['Messagerie interne','Activer la messagerie interne entre salariés et management.','cfg_ps_msg'],
-        ].map(([lab,sub,id])=>`
+          ['Autoriser les demandes d\'absence','Les salariés peuvent soumettre des demandes depuis leur portail.','cfg_ps_absence',cfg.portal_requests!==false],
+          ['Autoriser le téléchargement de documents','Les salariés peuvent déposer leurs documents RH.','cfg_ps_docs',cfg.portal_docs_upload!==false],
+          ['Affichage du planning','Afficher le planning et les horaires sur le portail.','cfg_ps_planning',cfg.portal_planning!==false],
+          ['Notifications','Les salariés reçoivent des notifications sur les événements importants.','cfg_ps_notifs',cfg.portal_notifications!==false],
+          ['Solde et compteurs','Afficher les soldes d\'absences et compteurs sur le portail.','cfg_ps_solde',cfg.portal_balances!==false],
+          ['Messagerie interne','Activer la messagerie interne entre salariés et management.','cfg_ps_msg',cfg.portal_messaging===true],
+        ].map(([lab,sub,id,checked])=>`
           <div style="display:flex;align-items:flex-start;justify-content:space-between;padding:10px;border:1px solid var(--line);border-radius:10px;gap:12px">
             <div>
               <div style="font-size:13px;font-weight:600">${lab}</div>
               <div style="font-size:11.5px;color:var(--muted);margin-top:2px">${sub}</div>
             </div>
-            <label class="tog-wrap" style="margin-top:2px;flex-shrink:0"><input type="checkbox" id="${id}" ${id!=='cfg_ps_msg'?'checked':''}><span class="tog-sw"></span></label>
+            <label class="tog-wrap" style="margin-top:2px;flex-shrink:0"><input type="checkbox" id="${id}" ${checked?'checked':''}><span class="tog-sw"></span></label>
           </div>`).join('')}
       </div>
+      <button class="btn p" id="cfg_savePortal" style="margin-top:14px"><i class="fa-solid fa-check"></i> Enregistrer les paramètres portail</button>
     </div>`;
 
   // Hotel info edit/save
@@ -5076,6 +5078,12 @@ async function _cfgGeneral(hotel, isAdmin){
     Object.assign(lsMirror,{weekStart:String(patch.week_start),dateFmt:patch.date_format,timeFmt:patch.time_format,tz:patch.timezone,lang:patch.language,portal:patch.portal_enabled,notif:patch.notif_email,rappels:patch.auto_reminders});
     localStorage.setItem('fty_cfg_'+hotelId,JSON.stringify(lsMirror));
     flash('Préférences enregistrées');
+  };
+  // Portail salarié save
+  $('cfg_savePortal').onclick=async()=>{
+    const patch={portal_requests:$('cfg_ps_absence').checked,portal_docs_upload:$('cfg_ps_docs').checked,portal_planning:$('cfg_ps_planning').checked,portal_notifications:$('cfg_ps_notifs').checked,portal_balances:$('cfg_ps_solde').checked,portal_messaging:$('cfg_ps_msg').checked};
+    try{ await BE.saveHotelSettings(hotelId,patch); }catch(e){ console.warn('savePortalSettings:',e.message); }
+    flash('Paramètres portail enregistrés');
   };
   // Import Excel
   $('importXlsxSettings').onclick=()=>$('xlsxFile').click();
