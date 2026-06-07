@@ -1692,6 +1692,15 @@ window.closeModal=e=>{
 };
 $('modal').addEventListener('click',e=>e.stopPropagation());
 
+// ── Exposition globale (script type="module" scope) ──────────────────────────
+window.goTo = goTo;
+window.showGdpr = showGdpr;
+window.renderForgotPassword = renderForgotPassword;
+window.renderSetPassword = renderSetPassword;
+window.submitQrCode = submitQrCode;
+window.renderActivation = renderActivation;
+window.renderError = renderError;
+
 // ── Démarrage ─────────────────────────────────────────────────────────────────
 // Service Worker PWA
 if('serviceWorker' in navigator){
