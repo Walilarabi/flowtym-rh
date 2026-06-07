@@ -1086,6 +1086,9 @@ function renderLogin(err){
     <div class="fld"><label>E-mail</label><input type="email" id="le" autocomplete="email"></div>
     <div class="fld"><label>Mot de passe</label><input type="password" id="lp" autocomplete="current-password"></div>
     <button class="btn p" id="lb" style="width:100%;justify-content:center;padding:11px">Se connecter</button>
+    <div style="text-align:center;margin-top:10px">
+      <button id="forgotBtn" style="background:none;border:none;color:var(--violet-d);font-size:12.5px;cursor:pointer;text-decoration:underline;padding:0">Mot de passe oublié ?</button>
+    </div>
     <div class="err" id="lerr">${err||''}</div></div></div>`;
   $('lb').onclick=async()=>{
     const e=$('le').value.trim(),p=$('lp').value;
@@ -1095,6 +1098,57 @@ function renderLogin(err){
     $('lb').disabled=false;
     if(error)$('lerr').textContent=error.message; else start();
   };
+  $('lp').addEventListener('keydown',e=>{if(e.key==='Enter')$('lb').click();});
+  $('forgotBtn').onclick=()=>renderForgotPwd();
+}
+
+function renderForgotPwd(msg){
+  $('root').dataset.ok='1';
+  $('root').innerHTML=`<div class="login"><div class="lcard">
+    <div class="mk"><i class="fa-solid fa-key"></i></div>
+    <h1>Mot de passe oublié</h1>
+    <div class="sub">Saisissez votre adresse email. Vous recevrez un lien pour redéfinir votre mot de passe.</div>
+    ${msg?`<div style="background:#dcfce7;color:#166534;padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:4px">${msg}</div>`:''}
+    <div class="fld"><label>E-mail</label><input type="email" id="fpe" autocomplete="email"></div>
+    <button class="btn p" id="fpb" style="width:100%;justify-content:center;padding:11px">Envoyer le lien</button>
+    <div style="text-align:center;margin-top:10px">
+      <button id="backLogin" style="background:none;border:none;color:var(--violet-d);font-size:12.5px;cursor:pointer;text-decoration:underline;padding:0">← Retour à la connexion</button>
+    </div>
+    <div class="err" id="fperr"></div></div></div>`;
+  $('fpb').onclick=async()=>{
+    const email=$('fpe').value.trim();
+    if(!email){$('fperr').textContent='E-mail requis.';return;}
+    $('fpb').disabled=true;
+    const {error}=await BE.sb.auth.resetPasswordForEmail(email,{redirectTo:'https://rh.flowtym.com/auth/callback?type=recovery'});
+    $('fpb').disabled=false;
+    if(error){$('fperr').textContent=error.message;}
+    else{renderForgotPwd('Email envoyé ! Vérifiez votre boîte de réception.');}
+  };
+  $('fpe').addEventListener('keydown',e=>{if(e.key==='Enter')$('fpb').click();});
+  $('backLogin').onclick=()=>renderLogin();
+}
+
+function renderManagerSetPwd(){
+  $('root').dataset.ok='1';
+  $('root').innerHTML=`<div class="login"><div class="lcard">
+    <div class="mk"><i class="fa-solid fa-lock-open"></i></div>
+    <h1>Bienvenue sur Flowtym RH</h1>
+    <div class="sub">Créez votre mot de passe pour sécuriser votre accès.</div>
+    <div class="fld"><label>Nouveau mot de passe</label><input type="password" id="np1" autocomplete="new-password" placeholder="8 caractères minimum"></div>
+    <div class="fld"><label>Confirmer le mot de passe</label><input type="password" id="np2" autocomplete="new-password"></div>
+    <button class="btn p" id="npb" style="width:100%;justify-content:center;padding:11px"><i class="fa-solid fa-check"></i> Valider et accéder</button>
+    <div class="err" id="nperr"></div></div></div>`;
+  $('npb').onclick=async()=>{
+    const p1=$('np1').value, p2=$('np2').value;
+    if(p1.length<8){$('nperr').textContent='Le mot de passe doit contenir au moins 8 caractères.';return;}
+    if(p1!==p2){$('nperr').textContent='Les mots de passe ne correspondent pas.';return;}
+    $('npb').disabled=true; $('nperr').textContent='';
+    const {error}=await BE.sb.auth.updateUser({password:p1});
+    $('npb').disabled=false;
+    if(error){$('nperr').textContent=error.message;}
+    else{await start();}
+  };
+  $('np2').addEventListener('keydown',e=>{if(e.key==='Enter')$('npb').click();});
 }
 
 /* ===================== SHELL ===================== */
@@ -9279,15 +9333,20 @@ async function boot(){
   try{
     if(TEST_MODE){ BE=makeTestBE(); await start(); return; }
     BE=await makeRealBE();
+    const qp=new URLSearchParams(search);
+    const linkType=qp.get('type'); // 'invite' | 'recovery' | null
     if(hasToken){
       if(search.includes('code=')){
-        const code = new URLSearchParams(search).get('code');
+        const code=qp.get('code');
         await BE.sb.auth.exchangeCodeForSession(code);
       }
       window.history.replaceState(null,'','/');
     }
     const {data:{session}}=await BE.sb.auth.getSession();
-    if(!session) renderLogin(); else await start();
+    if(!session){ renderLogin(); return; }
+    // Invitation ou réinitialisation → forcer la création du mot de passe
+    if(linkType==='invite'||linkType==='recovery'){ renderManagerSetPwd(); return; }
+    await start();
   }catch(e){showFatal(e);}
 }
 boot();
