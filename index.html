@@ -7672,7 +7672,14 @@ async function invitePortal(eid, email){
   try{
     // Appel de l'edge function invite-user (service_role côté serveur)
     // access_type='salarie' → invitation email, lien portal_auth_id, SANS user_hotels
-    await BE.inviteUser(hotelId, email, full_name, s.role||'reception', 'salarie', eid);
+    // Normaliser le rôle : la DB peut stocker le libellé ("Femme de chambre") ou la clé ("femme_de_chambre")
+    const VALID_ROLE_KEYS = Object.keys(ROLE_LABELS);
+    const roleLabel2Key = Object.fromEntries(Object.entries(ROLE_LABELS).map(([k,v])=>[v.toLowerCase(),k]));
+    const rawRole = (s.role||'').trim();
+    const normalizedRole = VALID_ROLE_KEYS.includes(rawRole)
+      ? rawRole
+      : (roleLabel2Key[rawRole.toLowerCase()] || 'reception');
+    await BE.inviteUser(hotelId, email, full_name, normalizedRole, 'salarie', eid);
     flash('Invitation portail envoyée à '+email+' ✓');
     if(s){s.portal_enabled=true;loadPortalSection(s);}
   }catch(e){
