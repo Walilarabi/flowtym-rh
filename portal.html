@@ -340,18 +340,12 @@ const REQ_TYPES={
 async function boot(){
   $('view').innerHTML='<div class="loading"><div class="spinner"></div><div>Chargement…</div></div>';
 
-  // Traiter le token Supabase s'il est présent dans l'URL (invitation, magic link, recovery)
-  const hash = window.location.hash;
+  // PKCE auth code (invitation / recovery / magic link) — Supabase JS v2
   const search = window.location.search;
-  const hasToken = hash.includes('access_token')
-    || search.includes('access_token')
-    || search.includes('code=');
-  if(hasToken){
-    const {data,error} = await sb.auth.getSessionFromUrl();
-    if(!error && data?.session){
-      session = data.session;
-      window.history.replaceState(null,'','/salarie');
-    }
+  if(search.includes('code=')){
+    const code = new URLSearchParams(search).get('code');
+    await sb.auth.exchangeCodeForSession(code);
+    window.history.replaceState(null,'','/salarie');
   }
 
   const {data:{session:s}} = await sb.auth.getSession();
@@ -395,11 +389,18 @@ async function loadEmployee(){
     }
     employee = data;
 
+    // Forcer le changement de mot de passe à la première connexion
+    if(employee.must_change_password){
+      renderSetPassword();
+      return;
+    }
+
     // Charger l'hôtel
     const {data:h} = await sb.from('hotels').select('id,name,city').eq('id',employee.hotel_id).single();
     hotel = h;
 
-    // Mettre à jour le journal d'audit (login)
+    // Mettre à jour last_login_at + journal d'audit
+    sb.from('employees').update({last_login_at: new Date().toISOString()}).eq('id',employee.id).catch(()=>{});
     auditLog('login').catch(()=>{});
 
     renderShell();
@@ -443,9 +444,12 @@ function renderAuth(){
 function renderAuthStep1(){
   return `
     <h2 class="auth-title">Connexion</h2>
-    <p class="auth-sub">Entrez l'adresse email associée à votre dossier RH. Vous recevrez un lien de connexion.</p>
+    <p class="auth-sub">Connectez-vous avec votre adresse email et votre mot de passe.</p>
     <div class="field"><label>Adresse e-mail</label>
       <input type="email" id="authEmail" placeholder="prenom.nom@hotel.fr" autocomplete="email" inputmode="email">
+    </div>
+    <div class="field"><label>Mot de passe</label>
+      <input type="password" id="authPassword" placeholder="••••••••" autocomplete="current-password">
     </div>
     <div class="gdpr-consent">
       <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer">
@@ -453,70 +457,113 @@ function renderAuthStep1(){
         <span>J'accepte que mes données soient traitées pour la gestion RH. <a href="#" onclick="showGdpr();return false">En savoir plus</a></span>
       </label>
     </div>
-    <button class="btn btn-p btn-full" id="authSend"><i class="fa-solid fa-paper-plane"></i> Recevoir le lien</button>
-    <p style="font-size:11.5px;color:var(--ink2);text-align:center;margin-top:14px">Votre compte est créé par votre responsable RH.</p>`;
+    <button class="btn btn-p btn-full" id="authSend"><i class="fa-solid fa-right-to-bracket"></i> Se connecter</button>
+    <div style="text-align:center;margin-top:10px">
+      <a href="#" onclick="renderForgotPassword();return false" style="font-size:12px;color:var(--violet)">Mot de passe oublié ?</a>
+    </div>
+    <p style="font-size:11.5px;color:var(--ink2);text-align:center;margin-top:10px">Votre accès est créé par votre responsable RH.</p>`;
 }
 
 function wireAuthStep1(){
   $('authSend')?.addEventListener('click', async()=>{
-    const email = $('authEmail')?.value?.trim();
-    const gdpr  = $('gdprCheck')?.checked;
+    const email    = $('authEmail')?.value?.trim();
+    const password = $('authPassword')?.value;
+    const gdpr     = $('gdprCheck')?.checked;
     if(!email || !email.includes('@')){ flash('Email invalide'); return; }
+    if(!password){ flash('Mot de passe requis'); return; }
     if(!gdpr){ flash('Veuillez accepter les conditions'); return; }
     $('authSend').disabled=true;
-    $('authSend').innerHTML='<div class="spinner" style="width:18px;height:18px;border-width:2px"></div> Envoi…';
-    const {error} = await sb.auth.signInWithOtp({
-      email,
-      options:{
-        emailRedirectTo: window.location.href,
-        shouldCreateUser: true,  // Crée le compte si premier accès (activé côté RH)
-        data:{ portal_login: true }
-      }
-    });
+    $('authSend').innerHTML='<div class="spinner" style="width:18px;height:18px;border-width:2px"></div> Connexion…';
+    const {data, error} = await sb.auth.signInWithPassword({email, password});
     if(error){
-      flash('Erreur : ' + error.message);
+      const msg = error.message.includes('Invalid login credentials')
+        ? 'Email ou mot de passe incorrect'
+        : 'Erreur : '+error.message;
+      flash(msg);
       $('authSend').disabled=false;
-      $('authSend').innerHTML='<i class="fa-solid fa-paper-plane"></i> Recevoir le lien';
+      $('authSend').innerHTML='<i class="fa-solid fa-right-to-bracket"></i> Se connecter';
       return;
     }
-    // Proposer aussi la saisie du code OTP (6 chiffres)
-    $('authStep').innerHTML=`
-      <h2 class="auth-title">Code envoyé ✓</h2>
-      <p class="auth-sub">Un email a été envoyé à <b>${esc(email)}</b>. Cliquez sur le lien ou saisissez le code à 6 chiffres ci-dessous.</p>
-      <div class="otp-inputs" id="otpWrap">
-        ${[0,1,2,3,4,5].map(i=>`<input type="tel" maxlength="1" id="otp${i}" inputmode="numeric">`).join('')}
-      </div>
-      <button class="btn btn-p btn-full" id="otpVerify"><i class="fa-solid fa-unlock"></i> Vérifier le code</button>
-      <button class="btn btn-g btn-full" style="margin-top:8px" id="otpBack"><i class="fa-solid fa-arrow-left"></i> Changer d'email</button>`;
-    wireOtp(email);
-  });
-}
-
-function wireOtp(email){
-  const inputs = [0,1,2,3,4,5].map(i=>$(`otp${i}`));
-  inputs.forEach((inp,i)=>{
-    inp.addEventListener('input', ()=>{
-      if(inp.value.length===1 && i<5) inputs[i+1].focus();
-      if(inputs.every(x=>x.value)) $('otpVerify').click();
-    });
-    inp.addEventListener('keydown', e=>{ if(e.key==='Backspace'&&!inp.value&&i>0) inputs[i-1].focus(); });
-  });
-  inputs[0].focus();
-
-  $('otpVerify').addEventListener('click', async()=>{
-    const token = inputs.map(x=>x.value).join('');
-    if(token.length!==6){ flash('Code incomplet'); return; }
-    $('otpVerify').disabled=true;
-    const {data,error} = await sb.auth.verifyOtp({email, token, type:'email'});
-    if(error){ flash('Code invalide ou expiré'); $('otpVerify').disabled=false; return; }
     session = data.session;
     await loadEmployee();
   });
+  $('authEmail')?.addEventListener('keydown', e=>{ if(e.key==='Enter') $('authPassword')?.focus(); });
+  $('authPassword')?.addEventListener('keydown', e=>{ if(e.key==='Enter') $('authSend')?.click(); });
+}
 
-  $('otpBack').addEventListener('click', ()=>{
-    $('authStep').innerHTML=renderAuthStep1();
-    wireAuthStep1();
+function renderForgotPassword(){
+  $('authStep').innerHTML=`
+    <h2 class="auth-title">Mot de passe oublié</h2>
+    <p class="auth-sub">Entrez votre email. Vous recevrez un lien pour définir un nouveau mot de passe.</p>
+    <div class="field"><label>Adresse e-mail</label>
+      <input type="email" id="authEmail" placeholder="prenom.nom@hotel.fr" autocomplete="email" inputmode="email">
+    </div>
+    <button class="btn btn-p btn-full" id="authSend"><i class="fa-solid fa-paper-plane"></i> Envoyer le lien</button>
+    <button class="btn btn-g btn-full" style="margin-top:8px" id="authBack"><i class="fa-solid fa-arrow-left"></i> Retour</button>`;
+  $('authSend').addEventListener('click', async()=>{
+    const email = $('authEmail').value.trim();
+    if(!email || !email.includes('@')){ flash('Email invalide'); return; }
+    $('authSend').disabled=true;
+    $('authSend').innerHTML='<div class="spinner" style="width:18px;height:18px;border-width:2px"></div> Envoi…';
+    const {error} = await sb.auth.resetPasswordForEmail(email, {
+      redirectTo: window.location.origin+'/salarie/auth/callback'
+    });
+    if(error){ flash('Erreur : '+error.message); $('authSend').disabled=false; $('authSend').innerHTML='<i class="fa-solid fa-paper-plane"></i> Envoyer le lien'; return; }
+    $('authStep').innerHTML=`
+      <h2 class="auth-title">Email envoyé ✓</h2>
+      <p class="auth-sub">Un lien de réinitialisation a été envoyé à <b>${esc(email)}</b>.<br>Cliquez dessus pour définir votre nouveau mot de passe.</p>
+      <button class="btn btn-g btn-full" id="authBack"><i class="fa-solid fa-arrow-left"></i> Retour à la connexion</button>`;
+    $('authBack').addEventListener('click', ()=>{ $('authStep').innerHTML=renderAuthStep1(); wireAuthStep1(); });
   });
+  $('authBack').addEventListener('click', ()=>{ $('authStep').innerHTML=renderAuthStep1(); wireAuthStep1(); });
+}
+
+function renderSetPassword(){
+  $('topbar').style.display='none';
+  $('nav').style.display='none';
+  $('view').innerHTML=`
+    <div class="auth-wrap">
+      <div class="auth-card">
+        <div class="auth-logo">
+          <div class="mk">🏨</div>
+          <div class="name">Flowtym<small>Créer votre mot de passe</small></div>
+        </div>
+        <h2 class="auth-title">Première connexion</h2>
+        <p class="auth-sub">Pour sécuriser votre compte, définissez un mot de passe personnel (min. 8 caractères).</p>
+        <div class="field"><label>Nouveau mot de passe</label>
+          <input type="password" id="newPwd" placeholder="Minimum 8 caractères" autocomplete="new-password">
+        </div>
+        <div class="field"><label>Confirmer le mot de passe</label>
+          <input type="password" id="confirmPwd" placeholder="Retapez le mot de passe" autocomplete="new-password">
+        </div>
+        <button class="btn btn-p btn-full" id="setPwdBtn"><i class="fa-solid fa-lock"></i> Enregistrer le mot de passe</button>
+        <div id="setPwdErr" style="color:var(--red);font-size:12px;margin-top:8px;text-align:center"></div>
+      </div>
+    </div>`;
+
+  const btn = $('setPwdBtn');
+  const showErr = msg => { $('setPwdErr').textContent=msg; btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-lock"></i> Enregistrer le mot de passe'; };
+  btn.addEventListener('click', async()=>{
+    const pwd  = $('newPwd').value;
+    const conf = $('confirmPwd').value;
+    if(pwd.length < 8){ showErr('Le mot de passe doit comporter au moins 8 caractères.'); return; }
+    if(pwd !== conf){ showErr('Les mots de passe ne correspondent pas.'); return; }
+    btn.disabled=true;
+    btn.innerHTML='<div class="spinner" style="width:18px;height:18px;border-width:2px"></div> Enregistrement…';
+    const {error} = await sb.auth.updateUser({password: pwd});
+    if(error){ showErr('Erreur : '+error.message); return; }
+    if(employee?.id){
+      await sb.from('employees').update({must_change_password:false, last_login_at: new Date().toISOString()}).eq('id', employee.id).catch(()=>{});
+    }
+    employee = {...employee, must_change_password:false};
+    const {data:h} = await sb.from('hotels').select('id,name,city').eq('id',employee.hotel_id).single();
+    hotel = h;
+    auditLog('password_set').catch(()=>{});
+    renderShell();
+    goTo('planning');
+  });
+  $('newPwd').addEventListener('keydown', e=>{ if(e.key==='Enter') $('confirmPwd')?.focus(); });
+  $('confirmPwd').addEventListener('keydown', e=>{ if(e.key==='Enter') btn?.click(); });
 }
 
 function renderActivation(){

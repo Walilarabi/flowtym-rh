@@ -614,6 +614,8 @@ async function makeRealBE(){
     async listAccess(h){const {data,error}=await sb.rpc('rh_list_users_for_hotel',{p_hotel:h});must(error,"Liste des accès");return data||[];},
     async updateAccess(h,user_id,role){const {error}=await sb.rpc('rh_update_user_role',{p_hotel:h,p_user_id:user_id,p_role:role});must(error,"Modification du rôle");},
     async revokeAccess(h,user_id){const {error}=await sb.rpc('rh_revoke_user_access',{p_hotel:h,p_user_id:user_id});must(error,"Révocation accès");},
+    async listPortalEmployees(h){const {data,error}=await sb.from('employees').select('id,first_name,last_name,email,portal_enabled,portal_auth_id,must_change_password,last_login_at').eq('hotel_id',h).eq('portal_enabled',true).order('last_name');must(error,"Liste salariés portail");return data||[];},
+    async revokePortalAccess(eid){const {error}=await sb.from('employees').update({portal_enabled:false,portal_auth_id:null,must_change_password:false}).eq('id',eid);must(error,"Révocation portail");},
     async inviteUser(h,email,full_name,role,access_type='manager',employee_id=null){
       const {data,error}=await sb.functions.invoke('invite-user',{body:{hotel_id:h,email,full_name,role,access_type,...(employee_id?{employee_id}:{})}});
       if(error){
@@ -890,6 +892,8 @@ function makeTestBE(){
     ];},
     async updateAccess(h,user_id,role){/* no-op en test */ return; },
     async revokeAccess(h,user_id){/* no-op en test */ return; },
+    async listPortalEmployees(h){return [];},
+    async revokePortalAccess(eid){return;},
     async inviteUser(h,email,full_name,role,access_type='manager'){
       return {success:true,user_id:'inv-'+Date.now(),already_existed:false};
     },
@@ -5498,8 +5502,17 @@ function _cfgContrats(){
 async function _cfgAccess(isAdmin){
   $('cfgBody').innerHTML=`
     <div class="box" style="margin-bottom:16px">
-      <h3><i class="fa-solid fa-users"></i>Utilisateurs de cet hôtel</h3>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <h3 style="margin:0"><i class="fa-solid fa-users"></i> Managers — Accès back-office</h3>
+        ${isAdmin?`<button class="btn p" id="inviteBtn"><i class="fa-solid fa-envelope"></i> Inviter un manager</button>`:''}
+      </div>
       <div id="accBox">Chargement…</div>
+    </div>
+    <div class="box" style="margin-bottom:16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <h3 style="margin:0"><i class="fa-solid fa-mobile-screen-button"></i> Salariés — Portail en ligne</h3>
+      </div>
+      <div id="portalBox">Chargement…</div>
     </div>
     <div class="box">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
@@ -5512,7 +5525,7 @@ async function _cfgAccess(isAdmin){
       </table>
     </div>`;
 
-  // Matrice
+  // Matrice des permissions
   const allTabs=TABS.flatMap(g=>g[1]).filter(t=>!t[3]);
   $('permRows').innerHTML=Object.entries(PERMS).map(([role,p])=>{
     const tabLabel=p.tabs==='all'?'<span class="ok">Tous</span>':p.tabs.map(t=>{const f=allTabs.find(x=>x[0]===t);return f?f[1]:t;}).join(' · ');
@@ -5524,23 +5537,24 @@ async function _cfgAccess(isAdmin){
     $('permReset')?.addEventListener('click',()=>{if(!confirm('Réinitialiser toutes les permissions ?'))return;localStorage.removeItem('fty_perms_'+hotelId);location.reload();});
   }
 
-  // Utilisateurs
+  // Section managers
   const ROLES_OPTS=Object.keys(ROLE_LABELS);
   try{
     const list=await BE.listAccess(hotelId);
+    const portalEmp=await BE.listPortalEmployees(hotelId);
+
     $('accBox').innerHTML=`
-      ${isAdmin?`<div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn p" id="inviteBtn"><i class="fa-solid fa-envelope"></i> Inviter un utilisateur</button></div>`:''}
       <table class="tbl">
         <thead><tr><th>Utilisateur</th><th>E-mail</th><th>Rôle</th><th>Depuis</th>${isAdmin?'<th></th>':''}</tr></thead>
         <tbody>${list.map(u=>`<tr data-uid="${u.user_id}">
-          <td><b>${u.full_name||'—'}</b></td>
-          <td style="font-size:12px">${u.email}</td>
+          <td><b>${esc(u.full_name||'—')}</b></td>
+          <td style="font-size:12px">${esc(u.email)}</td>
           <td><select class="roleSel" data-uid="${u.user_id}" style="font-size:12.5px;padding:5px 8px" ${isAdmin?'':'disabled'}>
             ${ROLES_OPTS.map(r=>`<option value="${r}" ${r===u.role?'selected':''}>${ROLE_LABELS[r]}</option>`).join('')}
           </select></td>
           <td style="font-size:11.5px;color:var(--muted)">${u.granted_at?u.granted_at.slice(0,10):'—'}</td>
-          ${isAdmin?`<td><button class="btn d revoke-btn" data-uid="${u.user_id}" data-name="${u.full_name||u.email}" style="padding:4px 8px;font-size:11px"><i class="fa-solid fa-user-xmark"></i></button></td>`:''}
-        </tr>`).join('')||`<tr><td colspan="${isAdmin?5:4}" style="padding:20px;text-align:center;color:var(--muted)">Aucun utilisateur affecté.</td></tr>`}
+          ${isAdmin?`<td><button class="btn d revoke-btn" data-uid="${u.user_id}" data-name="${esc(u.full_name||u.email)}" style="padding:4px 8px;font-size:11px"><i class="fa-solid fa-user-xmark"></i></button></td>`:''}
+        </tr>`).join('')||`<tr><td colspan="${isAdmin?5:4}" style="padding:20px;text-align:center;color:var(--muted)">Aucun manager affecté.</td></tr>`}
         </tbody>
       </table>`;
     $('accBox').querySelectorAll('.roleSel').forEach(sel=>{
@@ -5557,9 +5571,47 @@ async function _cfgAccess(isAdmin){
       try{await BE.revokeAccess(hotelId,b.dataset.uid);flash('Accès révoqué');_cfgAccess(isAdmin);}
       catch(e){flash('Erreur : '+(e.message||e));}
     });
-    const invBtn=$('inviteBtn');
-    if(invBtn) invBtn.onclick=()=>openInviteForm(()=>_cfgAccess(isAdmin));
-  }catch(e){$('accBox').innerHTML=`<div style="color:var(--red);padding:14px">${e.message}</div>`;}
+    if(isAdmin) $('inviteBtn')?.addEventListener('click',()=>openInviteForm(()=>_cfgAccess(isAdmin)));
+
+    // Section portail salariés
+    const portalStatusBadge = emp => {
+      if(!emp.portal_auth_id)
+        return `<span style="font-size:10.5px;background:#fef9c3;color:#854d0e;padding:2px 8px;border-radius:6px;font-weight:600"><i class="fa-solid fa-clock"></i> Invitation envoyée</span>`;
+      if(emp.must_change_password)
+        return `<span style="font-size:10.5px;background:#ede9fe;color:#6d28d9;padding:2px 8px;border-radius:6px;font-weight:600"><i class="fa-solid fa-key"></i> Mot de passe à définir</span>`;
+      return `<span style="font-size:10.5px;background:#dcfce7;color:#166534;padding:2px 8px;border-radius:6px;font-weight:600"><i class="fa-solid fa-circle-check"></i> Actif</span>`;
+    };
+    $('portalBox').innerHTML=`
+      <table class="tbl">
+        <thead><tr><th>Salarié</th><th>E-mail</th><th>Statut</th><th>Dernière connexion</th>${isAdmin?'<th></th>':''}</tr></thead>
+        <tbody>${portalEmp.map(e=>`<tr>
+          <td><b>${esc((e.first_name||'')+' '+(e.last_name||''))}</b></td>
+          <td style="font-size:12px">${esc(e.email||'—')}</td>
+          <td>${portalStatusBadge(e)}</td>
+          <td style="font-size:11.5px;color:var(--muted)">${e.last_login_at?e.last_login_at.slice(0,10):'Jamais'}</td>
+          ${isAdmin?`<td style="display:flex;gap:6px">
+            <button class="btn g reinvite-portal-btn" data-eid="${e.id}" data-email="${esc(e.email||'')}" data-name="${esc((e.first_name||'')+' '+(e.last_name||''))}" style="padding:4px 8px;font-size:11px" title="Renvoyer invitation"><i class="fa-solid fa-envelope-circle-check"></i></button>
+            <button class="btn d revoke-portal-btn" data-eid="${e.id}" data-name="${esc((e.first_name||'')+' '+(e.last_name||''))}" style="padding:4px 8px;font-size:11px" title="Révoquer accès portail"><i class="fa-solid fa-ban"></i></button>
+          </td>`:''}
+        </tr>`).join('')||`<tr><td colspan="${isAdmin?5:4}" style="padding:20px;text-align:center;color:var(--muted)">Aucun salarié avec accès portail.</td></tr>`}
+        </tbody>
+      </table>`;
+    if(isAdmin){
+      $('portalBox').querySelectorAll('.reinvite-portal-btn').forEach(b=>b.onclick=async()=>{
+        const s=staff.find(x=>x.id===b.dataset.eid);
+        if(s) await reinvitePortal(s.id, b.dataset.email);
+        else flash('Salarié introuvable dans le planning actuel');
+      });
+      $('portalBox').querySelectorAll('.revoke-portal-btn').forEach(b=>b.onclick=async()=>{
+        if(!confirm(`Révoquer l'accès portail de « ${b.dataset.name} » ?`))return;
+        try{await BE.revokePortalAccess(b.dataset.eid);flash('Accès portail révoqué');_cfgAccess(isAdmin);}
+        catch(e){flash('Erreur : '+(e.message||e));}
+      });
+    }
+  }catch(e){
+    $('accBox').innerHTML=`<div style="color:var(--red);padding:14px">${e.message}</div>`;
+    $('portalBox').innerHTML='';
+  }
 }
 
 /* ──────────────────────────────────────────────
@@ -8943,8 +8995,11 @@ async function boot(){
     if(TEST_MODE){ BE=makeTestBE(); await start(); return; }
     BE=await makeRealBE();
     if(hasToken){
-      const {data,error}=await BE.sb.auth.getSessionFromUrl();
-      if(!error && data?.session) window.history.replaceState(null,'','/');
+      if(search.includes('code=')){
+        const code = new URLSearchParams(search).get('code');
+        await BE.sb.auth.exchangeCodeForSession(code);
+      }
+      window.history.replaceState(null,'','/');
     }
     const {data:{session}}=await BE.sb.auth.getSession();
     if(!session) renderLogin(); else await start();

@@ -109,11 +109,10 @@ Deno.serve(async (req) => {
       // --- Portail salarié : lier le compte Auth à la fiche employé UNIQUEMENT ---
       // On NE crée PAS de user_hotels : le salarié ne doit pas avoir accès manager.
       // On identifie l'employé par employee_id (priorité) ou par email.
+      const empPatch = { portal_auth_id: targetAuthId, portal_enabled: true, must_change_password: true };
       const empQuery = employee_id
-        ? admin.from('employees').update({ portal_auth_id: targetAuthId, portal_enabled: true })
-            .eq('id', employee_id).eq('hotel_id', hotel_id)
-        : admin.from('employees').update({ portal_auth_id: targetAuthId, portal_enabled: true })
-            .eq('email', email).eq('hotel_id', hotel_id);
+        ? admin.from('employees').update(empPatch).eq('id', employee_id).eq('hotel_id', hotel_id)
+        : admin.from('employees').update(empPatch).eq('email', email).eq('hotel_id', hotel_id);
 
       const { error: empErr } = await empQuery;
       if (empErr) console.error('employees portal link error:', empErr.message);
