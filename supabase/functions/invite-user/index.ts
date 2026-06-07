@@ -157,11 +157,23 @@ Deno.serve(async (req) => {
       });
     } catch(_) {}
 
+    // --- Générer un lien direct (fallback si email non reçu) ---
+    let directLink: string | null = null;
+    try {
+      const { data: linkData } = await admin.auth.admin.generateLink({
+        type: alreadyExisted ? 'magiclink' : 'invite',
+        email,
+        options: { redirectTo },
+      });
+      directLink = (linkData as {properties?: {action_link?: string}})?.properties?.action_link ?? null;
+    } catch(_) {}
+
     return json({
       success: true,
       user_id: userId,
       already_existed: alreadyExisted,
       magic_link_sent: magicLinkSent,
+      direct_link: directLink,
     });
 
   } catch(e) {

@@ -758,7 +758,12 @@ async function makeRealBE(){
         .eq('hotel_id',h).order('start_date',{ascending:false});
       if(filters?.status) q=q.eq('status',filters.status);
       if(filters?.employee_id) q=q.eq('employee_id',filters.employee_id);
-      if(filters?.month){ q=q.gte('start_date',filters.month+'-01').lte('start_date',filters.month+'-31'); }
+      if(filters?.month){
+        const [fy,fm]=filters.month.split('-').map(Number);
+        const lastDay=new Date(fy,fm,0).getDate(); // dernier jour réel du mois
+        const endDate=filters.month+'-'+String(lastDay).padStart(2,'0');
+        q=q.gte('start_date',filters.month+'-01').lte('start_date',endDate);
+      }
       const {data,error}=await q; must(error,'Demandes absences'); return data||[];
     },
     async listAbsences(h){
@@ -974,7 +979,10 @@ function makeTestBE(){
       if(filters?.status) list=list.filter(r=>r.status===filters.status);
       if(filters?.employee_id) list=list.filter(r=>r.employee_id===filters.employee_id);
       if(filters?.month){
-        list=list.filter(r=>r.start_date>=filters.month+'-01' && r.start_date<=filters.month+'-31');
+        const [fy2,fm2]=filters.month.split('-').map(Number);
+        const ld2=new Date(fy2,fm2,0).getDate();
+        const end2=filters.month+'-'+String(ld2).padStart(2,'0');
+        list=list.filter(r=>r.start_date>=filters.month+'-01' && r.start_date<=end2);
       }
       const types=await this.listAbsenceTypes();
       return list.sort((a,b)=>b.start_date.localeCompare(a.start_date)).map(r=>{
@@ -8206,9 +8214,20 @@ async function invitePortal(eid, email){
     const normalizedRole = VALID_ROLE_KEYS.includes(rawRole)
       ? rawRole
       : (roleLabel2Key[rawRole.toLowerCase()] || 'reception');
-    await BE.inviteUser(hotelId, email, full_name, normalizedRole, 'salarie', eid);
-    flash('Invitation portail envoyée à '+email+' ✓');
+    const result = await BE.inviteUser(hotelId, email, full_name, normalizedRole, 'salarie', eid);
     if(s){s.portal_enabled=true;loadPortalSection(s);}
+    // Afficher le lien direct si disponible (fallback email non reçu)
+    if(result?.direct_link){
+      openModal(`<div class="modal-title"><i class="fa-solid fa-link"></i> Invitation envoyée</div>
+        <p style="font-size:13px;color:var(--ink2);margin-bottom:12px">
+          Email envoyé à <b>${esc(email)}</b>. Si le salarié ne reçoit pas l'email (vérifier les spams), partagez ce lien directement :</p>
+        <div style="background:#f4f4f7;border:1px solid var(--line);border-radius:8px;padding:10px 12px;word-break:break-all;font-size:11.5px;font-family:monospace;margin-bottom:12px">${esc(result.direct_link)}</div>
+        <button class="btn p" style="width:100%;justify-content:center" onclick="navigator.clipboard.writeText(${JSON.stringify(result.direct_link)}).then(()=>flash('Lien copié ✓'));closeModal(null)">
+          <i class="fa-solid fa-copy"></i> Copier le lien
+        </button>`);
+    } else {
+      flash('Invitation portail envoyée à '+email+' ✓');
+    }
   }catch(e){
     flash('Erreur invitation portail : '+(e.message||e));
   }
