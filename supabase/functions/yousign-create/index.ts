@@ -167,19 +167,42 @@ Deno.serve(async (req) => {
     const ysDoc = await docRes.json();
     console.log('[yousign-create] doc uploaded — id:', ysDoc.id);
 
+    // ── Normaliser le téléphone (E.164) ──────────────────────────────────────
+    // Accepte : 0612345678, +33612345678, 33612345678 → +33612345678
+    // Rejette tout ce qui ne matche pas E.164 après normalisation
+    let normalizedPhone: string | undefined;
+    if (signer_phone && String(signer_phone).trim()) {
+      const raw = String(signer_phone).replace(/[\s.\-()]/g, '');
+      let e164 = raw;
+      if (/^0[1-9]\d{8}$/.test(raw)) {
+        e164 = '+33' + raw.slice(1); // 06... → +336...
+      } else if (/^33[1-9]\d{8}$/.test(raw)) {
+        e164 = '+' + raw;
+      }
+      if (/^\+[1-9]\d{7,14}$/.test(e164)) {
+        normalizedPhone = e164;
+      } else {
+        console.warn('[yousign-create] téléphone invalide ignoré:', signer_phone, '→', raw);
+      }
+    }
+    console.log('[yousign-create] phone normalized:', normalizedPhone ?? 'absent');
+
     // ── Step 3 : Ajouter signataire ───────────────────────────────────────────
+    const signerInfo: Record<string, unknown> = {
+      first_name: signer_first_name,
+      last_name:  signer_name,
+      email:      signer_email,
+      locale:     'fr',
+    };
+    if (normalizedPhone) signerInfo.phone_number = normalizedPhone;
+
     const signerRes = await ysError('add_signer',
       await ysFetch('add_signer', `${YOUSIGN_API}/signature_requests/${srId}/signers`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${YOUSIGN_KEY}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          info: {
-            first_name: signer_first_name,
-            last_name:  signer_name,
-            email:      signer_email,
-            phone_number: signer_phone || undefined,
-            locale: 'fr',
-          },
+          info: signerInfo,
+          signature_level: 'electronic_signature',
           fields: [{
             document_id: ysDoc.id,
             type: 'signature',
@@ -187,7 +210,7 @@ Deno.serve(async (req) => {
             x: 80, y: 680,
             width: 200, height: 70,
           }],
-          signature_authentication_mode: signer_phone ? 'otp_sms' : 'otp_email',
+          signature_authentication_mode: normalizedPhone ? 'otp_sms' : 'otp_email',
         }),
       })
     );
@@ -265,10 +288,19 @@ Deno.serve(async (req) => {
         }), { status: 504, headers: CORS });
       }
       if (err.message?.startsWith('YOUSIGN_HTTP:')) {
+        const detail = err.detail ?? '';
+        // Erreur téléphone → message lisible
+        if (detail.includes('phone_number') || detail.includes('phone')) {
+          return new Response(JSON.stringify({
+            error: 'Numéro de téléphone invalide pour la signature électronique',
+            detail: 'Utilisez le format international : +33612345678',
+            step: err.step,
+          }), { status: 422, headers: CORS });
+        }
         return new Response(JSON.stringify({
           error: 'YOUSIGN_API_ERROR',
           step: err.step,
-          detail: err.detail,
+          detail,
           httpStatus: err.httpStatus,
         }), { status: 502, headers: CORS });
       }
