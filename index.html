@@ -2239,7 +2239,7 @@ async function openReplPanel(absentEmpId,date,absCode){
         ${e.hourly_rate?`<div style="font-size:11.5px;color:var(--muted);margin-bottom:4px"><i class="fa-solid fa-coins"></i> ${e.hourly_rate}€/h</div>`:''}
         ${!e.documents_ok?`<div style="font-size:11px;color:#dc2626;margin-top:6px"><i class="fa-solid fa-triangle-exclamation"></i> Documents manquants — vérifier avant affectation</div>`:''}
         <div class="rc-actions" style="margin-top:10px">
-          <button class="btn p" style="font-size:11.5px" onclick="flash('Affectation manuelle : contactez ${esc(e.first_name)} ${esc(e.last_name)} au ${e.phone||e.email||\`—\`}')">
+          <button class="btn p" style="font-size:11.5px" onclick="flash('Affectation manuelle : contactez ${esc(e.first_name)} ${esc(e.last_name)} au ${e.phone||e.email||'—'}')">
             <i class="fa-solid fa-phone"></i> Contacter
           </button>
           <button class="btn g" style="font-size:11.5px" onclick="openExternalExtraForm('${e.id}')"><i class="fa-solid fa-pen"></i> Fiche</button>
