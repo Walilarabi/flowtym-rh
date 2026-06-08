@@ -74,40 +74,35 @@ Deno.serve(async (req) => {
 
     // ── Mode diagnostic ───────────────────────────────────────────────────────
     if (payload.diagnostic === true) {
-      console.log('[yousign-create] DIAGNOSTIC MODE — testing API key against multiple endpoints');
-      const results: Record<string, unknown> = {};
+      const trimmedKey = YOUSIGN_KEY.trim();
+      const keyInfo = {
+        keyPresent:    !!trimmedKey,
+        keyLength:     YOUSIGN_KEY.length,
+        keyPrefix:     YOUSIGN_KEY.slice(0, 8),
+        keySuffix:     YOUSIGN_KEY.slice(-4),
+        hasWhitespace: YOUSIGN_KEY !== trimmedKey || /\s/.test(YOUSIGN_KEY),
+        apiBase:       YOUSIGN_API,
+      };
+      console.log('[yousign-create] DIAGNOSTIC KEY —', JSON.stringify(keyInfo));
 
-      const endpoints = [
-        { name: 'GET /users/me',             url: `${YOUSIGN_API}/users/me`,             method: 'GET'  },
-        { name: 'GET /signature_requests',   url: `${YOUSIGN_API}/signature_requests`,   method: 'GET'  },
-        { name: 'GET /workspaces',           url: `${YOUSIGN_API}/workspaces`,            method: 'GET'  },
-      ];
-
-      for (const ep of endpoints) {
-        try {
-          const r = await fetch(ep.url, {
-            method: ep.method,
-            headers: { 'Authorization': `Bearer ${YOUSIGN_KEY}`, 'Content-Type': 'application/json' },
-            signal: AbortSignal.timeout(10_000),
-          });
-          const body = await r.text();
-          console.log(`[yousign-create] diag ${ep.name} → ${r.status} — ${body.slice(0, 300)}`);
-          results[ep.name] = { status: r.status, body: body.slice(0, 300) };
-        } catch (err) {
-          console.error(`[yousign-create] diag ${ep.name} → EXCEPTION: ${String(err)}`);
-          results[ep.name] = { error: String(err) };
-        }
+      let usersMe: unknown;
+      try {
+        const r = await fetch(`${YOUSIGN_API}/users/me`, {
+          method: 'GET',
+          headers: { 'Authorization': `Bearer ${trimmedKey}`, 'Content-Type': 'application/json' },
+          signal: AbortSignal.timeout(10_000),
+        });
+        const body = await r.text();
+        console.log(`[yousign-create] diag GET /users/me → ${r.status} — ${body.slice(0, 500)}`);
+        usersMe = { status: r.status, body: body.slice(0, 500) };
+      } catch (err) {
+        console.error(`[yousign-create] diag GET /users/me → EXCEPTION: ${String(err)}`);
+        usersMe = { error: String(err) };
       }
 
-      console.log('[yousign-create] DIAGNOSTIC DONE — key_length:', YOUSIGN_KEY.length, 'api_base:', YOUSIGN_API);
-      return new Response(JSON.stringify({
-        diagnostic: true,
-        api_base: YOUSIGN_API,
-        key_length: YOUSIGN_KEY.length,
-        key_prefix: YOUSIGN_KEY.slice(0, 8) + '...',
-        results,
-      }), { headers: CORS });
+      return new Response(JSON.stringify({ ...keyInfo, usersMe }), { headers: CORS });
     }
+
     console.log('[yousign-create] payload keys:', Object.keys(payload).join(', '));
 
     const {
