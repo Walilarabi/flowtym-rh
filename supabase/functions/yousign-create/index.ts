@@ -71,6 +71,43 @@ Deno.serve(async (req) => {
     }
 
     const payload = await req.json();
+
+    // ── Mode diagnostic ───────────────────────────────────────────────────────
+    if (payload.diagnostic === true) {
+      console.log('[yousign-create] DIAGNOSTIC MODE — testing API key against multiple endpoints');
+      const results: Record<string, unknown> = {};
+
+      const endpoints = [
+        { name: 'GET /users/me',             url: `${YOUSIGN_API}/users/me`,             method: 'GET'  },
+        { name: 'GET /signature_requests',   url: `${YOUSIGN_API}/signature_requests`,   method: 'GET'  },
+        { name: 'GET /workspaces',           url: `${YOUSIGN_API}/workspaces`,            method: 'GET'  },
+      ];
+
+      for (const ep of endpoints) {
+        try {
+          const r = await fetch(ep.url, {
+            method: ep.method,
+            headers: { 'Authorization': `Bearer ${YOUSIGN_KEY}`, 'Content-Type': 'application/json' },
+            signal: AbortSignal.timeout(10_000),
+          });
+          const body = await r.text();
+          console.log(`[yousign-create] diag ${ep.name} → ${r.status} — ${body.slice(0, 300)}`);
+          results[ep.name] = { status: r.status, body: body.slice(0, 300) };
+        } catch (err) {
+          console.error(`[yousign-create] diag ${ep.name} → EXCEPTION: ${String(err)}`);
+          results[ep.name] = { error: String(err) };
+        }
+      }
+
+      console.log('[yousign-create] DIAGNOSTIC DONE — key_length:', YOUSIGN_KEY.length, 'api_base:', YOUSIGN_API);
+      return new Response(JSON.stringify({
+        diagnostic: true,
+        api_base: YOUSIGN_API,
+        key_length: YOUSIGN_KEY.length,
+        key_prefix: YOUSIGN_KEY.slice(0, 8) + '...',
+        results,
+      }), { headers: CORS });
+    }
     console.log('[yousign-create] payload keys:', Object.keys(payload).join(', '));
 
     const {
