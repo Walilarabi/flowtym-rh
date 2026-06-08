@@ -234,8 +234,7 @@ Deno.serve(async (req) => {
     if (pdf_base64 && contract_id) {
       const { error: updErr } = await sb.from('generated_contracts').update({
         yousign_sr_id: srId,
-        yousign_signer_id: signer.id,
-        signature_status: 'pending',
+        yousign_status: 'pending',
       }).eq('id', contract_id);
       if (updErr) console.warn('[yousign-create] generated_contracts update warn:', updErr.message);
 
