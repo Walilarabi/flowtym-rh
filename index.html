@@ -4647,6 +4647,7 @@ const TEMPLATE_VARS=[
   ['hotel.adresse','Adresse de l\'hôtel'],
   ['hotel.siret','N° SIRET'],
   ['hotel.representant','Représentant légal'],
+  ['hotel.representant_fonction','Fonction du représentant légal'],
   ['hotel.convention_collective','Convention collective applicable'],
   // ── Général ────────────────────────────────────────────────────────────────
   ['today','Date du jour (auto)'],
@@ -5193,7 +5194,7 @@ async function _genStep1(){
       job_title: (rols.find(r=>r.id===s.fields.role_id)||{}).name||emp.role||'',
       department: (deps.find(d=>d.id===s.fields.service_id)||{}).name||emp.department||'',
     });
-    previewHtml = transformContractHtml(substituteVariables(tpl.body_html, ctx));
+    previewHtml = transformContractHtml(substituteVariables(tpl.body_html, ctx), { sigDate: new Date().toLocaleDateString('fr-FR'), employerFunction: hotel.representative_role||'' });
   }
 
   const empOpts = activeStaff.map(e=>`<option value="${e.id}" ${e.id===s.employee_id?'selected':''}>${e.first_name} ${e.last_name}${e.role?' · '+e.role:''}</option>`).join('');
@@ -5469,7 +5470,7 @@ async function _genStep2(){
     department:(deps.find(d=>d.id===s.fields.service_id)||{}).name||emp.department||'',
   });
   const renderedRaw = substituteVariables(tpl.body_html, ctx);
-  const rendered = transformContractHtml(renderedRaw);
+  const rendered = transformContractHtml(renderedRaw, { sigDate: new Date().toLocaleDateString('fr-FR'), employerFunction: hotel.representative_role||'', employerName: hotel.legal_representative||'' });
   const missing = detectMissingVars(tpl.body_html, ctx);
 
   const missingBanner = missing.length
@@ -5536,14 +5537,38 @@ async function _genStep3(){
   const s = genInlineState;
   const emp = staff.find(x=>x.id===s.employee_id);
   if(!emp){$('genInlineBody').innerHTML='<div style="color:var(--red);padding:20px">Données manquantes</div>';return;}
+  const hotel3 = hotels.find(h=>h.id===hotelId)||{};
   $('genInlineBody').innerHTML=`
     <div class="box" style="padding:28px;max-width:560px;margin:0 auto">
       <h3 style="font-size:15px;font-weight:700;margin-bottom:4px">Envoi pour signature</h3>
       <p style="font-size:13px;color:var(--ink2);margin-bottom:20px">Le contrat sera envoyé à <b>${emp.first_name} ${emp.last_name}</b> pour signature électronique.</p>
-      <div class="fld"><label>Adresse email du signataire</label>
+
+      <div class="fld"><label>Adresse email du salarié</label>
         <input type="email" id="gs3_email" value="${emp.email||''}" placeholder="email@exemple.com"></div>
-      <div class="fld"><label>Message personnalisé (optionnel)</label>
-        <textarea id="gs3_msg" rows="3" placeholder="Bonjour, veuillez signer votre contrat…"></textarea></div>
+
+      <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:16px">
+        <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">Mode de signature</div>
+        <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;cursor:pointer;font-size:12px">
+          <input type="radio" name="gs3_sigmode" value="default" checked style="margin-top:2px"
+            onchange="$('gs3_dual_section').style.display='none'">
+          <div><b>Standard</b><br>
+            <span style="color:var(--muted);font-size:11px">Employeur pré-signé automatiquement (${esc(hotel3.legal_representative||'représentant légal')}), seul le salarié signe via YouSign.</span>
+          </div>
+        </label>
+        <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:12px">
+          <input type="radio" name="gs3_sigmode" value="dual" style="margin-top:2px"
+            onchange="$('gs3_dual_section').style.display=this.checked?'block':'none'">
+          <div><b>Double signature</b><br>
+            <span style="color:var(--muted);font-size:11px">Employeur ET salarié signent tous les deux via YouSign.</span>
+          </div>
+        </label>
+        <div id="gs3_dual_section" style="display:none;margin-top:10px;background:#f5f3ff;border-radius:6px;padding:12px">
+          <div class="fld" style="margin:0"><label style="font-size:11px">Email de l'employeur</label>
+            <input type="email" id="gs3_employer_email" value="${esc(hotel3.email||'')}" placeholder="directeur@hotel.com">
+          </div>
+        </div>
+      </div>
+
       <div style="display:flex;gap:10px;margin-top:20px">
         <button class="btn g" style="flex:1" onclick="genInlineState.step=2;renderContractsGenerate()"><i class="fa-solid fa-arrow-left"></i> Retour</button>
         <button class="btn p" style="flex:1" id="gs3_send"><i class="fa-solid fa-paper-plane"></i> Envoyer pour signature</button>
@@ -5569,10 +5594,17 @@ async function _genStep3(){
         department:(deps.find(d=>d.id===s.fields.service_id)||{}).name||emp.department||'',
       });
       const tpl=s.tplList.find(t=>t.id===s.template_id)||s.tplList.find(t=>t.status==='active');
-      const renderedHtml=tpl?transformContractHtml(substituteVariables(tpl.body_html,ctx)):'';
-      console.log('[step3] HTML rendered, length:', renderedHtml.length);
+      const sigMode = document.querySelector('input[name="gs3_sigmode"]:checked')?.value || 'default';
+      const isDual  = sigMode === 'dual';
+      const renderedHtml=tpl?transformContractHtml(substituteVariables(tpl.body_html,ctx),{
+        sigMode,
+        sigDate: new Date().toLocaleDateString('fr-FR'),
+        employerName: hotel.legal_representative||'',
+        employerFunction: hotel.representative_role||'',
+      }):'';
+      console.log('[step3] HTML rendered, length:', renderedHtml.length, 'sigMode:', sigMode);
       // 2. Générer PDF blob dans le navigateur
-      const { blob: pdfBlob, sigField }=await renderHtmlToPdfBlob(renderedHtml,`Contrat ${s.fields.contract_type} — ${emp.first_name} ${emp.last_name}`);
+      const { blob: pdfBlob, sigField, sigFieldEmployer }=await renderHtmlToPdfBlob(renderedHtml,`Contrat ${s.fields.contract_type} — ${emp.first_name} ${emp.last_name}`);
       console.log('[step3] PDF blob size:', pdfBlob.size);
       // 3. Convertir en base64
       const pdfBase64=await new Promise((res,rej)=>{
@@ -5614,6 +5646,10 @@ async function _genStep3(){
             signer_first_name:emp.first_name, signer_name:emp.last_name,
             signer_email:email, signer_phone:emp.phone||null,
             sig_field:sigField||null,
+            dual_signature:isDual,
+            sig_field_employer:isDual?(sigFieldEmployer||null):null,
+            employer_email:isDual?($('gs3_employer_email')?.value.trim()||null):null,
+            employer_name:isDual?(hotel.legal_representative||null):null,
           }),
         });
         ysResult=await ysResp.json();
@@ -5758,6 +5794,7 @@ function buildContractContext(emp, hotel, fields){
     'hotel.adresse'             : hotel?.address||hotel?.city||'',
     'hotel.siret'               : hotel?.siret||'',
     'hotel.representant'        : hotel?.legal_representative||fields.manager_name||'',
+    'hotel.representant_fonction': hotel?.representative_role||'',
     'hotel.convention_collective': fields.collective_agreement||hotel?.collective_agreement||'HCR – Hôtels Cafés Restaurants',
     // ── Anciens noms (rétrocompatibilité totale) ────────────────────────
     employee_first_name         : emp.first_name||'',
@@ -5869,7 +5906,7 @@ function _migrateUnstructuredContract(html){
 /* ===== MOTEUR DE RENDU STRUCTURÉ DU CONTRAT ===== */
 // Parse le HTML du template en blocs sémantiques et émet du HTML 100% inline-styled.
 // Aucune dépendance CSS externe — fonctionne dans l'aperçu ET dans jsPDF.
-function transformContractHtml(html){
+function transformContractHtml(html, opts={}){
   // Detect unstructured HTML: no h1/h2/bloc class → migrate to structured format first
   if(!/(<h[12][\s>]|class=["'][^"']*bloc-)/i.test(html)){
     html = _migrateUnstructuredContract(html);
@@ -5948,8 +5985,20 @@ function transformContractHtml(html){
     // ── Bloc signatures ───────────────────────────────────────────────────
     else if(cls.includes('sig-block')){
       const tds = Array.from(el.querySelectorAll('table td'));
+      // opts.sigMode : 'default' (employeur pré-signé) | 'dual' (double YouSign)
+      const sigMode        = opts.sigMode || 'default';
+      const sigDate        = opts.sigDate || new Date().toLocaleDateString('fr-FR');
+      const employerFunc   = opts.employerFunction || '';
 
       const renderSigTd = (td, isEmployee)=>{
+        // Extraire le nom employeur depuis le 2e élément <p> (plain, sans strong ni em)
+        const namePEl = !isEmployee
+          ? Array.from(td.children).find(c=>(c.tagName||'').toUpperCase()==='P' && !c.querySelector('strong') && !c.querySelector('em'))
+          : null;
+        const employerName = namePEl
+          ? (namePEl.innerHTML.split(/<br\s*\/?>/i)[0]).replace(/<[^>]+>/g,'').trim()
+          : (opts.employerName || '');
+
         let r = '';
         Array.from(td.children).forEach(child=>{
           const ct = (child.tagName||'').toUpperCase();
@@ -5964,23 +6013,37 @@ function transformContractHtml(html){
               r += `<div style="font-size:10pt;color:#555;margin:0 0 4pt">${child.textContent}</div>`;
             }
           } else if(ct === 'DIV'){
-            // Ancre YouSign : id="ys-sig-field" uniquement sur la colonne salarié
-            const idAttr = isEmployee ? ' id="ys-sig-field"' : '';
-            r += `<div${idAttr} style="margin-top:52pt;border-top:1px solid #333;max-width:180pt;padding-top:5pt;font-size:9pt;color:#777">${child.textContent}</div>`;
+            if(isEmployee){
+              // ── Colonne Salarié : ancre YouSign ───────────────────────────
+              r += `<div id="ys-sig-field" style="margin-top:52pt;border-top:1px solid #333;max-width:180pt;padding-top:5pt;font-size:9pt;color:#777">${child.textContent}</div>`;
+            } else if(sigMode === 'dual'){
+              // ── Colonne Employeur : double signature YouSign ───────────────
+              r += `<div id="ys-sig-employer" style="margin-top:52pt;border-top:1px solid #333;max-width:180pt;padding-top:5pt;font-size:9pt;color:#777">${child.textContent}</div>`;
+            } else {
+              // ── Colonne Employeur : pré-signé (workflow par défaut) ────────
+              r += `<div style="margin-top:14pt;max-width:180pt">`
+                 + `<div style="background:#f8f9fa;border:1px solid #e5e7eb;border-radius:3pt;padding:6pt 9pt;font-size:8.5pt;line-height:1.55;color:#374151">`
+                 + `<span style="font-weight:700;display:block;margin-bottom:3pt">✓ Approuvé</span>`
+                 + (employerName ? `<span style="display:block">${employerName}</span>` : '')
+                 + (employerFunc  ? `<span style="display:block;color:#6b7280">${employerFunc}</span>` : '')
+                 + `<span style="display:block;color:#6b7280;margin-top:2pt">Le ${sigDate}</span>`
+                 + `</div>`
+                 + `<div style="border-top:1px solid #333;padding-top:4pt;font-size:9pt;color:#777;margin-top:6pt">Signature et cachet</div>`
+                 + `</div>`;
+            }
           }
         });
         return r;
       };
 
       if(tds.length >= 2){
-        // page-break-before:always garantit que le bloc signatures est toujours sur sa propre dernière page
-        out += `<div style="page-break-before:always;page-break-inside:avoid;margin-top:38pt">`
+        out += `<div style="page-break-inside:avoid;margin-top:38pt">`
              + `<table style="width:100%;border-collapse:collapse"><tr>`
              + `<td style="vertical-align:top;width:50%;padding-right:24pt">${renderSigTd(tds[0], false)}</td>`
              + `<td style="vertical-align:top;width:50%;padding-left:24pt">${renderSigTd(tds[1], true)}</td>`
              + `</tr></table></div>`;
       } else {
-        out += `<div style="page-break-before:always;page-break-inside:avoid;margin-top:38pt">${el.innerHTML}</div>`;
+        out += `<div style="page-break-inside:avoid;margin-top:38pt">${el.innerHTML}</div>`;
       }
     }
 
@@ -6164,31 +6227,35 @@ async function renderHtmlToPdfBlob(html, title){
   wrap.innerHTML = `<div style="text-align:right;font-size:11px;color:#888;margin-bottom:10px;padding-bottom:4px;border-bottom:1px solid #ccc">${title} · Généré le ${new Date().toLocaleDateString('fr-FR')}</div>${html}`;
   document.body.appendChild(wrap);
 
-  // ── Mesure de la zone signature YouSign ─────────────────────────────────
+  // ── Mesure des zones signature YouSign ──────────────────────────────────
   // Coordonnées en points (1pt = 1/72") — système YouSign v3 : origine top-left.
-  // A4 = 595.28 × 841.89 pt. La div #ys-sig-field est la ligne "Signature" du salarié.
-  let sigField = null;
-  const ysElem = wrap.querySelector('#ys-sig-field');
-  if(ysElem){
-    const wrapRect = wrap.getBoundingClientRect();
-    const elemRect = ysElem.getBoundingClientRect();
+  // A4 = 595.28 × 841.89 pt.
+  // #ys-sig-field    = ligne "Signature" du salarié (toujours présente)
+  // #ys-sig-employer = ligne "Signature" de l'employeur (mode dual uniquement)
+  const _measureYsSig = (anchorEl, wrapRect)=>{
+    if(!anchorEl) return null;
+    const elemRect = anchorEl.getBoundingClientRect();
     const PT_PER_PX = 595.28 / wrapRect.width;
     const A4_H_PT   = 841.89;
-    // borderTopPt = position absolue (depuis le haut du document) de la ligne de signature
+    // borderTopPt = position absolue du bord supérieur de la div "Signature"
     const borderTopPt = (elemRect.top - wrapRect.top) * PT_PER_PX;
-    // Le champ YouSign couvre l'espace vide au-dessus de la ligne (margin-top:52pt dans le HTML)
+    // Le champ YouSign couvre l'espace vide (≈50pt) au-dessus de cette ligne
     const fieldTopPt  = borderTopPt - 50;
     const pageNum     = Math.floor(fieldTopPt / A4_H_PT) + 1;
     const yOnPage     = fieldTopPt - (pageNum - 1) * A4_H_PT;
-    sigField = {
+    return {
       page   : pageNum,
       x      : Math.round((elemRect.left - wrapRect.left) * PT_PER_PX),
       y      : Math.round(Math.max(0, yOnPage)),
       width  : Math.round(Math.min(190, elemRect.width * PT_PER_PX)),
       height : 55,
     };
-    console.log('[renderHtmlToPdfBlob] sigField:', JSON.stringify(sigField));
-  }
+  };
+  const wrapRectForSig  = wrap.getBoundingClientRect();
+  const sigField         = _measureYsSig(wrap.querySelector('#ys-sig-field'), wrapRectForSig);
+  const sigFieldEmployer = _measureYsSig(wrap.querySelector('#ys-sig-employer'), wrapRectForSig);
+  if(sigField)         console.log('[renderHtmlToPdfBlob] sigField:', JSON.stringify(sigField));
+  if(sigFieldEmployer) console.log('[renderHtmlToPdfBlob] sigFieldEmployer:', JSON.stringify(sigFieldEmployer));
 
   try {
     const canvas = await window.html2canvas(wrap, {
@@ -6213,11 +6280,12 @@ async function renderHtmlToPdfBlob(html, title){
       if(pg > 0) doc.addPage();
       doc.addImage(imgData, 'JPEG', 0, -pg * A4_H, A4_W, totalMmH);
     }
-    // Vérification de cohérence : la page signature doit être la dernière
-    if(sigField && sigField.page !== pageCount){
-      console.warn('[renderHtmlToPdfBlob] sigField.page', sigField.page, '!== pageCount', pageCount, '— vérifiez le page-break-before:always');
-    }
-    return { blob: doc.output('blob'), sigField, pageCount };
+    // Vérification de cohérence : les champs de signature doivent être sur la dernière page
+    if(sigField && sigField.page !== pageCount)
+      console.warn('[renderHtmlToPdfBlob] sigField.page', sigField.page, '!== pageCount', pageCount);
+    if(sigFieldEmployer && sigFieldEmployer.page !== pageCount)
+      console.warn('[renderHtmlToPdfBlob] sigFieldEmployer.page', sigFieldEmployer.page, '!== pageCount', pageCount);
+    return { blob: doc.output('blob'), sigField, sigFieldEmployer, pageCount };
   } finally {
     document.body.removeChild(wrap);
   }

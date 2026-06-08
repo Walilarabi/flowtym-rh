@@ -111,6 +111,7 @@ Deno.serve(async (req) => {
       employee_id, hotel_id,
       signer_first_name, signer_name, signer_email, signer_phone,
       sig_field,
+      dual_signature, sig_field_employer, employer_email, employer_name,
     } = payload;
 
     const sb = createClient(SUPABASE_URL, SUPABASE_SVC);
@@ -235,6 +236,32 @@ Deno.serve(async (req) => {
     const signer = await signerRes.json();
     console.log('[yousign-create] signer added — id:', signer.id);
 
+    // ── Step 3b : Ajouter signataire employeur (mode double signature) ────────
+    let employerSigner: { id: string } | null = null;
+    if (dual_signature && employer_email) {
+      const [empFirst = '', ...empLastParts] = String(employer_name || '').split(' ');
+      const empLast = empLastParts.join(' ') || empFirst || 'Employeur';
+      const empFieldFallback = { document_id: ysDoc.id, type: 'signature', page: signerField.page, x: 80, y: signerField.y, width: 200, height: 55 };
+      const empField = (sig_field_employer && sig_field_employer.page != null && sig_field_employer.x != null)
+        ? { document_id: ysDoc.id, type: 'signature', page: sig_field_employer.page, x: sig_field_employer.x, y: sig_field_employer.y, width: sig_field_employer.width ?? 190, height: sig_field_employer.height ?? 55 }
+        : empFieldFallback;
+      console.log('[yousign-create] employer field:', JSON.stringify(empField));
+      const empSignerRes = await ysError('add_employer_signer',
+        await ysFetch('add_employer_signer', `${YOUSIGN_API}/signature_requests/${srId}/signers`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${YOUSIGN_KEY}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            info: { first_name: empFirst || 'Représentant', last_name: empLast, email: employer_email, locale: 'fr' },
+            signature_level: 'electronic_signature',
+            fields: [empField],
+            signature_authentication_mode: 'otp_email',
+          }),
+        })
+      );
+      employerSigner = await empSignerRes.json() as { id: string };
+      console.log('[yousign-create] employer signer added — id:', employerSigner.id);
+    }
+
     // ── Step 4 : Activer ──────────────────────────────────────────────────────
     const actRes = await ysError('activate',
       await ysFetch('activate', `${YOUSIGN_API}/signature_requests/${srId}/activate`, {
@@ -245,8 +272,11 @@ Deno.serve(async (req) => {
     const activated = await actRes.json();
     console.log('[yousign-create] activated — status:', activated.status);
 
-    const signatureLink = (activated.signers as Array<{ id: string; signature_link?: string }>)
-      ?.find(s => s.id === signer.id)?.signature_link ?? signer.signature_link ?? '';
+    const activatedSigners = activated.signers as Array<{ id: string; signature_link?: string }> ?? [];
+    const signatureLink = activatedSigners.find(s => s.id === signer.id)?.signature_link ?? signer.signature_link ?? '';
+    const employerSignatureLink = employerSigner
+      ? (activatedSigners.find(s => s.id === employerSigner!.id)?.signature_link ?? '')
+      : null;
 
     // ── Step 5 : Enregistrer en base ──────────────────────────────────────────
     if (pdf_base64 && contract_id) {
@@ -263,8 +293,13 @@ Deno.serve(async (req) => {
           body: '📝 Un contrat est en attente de votre signature électronique.',
         });
       }
-      console.log('[yousign-create] Mode A done — sr_id:', srId);
-      return new Response(JSON.stringify({ success: true, sr_id: srId, signature_link: signatureLink }), { headers: CORS });
+      console.log('[yousign-create] Mode A done — sr_id:', srId, '— dual:', !!employerSigner);
+      return new Response(JSON.stringify({
+        success: true, sr_id: srId,
+        signature_link: signatureLink,
+        employer_signature_link: employerSignatureLink,
+        dual_signature: !!employerSigner,
+      }), { headers: CORS });
 
     } else {
       const { data: psrRow, error: insErr } = await sb.from('portal_signature_requests').insert({
