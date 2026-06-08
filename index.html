@@ -10255,21 +10255,33 @@ async function sendAiMessage(){
   aiMessages.push({role:'user',content:txt});
   _renderAiChat();
   $('aiSend').disabled=true;
+  // Indicateur de frappe
+  const typingId='ai-typing-'+Date.now();
+  const box=$('aiMessages');
+  if(box) box.insertAdjacentHTML('beforeend',`<div id="${typingId}" style="display:flex;gap:8px;align-items:center;margin-bottom:10px;color:var(--muted);font-size:12px"><i class="fa-solid fa-circle-notch fa-spin"></i> L'assistant rédige…</div>`);
+  $('aiScrollAnchor')?.scrollIntoView({behavior:'smooth'});
   try{
     const ctx=_buildAiContext();
-    const supabaseUrl=(typeof SUPABASE_URL!=='undefined'?SUPABASE_URL:null)||(BE?.sb?.supabaseUrl)||'';
-    const anonKey=(typeof SUPABASE_ANON_KEY!=='undefined'?SUPABASE_ANON_KEY:null)||(BE?.sb?.supabaseKey)||'';
-    const resp=await fetch(`${supabaseUrl}/functions/v1/rh-assistant`,{
+    const resp=await fetch(`${SUPABASE_URL}/functions/v1/rh-assistant`,{
       method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':`Bearer ${anonKey}`},
+      headers:{'Content-Type':'application/json','Authorization':`Bearer ${SUPABASE_ANON_KEY}`},
       body:JSON.stringify({hotel_id:hotelId,messages:aiMessages,context:ctx}),
     });
-    if(!resp.ok){const e=await resp.text();throw new Error(e);}
-    const {reply}=await resp.json();
-    aiMessages.push({role:'assistant',content:reply});
+    const data=await resp.json().catch(()=>({}));
+    if(!resp.ok||data.error){
+      const code=data.error||'';
+      if(code==='NOT_CONFIGURED'){
+        aiMessages.push({role:'assistant',content:'⚙️ **Assistant IA non configuré**\n\nLa clé API Anthropic n\'est pas encore renseignée dans Supabase.\n\nContactez votre administrateur pour activer cette fonctionnalité.'});
+      } else {
+        aiMessages.push({role:'assistant',content:'Une erreur temporaire s\'est produite. Veuillez réessayer dans quelques instants.'});
+      }
+    } else {
+      aiMessages.push({role:'assistant',content:data.reply});
+    }
   }catch(e){
-    aiMessages.push({role:'assistant',content:'Désolé, une erreur est survenue : '+e.message});
+    aiMessages.push({role:'assistant',content:'Impossible de joindre l\'assistant. Vérifiez votre connexion et réessayez.'});
   }
+  document.getElementById(typingId)?.remove();
   _renderAiChat();
   $('aiSend').disabled=false;
 }

@@ -28,10 +28,19 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors(origin) });
 
   try {
-    // Verify the caller is authenticated
+    // Vérification immédiate de la clé — retourne un code métier sans détail technique
+    if (!ANTHROPIC_API_KEY) {
+      return new Response(
+        JSON.stringify({ error: 'NOT_CONFIGURED' }),
+        { status: 503, headers: { ...cors(origin), 'Content-Type': 'application/json' } }
+      );
+    }
+
     const authHeader = req.headers.get('authorization') ?? '';
-    const anonKey = authHeader.replace('Bearer ', '');
-    if (!anonKey) return new Response(JSON.stringify({ error: 'Non autorisé' }), { status: 401, headers: cors(origin) });
+    const token = authHeader.replace('Bearer ', '');
+    if (!token) {
+      return new Response(JSON.stringify({ error: 'Non autorisé' }), { status: 401, headers: cors(origin) });
+    }
 
     const body = await req.json();
     const { hotel_id, messages, context } = body;
@@ -39,13 +48,22 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: 'Paramètres manquants' }), { status: 400, headers: cors(origin) });
     }
 
-    // Load hotel-scoped data using service role (never exposed to frontend)
+    // Chargement des données RH via service_role — jamais exposé au frontend
     const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
     const [staffRes, absRes, trainingRes, medicalRes] = await Promise.all([
-      sb.from('employees').select('id,first_name,last_name,department,role,contract_type,active,hire_date,departure_date').eq('hotel_id', hotel_id),
-      sb.from('absences').select('id,employee_id,type_id,start_date,end_date,status').eq('hotel_id', hotel_id).gte('start_date', new Date(Date.now()-90*864e5).toISOString().slice(0,10)),
-      sb.from('employee_trainings').select('id,employee_id,training_name,expiry_date').eq('hotel_id', hotel_id),
-      sb.from('medical_visits').select('id,employee_id,visit_date,next_visit_date').eq('hotel_id', hotel_id),
+      sb.from('employees')
+        .select('id,first_name,last_name,department,role,contract_type,active,hire_date,departure_date')
+        .eq('hotel_id', hotel_id),
+      sb.from('absence_requests')
+        .select('id,employee_id,start_date,end_date,status')
+        .eq('hotel_id', hotel_id)
+        .gte('start_date', new Date(Date.now() - 90 * 864e5).toISOString().slice(0, 10)),
+      sb.from('employee_trainings')
+        .select('id,employee_id,training_name,expiry_date')
+        .eq('hotel_id', hotel_id),
+      sb.from('medical_visits')
+        .select('id,employee_id,visit_date,next_visit_date')
+        .eq('hotel_id', hotel_id),
     ]);
 
     const employees = staffRes.data ?? [];
@@ -55,23 +73,20 @@ Deno.serve(async (req) => {
     const medicalVisits = medicalRes.data ?? [];
     const today = new Date().toISOString().slice(0, 10);
 
-    // Build a concise context summary injected as system message
     const systemPrompt = `Tu es l'Assistant RH IA de Flowtym, un logiciel RH pour hôtels. Tu aides les gestionnaires RH avec une expertise professionnelle, concise et bienveillante.
-Tu ne dois JAMAIS divulguer de données personnelles sensibles (n° SS, mot de passe, données bancaires). Si on te le demande, refuse poliment.
-Tu travailles uniquement sur les données de l'hôtel fourni, sans jamais accéder à d'autres hôtels.
+Tu ne dois JAMAIS divulguer de données personnelles sensibles (n° SS, mots de passe, données bancaires). Si on te le demande, refuse poliment.
+Tu travailles uniquement sur les données de l'hôtel fourni. Ne mentionne jamais d'autres hôtels.
 
-DONNÉES RH DE L'HÔTEL (${context?.hotel_name ?? 'Hôtel'}) — ${today} :
+DONNÉES RH — ${context?.hotel_name ?? 'Hôtel'} (au ${today}) :
 - Effectif actif : ${active.length} collaborateurs
 - Services : ${(context?.departments ?? []).map((d: any) => `${d.name} (${d.count})`).join(', ') || 'N/A'}
-- Types de contrats : ${JSON.stringify(context?.contracts ?? {})}
+- Contrats : ${JSON.stringify(context?.contracts ?? {})}
 - Absences (90 derniers jours) : ${absences.length} demandes (${absences.filter((a: any) => a.status === 'pending').length} en attente, ${absences.filter((a: any) => a.status === 'approved').length} approuvées)
-- Formations enregistrées : ${trainings.length} (${trainings.filter((t: any) => t.expiry_date && t.expiry_date < today).length} expirées)
-- Visites médicales : ${medicalVisits.length} (${medicalVisits.filter((v: any) => v.next_visit_date && v.next_visit_date < today).length} en retard)
-- Collaborateurs sans visite médicale : ${active.filter((e: any) => !medicalVisits.find((v: any) => v.employee_id === e.id)).length}
+- Formations : ${trainings.length} enregistrées (${trainings.filter((t: any) => t.expiry_date && t.expiry_date < today).length} expirées)
+- Visites médicales : ${medicalVisits.length} (${medicalVisits.filter((v: any) => v.next_visit_date && v.next_visit_date < today).length} en retard, ${active.filter((e: any) => !medicalVisits.find((v: any) => v.employee_id === e.id)).length} sans visite)
 
-Réponds toujours en français. Sois précis et aide le gestionnaire à prendre de meilleures décisions RH.`;
+Réponds toujours en français. Sois précis, professionnel et orienté action.`;
 
-    // Call Claude via Anthropic Messages API
     const anthropicResp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -88,8 +103,13 @@ Réponds toujours en français. Sois précis et aide le gestionnaire à prendre 
     });
 
     if (!anthropicResp.ok) {
+      // Log le détail côté serveur, ne le renvoie pas au client
       const errText = await anthropicResp.text();
-      throw new Error(`Anthropic API error: ${errText}`);
+      console.error('Anthropic API error:', anthropicResp.status, errText);
+      if (anthropicResp.status === 401) {
+        return new Response(JSON.stringify({ error: 'NOT_CONFIGURED' }), { status: 503, headers: cors(origin) });
+      }
+      throw new Error('Erreur IA temporaire');
     }
 
     const aiData = await anthropicResp.json();
@@ -102,9 +122,10 @@ Réponds toujours en français. Sois précis et aide le gestionnaire à prendre 
 
   } catch (e: any) {
     console.error('rh-assistant error:', e);
-    return new Response(JSON.stringify({ error: e.message }), {
-      status: 500,
-      headers: { ...cors(origin), 'Content-Type': 'application/json' },
-    });
+    // Ne jamais renvoyer le message d'erreur brut au client
+    return new Response(
+      JSON.stringify({ error: 'SERVICE_ERROR' }),
+      { status: 500, headers: { ...cors(origin), 'Content-Type': 'application/json' } }
+    );
   }
 });
