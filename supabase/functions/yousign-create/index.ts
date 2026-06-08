@@ -113,17 +113,23 @@ Deno.serve(async (req) => {
     }
 
     // ── Step 1 : Créer la signature request ──────────────────────────────────
+    const srUrl = `${YOUSIGN_API}/signature_requests`;
+    const srPayload = {
+      name: docLabel,
+      delivery_mode: 'email',   // 'none' retournait 405 — test avec 'email'
+      timezone: 'Europe/Paris',
+      audit_trail_locale: 'fr',
+      signers_allowed_to_decline: true,
+    };
+    console.log('[yousign-create] create_sr — URL:', srUrl);
+    console.log('[yousign-create] create_sr — method: POST');
+    console.log('[yousign-create] create_sr — headers: Authorization=Bearer[present=' + !!YOUSIGN_KEY + '] Content-Type=application/json');
+    console.log('[yousign-create] create_sr — payload:', JSON.stringify(srPayload));
     const srRes = await ysError('create_sr',
-      await ysFetch('create_sr', `${YOUSIGN_API}/signature_requests`, {
+      await ysFetch('create_sr', srUrl, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${YOUSIGN_KEY}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: docLabel,
-          delivery_mode: 'none',
-          timezone: 'Europe/Paris',
-          audit_trail_locale: 'fr',
-          signers_allowed_to_decline: true,
-        }),
+        body: JSON.stringify(srPayload),
       })
     );
     const sr = await srRes.json();
