@@ -852,7 +852,19 @@ async function makeRealBE(){
       const {data,error}=await sb.from('equipment_items').insert({hotel_id:h,...p,created_by:cb}).select('*').single();must(error,'Créer équipement');return data;
     },
     async updateEquipment(id,p){const {error}=await sb.from('equipment_items').update(p).eq('id',id);must(error,'MAJ équipement');},
-    async deleteEquipment(id){const {error}=await sb.from('equipment_items').delete().eq('id',id);must(error,'Supprimer équipement');}
+    async deleteEquipment(id){const {error}=await sb.from('equipment_items').delete().eq('id',id);must(error,'Supprimer équipement');},
+    /* --- ENTRETIENS --- */
+    async listReviewCampaigns(h){const {data,error}=await sb.from('review_campaigns').select('*').eq('hotel_id',h).order('year',{ascending:false}).order('created_at',{ascending:false});must(error,'Campagnes');return data||[];},
+    async saveReviewCampaign(h,p){const {data,error}=await sb.from('review_campaigns').insert({hotel_id:h,...p}).select('*').single();must(error,'Créer campagne');return data;},
+    async updateReviewCampaign(id,p){const {error}=await sb.from('review_campaigns').update(p).eq('id',id);must(error,'MAJ campagne');},
+    async deleteReviewCampaign(id){const {error}=await sb.from('review_campaigns').delete().eq('id',id);must(error,'Supprimer campagne');},
+    async listEmployeeReviews(h,campaignId){let q=sb.from('employee_reviews').select('*, employees!employee_id(first_name,last_name,department,role), manager:employees!manager_id(first_name,last_name)').eq('hotel_id',h);if(campaignId)q=q.eq('campaign_id',campaignId);const {data,error}=await q.order('created_at');must(error,'Entretiens');return data||[];},
+    async saveEmployeeReview(h,p){const {data,error}=await sb.from('employee_reviews').insert({hotel_id:h,...p}).select('*').single();must(error,'Créer entretien');return data;},
+    async updateEmployeeReview(id,p){const {error}=await sb.from('employee_reviews').update(p).eq('id',id);must(error,'MAJ entretien');},
+    async listReviewObjectives(reviewId){const {data,error}=await sb.from('review_objectives').select('*').eq('review_id',reviewId).order('created_at');must(error,'Objectifs');return data||[];},
+    async saveReviewObjective(reviewId,hotelId,p){const {data,error}=await sb.from('review_objectives').insert({review_id:reviewId,hotel_id:hotelId,...p}).select('*').single();must(error,'Créer objectif');return data;},
+    async updateReviewObjective(id,p){const {error}=await sb.from('review_objectives').update(p).eq('id',id);must(error,'MAJ objectif');},
+    async deleteReviewObjective(id){const {error}=await sb.from('review_objectives').delete().eq('id',id);must(error,'Supprimer objectif');}
   };
 }
 
@@ -1068,6 +1080,19 @@ function makeTestBE(){
     async saveEquipment(h,p){const r={id:'eq'+Date.now(),hotel_id:h,...p,created_at:new Date().toISOString(),updated_at:new Date().toISOString()};equipmentItems.push(r);return r;},
     async updateEquipment(id,p){Object.assign(equipmentItems.find(x=>x.id===id)||{},p,{updated_at:new Date().toISOString()});},
     async deleteEquipment(id){const i=equipmentItems.findIndex(x=>x.id===id);if(i>=0)equipmentItems.splice(i,1);},
+    /* --- ENTRETIENS TEST STUBS --- */
+    _reviewCampaigns:[], _employeeReviews:[], _reviewObjectives:[],
+    async listReviewCampaigns(h){return this._reviewCampaigns.filter(x=>x.hotel_id===h);},
+    async saveReviewCampaign(h,p){const r={id:'rc'+Date.now(),hotel_id:h,...p,created_at:new Date().toISOString()};this._reviewCampaigns.push(r);return r;},
+    async updateReviewCampaign(id,p){const r=this._reviewCampaigns.find(x=>x.id===id);if(r)Object.assign(r,p);},
+    async deleteReviewCampaign(id){this._reviewCampaigns=this._reviewCampaigns.filter(x=>x.id!==id);},
+    async listEmployeeReviews(h,cid){return this._employeeReviews.filter(x=>x.hotel_id===h&&(!cid||x.campaign_id===cid)).map(r=>({...r,employees:emps.find(e=>e.id===r.employee_id)||null,manager:emps.find(e=>e.id===r.manager_id)||null}));},
+    async saveEmployeeReview(h,p){const r={id:'er'+Date.now(),hotel_id:h,...p,created_at:new Date().toISOString()};this._employeeReviews.push(r);return r;},
+    async updateEmployeeReview(id,p){const r=this._employeeReviews.find(x=>x.id===id);if(r)Object.assign(r,p);},
+    async listReviewObjectives(rid){return this._reviewObjectives.filter(x=>x.review_id===rid);},
+    async saveReviewObjective(rid,h,p){const r={id:'ro'+Date.now(),review_id:rid,hotel_id:h,...p,created_at:new Date().toISOString()};this._reviewObjectives.push(r);return r;},
+    async updateReviewObjective(id,p){const r=this._reviewObjectives.find(x=>x.id===id);if(r)Object.assign(r,p);},
+    async deleteReviewObjective(id){this._reviewObjectives=this._reviewObjectives.filter(x=>x.id!==id);},
 
     _emps:emps,_planning:()=>planning,
     _absenceRequests:()=>absenceRequests, _absenceBalances:()=>absenceBalances,
@@ -1211,8 +1236,9 @@ const MODULE_LABELS = {
   personnel:'Personnel', contracts:'Contrats', documents:'Documents RH',
   absences:'Absences', pointage:'Pointage', tracking:'Suivi du temps',
   payroll:'Paie', recruitment:'Recrutement', training:'Formations',
-  medical:'Visites médicales', equipment:'Matériel remis',
+  reviews:'Entretiens', medical:'Visites médicales', equipment:'Matériel remis',
   orgchart:'Organigramme', portal_inbox:'Demandes portail', config:'Paramètres',
+  ai_assistant:'Assistant RH IA',
 };
 const ALL_MODULES = Object.keys(MODULE_LABELS);
 const PERM_ACTIONS = [
@@ -1229,50 +1255,50 @@ const DEFAULT_PERMISSIONS={
     dashboard:_p(1,0,0,0,1,0,0), planning:_v,                  reporting:_p(1,0,0,0,1,0,0),
     personnel:_p(1,0,0,0,1,0,1), contracts:_p(1,0,0,0,1,0,1), documents:_p(1,0,0,0,1,0,1),
     absences:_p(1,0,0,0,1,1,0),  pointage:_p(1,0,0,0,1,0,0),  tracking:_p(1,0,0,0,1,0,0),
-    payroll:_p(1,1,1,1,1,0,1),   recruitment:_0, training:_0,  medical:_0,
-    equipment:_v, orgchart:_v,    portal_inbox:_0, config:_0,
+    payroll:_p(1,1,1,1,1,0,1),   recruitment:_0, training:_0, reviews:_0, medical:_0,
+    equipment:_v, orgchart:_v,    portal_inbox:_0, config:_0, ai_assistant:_v,
   },
   revenue_manager:{
     dashboard:_v, planning:_v,   reporting:_p(1,0,0,0,1,0,0),
     personnel:_0, contracts:_0,  documents:_0, absences:_0,
     pointage:_0,  tracking:_0,   payroll:_0,   recruitment:_0,
-    training:_0,  medical:_0,    equipment:_0, orgchart:_0,
-    portal_inbox:_0, config:_0,
+    training:_0,  reviews:_0,    medical:_0,   equipment:_0, orgchart:_0,
+    portal_inbox:_0, config:_0, ai_assistant:_0,
   },
   reception:{
     dashboard:_v, planning:_v,   reporting:_0,
     personnel:_v, contracts:_0,  documents:_0,
     absences:_0,  pointage:_vc,  tracking:_0, payroll:_0,
-    recruitment:_0, training:_0, medical:_0,
-    equipment:_0, orgchart:_v,   portal_inbox:_0, config:_0,
+    recruitment:_0, training:_0, reviews:_0,  medical:_0,
+    equipment:_0, orgchart:_v,   portal_inbox:_0, config:_0, ai_assistant:_0,
   },
   gouvernante:{
     dashboard:_v, planning:_p(1,1,1,0,0,0,0), reporting:_0,
     personnel:_v, contracts:_0,               documents:_0,
     absences:_p(1,0,0,0,0,1,0), pointage:_vc, tracking:_0, payroll:_0,
-    recruitment:_0, training:_0, medical:_0,
-    equipment:_0, orgchart:_v, portal_inbox:_p(1,0,0,0,0,1,0), config:_0,
+    recruitment:_0, training:_0, reviews:_v, medical:_0,
+    equipment:_0, orgchart:_v, portal_inbox:_p(1,0,0,0,0,1,0), config:_0, ai_assistant:_0,
   },
   maintenance:{
     dashboard:_v, planning:_v,   reporting:_0,
     personnel:_v, contracts:_0,  documents:_0,
     absences:_0,  pointage:_0,   tracking:_0, payroll:_0,
-    recruitment:_0, training:_0, medical:_0,
-    equipment:_v, orgchart:_0,   portal_inbox:_v, config:_0,
+    recruitment:_0, training:_0, reviews:_0, medical:_0,
+    equipment:_v, orgchart:_0,   portal_inbox:_v, config:_0, ai_assistant:_0,
   },
   breakfast:{
     dashboard:_v, planning:_v,   reporting:_0,
     personnel:_v, contracts:_0,  documents:_0,
     absences:_0,  pointage:_0,   tracking:_0, payroll:_0,
-    recruitment:_0, training:_0, medical:_0,
-    equipment:_0, orgchart:_0,   portal_inbox:_v, config:_0,
+    recruitment:_0, training:_0, reviews:_0, medical:_0,
+    equipment:_0, orgchart:_0,   portal_inbox:_v, config:_0, ai_assistant:_0,
   },
   femme_de_chambre:{
     dashboard:_v, planning:_v,   reporting:_0,
     personnel:_0, contracts:_0,  documents:_0,
     absences:_0,  pointage:_0,   tracking:_0, payroll:_0,
-    recruitment:_0, training:_0, medical:_0,
-    equipment:_0, orgchart:_0,   portal_inbox:_0, config:_0,
+    recruitment:_0, training:_0, reviews:_0, medical:_0,
+    equipment:_0, orgchart:_0,   portal_inbox:_0, config:_0, ai_assistant:_0,
   },
 };
 let hotelPerms=null;    // surcharges DB chargées au boot
@@ -1309,6 +1335,7 @@ const TABS=[
   ]],
   ['RH Avancé',[
     ['training','Formations','fa-solid fa-graduation-cap'],
+    ['reviews','Entretiens','fa-solid fa-comments'],
     ['medical','Visites médicales','fa-solid fa-stethoscope'],
     ['equipment','Matériel remis','fa-solid fa-boxes-stacked'],
     ['orgchart','Organigramme','fa-solid fa-sitemap'],
@@ -1366,6 +1393,8 @@ function renderShell(){
     LS.set('rh_sidebar',sidebarCollapsed?'1':'0');
     setTimeout(()=>{if(typeof applyStickyWidths==='function')applyStickyWidths();},280);};
   goView(view);
+  const fab=$('aiFab');
+  if(fab) fab.style.display=canDo('ai_assistant','view')?'flex':'none';
 }
 
 // Alias pour navTo (utilisé dans les templates HTML inline)
@@ -1420,6 +1449,7 @@ function goView(v){
            personnel:renderPersonnel, contracts:renderContracts, documents:renderDocuments,
            config:renderConfig, absences:renderAbsences, pointage:renderPointage,
            recruitment:renderRecruitment, training:renderTraining,
+           reviews:renderReviews,
            medical:renderMedical, equipment:renderEquipment, orgchart:renderOrgChart,
            tracking:renderTracking, payroll:renderPayroll, portal_inbox:renderPortalInbox};
   (r[v]||r.dashboard)();
@@ -7109,13 +7139,34 @@ async function drawRecruitBoard(){
         return `<div style="width:240px;flex-shrink:0">
           <div style="background:${st.bg};color:${st.fg};padding:7px 12px;border-radius:10px 10px 0 0;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:space-between">
             ${st.label}<span style="background:rgba(0,0,0,.1);border-radius:20px;padding:1px 8px;font-size:11px">${col.length}</span></div>
-          <div style="background:#f9f9fb;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 10px 10px;min-height:120px;padding:8px;display:flex;flex-direction:column;gap:8px" data-stage="${st.key}">
+          <div class="kanban-col" style="background:#f9f9fb;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 10px 10px;min-height:120px;padding:8px;display:flex;flex-direction:column;gap:8px" data-stage="${st.key}">
             ${col.map(c=>recruitCard(c)).join('')}
             ${st.key!=='embauche'&&st.key!=='refuse'?`<button class="btn g" data-addstage="${st.key}" style="font-size:11px;padding:5px 8px;margin-top:4px;opacity:.7"><i class="fa-solid fa-plus"></i> Ajouter</button>`:''}
           </div></div>`;
       }).join('')}
     </div>`;
-    bd.querySelectorAll('[data-cid]').forEach(el=>el.onclick=()=>openCandidateFiche(el.dataset.cid,cands.find(c=>c.id===el.dataset.cid)));
+
+    // Drag & drop
+    let dragCid=null;
+    bd.querySelectorAll('[data-cid]').forEach(card=>{
+      card.draggable=true;
+      card.addEventListener('dragstart',e=>{dragCid=card.dataset.cid;card.style.opacity='.45';e.dataTransfer.effectAllowed='move';});
+      card.addEventListener('dragend',()=>{card.style.opacity='';dragCid=null;});
+      card.onclick=()=>openCandidateFiche(card.dataset.cid,cands.find(c=>c.id===card.dataset.cid));
+    });
+    bd.querySelectorAll('.kanban-col').forEach(col=>{
+      col.addEventListener('dragover',e=>{e.preventDefault();col.style.background='#ede9fe';});
+      col.addEventListener('dragleave',()=>{col.style.background='#f9f9fb';});
+      col.addEventListener('drop',async e=>{
+        e.preventDefault();col.style.background='#f9f9fb';
+        if(!dragCid)return;
+        const newStage=col.dataset.stage;
+        const c=cands.find(x=>x.id===dragCid);
+        if(!c||c.stage===newStage)return;
+        try{await BE.updateCandidate(dragCid,{stage:newStage});flash(`Déplacé → ${RECRUIT_STAGES_MAP[newStage]?.label||newStage}`);await drawRecruitBoard();}
+        catch(e){flash('Erreur : '+e.message,'ko');}
+      });
+    });
     bd.querySelectorAll('[data-addstage]').forEach(btn=>btn.onclick=()=>openCandidateForm(null,btn.dataset.addstage));
   }catch(e){bd.innerHTML=`<div style="padding:20px;color:var(--red)">Erreur : ${e.message||e}</div>`;}
 }
@@ -7255,12 +7306,14 @@ async function renderTraining(){
     <div class="phead"><div><h1>Formations obligatoires</h1><div class="sub">${hName}</div></div></div>
     <div style="display:flex;gap:4px;margin-bottom:18px;border-bottom:1px solid var(--line)">
       <button class="ctab ${trainingSubTab==='catalog'?'on':''}" data-sub="catalog"><i class="fa-solid fa-book"></i> Catalogue</button>
-      <button class="ctab ${trainingSubTab==='matrix'?'on':''}" data-sub="matrix"><i class="fa-solid fa-table"></i> Matrice collaborateurs</button>
+      <button class="ctab ${trainingSubTab==='matrix'?'on':''}" data-sub="matrix"><i class="fa-solid fa-table"></i> Matrice</button>
+      <button class="ctab ${trainingSubTab==='alerts'?'on':''}" data-sub="alerts"><i class="fa-solid fa-bell"></i> Alertes</button>
     </div>
     <div id="trainsub"></div>
   </div>`;
   $('view').querySelectorAll('.ctab').forEach(b=>b.onclick=()=>{trainingSubTab=b.dataset.sub;renderTraining();});
   if(trainingSubTab==='catalog') await renderTrainingCatalog();
+  else if(trainingSubTab==='alerts') await renderTrainingAlerts();
   else await renderTrainingMatrix();
 }
 
@@ -7392,6 +7445,58 @@ function openEmployeeTrainingForm(emp,training,et,onSave){
   };
 }
 
+async function renderTrainingAlerts(){
+  const el=$('trainsub'); if(!el)return;
+  el.innerHTML='<div style="padding:20px;text-align:center;color:var(--muted)">Chargement…</div>';
+  try{
+    const [catalog,ets]=await Promise.all([BE.listTrainingCatalog(hotelId),BE.listEmployeeTrainings(hotelId)]);
+    const today=new Date().toISOString().slice(0,10);
+    const d90=new Date(Date.now()+90*86400000).toISOString().slice(0,10);
+    const actStaff=staff.filter(s=>s.active);
+
+    // Build alert rows
+    const rows=[];
+    actStaff.forEach(emp=>{
+      catalog.filter(t=>t.active).forEach(t=>{
+        const et=ets.find(e=>e.employee_id===emp.id&&e.training_id===t.id);
+        if(!et||!et.expiry_date){
+          if(!et) rows.push({emp,t,et:null,level:'missing',label:'Non renseigné',daysLeft:null});
+        }else if(et.expiry_date<today){
+          rows.push({emp,t,et,level:'expired',label:'Expirée',daysLeft:Math.floor((Date.now()-new Date(et.expiry_date).getTime())/86400000)+'j de retard'});
+        }else if(et.expiry_date<=d90){
+          const d=Math.ceil((new Date(et.expiry_date).getTime()-Date.now())/86400000);
+          rows.push({emp,t,et,level:d<=30?'warn30':d<=60?'warn60':'warn90',label:`Expire dans ${d}j`,daysLeft:d});
+        }
+      });
+    });
+
+    const counts={expired:rows.filter(r=>r.level==='expired').length,warn30:rows.filter(r=>r.level==='warn30').length,warn60:rows.filter(r=>r.level==='warn60').length,warn90:rows.filter(r=>r.level==='warn90').length,missing:rows.filter(r=>r.level==='missing').length};
+    const lvlStyle={expired:{bg:'#FEE2E2',fg:'#991B1B',ic:'fa-circle-xmark'},warn30:{bg:'#FEE2E2',fg:'#991B1B',ic:'fa-clock'},warn60:{bg:'#FEF3C7',fg:'#92400E',ic:'fa-clock'},warn90:{bg:'#FEF9C3',fg:'#ca8a04',ic:'fa-clock'},missing:{bg:'#F3F4F6',fg:'#6B7280',ic:'fa-circle'}};
+
+    if(!rows.length){el.innerHTML='<div style="padding:40px;text-align:center;color:var(--green)"><i class="fa-solid fa-circle-check" style="font-size:32px;display:block;margin-bottom:12px"></i><b>Aucune alerte !</b> Toutes les formations sont à jour.</div>';return;}
+
+    el.innerHTML=`<div class="kpis" style="grid-template-columns:repeat(5,1fr);margin-bottom:16px">
+      ${[{k:'expired',l:'Expirées',v:counts.expired},{k:'warn30',l:'< 30 jours',v:counts.warn30},{k:'warn60',l:'30-60 jours',v:counts.warn60},{k:'warn90',l:'60-90 jours',v:counts.warn90},{k:'missing',l:'Non renseignées',v:counts.missing}]
+        .map(({k,l,v})=>`<div class="kpi" style="border-left:3px solid ${lvlStyle[k].fg}"><div class="val" style="color:${lvlStyle[k].fg}">${v}</div><div class="lab">${l}</div></div>`).join('')}
+    </div>
+    <div class="box" style="padding:0"><table class="rtable">
+      <thead><tr><th>Collaborateur</th><th>Service</th><th>Formation</th><th>Statut</th><th>Expiration</th><th></th></tr></thead>
+      <tbody>${rows.sort((a,b)=>{const o={expired:0,warn30:1,warn60:2,warn90:3,missing:4};return (o[a.level]||4)-(o[b.level]||4);}).map(r=>{
+        const ls=lvlStyle[r.level];
+        return `<tr>
+          <td><b>${r.emp.first_name} ${r.emp.last_name}</b></td>
+          <td style="font-size:12px">${r.emp.department||'—'}</td>
+          <td style="font-size:12px">${r.t.title}</td>
+          <td><span style="background:${ls.bg};color:${ls.fg};padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600"><i class="fa-solid ${ls.ic}"></i> ${r.label}</span></td>
+          <td style="font-size:12px;color:${r.et?.expiry_date<today?'var(--red)':'inherit'}">${r.et?.expiry_date||'—'}</td>
+          <td><button onclick="openEmployeeTrainingForm(staff.find(s=>s.id==='${r.emp.id}'),${JSON.stringify({id:r.t.id,title:r.t.title,frequency_months:r.t.frequency_months}).replace(/"/g,'&quot;')},${JSON.stringify(r.et||null).replace(/"/g,'&quot;')},renderTraining)" style="font-size:11px;padding:3px 8px" class="btn p" title="Mettre à jour"><i class="fa-solid fa-pen"></i></button></td>
+        </tr>`;
+      }).join('')}
+      </tbody>
+    </table></div>`;
+  }catch(e){el.innerHTML=`<div style="padding:20px;color:var(--red)">Erreur : ${e.message}</div>`;}
+}
+
 /* =====================================================================
    MODULE VISITES MÉDICALES
    ===================================================================== */
@@ -7406,6 +7511,7 @@ async function renderMedical(){
     <div class="phead">
       <div><h1>Visites médicales</h1><div class="sub">${hName}</div></div>
       <div class="actions"><button class="btn p" id="medNew"><i class="fa-solid fa-plus"></i> Nouvelle visite</button></div></div>
+    <div id="medKpis"></div>
     <div id="medAlerts"></div>
     <div id="medList">Chargement…</div>
   </div>`;
@@ -7419,13 +7525,32 @@ async function drawMedicalList(){
     const visits=await BE.listMedicalVisits(hotelId);
     const today=new Date().toISOString().slice(0,10);
     const soon=new Date(Date.now()+60*86400000).toISOString().slice(0,10);
+    // KPIs conformité
+    const actStaff=staff.filter(s=>s.active);
+    const empWithVisit=new Set(visits.map(v=>v.employee_id));
+    const withoutVisit=actStaff.filter(s=>!empWithVisit.has(s.id));
+    const overdue=visits.filter(v=>v.next_visit_date&&v.next_visit_date<today);
+    const upcomingSoon=visits.filter(v=>v.next_visit_date&&v.next_visit_date>=today&&v.next_visit_date<=soon);
+    const conformPct=actStaff.length?Math.round((actStaff.length-withoutVisit.length-overdue.length)/Math.max(actStaff.length,1)*100):100;
+    const kpiEl=$('medKpis');
+    if(kpiEl) kpiEl.innerHTML=`<div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr));margin-bottom:14px">
+      ${[{v:conformPct+'%',l:'Conformité',c:conformPct>=90?'var(--green)':conformPct>=70?'#d97706':'var(--red)',ic:'fa-shield-halved'},
+         {v:withoutVisit.length,l:'Sans visite',c:withoutVisit.length?'var(--red)':'var(--green)',ic:'fa-user-slash'},
+         {v:overdue.length,l:'En retard',c:overdue.length?'var(--red)':'var(--green)',ic:'fa-triangle-exclamation'},
+         {v:upcomingSoon.length,l:'Échéances 60j',c:upcomingSoon.length?'#d97706':'var(--green)',ic:'fa-clock'},
+         {v:visits.length,l:'Total visites',c:'',ic:'fa-stethoscope'}
+      ].map(k=>`<div class="kpi"><div class="val" style="${k.c?'color:'+k.c:''}">${k.v}</div><div class="lab"><i class="fa-solid ${k.ic}"></i> ${k.l}</div></div>`).join('')}
+    </div>`;
     // Alerts
-    const alerts=visits.filter(v=>v.next_visit_date&&v.next_visit_date<=soon&&!v.returned_date);
+    const alerts=visits.filter(v=>v.next_visit_date&&v.next_visit_date<=soon&&v.next_visit_date>=today);
     const alertsEl=$('medAlerts');
-    if(alertsEl&&alerts.length){
+    if(alertsEl&&(alerts.length||withoutVisit.length||overdue.length)){
+      const parts=[];
+      if(overdue.length) parts.push(`<b>${overdue.length} visite(s) en retard</b>`);
+      if(alerts.length) parts.push(`<b>${alerts.length} échéance(s)</b> dans 60j`);
+      if(withoutVisit.length) parts.push(`<b>${withoutVisit.length} collaborateur(s)</b> sans visite enregistrée`);
       alertsEl.innerHTML=`<div style="background:#fef3c7;border-radius:10px;padding:12px 16px;margin-bottom:14px;font-size:13px;color:#92400e">
-        <i class="fa-solid fa-triangle-exclamation"></i> <b>${alerts.length} visite(s)</b> à planifier dans les 60 prochains jours.
-        ${alerts.map(v=>{const e=v.employees;return `<span style="margin-left:8px;background:rgba(0,0,0,.08);padding:2px 8px;border-radius:6px">${e?e.first_name+' '+e.last_name:v.employee_id} (${v.next_visit_date})</span>`;}).join('')}
+        <i class="fa-solid fa-triangle-exclamation"></i> ${parts.join(' · ')}
       </div>`;
     }
     if(!visits.length){el.innerHTML='<div style="padding:30px;text-align:center;color:var(--muted)">Aucune visite enregistrée.</div>';return;}
@@ -7678,6 +7803,343 @@ async function renderOrgChart(){
   </div>`;
   $('orgExport').onclick=()=>exportOrgPNG();
   await drawOrgTree();
+}
+
+/* =====================================================================
+   MODULE ENTRETIENS ANNUELS & PROFESSIONNELS
+   ===================================================================== */
+let reviewsSubTab='campaigns'; // campaigns | reviews
+let reviewCampaignId=null;
+
+const REVIEW_TYPES={annual:{label:'Entretien annuel',color:'#EDE9FE',fg:'#6D28D9'},
+  professional:{label:'Entretien professionnel',color:'#DBEAFE',fg:'#1D4ED8'},
+  mid_year:{label:'Point mi-année',color:'#DCFCE7',fg:'#15803D'}};
+const REVIEW_STATUS={pending:{label:'En attente',color:'#F3F4F6',fg:'#6B7280'},
+  emp_done:{label:'Salarié OK',color:'#DBEAFE',fg:'#1D4ED8'},
+  mgr_done:{label:'Manager OK',color:'#FEF3C7',fg:'#92400E'},
+  signed:{label:'Signé',color:'#DCFCE7',fg:'#15803D'},
+  closed:{label:'Clôturé',color:'#F3F4F6',fg:'#6B7280'}};
+const REVIEW_EVAL={insuffisant:'Insuffisant',satisfaisant:'Satisfaisant',bien:'Bien',excellent:'Excellent'};
+const REVIEW_EVAL_COLORS={insuffisant:'#FEE2E2',satisfaisant:'#FEF3C7',bien:'#DCFCE7',excellent:'#EDE9FE'};
+const REVIEW_EVAL_FG={insuffisant:'#991B1B',satisfaisant:'#92400E',bien:'#15803D',excellent:'#6D28D9'};
+
+async function renderReviews(){
+  const hName=hotels.find(h=>h.id===hotelId)?.name||'';
+  $('view').innerHTML=`<div class="page">
+    <div class="phead">
+      <div><h1>Entretiens</h1><div class="sub">${hName}</div></div>
+      <div class="actions" id="reviewsActions"></div>
+    </div>
+    <div style="display:flex;gap:4px;margin-bottom:18px;border-bottom:1px solid var(--line)">
+      <button class="ctab ${reviewsSubTab==='campaigns'?'on':''}" data-sub="campaigns"><i class="fa-solid fa-layer-group"></i> Campagnes</button>
+      <button class="ctab ${reviewsSubTab==='reviews'?'on':''}" data-sub="reviews"><i class="fa-solid fa-comments"></i> Entretiens</button>
+    </div>
+    <div id="reviewsSub">Chargement…</div>
+  </div>`;
+  $('view').querySelectorAll('.ctab').forEach(b=>b.onclick=()=>{reviewsSubTab=b.dataset.sub;renderReviews();});
+  if(reviewsSubTab==='campaigns') await _drawReviewCampaigns();
+  else await _drawReviewsList();
+}
+
+async function _drawReviewCampaigns(){
+  const el=$('reviewsSub'),act=$('reviewsActions'); if(!el)return;
+  if(act&&canDo('reviews','create')) act.innerHTML=`<button class="btn p" id="rvNewCampaign"><i class="fa-solid fa-plus"></i> Nouvelle campagne</button>`;
+  try{
+    const camps=await BE.listReviewCampaigns(hotelId);
+    if(!camps.length){el.innerHTML='<div style="padding:40px;text-align:center;color:var(--muted)"><i class="fa-regular fa-comments" style="font-size:32px;display:block;margin-bottom:12px"></i>Aucune campagne. Créez la première campagne d\'entretiens.</div>';
+    }else{
+      const reviews=await BE.listEmployeeReviews(hotelId,null);
+      const revByCamp=new Map(); reviews.forEach(r=>{if(!revByCamp.has(r.campaign_id))revByCamp.set(r.campaign_id,[]);revByCamp.get(r.campaign_id).push(r);});
+      el.innerHTML=`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px">
+        ${camps.map(c=>{
+          const rs=revByCamp.get(c.id)||[];
+          const done=rs.filter(r=>r.status==='signed'||r.status==='closed').length;
+          const pct=rs.length?Math.round(done/rs.length*100):0;
+          const rt=REVIEW_TYPES[c.review_type]||REVIEW_TYPES.annual;
+          const st=c.status==='active'?{label:'Active',bg:'#DCFCE7',fg:'#15803D'}:c.status==='closed'?{label:'Clôturée',bg:'#F3F4F6',fg:'#6B7280'}:{label:'Brouillon',bg:'#FEF3C7',fg:'#92400E'};
+          return `<div class="card" style="cursor:pointer" data-cid="${c.id}">
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px">
+              <div><div style="font-size:15px;font-weight:800;margin-bottom:3px">${c.name}</div>
+                <span style="background:${rt.color};color:${rt.fg};padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600">${rt.label}</span>
+              </div>
+              <span style="background:${st.bg};color:${st.fg};padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700">${st.label}</span>
+            </div>
+            <div style="font-size:12px;color:var(--muted);margin-bottom:8px">${c.year}${c.start_date?' · '+c.start_date+' → '+(c.end_date||'…'):''}</div>
+            ${rs.length?`<div style="margin-bottom:6px">
+              <div style="display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:4px"><span>${done} / ${rs.length} signés</span><span>${pct}%</span></div>
+              <div style="height:6px;background:#e5e7eb;border-radius:3px"><div style="height:100%;width:${pct}%;background:var(--violet);border-radius:3px;transition:.3s"></div></div>
+            </div>`:'<div style="font-size:11.5px;color:var(--muted)">Aucun entretien généré</div>'}
+            <div style="display:flex;gap:6px;margin-top:10px">
+              ${canDo('reviews','edit')?`<button class="btn g" data-edit-camp="${c.id}" style="font-size:11px;padding:4px 10px"><i class="fa-solid fa-pen"></i></button>`:''}
+              <button class="btn p" data-open-camp="${c.id}" style="font-size:11px;flex:1">Voir les entretiens</button>
+              ${canDo('reviews','create')&&rs.length===0?`<button class="btn p" data-gen-camp="${c.id}" style="font-size:11px;padding:4px 12px;background:var(--green);border-color:var(--green)" title="Générer les entretiens pour tous les actifs"><i class="fa-solid fa-wand-magic-sparkles"></i></button>`:''}
+            </div>
+          </div>`;
+        }).join('')}
+      </div>`;
+      el.querySelectorAll('[data-open-camp]').forEach(b=>{b.onclick=e=>{e.stopPropagation();reviewCampaignId=b.dataset.openCamp;reviewsSubTab='reviews';renderReviews();};});
+      el.querySelectorAll('[data-edit-camp]').forEach(b=>{b.onclick=e=>{e.stopPropagation();openReviewCampaignForm(camps.find(c=>c.id===b.dataset.editCamp));};});
+      el.querySelectorAll('[data-gen-camp]').forEach(b=>{b.onclick=e=>{e.stopPropagation();_generateCampaignReviews(b.dataset.genCamp);};});
+      el.querySelectorAll('.card[data-cid]').forEach(card=>{card.onclick=()=>{reviewCampaignId=card.dataset.cid;reviewsSubTab='reviews';renderReviews();};});
+    }
+    if($('rvNewCampaign')) $('rvNewCampaign').onclick=()=>openReviewCampaignForm(null);
+  }catch(e){el.innerHTML=`<div style="padding:20px;color:var(--red)">Erreur : ${e.message}</div>`;}
+}
+
+async function _generateCampaignReviews(campId){
+  const camp=((await BE.listReviewCampaigns(hotelId))||[]).find(c=>c.id===campId); if(!camp)return;
+  const actStaff=staff.filter(s=>s.active);
+  if(!confirm(`Générer ${actStaff.length} entretien(s) pour tous les collaborateurs actifs de la campagne "${camp.name}" ?`))return;
+  try{
+    await Promise.all(actStaff.map(emp=>BE.saveEmployeeReview(hotelId,{campaign_id:campId,employee_id:emp.id,status:'pending'})));
+    flash(`${actStaff.length} entretien(s) générés`); renderReviews();
+  }catch(e){flash('Erreur : '+e.message,'ko');}
+}
+
+function openReviewCampaignForm(c){
+  const tyOpts=Object.entries(REVIEW_TYPES).map(([k,v])=>`<option value="${k}" ${(c?.review_type||'annual')===k?'selected':''}>${v.label}</option>`).join('');
+  const stOpts=[['draft','Brouillon'],['active','Active'],['closed','Clôturée']].map(([k,l])=>`<option value="${k}" ${(c?.status||'draft')===k?'selected':''}>${l}</option>`).join('');
+  $('modal').innerHTML=mhHTML('fa-solid fa-comments',c?'Modifier la campagne':'Nouvelle campagne d\'entretiens')+`
+  <div class="mb">
+    <div class="fld"><label>Nom *</label><input id="rca_name" value="${c?.name||''}" placeholder="ex : Entretiens Annuels 2026"></div>
+    <div class="row3">
+      <div class="fld"><label>Type</label><select id="rca_type">${tyOpts}</select></div>
+      <div class="fld"><label>Année</label><input type="number" id="rca_year" value="${c?.year||new Date().getFullYear()}" min="2020" max="2030"></div>
+      <div class="fld"><label>Statut</label><select id="rca_status">${stOpts}</select></div>
+    </div>
+    <div class="row2">
+      <div class="fld"><label>Date de début</label><input type="date" id="rca_sd" value="${c?.start_date||''}"></div>
+      <div class="fld"><label>Date de fin</label><input type="date" id="rca_ed" value="${c?.end_date||''}"></div>
+    </div>
+  </div>
+  <div class="mact">
+    <button class="btn g" onclick="closeModal()">Annuler</button>
+    ${c?`<button class="btn d" id="rca_del"><i class="fa-solid fa-trash"></i> Supprimer</button>`:''}
+    <button class="btn p" id="rca_save"><i class="fa-solid fa-check"></i> ${c?'Enregistrer':'Créer'}</button>
+  </div>`;
+  $('modalbg').classList.add('on');
+  if(c) $('rca_del').onclick=async()=>{
+    if(!confirm('Supprimer cette campagne et tous ses entretiens ?'))return;
+    await BE.deleteReviewCampaign(c.id); closeModal(); await renderReviews();
+  };
+  $('rca_save').onclick=async()=>{
+    const name=$('rca_name').value.trim(); if(!name){flash('Nom requis');return;}
+    const p={name,review_type:$('rca_type').value,year:+$('rca_year').value,status:$('rca_status').value,start_date:$('rca_sd').value||null,end_date:$('rca_ed').value||null};
+    try{c?await BE.updateReviewCampaign(c.id,p):await BE.saveReviewCampaign(hotelId,p);
+      flash(c?'Campagne mise à jour':'Campagne créée');closeModal();renderReviews();}
+    catch(e){flash('Erreur : '+e.message,'ko');}
+  };
+}
+
+async function _drawReviewsList(){
+  const el=$('reviewsSub'),act=$('reviewsActions'); if(!el)return;
+  const addBtn=canDo('reviews','create')?`<button class="btn p" id="rvNewReview"><i class="fa-solid fa-plus"></i> Ajouter un entretien</button>`:'';
+  if(act) act.innerHTML=addBtn;
+  try{
+    const [camps,reviews]=await Promise.all([BE.listReviewCampaigns(hotelId),BE.listEmployeeReviews(hotelId,reviewCampaignId||null)]);
+    const camp=reviewCampaignId?camps.find(c=>c.id===reviewCampaignId):null;
+    // Breadcrumb
+    const bc=camp?`<div style="font-size:12.5px;color:var(--muted);margin-bottom:14px">
+      <span style="cursor:pointer;color:var(--violet)" onclick="reviewCampaignId=null;reviewsSubTab='campaigns';renderReviews()">← Campagnes</span>
+      <span style="margin:0 6px">/</span><span style="font-weight:600">${camp.name}</span></div>`:'';
+    if(!reviews.length){
+      el.innerHTML=bc+'<div style="padding:40px;text-align:center;color:var(--muted)">Aucun entretien'+(camp?' dans cette campagne.':' trouvé.')+
+        (camp&&canDo('reviews','create')?`<br><button class="btn p" style="margin-top:12px" onclick="_generateCampaignReviews('${camp.id}')"><i class="fa-solid fa-wand-magic-sparkles"></i> Générer pour tous les actifs</button>`:'')+'</div>';
+    }else{
+      // KPIs
+      const signed=reviews.filter(r=>r.status==='signed'||r.status==='closed').length;
+      const pending=reviews.filter(r=>r.status==='pending').length;
+      const pct=Math.round(signed/reviews.length*100);
+      const kpis=`<div class="kpis" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px">
+        ${[{v:reviews.length,l:'Total',ic:'fa-comments'},{v:signed,l:'Signés',ic:'fa-check-circle',c:signed?'var(--green)':''},
+           {v:pending,l:'En attente',ic:'fa-clock',c:pending?'#d97706':''},{v:pct+'%',l:'Avancement',ic:'fa-chart-pie',c:pct===100?'var(--green)':'var(--violet)'}
+        ].map(k=>`<div class="kpi"><div class="val" style="${k.c?'color:'+k.c:''}">${k.v}</div><div class="lab"><i class="fa-solid ${k.ic}"></i> ${k.l}</div></div>`).join('')}
+      </div>`;
+      el.innerHTML=bc+kpis+`<div class="box" style="padding:0"><table class="rtable">
+        <thead><tr>
+          <th>Collaborateur</th><th>Service</th><th>Poste</th>
+          ${!camp?'<th>Campagne</th>':''}
+          <th>Statut</th><th>Date prévue</th><th>Évaluation</th><th></th>
+        </tr></thead>
+        <tbody>${reviews.map(r=>{
+          const emp=r.employees; const st=REVIEW_STATUS[r.status]||REVIEW_STATUS.pending;
+          const ev=r.mgr_evaluation;
+          return `<tr>
+            <td style="cursor:pointer" onclick="openEmployeeReviewForm('${r.id}',${JSON.stringify(r).replace(/"/g,'&quot;')})">
+              <b>${emp?emp.first_name+' '+emp.last_name:'—'}</b></td>
+            <td style="font-size:12px">${emp?.department||'—'}</td>
+            <td style="font-size:12px">${emp?.role||'—'}</td>
+            ${!camp?`<td style="font-size:11px">${camps.find(c=>c.id===r.campaign_id)?.name||'—'}</td>`:''}
+            <td><span style="background:${st.color};color:${st.fg};padding:2px 8px;border-radius:6px;font-size:11.5px;font-weight:600">${st.label}</span></td>
+            <td style="font-size:12px">${r.scheduled_date||'—'}</td>
+            <td>${ev?`<span style="background:${REVIEW_EVAL_COLORS[ev]||'#eee'};color:${REVIEW_EVAL_FG[ev]||'#333'};padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600">${REVIEW_EVAL[ev]||ev}</span>`:'—'}</td>
+            <td><button onclick="openEmployeeReviewForm('${r.id}',null)" title="Ouvrir"><i class="fa-solid fa-arrow-right"></i></button></td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table></div>`;
+    }
+    if($('rvNewReview')) $('rvNewReview').onclick=()=>openNewEmployeeReview(camps,reviewCampaignId);
+  }catch(e){el.innerHTML=`<div style="padding:20px;color:var(--red)">Erreur : ${e.message}</div>`;}
+}
+
+function openNewEmployeeReview(camps,defaultCampId){
+  const campOpts=camps.map(c=>`<option value="${c.id}" ${defaultCampId===c.id?'selected':''}>${c.name} (${c.year})</option>`).join('');
+  const empOpts=staff.filter(s=>s.active).sort((a,b)=>a.last_name.localeCompare(b.last_name)).map(e=>`<option value="${e.id}">${e.first_name} ${e.last_name}</option>`).join('');
+  const mgrOpts=staff.filter(s=>s.active).sort((a,b)=>a.last_name.localeCompare(b.last_name)).map(e=>`<option value="${e.id}">${e.first_name} ${e.last_name}</option>`).join('');
+  $('modal').innerHTML=mhHTML('fa-solid fa-comment-dots','Nouvel entretien')+`
+  <div class="mb">
+    <div class="row2">
+      <div class="fld"><label>Campagne *</label><select id="nr_camp"><option value="">— choisir —</option>${campOpts}</select></div>
+      <div class="fld"><label>Date prévue</label><input type="date" id="nr_date" value="${new Date().toISOString().slice(0,10)}"></div>
+    </div>
+    <div class="row2">
+      <div class="fld"><label>Collaborateur *</label><select id="nr_emp"><option value="">— choisir —</option>${empOpts}</select></div>
+      <div class="fld"><label>Manager</label><select id="nr_mgr"><option value="">— aucun —</option>${mgrOpts}</select></div>
+    </div>
+  </div>
+  <div class="mact">
+    <button class="btn g" onclick="closeModal()">Annuler</button>
+    <button class="btn p" id="nr_save"><i class="fa-solid fa-check"></i> Créer</button>
+  </div>`;
+  $('modalbg').classList.add('on');
+  $('nr_save').onclick=async()=>{
+    const campId=$('nr_camp').value,empId=$('nr_emp').value;
+    if(!campId||!empId){flash('Campagne et collaborateur requis');return;}
+    try{await BE.saveEmployeeReview(hotelId,{campaign_id:campId,employee_id:empId,manager_id:$('nr_mgr').value||null,scheduled_date:$('nr_date').value||null,status:'pending'});
+      flash('Entretien créé');closeModal();await _drawReviewsList();}
+    catch(e){flash('Erreur : '+e.message,'ko');}
+  };
+}
+
+async function openEmployeeReviewForm(rid,rData){
+  let r=rData;
+  if(!r){
+    // Reload from BE when called from table click without data
+    try{const all=await BE.listEmployeeReviews(hotelId,null);r=all.find(x=>x.id===rid);}catch(_){}
+    if(!r){flash('Entretien introuvable','ko');return;}
+  }
+  const objectives=await BE.listReviewObjectives(rid);
+  const emp=r.employees||staff.find(s=>s.id===r.employee_id);
+  const mgr=r.manager||staff.find(s=>s.id===r.manager_id);
+  const st=REVIEW_STATUS[r.status]||REVIEW_STATUS.pending;
+  const canEdit=canDo('reviews','edit');
+  const evalOpts=Object.entries(REVIEW_EVAL).map(([k,l])=>`<option value="${k}" ${r.mgr_evaluation===k?'selected':''}>${l}</option>`).join('');
+  const statusOpts=Object.entries(REVIEW_STATUS).map(([k,v])=>`<option value="${k}" ${r.status===k?'selected':''}>${v.label}</option>`).join('');
+  const objTypeOpts=`<option value="qualitatif">Qualitatif</option><option value="quantitatif">Quantitatif</option>`;
+  const objStatusOpts=`<option value="en_cours">En cours</option><option value="atteint">Atteint</option><option value="partiellement">Partiellement</option><option value="non_atteint">Non atteint</option>`;
+
+  $('modal').innerHTML=mhHTML('fa-solid fa-comments',
+    `Entretien — ${emp?emp.first_name+' '+emp.last_name:'—'}`,
+    mgr?`Manager : ${mgr.first_name} ${mgr.last_name}`:''
+  )+`
+  <div class="mb" style="display:flex;flex-direction:column;gap:16px">
+    <!-- Status + date -->
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <span style="background:${st.color};color:${st.fg};padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700">${st.label}</span>
+      ${canEdit?`<select id="rv_status" style="font-size:12px;padding:5px 8px">${statusOpts}</select>
+      <input type="date" id="rv_sched" value="${r.scheduled_date||''}" style="font-size:12px;padding:5px 8px;border:1px solid var(--line);border-radius:8px">
+      <button class="btn g" id="rv_status_save" style="font-size:11px;padding:4px 10px"><i class="fa-solid fa-check"></i> Appliquer</button>`:''}
+    </div>
+
+    <!-- Partie collaborateur -->
+    <div class="box" style="padding:14px">
+      <div style="font-weight:700;font-size:13px;margin-bottom:12px;color:var(--violet)"><i class="fa-solid fa-user" style="margin-right:6px"></i>Partie collaborateur</div>
+      <div class="fld"><label>Réalisations de l'année</label>
+        <textarea id="rv_achievements" rows="3" ${!canEdit?'readonly':''} style="min-height:60px">${r.emp_achievements||''}</textarea></div>
+      <div class="fld"><label>Difficultés rencontrées</label>
+        <textarea id="rv_difficulties" rows="2" ${!canEdit?'readonly':''} style="min-height:50px">${r.emp_difficulties||''}</textarea></div>
+      <div class="fld"><label>Besoins & souhaits d'évolution</label>
+        <textarea id="rv_needs" rows="2" ${!canEdit?'readonly':''} style="min-height:50px">${r.emp_needs||''}</textarea></div>
+      ${r.emp_signed_at?`<div style="font-size:11.5px;color:var(--green);margin-top:6px"><i class="fa-solid fa-signature"></i> Signé par le collaborateur le ${r.emp_signed_at.slice(0,10)}</div>`:
+        canEdit?`<button class="btn p" id="rv_emp_sign" style="font-size:11.5px;margin-top:6px"><i class="fa-solid fa-signature"></i> Signer (collaborateur)</button>`:''}
+    </div>
+
+    <!-- Partie manager -->
+    <div class="box" style="padding:14px">
+      <div style="font-weight:700;font-size:13px;margin-bottom:12px;color:#1D4ED8"><i class="fa-solid fa-user-tie" style="margin-right:6px"></i>Partie manager</div>
+      <div class="row2">
+        <div class="fld"><label>Évaluation globale</label>
+          <select id="rv_eval" ${!canEdit?'disabled':''}>${evalOpts}</select></div>
+        <div class="fld"><label>Score (/5)</label>
+          <input type="number" id="rv_score" min="0" max="5" step="0.5" value="${r.overall_score||''}" ${!canEdit?'readonly':''} style="text-align:center" placeholder="—"></div>
+      </div>
+      <div class="fld"><label>Commentaires manager</label>
+        <textarea id="rv_mgr_comments" rows="3" ${!canEdit?'readonly':''} style="min-height:60px">${r.mgr_comments||''}</textarea></div>
+      ${r.mgr_signed_at?`<div style="font-size:11.5px;color:var(--green);margin-top:6px"><i class="fa-solid fa-signature"></i> Signé par le manager le ${r.mgr_signed_at.slice(0,10)}</div>`:
+        canEdit?`<button class="btn p" id="rv_mgr_sign" style="font-size:11.5px;margin-top:6px;background:#1D4ED8;border-color:#1D4ED8"><i class="fa-solid fa-signature"></i> Signer (manager)</button>`:''}
+    </div>
+
+    <!-- Objectifs -->
+    <div class="box" style="padding:14px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div style="font-weight:700;font-size:13px"><i class="fa-solid fa-bullseye" style="margin-right:6px;color:#d97706"></i>Objectifs</div>
+        ${canEdit?`<button class="btn p" id="rv_obj_add" style="font-size:11px;padding:4px 10px"><i class="fa-solid fa-plus"></i> Ajouter</button>`:''}
+      </div>
+      <div id="rv_objectives">
+        ${objectives.length?objectives.map(o=>`
+          <div class="rv-obj-row" data-oid="${o.id}" style="display:flex;gap:8px;align-items:center;padding:8px 10px;background:#f9f9fb;border-radius:8px;margin-bottom:6px">
+            <div style="flex:1">
+              <div style="font-weight:600;font-size:12.5px">${o.title}</div>
+              ${o.description?`<div style="font-size:11.5px;color:var(--muted)">${o.description}</div>`:''}
+              <div style="font-size:11px;color:var(--muted);margin-top:2px">${o.obj_type==='quantitatif'&&o.target_value?'Cible : '+o.target_value+(o.achieved_value?' → Réel : '+o.achieved_value:''):o.obj_type}</div>
+            </div>
+            <span style="background:${o.status==='atteint'?'#DCFCE7':o.status==='non_atteint'?'#FEE2E2':o.status==='partiellement'?'#FEF3C7':'#F3F4F6'};color:${o.status==='atteint'?'#15803D':o.status==='non_atteint'?'#991B1B':o.status==='partiellement'?'#92400E':'#6B7280'};padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600">${o.status==='atteint'?'Atteint':o.status==='non_atteint'?'Non atteint':o.status==='partiellement'?'Partiel':'En cours'}</span>
+            ${canEdit?`<button class="btn d" data-del-obj="${o.id}" style="padding:3px 7px;font-size:11px"><i class="fa-solid fa-trash"></i></button>`:''}
+          </div>`).join(''):'<div style="color:var(--muted);font-size:12.5px;padding:6px 0">Aucun objectif défini.</div>'}
+      </div>
+    </div>
+  </div>
+  <div class="mact">
+    <button class="btn g" onclick="closeModal()">Fermer</button>
+    ${canEdit?`<button class="btn p" id="rv_save"><i class="fa-solid fa-floppy-disk"></i> Sauvegarder</button>`:''}
+  </div>`;
+  $('modalbg').classList.add('on');
+
+  // Save main review
+  const doSave=async()=>{
+    const p={emp_achievements:$('rv_achievements').value||null,emp_difficulties:$('rv_difficulties').value||null,emp_needs:$('rv_needs').value||null,
+      mgr_evaluation:$('rv_eval').value||null,mgr_comments:$('rv_mgr_comments').value||null,overall_score:parseFloat($('rv_score').value)||null};
+    try{await BE.updateEmployeeReview(rid,p);flash('Sauvegardé');}catch(e){flash('Erreur : '+e.message,'ko');}
+  };
+  if($('rv_save')) $('rv_save').onclick=async()=>{await doSave();closeModal();await _drawReviewsList();};
+  if($('rv_status_save')) $('rv_status_save').onclick=async()=>{
+    await BE.updateEmployeeReview(rid,{status:$('rv_status').value,scheduled_date:$('rv_sched').value||null});
+    flash('Statut mis à jour');closeModal();await _drawReviewsList();
+  };
+  if($('rv_emp_sign')) $('rv_emp_sign').onclick=async()=>{
+    await doSave(); await BE.updateEmployeeReview(rid,{emp_signed_at:new Date().toISOString(),status:'emp_done'});
+    flash('Signature collaborateur enregistrée');closeModal();await _drawReviewsList();
+  };
+  if($('rv_mgr_sign')) $('rv_mgr_sign').onclick=async()=>{
+    await doSave(); const hasBoth=r.emp_signed_at;
+    await BE.updateEmployeeReview(rid,{mgr_signed_at:new Date().toISOString(),status:hasBoth?'signed':'mgr_done'});
+    flash('Signature manager enregistrée');closeModal();await _drawReviewsList();
+  };
+  // Add objective
+  if($('rv_obj_add')) $('rv_obj_add').onclick=()=>{
+    $('modal').innerHTML=mhHTML('fa-solid fa-bullseye','Nouvel objectif')+`
+    <div class="mb">
+      <div class="fld"><label>Intitulé *</label><input id="obj_ti" placeholder="ex : Améliorer la satisfaction client"></div>
+      <div class="row2">
+        <div class="fld"><label>Type</label><select id="obj_ty">${objTypeOpts}</select></div>
+        <div class="fld"><label>Valeur cible</label><input id="obj_tgt" placeholder="ex : 90%"></div>
+      </div>
+      <div class="fld"><label>Description</label><textarea id="obj_de" rows="2"></textarea></div>
+    </div>
+    <div class="mact">
+      <button class="btn g" onclick="openEmployeeReviewForm('${rid}',null)">Retour</button>
+      <button class="btn p" id="obj_save"><i class="fa-solid fa-check"></i> Ajouter</button>
+    </div>`;
+    $('obj_save').onclick=async()=>{
+      const ti=$('obj_ti').value.trim();if(!ti){flash('Intitulé requis');return;}
+      await BE.saveReviewObjective(rid,hotelId,{title:ti,obj_type:$('obj_ty').value,target_value:$('obj_tgt').value||null,description:$('obj_de').value||null});
+      flash('Objectif ajouté');openEmployeeReviewForm(rid,null);
+    };
+  };
+  // Delete objectives
+  $('modal').querySelectorAll('[data-del-obj]').forEach(b=>b.onclick=async()=>{
+    await BE.deleteReviewObjective(b.dataset.delObj);openEmployeeReviewForm(rid,null);
+  });
 }
 
 async function drawOrgTree(){
@@ -8745,6 +9207,12 @@ function openEmpForm(s){
         </select></div>
         <div class="fld" id="edepWrap" style="${s?.active===false?'':'display:none'}"><label>Date de départ</label><input type="date" id="edep" value="${s?.departure_date||''}"></div>
       </div>
+      <div id="eqDepartureCheck" style="${s?.active===false&&s?.id?'':'display:none'}">
+        <div style="margin-top:14px;padding:12px 14px;background:#FEF3C7;border:1px solid #F59E0B;border-radius:8px;font-size:13px">
+          <div style="font-weight:700;color:#92400E;margin-bottom:8px"><i class="fa-solid fa-triangle-exclamation" style="margin-right:6px"></i>Matériel à récupérer</div>
+          <div id="eqDepartureList" style="color:#78350F">Chargement…</div>
+        </div>
+      </div>
       <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--line)">
         <div style="font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:10px"><i class="fa-solid fa-calendar-days" style="margin-right:5px"></i>Rythme de travail / Repos</div>
         <div class="fld"><label>Mode de planification</label>
@@ -8805,7 +9273,27 @@ function openEmpForm(s){
     </div>`;
   $('modalbg').classList.add('on');
   $('ecancel').onclick=closeModal;
-  $('estatus').onchange=e=>{$('edepWrap').style.display=e.target.value==='parti'?'':'none';};
+  const _loadDepartureEq=async()=>{
+    if(!s?.id)return;
+    const all=await BE.listEquipment(hotelId);
+    const unreturned=all.filter(eq=>eq.employee_id===s.id&&!eq.returned_at);
+    const el=$('eqDepartureList');
+    if(!el)return;
+    if(!unreturned.length){el.innerHTML='<span style="color:#15803D"><i class="fa-solid fa-check" style="margin-right:5px"></i>Aucun matériel en attente de restitution.</span>';return;}
+    el.innerHTML=`<div style="margin-bottom:6px;font-weight:600">${unreturned.length} article(s) non restitué(s) :</div>`+
+      unreturned.map(eq=>`<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid #FDE68A">
+        <i class="fa-solid fa-box" style="color:#D97706;width:16px"></i>
+        <span><b>${EQ_TYPES[eq.item_type]||eq.item_type}</b>${eq.item_code?' — '+eq.item_code:''}</span>
+        ${eq.given_date?`<span style="color:#92400E;font-size:11px;margin-left:auto">Remis le ${eq.given_date}</span>`:''}
+      </div>`).join('');
+  };
+  $('estatus').onchange=e=>{
+    const isParti=e.target.value==='parti';
+    $('edepWrap').style.display=isParti?'':'none';
+    if(isParti&&s?.id){$('eqDepartureCheck').style.display='';_loadDepartureEq();}
+    else $('eqDepartureCheck').style.display='none';
+  };
+  if(s?.active===false&&s?.id) _loadDepartureEq();
   $('esave').onclick=async()=>{
     const isLeft=$('estatus').value==='parti';
     const dep=$('edep').value;
@@ -9740,6 +10228,116 @@ async function boot(){
   }catch(e){showFatal(e);}
 }
 boot();
+
+/* ===================== ASSISTANT RH IA ===================== */
+let aiMessages=[];
+let aiOpen=false;
+
+function _buildAiContext(){
+  const actStaff=staff.filter(s=>s.active!==false);
+  const depCounts={};
+  actStaff.forEach(s=>{if(s.department) depCounts[s.department]=(depCounts[s.department]||0)+1;});
+  const today=new Date().toISOString().slice(0,10);
+  return {
+    hotel_name: hotelName||'Hôtel',
+    total_active_staff: actStaff.length,
+    departments: deps.map(d=>({name:d.name,count:depCounts[d.name]||0})),
+    contracts: CONTRACTS.reduce((acc,c)=>{acc[c]=actStaff.filter(s=>s.contract_type===c).length;return acc;},{} ),
+    today,
+  };
+}
+
+async function sendAiMessage(){
+  const inp=$('aiInput');
+  const txt=inp.value.trim();
+  if(!txt)return;
+  inp.value='';
+  aiMessages.push({role:'user',content:txt});
+  _renderAiChat();
+  $('aiSend').disabled=true;
+  try{
+    const ctx=_buildAiContext();
+    const supabaseUrl=(typeof SUPABASE_URL!=='undefined'?SUPABASE_URL:null)||(BE?.sb?.supabaseUrl)||'';
+    const anonKey=(typeof SUPABASE_ANON_KEY!=='undefined'?SUPABASE_ANON_KEY:null)||(BE?.sb?.supabaseKey)||'';
+    const resp=await fetch(`${supabaseUrl}/functions/v1/rh-assistant`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':`Bearer ${anonKey}`},
+      body:JSON.stringify({hotel_id:hotelId,messages:aiMessages,context:ctx}),
+    });
+    if(!resp.ok){const e=await resp.text();throw new Error(e);}
+    const {reply}=await resp.json();
+    aiMessages.push({role:'assistant',content:reply});
+  }catch(e){
+    aiMessages.push({role:'assistant',content:'Désolé, une erreur est survenue : '+e.message});
+  }
+  _renderAiChat();
+  $('aiSend').disabled=false;
+}
+
+function _renderAiChat(){
+  const box=$('aiMessages');
+  if(!box)return;
+  box.innerHTML=aiMessages.map(m=>{
+    const isUser=m.role==='user';
+    return `<div style="display:flex;justify-content:${isUser?'flex-end':'flex-start'};margin-bottom:10px">
+      <div style="max-width:82%;padding:10px 14px;border-radius:${isUser?'14px 14px 4px 14px':'14px 14px 14px 4px'};
+        background:${isUser?'var(--violet)':'#F3F4F6'};color:${isUser?'#fff':'var(--ink)'};font-size:13px;line-height:1.5;
+        white-space:pre-wrap;word-break:break-word">${m.content.replace(/</g,'&lt;')}</div>
+    </div>`;
+  }).join('')+'<div id="aiScrollAnchor"></div>';
+  $('aiScrollAnchor')?.scrollIntoView({behavior:'smooth'});
+}
+
+function toggleAiPanel(){
+  aiOpen=!aiOpen;
+  const panel=$('aiPanel');
+  if(!panel)return;
+  panel.style.display=aiOpen?'flex':'none';
+  if(aiOpen&&!aiMessages.length){
+    aiMessages=[{role:'assistant',content:`Bonjour ! Je suis votre assistant RH Flowtym.\nJe peux vous aider à analyser vos données RH, répondre à vos questions sur les effectifs, les absences, les formations, et plus encore.\nQue puis-je faire pour vous ?`}];
+    _renderAiChat();
+    setTimeout(()=>$('aiInput')?.focus(),100);
+  }
+}
 </script>
+
+<!-- ASSISTANT RH IA — Floating Button + Panel -->
+<style>
+#aiFab{position:fixed;bottom:24px;right:24px;z-index:9999;width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#7C3AED,#4F46E5);color:#fff;border:none;cursor:pointer;box-shadow:0 4px 20px rgba(124,58,237,.5);display:none;align-items:center;justify-content:center;font-size:22px;transition:transform .15s,box-shadow .15s}
+#aiFab:hover{transform:scale(1.08);box-shadow:0 6px 28px rgba(124,58,237,.65)}
+#aiPanel{position:fixed;bottom:92px;right:24px;z-index:9998;width:min(400px,calc(100vw - 32px));height:min(520px,calc(100vh - 120px));background:#fff;border-radius:18px;box-shadow:0 16px 60px rgba(0,0,0,.2),0 0 0 1px rgba(0,0,0,.06);display:none;flex-direction:column;overflow:hidden}
+#aiPanelHeader{background:linear-gradient(135deg,#7C3AED,#4F46E5);color:#fff;padding:14px 16px;display:flex;align-items:center;gap:10px}
+#aiPanelHeader .ai-title{flex:1;font-weight:700;font-size:14px}
+#aiPanelHeader .ai-close{background:none;border:none;color:#fff;cursor:pointer;opacity:.8;font-size:18px;padding:2px 6px;border-radius:6px}
+#aiPanelHeader .ai-close:hover{opacity:1;background:rgba(255,255,255,.15)}
+#aiMessages{flex:1;overflow-y:auto;padding:14px;background:#FAFAFA}
+#aiInputRow{padding:10px 12px;border-top:1px solid var(--line);display:flex;gap:8px;align-items:center;background:#fff}
+#aiInput{flex:1;border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:13px;outline:none;resize:none;font-family:inherit;line-height:1.4}
+#aiInput:focus{border-color:var(--violet)}
+#aiSend{background:var(--violet);color:#fff;border:none;border-radius:10px;padding:8px 14px;cursor:pointer;font-size:14px;flex-shrink:0}
+#aiSend:disabled{opacity:.5;cursor:default}
+#aiNewChat{background:none;border:none;color:rgba(255,255,255,.75);cursor:pointer;font-size:12px;padding:2px 8px;border-radius:5px}
+#aiNewChat:hover{background:rgba(255,255,255,.15);color:#fff}
+</style>
+
+<button id="aiFab" onclick="toggleAiPanel()" title="Assistant RH IA">
+  <i class="fa-solid fa-robot"></i>
+</button>
+
+<div id="aiPanel" style="display:none">
+  <div id="aiPanelHeader">
+    <i class="fa-solid fa-robot" style="font-size:18px;opacity:.9"></i>
+    <span class="ai-title">Assistant RH IA</span>
+    <button id="aiNewChat" onclick="aiMessages=[];_renderAiChat()" title="Nouvelle conversation"><i class="fa-solid fa-rotate-right"></i></button>
+    <button class="ai-close" onclick="toggleAiPanel()" title="Fermer"><i class="fa-solid fa-xmark"></i></button>
+  </div>
+  <div id="aiMessages" style="padding:14px;flex:1;overflow-y:auto;background:#FAFAFA"></div>
+  <div id="aiInputRow">
+    <textarea id="aiInput" rows="1" placeholder="Posez votre question RH…"
+      onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendAiMessage()}"
+      oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px'"></textarea>
+    <button id="aiSend" onclick="sendAiMessage()"><i class="fa-solid fa-paper-plane"></i></button>
+  </div>
+</div>
 </body>
 </html>
