@@ -831,6 +831,10 @@ async function makeRealBE(){
     async saveTrainingCatalog(h,p){const {data,error}=await sb.from('training_catalog').insert({hotel_id:h,...p}).select('*').single();must(error,'Créer formation');return data;},
     async updateTrainingCatalog(id,p){const {error}=await sb.from('training_catalog').update(p).eq('id',id);must(error,'MAJ formation');},
     async deleteTrainingCatalog(id){const {error}=await sb.from('training_catalog').delete().eq('id',id);must(error,'Supprimer formation');},
+    async listRoleRequiredTrainings(h){const {data,error}=await sb.from('role_required_trainings').select('*, training_catalog(title,category,frequency_months)').eq('hotel_id',h).order('role_name');must(error,'Formations rôle');return data||[];},
+    async saveRoleRequiredTraining(h,p){const {data,error}=await sb.from('role_required_trainings').insert({hotel_id:h,...p}).select('*').single();must(error,'Créer formation rôle');return data;},
+    async updateRoleRequiredTraining(id,p){const {error}=await sb.from('role_required_trainings').update(p).eq('id',id);must(error,'MAJ formation rôle');},
+    async deleteRoleRequiredTraining(id){const {error}=await sb.from('role_required_trainings').delete().eq('id',id);must(error,'Supprimer formation rôle');},
     async listEmployeeTrainings(h){const {data,error}=await sb.from('employee_trainings').select('*, training_catalog(title,frequency_months,category), employees(first_name,last_name,department,role)').eq('hotel_id',h).order('expiry_date',{nullsFirst:false});must(error,'Formations emp');return data||[];},
     async upsertEmployeeTraining(h,employee_id,training_id,patch){
       const {error}=await sb.from('employee_trainings').upsert({hotel_id:h,employee_id,training_id,...patch},{onConflict:'hotel_id,employee_id,training_id'});must(error,'Upsert formation');
@@ -1070,6 +1074,12 @@ function makeTestBE(){
       if(i>=0) Object.assign(employeeTrainings[i],patch,{updated_at:new Date().toISOString()});
       else employeeTrainings.push({id:'et'+Date.now(),hotel_id:h,employee_id,training_id,...patch,status:patch.status||'todo',created_at:new Date().toISOString(),updated_at:new Date().toISOString()});
     },
+    /* ---- Formations par rôle ---- */
+    _roleRequiredTrainings:[],
+    async listRoleRequiredTrainings(h){return this._roleRequiredTrainings.filter(x=>x.hotel_id===h).map(r=>({...r,training_catalog:trainingCatalog.find(t=>t.id===r.training_id)||null}));},
+    async saveRoleRequiredTraining(h,p){const r={id:'rrt'+Date.now(),hotel_id:h,...p,created_at:new Date().toISOString()};this._roleRequiredTrainings.push(r);return r;},
+    async updateRoleRequiredTraining(id,p){const r=this._roleRequiredTrainings.find(x=>x.id===id);if(r)Object.assign(r,p);},
+    async deleteRoleRequiredTraining(id){this._roleRequiredTrainings=this._roleRequiredTrainings.filter(x=>x.id!==id);},
     /* ---- Visites médicales ---- */
     async listMedicalVisits(h){return medicalVisits.filter(x=>x.hotel_id===h).map(v=>({...v,employees:emps.find(e=>e.id===v.employee_id)||null}));},
     async saveMedicalVisit(h,p){const r={id:'mv'+Date.now(),hotel_id:h,...p,created_at:new Date().toISOString(),updated_at:new Date().toISOString()};medicalVisits.push(r);return r;},
@@ -7596,12 +7606,14 @@ async function renderTraining(){
       <button class="ctab ${trainingSubTab==='catalog'?'on':''}" data-sub="catalog"><i class="fa-solid fa-book"></i> Catalogue</button>
       <button class="ctab ${trainingSubTab==='matrix'?'on':''}" data-sub="matrix"><i class="fa-solid fa-table"></i> Matrice</button>
       <button class="ctab ${trainingSubTab==='alerts'?'on':''}" data-sub="alerts"><i class="fa-solid fa-bell"></i> Alertes</button>
+      <button class="ctab ${trainingSubTab==='conformite'?'on':''}" data-sub="conformite"><i class="fa-solid fa-shield-check"></i> Conformité</button>
     </div>
     <div id="trainsub"></div>
   </div>`;
   $('view').querySelectorAll('.ctab').forEach(b=>b.onclick=()=>{trainingSubTab=b.dataset.sub;renderTraining();});
   if(trainingSubTab==='catalog') await renderTrainingCatalog();
   else if(trainingSubTab==='alerts') await renderTrainingAlerts();
+  else if(trainingSubTab==='conformite') await renderTrainingConformite();
   else await renderTrainingMatrix();
 }
 
@@ -7783,6 +7795,146 @@ async function renderTrainingAlerts(){
       </tbody>
     </table></div>`;
   }catch(e){el.innerHTML=`<div style="padding:20px;color:var(--red)">Erreur : ${e.message}</div>`;}
+}
+
+async function renderTrainingConformite(){
+  const el=$('trainsub'); if(!el)return;
+  el.innerHTML='<div style="padding:20px;text-align:center;color:var(--muted)"><i class="fa-solid fa-spinner fa-spin"></i> Chargement…</div>';
+  try{
+    const today=new Date().toISOString().slice(0,10);
+    const in30=new Date(Date.now()+30*864e5).toISOString().slice(0,10);
+    const in60=new Date(Date.now()+60*864e5).toISOString().slice(0,10);
+    const in90=new Date(Date.now()+90*864e5).toISOString().slice(0,10);
+    const [catalog,ets,rrts,actStaff]=await Promise.all([
+      BE.listTrainingCatalog(hotelId),
+      BE.listEmployeeTrainings(hotelId),
+      BE.listRoleRequiredTrainings(hotelId),
+      Promise.resolve(staff.filter(s=>s.active))
+    ]);
+    // Build compliance per employee
+    const empResults=actStaff.map(emp=>{
+      const reqs=rrts.filter(r=>r.role_name===emp.role);
+      if(!reqs.length)return{emp,status:'na',missing:[],expiring:[],expired:[]};
+      const missing=[],expiring=[],expired=[];
+      reqs.forEach(req=>{
+        const et=ets.find(e=>e.employee_id===emp.id&&e.training_id===req.training_id);
+        const title=req.training_catalog?.title||catalog.find(c=>c.id===req.training_id)?.title||'Formation';
+        if(!et||et.status==='todo'){missing.push(title);}
+        else if(et.expiry_date){
+          if(et.expiry_date<today)expired.push({title,date:et.expiry_date});
+          else if(et.expiry_date<=in30)expiring.push({title,date:et.expiry_date,days:30});
+          else if(et.expiry_date<=in60)expiring.push({title,date:et.expiry_date,days:60});
+          else if(et.expiry_date<=in90)expiring.push({title,date:et.expiry_date,days:90});
+        }
+      });
+      const total=reqs.length;
+      const ok=total-missing.length-expired.length;
+      const pct=Math.round(ok/total*100);
+      const status=pct===100?'conforme':pct>=50?'partiel':'non_conforme';
+      return{emp,status,missing,expiring,expired,pct,total,ok};
+    }).filter(r=>r.status!=='na');
+
+    // Dept rates
+    const depts=[...new Set(empResults.map(r=>r.emp.department))].filter(Boolean);
+    const deptRates=depts.map(d=>{
+      const rows=empResults.filter(r=>r.emp.department===d);
+      const avg=rows.length?Math.round(rows.reduce((s,r)=>s+(r.pct||0),0)/rows.length):0;
+      return{dept:d,pct:avg,count:rows.length,ok:rows.filter(r=>r.status==='conforme').length};
+    });
+
+    const conforme=empResults.filter(r=>r.status==='conforme').length;
+    const partiel=empResults.filter(r=>r.status==='partiel').length;
+    const nonConf=empResults.filter(r=>r.status==='non_conforme').length;
+    const totalAlerts=empResults.reduce((s,r)=>s+r.expired.length+r.expiring.length,0);
+
+    const statusBadge=(s,pct)=>{
+      if(s==='conforme')return`<span style="background:#DCFCE7;color:#166534;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600">✓ Conforme</span>`;
+      if(s==='partiel')return`<span style="background:#FEF3C7;color:#92400E;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600">~ Partiel ${pct}%</span>`;
+      return`<span style="background:#FEE2E2;color:#991B1B;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600">✗ Non conforme ${pct}%</span>`;
+    };
+
+    el.innerHTML=`
+      <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
+        <button class="btn p" onclick="openRoleRequiredTrainingsForm()"><i class="fa-solid fa-cog"></i> Paramétrer formations par rôle</button>
+      </div>
+      <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:18px">
+        <div class="kpi"><div class="val" style="color:var(--green)">${conforme}</div><div class="lab">Conformes</div></div>
+        <div class="kpi"><div class="val" style="color:#D97706">${partiel}</div><div class="lab">Partiels</div></div>
+        <div class="kpi"><div class="val" style="color:var(--red)">${nonConf}</div><div class="lab">Non conformes</div></div>
+        <div class="kpi"><div class="val" style="color:var(--red)">${totalAlerts}</div><div class="lab">Alertes</div></div>
+      </div>
+      ${deptRates.length?`<h4 style="font-size:13px;font-weight:700;margin:0 0 10px">Par service</h4>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:18px">
+        ${deptRates.map(d=>`<div class="box" style="padding:10px 14px;min-width:160px">
+          <div style="font-weight:700;font-size:13px;margin-bottom:4px">${d.dept}</div>
+          <div style="font-size:11px;color:var(--muted)">${d.ok}/${d.count} conformes</div>
+          <div style="margin-top:6px;background:#e5e7eb;border-radius:4px;height:6px"><div style="background:${d.pct>=80?'var(--green)':d.pct>=50?'#F59E0B':'var(--red)'};width:${d.pct}%;height:6px;border-radius:4px"></div></div>
+          <div style="font-size:11px;font-weight:700;margin-top:3px">${d.pct}%</div>
+        </div>`).join('')}
+      </div>`:''}
+      ${empResults.length?`<h4 style="font-size:13px;font-weight:700;margin:0 0 10px">Par collaborateur</h4>
+      <div class="box" style="padding:0">
+        <table class="tbl"><thead><tr><th>Collaborateur</th><th>Poste</th><th>Statut</th><th>Manquantes</th><th>Expirées</th><th>À renouveler ≤90j</th></tr></thead>
+        <tbody>
+          ${empResults.sort((a,b)=>(a.pct||0)-(b.pct||0)).map(r=>`<tr>
+            <td><b>${r.emp.first_name} ${r.emp.last_name}</b></td>
+            <td style="font-size:12px;color:var(--muted)">${r.emp.department||''}</td>
+            <td>${statusBadge(r.status,r.pct)}</td>
+            <td style="font-size:12px;color:var(--red)">${r.missing.join(', ')||'—'}</td>
+            <td style="font-size:12px;color:var(--red)">${r.expired.map(x=>x.title).join(', ')||'—'}</td>
+            <td style="font-size:12px;color:#D97706">${r.expiring.map(x=>x.title+' ('+x.date+')').join(', ')||'—'}</td>
+          </tr>`).join('')}
+        </tbody></table>
+      </div>`:'<div style="padding:20px;text-align:center;color:var(--muted)">Aucune formation obligatoire configurée. Cliquez sur "Paramétrer" pour commencer.</div>'}
+    `;
+  }catch(e){el.innerHTML=`<div style="padding:20px;color:var(--red)">Erreur : ${e.message}</div>`;}
+}
+
+async function openRoleRequiredTrainingsForm(){
+  const [catalog,rrts]=await Promise.all([BE.listTrainingCatalog(hotelId),BE.listRoleRequiredTrainings(hotelId)]);
+  const roles=[...new Set(staff.filter(s=>s.active).map(s=>s.role).filter(Boolean))].sort();
+  const catOpts=catalog.map(c=>`<option value="${c.id}">${c.title}</option>`).join('');
+  const roleOpts=roles.map(r=>`<option value="${r}">${r}</option>`).join('');
+  const draw=()=>{
+    const el=$('rrtList'); if(!el)return;
+    el.innerHTML=rrts.length?`<table class="tbl"><thead><tr><th>Rôle</th><th>Formation</th><th>Obligatoire</th><th></th></tr></thead><tbody>
+      ${rrts.map(r=>`<tr>
+        <td style="font-weight:600;font-size:12px">${r.role_name}</td>
+        <td style="font-size:12px">${r.training_catalog?.title||catalog.find(c=>c.id===r.training_id)?.title||r.training_id}</td>
+        <td>${r.mandatory?'<span style="color:var(--green);font-weight:600">Oui</span>':'Non'}</td>
+        <td><button data-del="${r.id}" style="color:var(--red)"><i class="fa-solid fa-trash"></i></button></td>
+      </tr>`).join('')}
+    </tbody></table>`:
+    '<div style="padding:14px;text-align:center;color:var(--muted);font-size:13px">Aucune formation obligatoire configurée</div>';
+    el.querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{
+      await BE.deleteRoleRequiredTraining(b.dataset.del);
+      const idx=rrts.findIndex(r=>r.id===b.dataset.del);if(idx>=0)rrts.splice(idx,1);
+      draw();
+    });
+  };
+  $('modal').innerHTML=mhHTML('fa-solid fa-cog','Formations obligatoires par rôle')+`
+  <div class="mb">
+    <div class="row3" style="margin-bottom:12px">
+      <div class="fld"><label>Rôle</label><select id="rrt_role"><option value="">— choisir —</option>${roleOpts}</select></div>
+      <div class="fld"><label>Formation</label><select id="rrt_cat"><option value="">— choisir —</option>${catOpts}</select></div>
+      <div class="fld" style="display:flex;align-items:flex-end;gap:8px">
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:6px"><input type="checkbox" id="rrt_mand" checked> Obligatoire</label>
+        <button class="btn p" id="rrt_add"><i class="fa-solid fa-plus"></i> Ajouter</button>
+      </div>
+    </div>
+    <div id="rrtList">Chargement…</div>
+  </div>
+  <div class="mact"><button class="btn g" onclick="closeModal()">Fermer</button></div>`;
+  $('modalbg').classList.add('on');
+  draw();
+  $('rrt_add').onclick=async()=>{
+    const role=$('rrt_role').value; if(!role){flash('Rôle requis');return;}
+    const tid=$('rrt_cat').value; if(!tid){flash('Formation requise');return;}
+    if(rrts.some(r=>r.role_name===role&&r.training_id===tid)){flash('Déjà configuré');return;}
+    const r=await BE.saveRoleRequiredTraining(hotelId,{role_name:role,training_id:tid,mandatory:$('rrt_mand').checked});
+    r.training_catalog=catalog.find(c=>c.id===r.training_id)||null;
+    rrts.push(r);draw();flash('Ajouté');
+  };
 }
 
 function _printReview(r,emp,mgr,objectives){
@@ -8004,6 +8156,7 @@ function openMedicalForm(v){
 const EQ_TYPES={badge:'Badge',cle:'Clé',uniforme:'Uniforme',telephone:'Téléphone',
   ordinateur:'Ordinateur',tablette:'Tablette',vehicule:'Véhicule',autre:'Autre'};
 const EQ_COND={neuf:'Neuf',bon:'Bon état',usage:'Usagé',abime:'Abîmé',perdu:'Perdu'};
+const EQ_STATUSES={remis:{label:'Remis',color:'#DBEAFE',fg:'#1D4ED8'},restitue:{label:'Restitué',color:'#DCFCE7',fg:'#166534'},perdu:{label:'Perdu',color:'#FEE2E2',fg:'#991B1B'},casse:{label:'Cassé',color:'#FEE2E2',fg:'#991B1B'},en_stock:{label:'En stock',color:'#F3F4F6',fg:'#374151'},en_reparation:{label:'En réparation',color:'#FEF3C7',fg:'#92400E'},a_restituer:{label:'À restituer',color:'#FEF3C7',fg:'#D97706'},hors_service:{label:'Hors service',color:'#F3F4F6',fg:'#9CA3AF'}};
 
 async function renderEquipment(){
   const hName=hotels.find(h=>h.id===hotelId)?.name||'';
