@@ -2145,11 +2145,11 @@ function renderDashboard(){
       <div style="background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:var(--shadow)">
         <div style="font-size:15px;font-weight:700;margin-bottom:16px">Actions rapides</div>
         ${[
-          {icon:'fa-calendar-days',bg:'#ede9fe',fg:'#7c3aed',label:'Voir le planning',action:"goView('planning')"},
-          {icon:'fa-user-plus',bg:'#dbeafe',fg:'#2563eb',label:'Ajouter un collaborateur',action:"goView('personnel');setTimeout(()=>openEmpForm(null),300)"},
-          {icon:'fa-file-contract',bg:'#fef9c3',fg:'#ca8a04',label:'Générer un contrat',action:"goView('contracts');contractsSubTab='generate';setTimeout(renderContracts,100)"},
-          {icon:'fa-magnifying-glass-chart',bg:'#dcfce7',fg:'#16a34a',label:'Voir les candidats',action:"goView('recruitment')"},
-        ].map(a=>`<div onclick="${a.action}" style="display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:12px;cursor:pointer;margin-bottom:8px;transition:.15s" onmouseover="this.style.background='#f8f8fc'" onmouseout="this.style.background='transparent'">
+          {icon:'fa-calendar-days',bg:'#ede9fe',fg:'#7c3aed',label:'Voir le planning',action:"goView('planning')",perm:null},
+          {icon:'fa-user-plus',bg:'#dbeafe',fg:'#2563eb',label:'Ajouter un collaborateur',action:"goView('personnel');setTimeout(()=>openEmpForm(null),300)",perm:null},
+          {icon:'fa-file-contract',bg:'#fef9c3',fg:'#ca8a04',label:'Générer un contrat',action:"goView('contracts');contractsSubTab='generate';setTimeout(renderContracts,100)",perm:['contracts','create']},
+          {icon:'fa-magnifying-glass-chart',bg:'#dcfce7',fg:'#16a34a',label:'Voir les candidats',action:"goView('recruitment')",perm:null},
+        ].filter(a=>!a.perm||canDo(a.perm[0],a.perm[1])).map(a=>`<div onclick="${a.action}" style="display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:12px;cursor:pointer;margin-bottom:8px;transition:.15s" onmouseover="this.style.background='#f8f8fc'" onmouseout="this.style.background='transparent'">
           <div style="width:36px;height:36px;background:${a.bg};border-radius:10px;display:grid;place-items:center;flex-shrink:0">
             <i class="fa-solid ${a.icon}" style="color:${a.fg};font-size:14px"></i>
           </div>
