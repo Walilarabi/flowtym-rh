@@ -4272,9 +4272,9 @@ async function _genStep3(){
   $('gs3_send').onclick=async()=>{
     const email=$('gs3_email').value.trim();
     if(!email){flash('Email requis');return;}
-    const btn=$('gs3_send'); btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Envoi…';
+    const btn=$('gs3_send'); btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Génération PDF…';
     try{
-      // 1. Build rendered HTML to persist
+      // 1. Contexte + rendu HTML
       const hotel=hotels.find(h=>h.id===hotelId)||{};
       const mgr=staff.find(x=>x.id===s.fields.manager_id);
       const ctx=buildContractContext(emp,hotel,{
@@ -4288,9 +4288,15 @@ async function _genStep3(){
       });
       const tpl=s.tplList.find(t=>t.id===s.template_id)||s.tplList.find(t=>t.status==='active');
       const renderedHtml=tpl?transformContractHtml(substituteVariables(tpl.body_html,ctx)):'';
-      // 2. Generate contract number from DB sequence
+      // 2. Générer PDF blob dans le navigateur
+      const pdfBlob=await renderHtmlToPdfBlob(renderedHtml,`Contrat ${s.fields.contract_type} — ${emp.first_name} ${emp.last_name}`);
+      // 3. Convertir en base64
+      const pdfBase64=await new Promise((res,rej)=>{
+        const reader=new FileReader();reader.onload=()=>res(reader.result.split(',')[1]);reader.onerror=rej;reader.readAsDataURL(pdfBlob);
+      });
+      // 4. Numéro + sauvegarde DB
+      btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Enregistrement…';
       const contractNumber=await BE.nextContractNumber(hotelId);
-      // 3. Save contract record with rendered HTML
       const saved=await BE.saveGeneratedContract(hotelId,{
         employee_id:s.employee_id, template_id:s.template_id||null,
         contract_number:contractNumber, status:'sent_signature',
@@ -4299,31 +4305,37 @@ async function _genStep3(){
         salary_type:s.fields.salary_type, salary_amount:s.fields.salary_amount||null,
         trial_period:s.fields.trial_period||null, signature_method:s.fields.signature_method,
         manager_id:s.fields.manager_id||null, sent_at:new Date().toISOString(),
-        generated_html:renderedHtml||null
+        generated_html:renderedHtml||null,
       });
-      // 4. Call yousign-create Edge Function
+      // 5. Appel YouSign (Mode A : pdf_base64 + contract_id)
+      btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Envoi YouSign…';
       const SUPA_URL='https://hzrzkvdebaadditvbqis.supabase.co/functions/v1';
       const {data:{session}}=await BE.sb.auth.getSession();
       const ysResp=await fetch(`${SUPA_URL}/yousign-create`,{
         method:'POST',
         headers:{'Authorization':`Bearer ${session?.access_token}`,'Content-Type':'application/json'},
         body:JSON.stringify({
-          document_id:saved.id, employee_id:s.employee_id, hotel_id:hotelId,
+          pdf_base64:pdfBase64,
+          contract_id:saved.id,
+          contract_label:`Contrat ${s.fields.contract_type} — ${emp.first_name} ${emp.last_name} — ${contractNumber}`,
+          employee_id:s.employee_id, hotel_id:hotelId,
           signer_first_name:emp.first_name, signer_name:emp.last_name,
           signer_email:email, signer_phone:emp.phone||null,
         }),
       });
       const ysResult=await ysResp.json();
       if(!ysResp.ok||ysResult.error){
-        // YouSign failed but contract is saved — update status to reflect partial state
+        if(ysResult.error==='YOUSIGN_NOT_CONFIGURED'){
+          flash(`Contrat ${contractNumber} enregistré. ⚠️ YouSign non configuré — ajoutez YOUSIGN_API_KEY dans les secrets Supabase.`);
+          genInlineState.step=4; renderContractsGenerate(); return;
+        }
         await BE.updateGeneratedContract(saved.id,{status:'error_yousign',yousign_status:ysResult.error||'error'}).catch(()=>{});
-        throw new Error('YouSign : '+(ysResult.error||ysResult.message||'Erreur inconnue'));
+        throw new Error(ysResult.error||ysResult.message||'Erreur YouSign inconnue');
       }
-      // 5. Save YouSign signature request ID
-      if(ysResult.sr_id||ysResult.signature_request_id){
-        await BE.updateGeneratedContract(saved.id,{yousign_sr_id:ysResult.sr_id||ysResult.signature_request_id,yousign_status:'pending'}).catch(()=>{});
+      if(ysResult.sr_id){
+        await BE.updateGeneratedContract(saved.id,{yousign_sr_id:ysResult.sr_id,yousign_status:'pending',status:'pending_signature'}).catch(()=>{});
       }
-      flash('Contrat envoyé pour signature — '+contractNumber);
+      flash(`Contrat ${contractNumber} envoyé pour signature`);
       genInlineState.step=4; renderContractsGenerate();
     }catch(e){flash('Erreur : '+e.message); btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-paper-plane"></i> Envoyer pour signature';}
   };
