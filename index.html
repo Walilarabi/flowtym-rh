@@ -1394,7 +1394,9 @@ function renderShell(){
     setTimeout(()=>{if(typeof applyStickyWidths==='function')applyStickyWidths();},280);};
   goView(view);
   const fab=$('aiFab');
-  if(fab) fab.style.display=canDo('ai_assistant','view')?'flex':'none';
+  // AI_ASSISTANT_ENABLED=false — en veille, réactiver en passant à true
+  const AI_ASSISTANT_ENABLED=false;
+  if(fab) fab.style.display=(AI_ASSISTANT_ENABLED&&canDo('ai_assistant','view'))?'flex':'none';
 }
 
 // Alias pour navTo (utilisé dans les templates HTML inline)
@@ -2185,6 +2187,38 @@ function renderDashboard(){
       </div>
     </div>
 
+    <!-- Effectifs par contrat + Conformité + Turnover -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:22px" id="dashContractRow">
+      ${['CDI','CDD','Alternance','Extra / Intérim'].map((ct,i)=>{
+        const bg=['#EEF2FF','#FEF3C7','#F0FDF4','#F5F3FF'][i];
+        const fg=['#4338CA','#92400E','#166534','#5B21B6'][i];
+        const ic=['fa-briefcase','fa-clock','fa-graduation-cap','fa-user-clock'][i];
+        const n=staff.filter(s=>s.active&&(s.contract_type||'CDI')===ct).length;
+        return `<div style="background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px;box-shadow:var(--shadow)">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+            <div style="width:32px;height:32px;background:${bg};border-radius:8px;display:grid;place-items:center">
+              <i class="fa-solid ${ic}" style="color:${fg};font-size:13px"></i></div>
+            <span style="font-size:12px;font-weight:600;color:var(--ink2)">${ct}</span>
+          </div>
+          <div style="font-size:28px;font-weight:800;color:var(--ink)">${n}</div>
+        </div>`;
+      }).join('')}
+    </div>
+
+    <!-- Conformité RH + Alertes prioritaires -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:22px">
+      <!-- Conformité -->
+      <div style="background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:var(--shadow)">
+        <div style="font-size:15px;font-weight:700;margin-bottom:16px"><i class="fa-solid fa-shield-check" style="color:var(--violet);margin-right:8px"></i>Conformité RH</div>
+        <div id="dashConformite"><div style="color:var(--muted);font-size:13px">Chargement…</div></div>
+      </div>
+      <!-- Alertes prioritaires -->
+      <div style="background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:var(--shadow)">
+        <div style="font-size:15px;font-weight:700;margin-bottom:16px"><i class="fa-solid fa-bell" style="color:#F59E0B;margin-right:8px"></i>Alertes prioritaires</div>
+        <div id="dashPriorityAlerts"><div style="color:var(--muted);font-size:13px">Chargement…</div></div>
+      </div>
+    </div>
+
     <!-- 3 cols: Actions | Equipe du jour | Activité -->
     <div style="display:grid;grid-template-columns:1.1fr 1fr 1fr;gap:16px;margin-bottom:18px">
       <!-- Actions rapides -->
@@ -2383,9 +2417,125 @@ async function drawDashboardAlerts(){
     // Couverture service étages
     drawHousekeepingCoverage().catch(e=>console.warn('HK coverage error:',e));
 
+    // Conformité RH + Alertes prioritaires
+    _drawDashConformite().catch(()=>{});
+    _drawDashPriorityAlerts().catch(()=>{});
+
   }catch(e){
     console.warn('Dashboard async error:', e);
   }
+}
+
+async function _drawDashConformite(){
+  const el=$('dashConformite'); if(!el) return;
+  const today=new Date().toISOString().slice(0,10);
+  const actStaff=staff.filter(s=>s.active!==false);
+  const [trainings, visits] = await Promise.all([
+    BE.listEmployeeTrainings(hotelId).catch(()=>[]),
+    BE.listMedicalVisits(hotelId).catch(()=>[]),
+  ]);
+  // Formations: % sans formation expirée
+  const expiredTr=trainings.filter(t=>t.expiry_date&&t.expiry_date<today);
+  const empWithExpired=new Set(expiredTr.map(t=>t.employee_id));
+  const trOk=actStaff.filter(s=>!empWithExpired.has(s.id)).length;
+  const trPct=actStaff.length?Math.round(trOk/actStaff.length*100):100;
+  // Visites: % avec visite à jour
+  const empWithVisit=new Set(visits.filter(v=>!v.next_visit_date||v.next_visit_date>=today).map(v=>v.employee_id));
+  const vmOk=actStaff.filter(s=>empWithVisit.has(s.id)).length;
+  const vmPct=actStaff.length?Math.round(vmOk/actStaff.length*100):100;
+  // Turnover 12 mois
+  const since=new Date(); since.setFullYear(since.getFullYear()-1);
+  const sinceStr=since.toISOString().slice(0,10);
+  const departs=staff.filter(s=>s.active===false&&s.departure_date&&s.departure_date>=sinceStr).length;
+  const avgLen=actStaff.length>0?(()=>{
+    const hDates=actStaff.filter(s=>s.hire_date).map(s=>(new Date()-new Date(s.hire_date))/864e5/365);
+    return hDates.length?Math.round(hDates.reduce((a,b)=>a+b,0)/hDates.length*10)/10:0;
+  })():0;
+  const bar=(pct,good=70)=>{
+    const c=pct>=good?'#22C55E':pct>=50?'#F59E0B':'#EF4444';
+    return `<div style="display:flex;align-items:center;gap:8px">
+      <div style="flex:1;height:6px;background:#F3F4F6;border-radius:3px">
+        <div style="width:${pct}%;height:100%;background:${c};border-radius:3px;transition:width .4s"></div>
+      </div>
+      <span style="font-size:12px;font-weight:700;color:${c};min-width:32px;text-align:right">${pct}%</span>
+    </div>`;
+  };
+  el.innerHTML=`
+    <div style="margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;font-size:12.5px;font-weight:600;color:var(--ink);margin-bottom:4px">
+        <span><i class="fa-solid fa-graduation-cap" style="margin-right:5px;color:#7C3AED"></i>Formations à jour</span>
+        <span style="cursor:pointer;color:var(--violet)" onclick="goView('training')">Gérer →</span>
+      </div>
+      ${bar(trPct)}
+    </div>
+    <div style="margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;font-size:12.5px;font-weight:600;color:var(--ink);margin-bottom:4px">
+        <span><i class="fa-solid fa-stethoscope" style="margin-right:5px;color:#0EA5E9"></i>Visites médicales</span>
+        <span style="cursor:pointer;color:var(--violet)" onclick="goView('medical')">Gérer →</span>
+      </div>
+      ${bar(vmPct)}
+    </div>
+    <div style="border-top:1px solid var(--line);padding-top:12px;display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div style="text-align:center;padding:10px;background:#F9FAFB;border-radius:10px">
+        <div style="font-size:20px;font-weight:800;color:${departs>5?'#EF4444':'var(--ink)'}">${departs}</div>
+        <div style="font-size:11px;color:var(--muted)">Départs 12 mois</div>
+      </div>
+      <div style="text-align:center;padding:10px;background:#F9FAFB;border-radius:10px">
+        <div style="font-size:20px;font-weight:800">${avgLen}<small style="font-size:12px;font-weight:500"> ans</small></div>
+        <div style="font-size:11px;color:var(--muted)">Ancienneté moy.</div>
+      </div>
+    </div>`;
+}
+
+async function _drawDashPriorityAlerts(){
+  const el=$('dashPriorityAlerts'); if(!el) return;
+  const today=new Date().toISOString().slice(0,10);
+  const soon60=new Date(Date.now()+60*864e5).toISOString().slice(0,10);
+  const soon30=new Date(Date.now()+30*864e5).toISOString().slice(0,10);
+  const actStaff=staff.filter(s=>s.active!==false);
+  const alerts=[];
+
+  // Periodes d'essai arrivant à terme (embauche < 3 mois)
+  const pe3m=new Date(); pe3m.setMonth(pe3m.getMonth()-3);
+  const peAlerts=actStaff.filter(s=>s.hire_date&&new Date(s.hire_date)>=pe3m&&(s.contract_type==='CDI'||s.contract_type==='CDD'));
+  if(peAlerts.length) alerts.push({icon:'fa-hourglass-half',color:'#8B5CF6',label:`${peAlerts.length} période${peAlerts.length>1?'s':''} d'essai en cours`,link:'personnel'});
+
+  // Contrats CDD expirant < 60 jours
+  const [contracts]=await Promise.all([BE.listGeneratedContracts(hotelId).catch(()=>[])]);
+  const cddExpiring=contracts.filter(c=>c.end_date&&c.end_date<=soon60&&c.end_date>=today&&(c.contract_type==='CDD'||c.template_name?.toLowerCase().includes('cdd')));
+  if(cddExpiring.length) alerts.push({icon:'fa-file-contract',color:'#F59E0B',label:`${cddExpiring.length} CDD expirant dans 60j`,link:'contracts'});
+
+  // Titres de séjour expirant < 60 jours
+  const rsExpiring=actStaff.filter(s=>s.residency_permit_expires&&s.residency_permit_expires<=soon60&&s.residency_permit_expires>=today);
+  if(rsExpiring.length) alerts.push({icon:'fa-id-card',color:'#EF4444',label:`${rsExpiring.length} titre${rsExpiring.length>1?'s':''} de séjour expir${rsExpiring.length>1?'ant':'ant'} dans 60j`,link:'personnel'});
+
+  // Formations expirées
+  const [trainings, visits]=await Promise.all([BE.listEmployeeTrainings(hotelId).catch(()=>[]),BE.listMedicalVisits(hotelId).catch(()=>[])]);
+  const trExpired=trainings.filter(t=>t.expiry_date&&t.expiry_date<today);
+  const trExpiring30=trainings.filter(t=>t.expiry_date&&t.expiry_date>=today&&t.expiry_date<=soon30);
+  if(trExpired.length) alerts.push({icon:'fa-graduation-cap',color:'#EF4444',label:`${trExpired.length} formation${trExpired.length>1?'s':''} expirée${trExpired.length>1?'s':''}`,link:'training'});
+  if(trExpiring30.length) alerts.push({icon:'fa-graduation-cap',color:'#F59E0B',label:`${trExpiring30.length} formation${trExpiring30.length>1?'s':''} expirant dans 30j`,link:'training'});
+
+  // Visites médicales en retard
+  const vmLate=visits.filter(v=>v.next_visit_date&&v.next_visit_date<today);
+  const vmSoon=visits.filter(v=>v.next_visit_date&&v.next_visit_date>=today&&v.next_visit_date<=soon60);
+  if(vmLate.length) alerts.push({icon:'fa-stethoscope',color:'#EF4444',label:`${vmLate.length} visite${vmLate.length>1?'s':''} médicale${vmLate.length>1?'s':''} en retard`,link:'medical'});
+  if(vmSoon.length) alerts.push({icon:'fa-stethoscope',color:'#F59E0B',label:`${vmSoon.length} visite${vmSoon.length>1?'s':''} médicale${vmSoon.length>1?'s':''} dans 60j`,link:'medical'});
+
+  if(!alerts.length){
+    el.innerHTML=`<div style="text-align:center;padding:28px 0;color:var(--muted);font-size:13px"><i class="fa-solid fa-circle-check" style="font-size:24px;color:#22C55E;display:block;margin-bottom:10px"></i>Aucune alerte active — tout est conforme !</div>`;
+    return;
+  }
+  el.innerHTML=`<div style="display:flex;flex-direction:column;gap:8px">
+    ${alerts.slice(0,6).map(a=>`<div onclick="goView('${a.link}')" style="display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:10px;background:#FAFAFA;border:1px solid var(--line);cursor:pointer;transition:.15s" onmouseover="this.style.background='#F5F3FF'" onmouseout="this.style.background='#FAFAFA'">
+      <div style="width:30px;height:30px;background:${a.color}18;border-radius:8px;display:grid;place-items:center;flex-shrink:0">
+        <i class="fa-solid ${a.icon}" style="color:${a.color};font-size:12px"></i>
+      </div>
+      <span style="flex:1;font-size:12.5px;font-weight:600;color:var(--ink)">${a.label}</span>
+      <i class="fa-solid fa-chevron-right" style="color:var(--muted);font-size:10px"></i>
+    </div>`).join('')}
+    ${alerts.length>6?`<div style="text-align:center;font-size:11.5px;color:var(--muted);padding:4px">+${alerts.length-6} alertes supplémentaires</div>`:''}
+  </div>`;
 }
 
 /* Calcule et affiche la couverture 7 jours du service étages */
@@ -7115,33 +7265,95 @@ const RECRUIT_STAGES=[
 ];
 const RECRUIT_STAGES_MAP=Object.fromEntries(RECRUIT_STAGES.map(s=>[s.key,s]));
 
+let recruitFilter={search:'',stage:'',vivier:false};
+
 async function renderRecruitment(){
   const hName=hotels.find(h=>h.id===hotelId)?.name||'';
   $('view').innerHTML=`<div class="page">
     <div class="phead">
       <div><h1>Recrutement</h1><div class="sub">${hName}</div></div>
-      <div class="actions">
-        <button class="btn p" id="recNewCand"><i class="fa-solid fa-user-plus"></i> Nouveau candidat</button>
-      </div></div>
+      <div class="actions" style="display:flex;gap:8px;flex-wrap:wrap">
+        ${canDo('recruitment','create')?`<button class="btn g" id="recOffres"><i class="fa-solid fa-briefcase"></i> Offres d'emploi</button>`:''}
+        ${canDo('recruitment','create')?`<button class="btn p" id="recNewCand"><i class="fa-solid fa-user-plus"></i> Nouveau candidat</button>`:''}
+      </div>
+    </div>
+    <!-- Stats bar -->
+    <div id="recStats" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px"></div>
+    <!-- Filtres -->
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px">
+      <input id="recSearch" type="search" placeholder="Rechercher un candidat, poste…" style="flex:1;min-width:200px;max-width:320px;padding:8px 12px;border:1px solid var(--line);border-radius:9px;font-size:13px" value="${recruitFilter.search||''}">
+      <select id="recStageFilter" style="padding:8px 12px;border:1px solid var(--line);border-radius:9px;font-size:13px">
+        <option value="">Tous les statuts</option>
+        ${RECRUIT_STAGES.map(s=>`<option value="${s.key}" ${recruitFilter.stage===s.key?'selected':''}>${s.label}</option>`).join('')}
+      </select>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;padding:7px 12px;border:1px solid var(--line);border-radius:9px;background:${recruitFilter.vivier?'#EDE9FE':'#fff'}">
+        <input type="checkbox" id="recVivierOnly" ${recruitFilter.vivier?'checked':''} style="accent-color:var(--violet)"> Vivier uniquement
+      </label>
+    </div>
     <div id="recBoard" style="overflow-x:auto;padding-bottom:8px">Chargement…</div>
   </div>`;
-  $('recNewCand').onclick=()=>openCandidateForm(null);
+  if(canDo('recruitment','create')){
+    const nb=$('recNewCand'); if(nb) nb.onclick=()=>openCandidateForm(null);
+    const ob=$('recOffres'); if(ob) ob.onclick=()=>openJobPostingsPanel();
+  }
+  $('recSearch').oninput=e=>{recruitFilter.search=e.target.value;drawRecruitBoard();};
+  $('recStageFilter').onchange=e=>{recruitFilter.stage=e.target.value;drawRecruitBoard();};
+  $('recVivierOnly').onchange=e=>{recruitFilter.vivier=e.target.checked;drawRecruitBoard();};
   await drawRecruitBoard();
 }
 
 async function drawRecruitBoard(){
   const bd=$('recBoard'); if(!bd)return;
   try{
-    const [cands,postings]=await Promise.all([BE.listCandidates(hotelId),BE.listJobPostings(hotelId)]);
+    const [allCands,postings]=await Promise.all([BE.listCandidates(hotelId),BE.listJobPostings(hotelId)]);
+
+    // Stats bar
+    const statsEl=$('recStats');
+    if(statsEl){
+      const total=allCands.length;
+      const embauches=allCands.filter(c=>c.stage==='embauche').length;
+      const enCours=allCands.filter(c=>!['embauche','refuse'].includes(c.stage)).length;
+      const viviers=allCands.filter(c=>c.vivier).length;
+      const hired30=allCands.filter(c=>{
+        if(c.stage!=='embauche'||!c.updated_at)return false;
+        return (Date.now()-new Date(c.updated_at))<30*864e5;
+      }).length;
+      statsEl.innerHTML=[
+        {label:'Total candidats',val:total,icon:'fa-users',bg:'#EEF2FF',fg:'#4338CA'},
+        {label:'En cours',val:enCours,icon:'fa-spinner',bg:'#FEF3C7',fg:'#92400E'},
+        {label:'Embauchés',val:embauches,icon:'fa-user-check',bg:'#F0FDF4',fg:'#166534'},
+        {label:'Embauches 30j',val:hired30,icon:'fa-star',bg:'#FDF4FF',fg:'#7C3AED'},
+        {label:'Vivier',val:viviers,icon:'fa-bookmark',bg:'#FFF7ED',fg:'#C2410C'},
+        {label:'Postes ouverts',val:postings.filter(p=>p.status==='open').length,icon:'fa-briefcase',bg:'#F0F9FF',fg:'#0369A1'},
+      ].map(s=>`<div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 16px;display:flex;align-items:center;gap:10px;min-width:130px">
+        <div style="width:30px;height:30px;background:${s.bg};border-radius:8px;display:grid;place-items:center;flex-shrink:0">
+          <i class="fa-solid ${s.icon}" style="color:${s.fg};font-size:12px"></i>
+        </div>
+        <div><div style="font-size:18px;font-weight:800;color:var(--ink)">${s.val}</div>
+          <div style="font-size:11px;color:var(--muted)">${s.label}</div></div>
+      </div>`).join('');
+    }
+
+    // Appliquer filtres
+    const q=(recruitFilter.search||'').toLowerCase();
+    const fStage=recruitFilter.stage||'';
+    const fVivier=recruitFilter.vivier;
+    const cands=allCands.filter(c=>{
+      if(fVivier&&!c.vivier)return false;
+      if(fStage&&c.stage!==fStage)return false;
+      if(q&&!`${c.first_name||''} ${c.last_name||''} ${c.job_title||''} ${c.email||''} ${c.job_postings?.title||''}`.toLowerCase().includes(q))return false;
+      return true;
+    });
+
     bd.innerHTML=`<div style="display:flex;gap:14px;min-width:max-content;padding-bottom:8px">
-      ${RECRUIT_STAGES.map(st=>{
+      ${RECRUIT_STAGES.filter(st=>!fStage||st.key===fStage).map(st=>{
         const col=cands.filter(c=>c.stage===st.key);
-        return `<div style="width:240px;flex-shrink:0">
+        return `<div style="width:260px;flex-shrink:0">
           <div style="background:${st.bg};color:${st.fg};padding:7px 12px;border-radius:10px 10px 0 0;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:space-between">
             ${st.label}<span style="background:rgba(0,0,0,.1);border-radius:20px;padding:1px 8px;font-size:11px">${col.length}</span></div>
           <div class="kanban-col" style="background:#f9f9fb;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 10px 10px;min-height:120px;padding:8px;display:flex;flex-direction:column;gap:8px" data-stage="${st.key}">
             ${col.map(c=>recruitCard(c)).join('')}
-            ${st.key!=='embauche'&&st.key!=='refuse'?`<button class="btn g" data-addstage="${st.key}" style="font-size:11px;padding:5px 8px;margin-top:4px;opacity:.7"><i class="fa-solid fa-plus"></i> Ajouter</button>`:''}
+            ${canDo('recruitment','create')&&st.key!=='embauche'&&st.key!=='refuse'?`<button class="btn g" data-addstage="${st.key}" style="font-size:11px;padding:5px 8px;margin-top:4px;opacity:.7"><i class="fa-solid fa-plus"></i> Ajouter</button>`:''}
           </div></div>`;
       }).join('')}
     </div>`;
@@ -7172,10 +7384,12 @@ async function drawRecruitBoard(){
 }
 
 function recruitCard(c){
-  const st=RECRUIT_STAGES_MAP[c.stage]||RECRUIT_STAGES_MAP['nouveau'];
   return `<div class="card" data-cid="${c.id}" style="cursor:pointer;padding:10px 12px">
-    <div style="font-weight:700;font-size:13px;margin-bottom:2px">${c.first_name||''} ${c.last_name||''}</div>
-    ${c.job_postings?.title?`<div style="font-size:11.5px;color:var(--ink2);margin-bottom:4px">${c.job_postings.title}</div>`:''}
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:6px;margin-bottom:2px">
+      <div style="font-weight:700;font-size:13px">${c.first_name||''} ${c.last_name||''}</div>
+      ${c.vivier?`<span style="background:#FFF7ED;color:#C2410C;font-size:10px;font-weight:700;padding:1px 6px;border-radius:6px;white-space:nowrap;flex-shrink:0"><i class="fa-solid fa-bookmark" style="margin-right:2px"></i>Vivier</span>`:''}
+    </div>
+    ${c.job_postings?.title||c.job_title?`<div style="font-size:11.5px;color:var(--ink2);margin-bottom:4px">${c.job_postings?.title||c.job_title}</div>`:''}
     ${c.email?`<div style="font-size:11px;color:var(--muted)">${c.email}</div>`:''}
     <div style="margin-top:6px;font-size:11px;color:var(--muted)">${c.created_at?.slice(0,10)||''}</div>
   </div>`;
@@ -7197,6 +7411,11 @@ function openCandidateForm(c,defaultStage){
       <div class="fld"><label>Poste visé</label><input id="cf_jt" value="${c?.job_title||''}" placeholder="ex : Réceptionniste"></div>
     </div>
     <div class="fld"><label>Notes</label><textarea id="cf_no" rows="3" style="min-height:70px">${c?.notes||''}</textarea></div>
+    <div style="display:flex;align-items:center;gap:10px;padding:10px;background:#FFF7ED;border-radius:8px;margin-top:4px">
+      <input type="checkbox" id="cf_vivier" ${c?.vivier?'checked':''} style="accent-color:#C2410C;width:16px;height:16px">
+      <label for="cf_vivier" style="font-size:13px;font-weight:600;color:#C2410C;cursor:pointer"><i class="fa-solid fa-bookmark" style="margin-right:5px"></i>Ajouter au vivier candidats</label>
+      <span style="font-size:11.5px;color:var(--muted)">(profil intéressant, à recontacter)</span>
+    </div>
   </div>
   <div class="mact">
     <button class="btn g" id="cf_cancel">Annuler</button>
@@ -7209,11 +7428,72 @@ function openCandidateForm(c,defaultStage){
   $('cf_save').onclick=async()=>{
     const fn=$('cf_fn').value.trim(),ln=$('cf_ln').value.trim();
     if(!fn&&!ln){flash('Prénom ou nom requis');return;}
-    const p={first_name:fn,last_name:ln,email:$('cf_em').value.trim()||null,phone:$('cf_ph').value.trim()||null,job_title:$('cf_jt').value.trim()||null,notes:$('cf_no').value||null,stage:$('cf_st').value};
+    const p={first_name:fn,last_name:ln,email:$('cf_em').value.trim()||null,phone:$('cf_ph').value.trim()||null,job_title:$('cf_jt').value.trim()||null,notes:$('cf_no').value||null,stage:$('cf_st').value,vivier:$('cf_vivier').checked};
     try{
       if(c) await BE.updateCandidate(c.id,p);
       else await BE.saveCandidate(hotelId,p);
       closeModal(); await drawRecruitBoard();
+    }catch(e){flash('Erreur : '+(e.message||e));}
+  };
+}
+
+async function openJobPostingsPanel(){
+  const postings=await BE.listJobPostings(hotelId).catch(()=>[]);
+  const depOpts=deps.map(d=>`<option value="${d.name}">${d.name}</option>`).join('');
+  $('modal').innerHTML=mhHTML('fa-solid fa-briefcase','Offres d\'emploi','Gérer les postes ouverts')+`
+  <div class="mb">
+    ${canDo('recruitment','create')?`<button class="btn p" id="jpNew" style="margin-bottom:14px"><i class="fa-solid fa-plus"></i> Nouvelle offre</button>`:''}
+    <div id="jpList">
+      ${postings.length?postings.map(p=>`<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;margin-bottom:8px">
+        <div style="flex:1">
+          <div style="font-weight:700;font-size:13px">${p.title}</div>
+          <div style="font-size:11.5px;color:var(--muted)">${p.staff_departments?.name||p.department||'—'} · <span style="background:${p.status==='open'?'#DCFCE7':'#F3F4F6'};color:${p.status==='open'?'#15803D':'#6B7280'};padding:1px 8px;border-radius:6px;font-size:11px;font-weight:600">${p.status==='open'?'Ouvert':'Fermé'}</span></div>
+        </div>
+        ${canDo('recruitment','edit')?`<button class="btn g" onclick="_editJobPosting('${p.id}')" style="font-size:11px;padding:5px 10px"><i class="fa-solid fa-pen"></i></button>`:''}
+      </div>`).join('') : '<div style="color:var(--muted);font-size:13px;padding:20px 0;text-align:center">Aucune offre d\'emploi</div>'}
+    </div>
+  </div>
+  <div class="mact"><button class="btn g" onclick="closeModal()">Fermer</button></div>`;
+  $('modalbg').classList.add('on');
+  if(canDo('recruitment','create')){
+    const nb=$('jpNew');
+    if(nb) nb.onclick=()=>_editJobPosting(null);
+  }
+}
+
+async function _editJobPosting(id){
+  const postings=await BE.listJobPostings(hotelId).catch(()=>[]);
+  const p=id?postings.find(x=>x.id===id):null;
+  const depOpts=deps.map(d=>`<option value="${d.id}" ${p?.department_id===d.id?'selected':''}>${d.name}</option>`).join('');
+  $('modal').innerHTML=mhHTML('fa-solid fa-briefcase',p?'Modifier l\'offre':'Nouvelle offre d\'emploi')+`
+  <div class="mb">
+    <div class="fld"><label>Titre du poste *</label><input id="jp_title" value="${p?.title||''}" placeholder="ex: Réceptionniste H/F"></div>
+    <div class="row2">
+      <div class="fld"><label>Service</label><select id="jp_dep"><option value="">—</option>${depOpts}</select></div>
+      <div class="fld"><label>Statut</label><select id="jp_st">
+        <option value="open" ${(!p||p.status==='open')?'selected':''}>Ouvert</option>
+        <option value="closed" ${p?.status==='closed'?'selected':''}>Fermé</option>
+      </select></div>
+    </div>
+    <div class="fld"><label>Description</label><textarea id="jp_desc" rows="4">${p?.description||''}</textarea></div>
+  </div>
+  <div class="mact">
+    <button class="btn g" onclick="openJobPostingsPanel()">Annuler</button>
+    ${p&&canDo('recruitment','delete')?`<button class="btn d" id="jp_del"><i class="fa-solid fa-trash"></i></button>`:''}
+    <button class="btn p" id="jp_save"><i class="fa-solid fa-check"></i> Enregistrer</button>
+  </div>`;
+  $('modalbg').classList.add('on');
+  if(p&&canDo('recruitment','delete')){const db=$('jp_del');if(db)db.onclick=async()=>{if(!confirm('Supprimer cette offre ?'))return;await BE.updateJobPosting(p.id,{status:'closed'});openJobPostingsPanel();};}
+  $('jp_save').onclick=async()=>{
+    const title=$('jp_title').value.trim();
+    if(!title){flash('Titre requis');return;}
+    const depId=$('jp_dep').value||null;
+    const depName=deps.find(d=>d.id===depId)?.name||null;
+    const data={title,department_id:depId,department:depName,status:$('jp_st').value,description:$('jp_desc').value.trim()||null};
+    try{
+      if(p) await BE.updateJobPosting(p.id,data);
+      else await BE.saveJobPosting(hotelId,data);
+      openJobPostingsPanel();
     }catch(e){flash('Erreur : '+(e.message||e));}
   };
 }
@@ -7245,6 +7525,9 @@ async function openCandidateFiche(cid,c){
     </div>
   </div>
   <div class="mact">
+    <button class="btn g" id="cf_vivier_btn" style="background:${c.vivier?'#FFF7ED':'#fff'};border:1px solid ${c.vivier?'#C2410C':'var(--line)'};color:${c.vivier?'#C2410C':'var(--ink2)'}">
+      <i class="fa-${c.vivier?'solid':'regular'} fa-bookmark"></i> ${c.vivier?'Retirer du vivier':'Ajouter au vivier'}
+    </button>
     <button class="btn g" id="cf_edit_btn">Modifier</button>
     <button class="btn g" onclick="closeModal()">Fermer</button>
   </div>`;
@@ -7253,6 +7536,11 @@ async function openCandidateFiche(cid,c){
     const ns=$('cf_stq').value;
     await BE.updateCandidate(cid,{stage:ns});
     flash('Étape mise à jour'); closeModal(); await drawRecruitBoard();
+  };
+  $('cf_vivier_btn').onclick=async()=>{
+    await BE.updateCandidate(cid,{vivier:!c.vivier});
+    flash(c.vivier?'Retiré du vivier':'Ajouté au vivier');
+    closeModal(); await drawRecruitBoard();
   };
   $('cf_edit_btn').onclick=()=>{closeModal();openCandidateForm(c);};
   $('cnote_add').onclick=async()=>{
@@ -7495,6 +7783,91 @@ async function renderTrainingAlerts(){
       </tbody>
     </table></div>`;
   }catch(e){el.innerHTML=`<div style="padding:20px;color:var(--red)">Erreur : ${e.message}</div>`;}
+}
+
+function _printReview(r,emp,mgr,objectives){
+  const hotel=hotels.find(h=>h.id===hotelId);
+  const st=REVIEW_STATUS[r.status]||REVIEW_STATUS.pending;
+  const evalLabel=REVIEW_EVAL[r.mgr_evaluation]||'—';
+  const objRows=objectives.map(o=>`
+    <tr>
+      <td style="padding:6px 10px;border-bottom:1px solid #e5e7eb">${o.title}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #e5e7eb;white-space:nowrap">${o.obj_type==='quantitatif'?'Quantitatif':'Qualitatif'}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #e5e7eb">${o.target_value||'—'}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #e5e7eb">${o.achieved_value||'—'}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #e5e7eb;font-weight:600;color:${o.status==='atteint'?'#15803D':o.status==='non_atteint'?'#991B1B':o.status==='partiellement'?'#92400E':'#374151'}">${o.status==='atteint'?'Atteint':o.status==='non_atteint'?'Non atteint':o.status==='partiellement'?'Partiel':'En cours'}</td>
+    </tr>`).join('');
+  const html=`<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"><title>Compte rendu entretien</title>
+  <style>
+    body{font-family:Arial,sans-serif;font-size:12px;color:#1f2937;margin:0;padding:0}
+    .page{padding:30px 40px;max-width:800px;margin:0 auto}
+    h1{font-size:18px;font-weight:700;margin-bottom:4px;color:#111827}
+    h2{font-size:13px;font-weight:700;margin:18px 0 8px;border-bottom:2px solid #7c3aed;padding-bottom:4px;color:#7c3aed}
+    .kv{display:grid;grid-template-columns:140px 1fr;gap:4px 12px;margin-bottom:6px}
+    .kv span:first-child{color:#6b7280;font-size:11px}
+    .kv span:last-child{font-weight:600}
+    .box{background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:12px 14px;margin-bottom:12px}
+    table{width:100%;border-collapse:collapse;font-size:11px}
+    th{background:#f3f4f6;padding:6px 10px;text-align:left;border-bottom:2px solid #e5e7eb}
+    .sig-row{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:20px}
+    .sig-box{border:1px solid #e5e7eb;border-radius:6px;padding:14px;text-align:center}
+    .sig-box strong{display:block;margin-bottom:4px;font-size:11px}
+    .sig-box span{font-size:11px;color:#6b7280}
+    @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+  </style></head><body>
+  <div class="page">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;border-bottom:2px solid #7c3aed;padding-bottom:14px">
+      <div>
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#7c3aed;font-weight:700;margin-bottom:4px">Compte rendu d'entretien</div>
+        <h1>${emp?emp.first_name+' '+emp.last_name:'—'}</h1>
+        <div style="font-size:12px;color:#6b7280">${emp?.role||''} · ${emp?.department||''}</div>
+      </div>
+      <div style="text-align:right;font-size:11px;color:#6b7280">
+        <div style="font-weight:700;color:#111827">${hotel?.name||''}</div>
+        <div>Généré le ${new Date().toLocaleDateString('fr-FR')}</div>
+        <div style="margin-top:4px;background:${st.color};color:${st.fg};padding:2px 10px;border-radius:10px;display:inline-block;font-weight:700">${st.label}</div>
+      </div>
+    </div>
+
+    <div class="kv">
+      <span>Collaborateur</span><span>${emp?emp.first_name+' '+emp.last_name:'—'}</span>
+      <span>Manager</span><span>${mgr?mgr.first_name+' '+mgr.last_name:'—'}</span>
+      <span>Date prévue</span><span>${r.scheduled_date||'—'}</span>
+      <span>Évaluation</span><span>${evalLabel}${r.overall_score?' — '+r.overall_score+'/5':''}</span>
+    </div>
+
+    <h2>Partie collaborateur</h2>
+    <div class="box">
+      ${r.emp_achievements?`<div style="margin-bottom:10px"><strong style="font-size:11px;color:#374151">Réalisations</strong><div style="margin-top:4px">${r.emp_achievements}</div></div>`:''}
+      ${r.emp_difficulties?`<div style="margin-bottom:10px"><strong style="font-size:11px;color:#374151">Difficultés rencontrées</strong><div style="margin-top:4px">${r.emp_difficulties}</div></div>`:''}
+      ${r.emp_needs?`<div><strong style="font-size:11px;color:#374151">Besoins & évolution</strong><div style="margin-top:4px">${r.emp_needs}</div></div>`:''}
+    </div>
+
+    <h2>Partie manager</h2>
+    <div class="box">
+      ${r.mgr_comments?`<div style="margin-bottom:8px"><strong style="font-size:11px;color:#374151">Commentaires</strong><div style="margin-top:4px">${r.mgr_comments}</div></div>`:''}
+    </div>
+
+    ${objectives.length?`<h2>Objectifs (${objectives.length})</h2>
+    <table><thead><tr><th>Objectif</th><th>Type</th><th>Cible</th><th>Réalisé</th><th>Statut</th></tr></thead>
+    <tbody>${objRows}</tbody></table>`:''}
+
+    <div class="sig-row">
+      <div class="sig-box">
+        <strong>Signature collaborateur</strong>
+        ${r.emp_signed_at?`<div style="color:#15803d;font-weight:600"><i>Signé le ${r.emp_signed_at.slice(0,10)}</i></div>`:`<div style="height:40px;border-bottom:1px solid #d1d5db;margin:10px 0"></div><span>Signature</span>`}
+      </div>
+      <div class="sig-box">
+        <strong>Signature manager</strong>
+        ${r.mgr_signed_at?`<div style="color:#15803d;font-weight:600"><i>Signé le ${r.mgr_signed_at.slice(0,10)}</i></div>`:`<div style="height:40px;border-bottom:1px solid #d1d5db;margin:10px 0"></div><span>Signature</span>`}
+      </div>
+    </div>
+    <div style="margin-top:30px;font-size:10px;color:#9ca3af;text-align:center">Flowtym RH · Document confidentiel · ${hotel?.name||''}</div>
+  </div>
+  <script>window.onload=()=>{window.print();setTimeout(()=>window.close(),1000)}<\/script>
+  </body></html>`;
+  const w=window.open('','_blank','width=860,height=700');
+  if(w){w.document.write(html);w.document.close();}
 }
 
 /* =====================================================================
@@ -8091,6 +8464,7 @@ async function openEmployeeReviewForm(rid,rData){
   </div>
   <div class="mact">
     <button class="btn g" onclick="closeModal()">Fermer</button>
+    <button class="btn g" id="rv_print" title="Exporter en PDF"><i class="fa-solid fa-file-pdf"></i> PDF</button>
     ${canEdit?`<button class="btn p" id="rv_save"><i class="fa-solid fa-floppy-disk"></i> Sauvegarder</button>`:''}
   </div>`;
   $('modalbg').classList.add('on');
@@ -8101,6 +8475,7 @@ async function openEmployeeReviewForm(rid,rData){
       mgr_evaluation:$('rv_eval').value||null,mgr_comments:$('rv_mgr_comments').value||null,overall_score:parseFloat($('rv_score').value)||null};
     try{await BE.updateEmployeeReview(rid,p);flash('Sauvegardé');}catch(e){flash('Erreur : '+e.message,'ko');}
   };
+  if($('rv_print')) $('rv_print').onclick=()=>_printReview(r,emp,mgr,objectives);
   if($('rv_save')) $('rv_save').onclick=async()=>{await doSave();closeModal();await _drawReviewsList();};
   if($('rv_status_save')) $('rv_status_save').onclick=async()=>{
     await BE.updateEmployeeReview(rid,{status:$('rv_status').value,scheduled_date:$('rv_sched').value||null});
