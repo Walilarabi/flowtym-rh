@@ -561,7 +561,7 @@ async function makeRealBE(){
       if(!u)return;
       await sb.from('user_active_hotel').upsert({user_id:u.id,hotel_id:hotelId},{onConflict:'user_id'});
     },
-    async listDepartments(h){const {data,error}=await sb.from('staff_departments').select('id,name,sort_order').eq('hotel_id',h).order('sort_order');must(error,"Départements");return data||[];},
+    async listDepartments(h){const {data,error}=await sb.from('staff_departments').select('id,name,sort_order,default_start_time,default_end_time,break_minutes,hours_per_day,cp_days_per_month').eq('hotel_id',h).order('sort_order');must(error,"Départements");return data||[];},
     async listRoles(h){const {data,error}=await sb.from('staff_roles').select('id,name,department_id').eq('hotel_id',h).order('name');must(error,"Rôles");return data||[];},
     async listEmployees(h){const {data,error}=await sb.from('employees').select('*').eq('hotel_id',h).order('active',{ascending:false}).order('last_name');must(error,"Collaborateurs");return data||[];},
     async addEmployee(h,p){const {data,error}=await sb.from('employees').insert({hotel_id:h,...p}).select('*').single();must(error,"Création collaborateur");return data;},
@@ -893,6 +893,7 @@ function makeTestBE(){
     async setDocument(h,eid,doc_type,status){const i=docs.findIndex(d=>d.hotel_id===h&&d.employee_id===eid&&d.doc_type===doc_type);
       if(i>=0)docs[i].status=status;else docs.push({hotel_id:h,employee_id:eid,doc_type,status});},
     async addDepartment(h,name){const d={id:'d'+Date.now(),hotel_id:h,name,sort_order:99};(depts[h]||(depts[h]=[])).push(d);return d;},
+    async updateDepartment(id,patch){Object.keys(depts).forEach(h=>{const d=depts[h]?.find(x=>x.id===id);if(d)Object.assign(d,patch);});},
     async deleteDepartment(id){Object.keys(depts).forEach(h=>{depts[h]=depts[h].filter(d=>d.id!==id);});},
     async addRole(h,name,department_id){const r={id:'r'+Date.now(),hotel_id:h,name,department_id:department_id||null};(roles[h]||(roles[h]=[])).push(r);return r;},
     async deleteRole(id){Object.keys(roles).forEach(h=>{roles[h]=roles[h].filter(r=>r.id!==id);});},
@@ -5027,6 +5028,7 @@ async function renderConfig(){
     ['general',   'fa-building',          'Général'],
     ['org',       'fa-layer-group',        'Organisation'],
     ['planning',  'fa-calendar-days',      'Planning'],
+    ['horaires',  'fa-clock',              'Horaires de travail'],
     ['etages',    'fa-broom',              'Service Étages'],
     ['docs',      'fa-folder-open',        'Documents RH'],
     ['contrats',  'fa-file-signature',     'Contrats'],
@@ -5049,6 +5051,7 @@ async function renderConfig(){
   if(_cfgTab==='general')     await _cfgGeneral(hotel, isAdmin);
   else if(_cfgTab==='org')    _cfgOrg();
   else if(_cfgTab==='planning') _cfgPlanning();
+  else if(_cfgTab==='horaires') await _cfgHoraires();
   else if(_cfgTab==='etages') await _cfgEtages();
   else if(_cfgTab==='docs')   _cfgDocs();
   else if(_cfgTab==='contrats') _cfgContrats();
@@ -5268,6 +5271,93 @@ async function _cfgGeneral(hotel, isAdmin){
   };
   // Import Excel
   $('importXlsxSettings').onclick=()=>$('xlsxFile').click();
+}
+
+/* ──────────────────────────────────────────────
+   ONGLET · HORAIRES DE TRAVAIL
+────────────────────────────────────────────── */
+async function _cfgHoraires(){
+  const sorted=[...deps].sort((a,b)=>(a.sort_order??999)-(b.sort_order??999));
+  $('cfgBody').innerHTML=`
+    <div class="box" style="max-width:820px">
+      <h3><i class="fa-solid fa-clock"></i>Horaires de travail par service</h3>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:18px">
+        Définissez les horaires standard de chaque service. Ces valeurs servent de référence pour le pointage et le calcul des heures. Les congés payés (CP) s'accumulent selon le taux mensuel renseigné (légal français : 2,5 j/mois = 30 j/an).
+      </div>
+      ${!sorted.length?'<div style="color:var(--muted);font-size:13px">Aucun service défini. Ajoutez des services dans l\'onglet Organisation.</div>':`
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead>
+          <tr style="border-bottom:2px solid var(--line);text-align:left">
+            <th style="padding:8px 10px;font-weight:700;color:var(--ink2)">Service</th>
+            <th style="padding:8px 10px;font-weight:700;color:var(--ink2)">Début</th>
+            <th style="padding:8px 10px;font-weight:700;color:var(--ink2)">Fin</th>
+            <th style="padding:8px 10px;font-weight:700;color:var(--ink2)">Pause (min)</th>
+            <th style="padding:8px 10px;font-weight:700;color:var(--ink2)">H/jour</th>
+            <th style="padding:8px 10px;font-weight:700;color:var(--ink2)">CP/mois</th>
+            <th style="padding:8px 10px"></th>
+          </tr>
+        </thead>
+        <tbody id="horairesBody">
+        ${sorted.map(d=>`
+          <tr data-depid="${d.id}" style="border-bottom:1px solid var(--line)">
+            <td style="padding:10px 10px;font-weight:600">${d.name}</td>
+            <td style="padding:6px 8px"><input type="time" class="h-start" value="${d.default_start_time||''}" style="width:90px;padding:5px 7px;border:1px solid var(--line);border-radius:7px;font-size:12px"></td>
+            <td style="padding:6px 8px"><input type="time" class="h-end" value="${d.default_end_time||''}" style="width:90px;padding:5px 7px;border:1px solid var(--line);border-radius:7px;font-size:12px"></td>
+            <td style="padding:6px 8px"><input type="number" class="h-brk" min="0" max="120" step="5" value="${d.break_minutes??0}" style="width:70px;padding:5px 7px;border:1px solid var(--line);border-radius:7px;font-size:12px;text-align:center" placeholder="0"></td>
+            <td style="padding:6px 8px"><input type="number" class="h-hpd" min="0" max="24" step="0.25" value="${d.hours_per_day!=null?d.hours_per_day:''}" style="width:70px;padding:5px 7px;border:1px solid var(--line);border-radius:7px;font-size:12px;text-align:center" placeholder="auto"></td>
+            <td style="padding:6px 8px"><input type="number" class="h-cp" min="0" max="5" step="0.01" value="${d.cp_days_per_month!=null?d.cp_days_per_month:2.5}" style="width:70px;padding:5px 7px;border:1px solid var(--line);border-radius:7px;font-size:12px;text-align:center"></td>
+            <td style="padding:6px 8px"><button class="btn p h-save" style="padding:5px 12px;font-size:11px"><i class="fa-solid fa-floppy-disk"></i> Sauvegarder</button></td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+      <div style="font-size:11px;color:var(--muted);margin-top:12px">
+        <i class="fa-solid fa-circle-info"></i> La colonne <b>H/jour</b> est calculée automatiquement (Fin − Début − Pause) si vous laissez le champ vide.
+        La valeur légale de <b>CP/mois</b> est <b>2,5 jours</b> (soit 30 jours ouvrables/an).
+      </div>`}
+    </div>`;
+
+  document.querySelectorAll('#horairesBody tr').forEach(row=>{
+    const depId=row.dataset.depid;
+    // Auto-calcul H/jour quand start/end/pause changent
+    const autoCalc=()=>{
+      const s=row.querySelector('.h-start').value;
+      const e=row.querySelector('.h-end').value;
+      const brk=parseInt(row.querySelector('.h-brk').value)||0;
+      const hpd=row.querySelector('.h-hpd');
+      if(s&&e&&!hpd.value){
+        const [sh,sm]=s.split(':').map(Number), [eh,em]=e.split(':').map(Number);
+        let mins=(eh*60+em)-(sh*60+sm)-brk;
+        if(mins>0) hpd.placeholder=(mins/60).toFixed(2);
+      }
+    };
+    row.querySelector('.h-start').addEventListener('change',autoCalc);
+    row.querySelector('.h-end').addEventListener('change',autoCalc);
+    row.querySelector('.h-brk').addEventListener('change',autoCalc);
+
+    row.querySelector('.h-save').onclick=async()=>{
+      const s=row.querySelector('.h-start').value||null;
+      const e=row.querySelector('.h-end').value||null;
+      const brk=parseInt(row.querySelector('.h-brk').value)||0;
+      let hpd=parseFloat(row.querySelector('.h-hpd').value)||null;
+      const cp=parseFloat(row.querySelector('.h-cp').value)||2.5;
+      // Auto-calcul si vide
+      if(!hpd&&s&&e){
+        const [sh,sm]=s.split(':').map(Number),[eh,em]=e.split(':').map(Number);
+        const mins=(eh*60+em)-(sh*60+sm)-brk;
+        if(mins>0) hpd=Math.round(mins/60*100)/100;
+      }
+      try{
+        await BE.updateDepartment(depId,{
+          default_start_time:s, default_end_time:e,
+          break_minutes:brk, hours_per_day:hpd, cp_days_per_month:cp
+        });
+        const d=deps.find(x=>x.id===depId);
+        if(d) Object.assign(d,{default_start_time:s,default_end_time:e,break_minutes:brk,hours_per_day:hpd,cp_days_per_month:cp});
+        flash(`Horaires ${row.querySelector('td').textContent.trim()} sauvegardés`);
+        if(hpd&&!row.querySelector('.h-hpd').value) row.querySelector('.h-hpd').value=hpd;
+      }catch(err){flash('Erreur : '+err.message,'ko');}
+    };
+  });
 }
 
 /* ──────────────────────────────────────────────
