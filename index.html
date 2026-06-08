@@ -607,6 +607,11 @@ async function makeRealBE(){
     async addDepartment(h,name){const {data,error}=await sb.from('staff_departments').insert({hotel_id:h,name}).select('*').single();must(error,"Création département");return data;},
     async updateDepartment(id,patch){const {error}=await sb.from('staff_departments').update(patch).eq('id',id);must(error,"Mise à jour service");},
     async deleteDepartment(id){const {error}=await sb.from('staff_departments').delete().eq('id',id);must(error,"Suppression département");},
+    /* --- HORAIRES PAR SERVICE --- */
+    async listSchedules(h){const {data,error}=await sb.from('department_schedules').select('*').eq('hotel_id',h).order('sort_order').order('name');must(error,'Horaires');return data||[];},
+    async addSchedule(h,payload){const {data,error}=await sb.from('department_schedules').insert({hotel_id:h,...payload}).select('*').single();must(error,'Création horaire');return data;},
+    async updateSchedule(id,patch){const {data,error}=await sb.from('department_schedules').update(patch).eq('id',id).select('*').single();must(error,'Mise à jour horaire');return data;},
+    async deleteSchedule(id){const {error}=await sb.from('department_schedules').delete().eq('id',id);must(error,'Suppression horaire');},
     async addRole(h,name,department_id){const {data,error}=await sb.from('staff_roles').insert({hotel_id:h,name,department_id:department_id||null}).select('*').single();must(error,"Création rôle");return data;},
     async deleteRole(id){const {error}=await sb.from('staff_roles').delete().eq('id',id);must(error,"Suppression rôle");},
     async listAccess(h){const {data,error}=await sb.rpc('rh_list_users_for_hotel',{p_hotel:h});must(error,"Liste des accès");return data||[];},
@@ -895,6 +900,11 @@ function makeTestBE(){
     async addDepartment(h,name){const d={id:'d'+Date.now(),hotel_id:h,name,sort_order:99};(depts[h]||(depts[h]=[])).push(d);return d;},
     async updateDepartment(id,patch){Object.keys(depts).forEach(h=>{const d=depts[h]?.find(x=>x.id===id);if(d)Object.assign(d,patch);});},
     async deleteDepartment(id){Object.keys(depts).forEach(h=>{depts[h]=depts[h].filter(d=>d.id!==id);});},
+    _scheds:{},
+    async listSchedules(h){return this._scheds[h]||[];},
+    async addSchedule(h,p){const s={id:'sc'+Date.now(),hotel_id:h,...p};(this._scheds[h]||(this._scheds[h]=[])).push(s);return s;},
+    async updateSchedule(id,patch){Object.keys(this._scheds).forEach(h=>{const s=this._scheds[h]?.find(x=>x.id===id);if(s)Object.assign(s,patch);});return{id,...patch};},
+    async deleteSchedule(id){Object.keys(this._scheds).forEach(h=>{this._scheds[h]=this._scheds[h]?.filter(x=>x.id!==id);});},
     async addRole(h,name,department_id){const r={id:'r'+Date.now(),hotel_id:h,name,department_id:department_id||null};(roles[h]||(roles[h]=[])).push(r);return r;},
     async deleteRole(id){Object.keys(roles).forEach(h=>{roles[h]=roles[h].filter(r=>r.id!==id);});},
     async listAccess(h){return [
@@ -1067,7 +1077,7 @@ function makeTestBE(){
 
 /* ===================== ÉTAT ===================== */
 let BE=null;
-let hotels=[],hotelId=null,deps=[],rols=[],staff=[],cur=new Date();
+let hotels=[],hotelId=null,deps=[],rols=[],staff=[],schedules=[],cur=new Date();
 let absenceTypes=[];
 let absSubTab='requests'; // requests | calendar | balances
 let committed=new Map();        // 'eid|YYYY-MM-DD' -> {status, duration}
@@ -1726,11 +1736,12 @@ async function loadHotel(){
   if(!BE.isTest) await BE.setActiveHotel(hotelId);
   await loadMyRole();
   await loadRolePermissions();
-  [deps, rols, staff, absenceTypes] = await Promise.all([
+  [deps, rols, staff, absenceTypes, schedules] = await Promise.all([
     BE.listDepartments(hotelId),
     BE.listRoles(hotelId),
     BE.listEmployees(hotelId),
-    BE.listAbsenceTypes()
+    BE.listAbsenceTypes(),
+    BE.listSchedules(hotelId)
   ]);
   applyCustomColors(hotelId);
   applyCustomPerms(hotelId);
@@ -5276,88 +5287,135 @@ async function _cfgGeneral(hotel, isAdmin){
 /* ──────────────────────────────────────────────
    ONGLET · HORAIRES DE TRAVAIL
 ────────────────────────────────────────────── */
+function _schedHpd(start,end,brk){
+  if(!start||!end)return null;
+  const [sh,sm]=start.split(':').map(Number),[eh,em]=end.split(':').map(Number);
+  let mins=(eh*60+em)-(sh*60+sm); if(mins<=0)mins+=24*60; // nuit
+  mins-=(brk||0); return mins>0?Math.round(mins/60*100)/100:null;
+}
+
 async function _cfgHoraires(){
   const sorted=[...deps].sort((a,b)=>(a.sort_order??999)-(b.sort_order??999));
+
+  const renderScheduleRow=(sc,depName)=>`
+    <tr data-scid="${sc.id}" style="border-bottom:1px solid var(--line);background:#fafafe">
+      <td style="padding:8px 10px 8px 26px;font-size:12.5px;color:var(--ink2)">
+        <input type="text" class="sc-name" value="${sc.name||''}" placeholder="Nom (ex: Jour)" style="width:110px;padding:4px 7px;border:1px solid var(--line);border-radius:7px;font-size:12px">
+      </td>
+      <td style="padding:5px 7px"><input type="time" class="sc-start" value="${sc.default_start_time||''}" style="width:88px;padding:4px 6px;border:1px solid var(--line);border-radius:7px;font-size:12px"></td>
+      <td style="padding:5px 7px"><input type="time" class="sc-end" value="${sc.default_end_time||''}" style="width:88px;padding:4px 6px;border:1px solid var(--line);border-radius:7px;font-size:12px"></td>
+      <td style="padding:5px 7px"><input type="number" class="sc-brk" min="0" max="120" step="5" value="${sc.break_minutes??0}" style="width:62px;padding:4px 6px;border:1px solid var(--line);border-radius:7px;font-size:12px;text-align:center"></td>
+      <td style="padding:5px 7px"><input type="number" class="sc-hpd" min="0" max="24" step="0.25" value="${sc.hours_per_day!=null?sc.hours_per_day:''}" style="width:62px;padding:4px 6px;border:1px solid var(--line);border-radius:7px;font-size:12px;text-align:center" placeholder="auto"></td>
+      <td style="padding:5px 7px"><input type="number" class="sc-cp" min="0" max="5" step="0.01" value="${sc.cp_days_per_month!=null?sc.cp_days_per_month:2.5}" style="width:62px;padding:4px 6px;border:1px solid var(--line);border-radius:7px;font-size:12px;text-align:center"></td>
+      <td style="padding:5px 7px;display:flex;gap:5px">
+        <button class="btn p sc-save" style="padding:4px 10px;font-size:11px"><i class="fa-solid fa-floppy-disk"></i></button>
+        <button class="btn d sc-del" style="padding:4px 9px;font-size:11px"><i class="fa-solid fa-trash"></i></button>
+      </td>
+    </tr>`;
+
+  const renderDeptSection=(d)=>{
+    const dschs=schedules.filter(s=>s.department_id===d.id).sort((a,b)=>(a.sort_order??10)-(b.sort_order??10)||(a.name||'').localeCompare(b.name||''));
+    return `
+      <tr class="plan-dept-row" data-dep="${d.id}">
+        <td colspan="7" style="padding:10px 12px">
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            <span><i class="fa-solid fa-layer-group" style="margin-right:6px;color:var(--violet)"></i>${d.name}</span>
+            <button class="btn p sc-add-btn" data-depid="${d.id}" data-depname="${d.name}" style="padding:4px 12px;font-size:11px;margin:0">
+              <i class="fa-solid fa-plus"></i> Ajouter un horaire
+            </button>
+          </div>
+        </td>
+      </tr>
+      ${dschs.length?dschs.map(sc=>renderScheduleRow(sc,d.name)).join(''):`<tr data-dep-empty="${d.id}"><td colspan="7" style="padding:6px 26px;font-size:11.5px;color:var(--muted);font-style:italic">Aucun horaire défini — cliquez « Ajouter un horaire »</td></tr>`}`;
+  };
+
   $('cfgBody').innerHTML=`
-    <div class="box" style="max-width:820px">
+    <div class="box" style="max-width:900px">
       <h3><i class="fa-solid fa-clock"></i>Horaires de travail par service</h3>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:18px">
-        Définissez les horaires standard de chaque service. Ces valeurs servent de référence pour le pointage et le calcul des heures. Les congés payés (CP) s'accumulent selon le taux mensuel renseigné (légal français : 2,5 j/mois = 30 j/an).
+      <div style="font-size:12px;color:var(--muted);margin-bottom:16px">
+        Chaque service peut avoir plusieurs horaires (Jour, Nuit, Matin…). Chaque collaborateur est ensuite affecté à un horaire dans sa fiche.
+        Les heures/jour servent au calcul Suivi du temps et Paie. CP légal : <b>2,5 j/mois</b>.
       </div>
       ${!sorted.length?'<div style="color:var(--muted);font-size:13px">Aucun service défini. Ajoutez des services dans l\'onglet Organisation.</div>':`
-      <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <table style="width:100%;border-collapse:collapse;font-size:13px" id="horairesTable">
         <thead>
-          <tr style="border-bottom:2px solid var(--line);text-align:left">
-            <th style="padding:8px 10px;font-weight:700;color:var(--ink2)">Service</th>
-            <th style="padding:8px 10px;font-weight:700;color:var(--ink2)">Début</th>
-            <th style="padding:8px 10px;font-weight:700;color:var(--ink2)">Fin</th>
-            <th style="padding:8px 10px;font-weight:700;color:var(--ink2)">Pause (min)</th>
-            <th style="padding:8px 10px;font-weight:700;color:var(--ink2)">H/jour</th>
-            <th style="padding:8px 10px;font-weight:700;color:var(--ink2)">CP/mois</th>
-            <th style="padding:8px 10px"></th>
+          <tr style="border-bottom:2px solid var(--line);text-align:left;background:#f8f7ff">
+            <th style="padding:8px 10px">Horaire</th>
+            <th style="padding:8px 8px">Début</th>
+            <th style="padding:8px 8px">Fin</th>
+            <th style="padding:8px 8px">Pause (min)</th>
+            <th style="padding:8px 8px">H/jour</th>
+            <th style="padding:8px 8px">CP/mois</th>
+            <th style="padding:8px 8px"></th>
           </tr>
         </thead>
         <tbody id="horairesBody">
-        ${sorted.map(d=>`
-          <tr data-depid="${d.id}" style="border-bottom:1px solid var(--line)">
-            <td style="padding:10px 10px;font-weight:600">${d.name}</td>
-            <td style="padding:6px 8px"><input type="time" class="h-start" value="${d.default_start_time||''}" style="width:90px;padding:5px 7px;border:1px solid var(--line);border-radius:7px;font-size:12px"></td>
-            <td style="padding:6px 8px"><input type="time" class="h-end" value="${d.default_end_time||''}" style="width:90px;padding:5px 7px;border:1px solid var(--line);border-radius:7px;font-size:12px"></td>
-            <td style="padding:6px 8px"><input type="number" class="h-brk" min="0" max="120" step="5" value="${d.break_minutes??0}" style="width:70px;padding:5px 7px;border:1px solid var(--line);border-radius:7px;font-size:12px;text-align:center" placeholder="0"></td>
-            <td style="padding:6px 8px"><input type="number" class="h-hpd" min="0" max="24" step="0.25" value="${d.hours_per_day!=null?d.hours_per_day:''}" style="width:70px;padding:5px 7px;border:1px solid var(--line);border-radius:7px;font-size:12px;text-align:center" placeholder="auto"></td>
-            <td style="padding:6px 8px"><input type="number" class="h-cp" min="0" max="5" step="0.01" value="${d.cp_days_per_month!=null?d.cp_days_per_month:2.5}" style="width:70px;padding:5px 7px;border:1px solid var(--line);border-radius:7px;font-size:12px;text-align:center"></td>
-            <td style="padding:6px 8px"><button class="btn p h-save" style="padding:5px 12px;font-size:11px"><i class="fa-solid fa-floppy-disk"></i> Sauvegarder</button></td>
-          </tr>`).join('')}
+          ${sorted.map(d=>renderDeptSection(d)).join('')}
         </tbody>
       </table>
-      <div style="font-size:11px;color:var(--muted);margin-top:12px">
-        <i class="fa-solid fa-circle-info"></i> La colonne <b>H/jour</b> est calculée automatiquement (Fin − Début − Pause) si vous laissez le champ vide.
-        La valeur légale de <b>CP/mois</b> est <b>2,5 jours</b> (soit 30 jours ouvrables/an).
+      <div style="font-size:11px;color:var(--muted);margin-top:10px">
+        <i class="fa-solid fa-circle-info"></i> <b>H/jour</b> est calculé automatiquement depuis les horaires si laissé vide. Pour les services de nuit (ex: 22:00→06:00), le passage minuit est géré automatiquement.
       </div>`}
     </div>`;
 
-  document.querySelectorAll('#horairesBody tr').forEach(row=>{
-    const depId=row.dataset.depid;
-    // Auto-calcul H/jour quand start/end/pause changent
-    const autoCalc=()=>{
-      const s=row.querySelector('.h-start').value;
-      const e=row.querySelector('.h-end').value;
-      const brk=parseInt(row.querySelector('.h-brk').value)||0;
-      const hpd=row.querySelector('.h-hpd');
-      if(s&&e&&!hpd.value){
-        const [sh,sm]=s.split(':').map(Number), [eh,em]=e.split(':').map(Number);
-        let mins=(eh*60+em)-(sh*60+sm)-brk;
-        if(mins>0) hpd.placeholder=(mins/60).toFixed(2);
-      }
-    };
-    row.querySelector('.h-start').addEventListener('change',autoCalc);
-    row.querySelector('.h-end').addEventListener('change',autoCalc);
-    row.querySelector('.h-brk').addEventListener('change',autoCalc);
+  const wireRows=()=>{
+    // Boutons Ajouter
+    document.querySelectorAll('.sc-add-btn').forEach(btn=>{
+      btn.onclick=async()=>{
+        const depId=btn.dataset.depid, depName=btn.dataset.depname;
+        const name=prompt(`Nom de l'horaire pour "${depName}" (ex: Jour, Nuit, Matin…)`,'');
+        if(!name)return;
+        try{
+          const sc=await BE.addSchedule(hotelId,{department_id:depId,name,sort_order:schedules.filter(s=>s.department_id===depId).length*10+10,break_minutes:0,cp_days_per_month:2.5});
+          schedules.push(sc);
+          await _cfgHoraires();
+        }catch(e){flash('Erreur : '+e.message,'ko');}
+      };
+    });
 
-    row.querySelector('.h-save').onclick=async()=>{
-      const s=row.querySelector('.h-start').value||null;
-      const e=row.querySelector('.h-end').value||null;
-      const brk=parseInt(row.querySelector('.h-brk').value)||0;
-      let hpd=parseFloat(row.querySelector('.h-hpd').value)||null;
-      const cp=parseFloat(row.querySelector('.h-cp').value)||2.5;
-      // Auto-calcul si vide
-      if(!hpd&&s&&e){
-        const [sh,sm]=s.split(':').map(Number),[eh,em]=e.split(':').map(Number);
-        const mins=(eh*60+em)-(sh*60+sm)-brk;
-        if(mins>0) hpd=Math.round(mins/60*100)/100;
-      }
-      try{
-        await BE.updateDepartment(depId,{
-          default_start_time:s, default_end_time:e,
-          break_minutes:brk, hours_per_day:hpd, cp_days_per_month:cp
-        });
-        const d=deps.find(x=>x.id===depId);
-        if(d) Object.assign(d,{default_start_time:s,default_end_time:e,break_minutes:brk,hours_per_day:hpd,cp_days_per_month:cp});
-        flash(`Horaires ${row.querySelector('td').textContent.trim()} sauvegardés`);
-        if(hpd&&!row.querySelector('.h-hpd').value) row.querySelector('.h-hpd').value=hpd;
-      }catch(err){flash('Erreur : '+err.message,'ko');}
-    };
-  });
+    // Lignes d'horaire existantes
+    document.querySelectorAll('#horairesBody tr[data-scid]').forEach(row=>{
+      const scId=row.dataset.scid;
+      const autoHpd=()=>{
+        const s=row.querySelector('.sc-start').value, e=row.querySelector('.sc-end').value;
+        const brk=parseInt(row.querySelector('.sc-brk').value)||0;
+        const hpdInput=row.querySelector('.sc-hpd');
+        if(s&&e&&!hpdInput.value){const v=_schedHpd(s,e,brk);if(v)hpdInput.placeholder=v;}
+      };
+      row.querySelector('.sc-start').addEventListener('change',autoHpd);
+      row.querySelector('.sc-end').addEventListener('change',autoHpd);
+      row.querySelector('.sc-brk').addEventListener('change',autoHpd);
+
+      row.querySelector('.sc-save').onclick=async()=>{
+        const name=row.querySelector('.sc-name').value.trim();
+        if(!name){flash('Le nom est requis','ko');return;}
+        const start=row.querySelector('.sc-start').value||null;
+        const end=row.querySelector('.sc-end').value||null;
+        const brk=parseInt(row.querySelector('.sc-brk').value)||0;
+        let hpd=parseFloat(row.querySelector('.sc-hpd').value)||null;
+        const cp=parseFloat(row.querySelector('.sc-cp').value)||2.5;
+        if(!hpd&&start&&end) hpd=_schedHpd(start,end,brk);
+        try{
+          const updated=await BE.updateSchedule(scId,{name,default_start_time:start,default_end_time:end,break_minutes:brk,hours_per_day:hpd,cp_days_per_month:cp});
+          const idx=schedules.findIndex(s=>s.id===scId); if(idx>=0) Object.assign(schedules[idx],updated);
+          flash(`Horaire "${name}" sauvegardé`);
+          if(hpd&&!row.querySelector('.sc-hpd').value) row.querySelector('.sc-hpd').value=hpd;
+        }catch(e){flash('Erreur : '+e.message,'ko');}
+      };
+
+      row.querySelector('.sc-del').onclick=async()=>{
+        const nm=row.querySelector('.sc-name').value||'cet horaire';
+        if(!confirm(`Supprimer "${nm}" ? Les collaborateurs affectés à cet horaire seront désassociés.`))return;
+        try{
+          await BE.deleteSchedule(scId);
+          schedules=schedules.filter(s=>s.id!==scId);
+          await _cfgHoraires();
+        }catch(e){flash('Erreur : '+e.message,'ko');}
+      };
+    });
+  };
+
+  wireRows();
 }
 
 /* ──────────────────────────────────────────────
@@ -7924,9 +7982,11 @@ async function drawTracking(){
         if(c.clock_out_ts) extraMin+=minutesBetween(c.clock_in_ts,c.clock_out_ts)-(c.break_minutes||0);
       });
       worked=Math.round(extraMin/60*10)/10;
-      const plannedH=planned*7; // 7h par jour planifié par défaut
+      const sc=schedules.find(s=>s.id===emp.schedule_id);
+      const hpd=sc?.hours_per_day??7;
+      const plannedH=Math.round(planned*hpd*10)/10;
       const diff=Math.round((worked-plannedH)*10)/10;
-      return {emp,planned,cp,rtt,abs,worked,plannedH,diff};
+      return {emp,planned,cp,rtt,abs,worked,plannedH,diff,hpd,scheduleName:sc?.name};
     });
     // KPIs
     const totalPlannedH=rows.reduce((s,r)=>s+r.plannedH,0);
@@ -7945,11 +8005,12 @@ async function drawTracking(){
     const diffColor=d=>d>0?'color:#16a34a;font-weight:600':d<0?'color:#dc2626;font-weight:600':'color:var(--muted)';
     el.innerHTML=`<table class="rtable">
       <thead><tr>
-        <th>Collaborateur</th><th>Service</th><th>Contrat</th>
+        <th>Collaborateur</th><th>Service</th><th>Horaire</th><th>Contrat</th>
         <th style="text-align:center">Jours P/PE</th>
         <th style="text-align:center">CP</th>
         <th style="text-align:center">RTT</th>
         <th style="text-align:center">Abs.</th>
+        <th style="text-align:right">H/jour</th>
         <th style="text-align:right">Planifié (h)</th>
         <th style="text-align:right">Pointé (h)</th>
         <th style="text-align:right">Écart</th>
@@ -7958,11 +8019,13 @@ async function drawTracking(){
         ${rows.map(r=>`<tr>
           <td><b>${r.emp.last_name} ${r.emp.first_name}</b></td>
           <td>${r.emp.department||'—'}</td>
+          <td style="font-size:11px">${r.scheduleName?`<span class="tag gray">${r.scheduleName}</span>`:'<span style="color:var(--muted)">—</span>'}</td>
           <td style="font-size:11px;color:var(--muted)">${r.emp.contract_type||'—'}</td>
           <td style="text-align:center">${r.planned}</td>
           <td style="text-align:center">${r.cp||'—'}</td>
           <td style="text-align:center">${r.rtt||'—'}</td>
           <td style="text-align:center">${r.abs||'—'}</td>
+          <td style="text-align:right;font-size:11px;color:var(--muted)">${r.hpd}h</td>
           <td style="text-align:right">${r.plannedH}h</td>
           <td style="text-align:right">${r.worked>0?r.worked+'h':'<span style="color:var(--muted)">—</span>'}</td>
           <td style="text-align:right;${diffColor(r.diff)}">${r.worked>0?(r.diff>0?'+':'')+r.diff+'h':'—'}</td>
@@ -7973,10 +8036,10 @@ async function drawTracking(){
 }
 function exportTrackingCSV(){
   const rows=window._trRows||[];
-  const hdr='Nom,Prénom,Service,Contrat,Jours planifiés,CP,RTT,Abs,Heures planifiées,Heures pointées,Écart\n';
+  const hdr='Nom,Prénom,Service,Horaire,Contrat,Jours planifiés,CP,RTT,Abs,H/jour,Heures planifiées,Heures pointées,Écart\n';
   const body=rows.map(r=>[
-    r.emp.last_name, r.emp.first_name, r.emp.department||'', r.emp.contract_type||'',
-    r.planned, r.cp, r.rtt, r.abs, r.plannedH, r.worked, r.diff
+    r.emp.last_name, r.emp.first_name, r.emp.department||'', r.scheduleName||'', r.emp.contract_type||'',
+    r.planned, r.cp, r.rtt, r.abs, r.hpd, r.plannedH, r.worked, r.diff
   ].join(',')).join('\n');
   const blob=new Blob(['﻿'+hdr+body],{type:'text/csv;charset=utf-8'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
@@ -8042,9 +8105,11 @@ async function drawPayroll(){
       let totalMin=0;
       cks.forEach(c=>{if(c.clock_out_ts) totalMin+=minutesBetween(c.clock_in_ts,c.clock_out_ts)-(c.break_minutes||0);});
       const totalH=Math.round(totalMin/60*100)/100;
-      const plannedH=(P+PE)*7;
+      const sc2=schedules.find(s=>s.id===emp.schedule_id);
+      const hpd2=sc2?.hours_per_day??7;
+      const plannedH=Math.round((P+PE)*hpd2*100)/100;
       const heuresSup=Math.max(0,Math.round((totalH-plannedH)*100)/100);
-      return {emp,P,PE,CP,RTT,MAL,MAT,CSS,AE,F,PAT,ABS,REC,FORM,repos,totalH,plannedH,heuresSup};
+      return {emp,P,PE,CP,RTT,MAL,MAT,CSS,AE,F,PAT,ABS,REC,FORM,repos,totalH,plannedH,heuresSup,hpd:hpd2,scheduleName:sc2?.name};
     });
     window._pyRows=rows;
     // KPIs
@@ -8667,6 +8732,13 @@ function openEmpForm(s){
         <div class="fld"><label>Date d'entrée</label><input type="date" id="eh" value="${s?.hire_date||''}"></div>
       </div>
       <div class="row2">
+        <div class="fld"><label>Horaire de travail</label><select id="esched">
+          <option value="">— Non défini —</option>
+          ${(()=>{const dep=deps.find(d=>d.name===(s?.department||''));const depId=dep?.id;return schedules.filter(sc=>!depId||sc.department_id===depId).map(sc=>{const dep2=deps.find(d=>d.id===sc.department_id);const prefix=dep2&&!depId?dep2.name+' · ':'';return`<option value="${sc.id}" ${s?.schedule_id===sc.id?'selected':''}>${prefix}${sc.name}${sc.default_start_time?` (${sc.default_start_time}–${sc.default_end_time||'?'})`:''}</option>`;}).join('');})()}
+        </select></div>
+        <div class="fld"></div>
+      </div>
+      <div class="row2">
         <div class="fld"><label>Statut</label><select id="estatus">
           <option value="actif" ${s?.active===false?'':'selected'}>Actif</option>
           <option value="parti" ${s?.active===false?'selected':''}>Parti</option>
@@ -8746,6 +8818,7 @@ function openEmpForm(s){
       phone:$('ep').value.trim()||null, email:$('em').value.trim()||null,
       address:$('ea').value.trim()||null, emergency_contact:$('eu').value.trim()||null,
       manager_id:$('emgr').value||null,
+      schedule_id:$('esched').value||null,
       active:!isLeft, departure_date: isLeft?dep:null,
     };
     if(canFicheFull()){
@@ -8783,6 +8856,15 @@ function openEmpForm(s){
       closeModal(); render(); flash(isNew?'Collaborateur ajouté':'Collaborateur mis à jour');
     }catch(e){flash('Erreur : '+e.message);console.error(e);}
     finally{$('esave').disabled=false;}
+  };
+  // Mise à jour dynamique des horaires selon le service sélectionné
+  $('ed').onchange=()=>{
+    const depName=$('ed').value;
+    const dep=deps.find(d=>d.name===depName);
+    const sel=$('esched');
+    const curVal=sel.value;
+    const opts=schedules.filter(sc=>!dep||sc.department_id===dep.id).map(sc=>`<option value="${sc.id}" ${sc.id===curVal?'selected':''}>${sc.name}${sc.default_start_time?` (${sc.default_start_time}–${sc.default_end_time||'?'})`:''}</option>`).join('');
+    sel.innerHTML=`<option value="">— Non défini —</option>${opts}`;
   };
   // Comportement dynamique du sélecteur de mode
   $('ewpType').onchange=()=>{
