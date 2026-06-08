@@ -857,6 +857,8 @@ async function makeRealBE(){
     },
     async updateEquipment(id,p){const {error}=await sb.from('equipment_items').update(p).eq('id',id);must(error,'MAJ équipement');},
     async deleteEquipment(id){const {error}=await sb.from('equipment_items').delete().eq('id',id);must(error,'Supprimer équipement');},
+    async listEquipmentHistory(equipmentId){const {data,error}=await sb.from('equipment_history').select('*').eq('equipment_item_id',equipmentId).order('performed_at',{ascending:false});must(error,'Historique matériel');return data||[];},
+    async logEquipmentAction(h,equipmentId,action,notes,userId){const {error}=await sb.from('equipment_history').insert({hotel_id:h,equipment_item_id:equipmentId,action,notes,performed_by_user_id:userId||null,performed_at:new Date().toISOString()});must(error,'Log matériel');},
     /* --- ENTRETIENS --- */
     async listReviewCampaigns(h){const {data,error}=await sb.from('review_campaigns').select('*').eq('hotel_id',h).order('year',{ascending:false}).order('created_at',{ascending:false});must(error,'Campagnes');return data||[];},
     async saveReviewCampaign(h,p){const {data,error}=await sb.from('review_campaigns').insert({hotel_id:h,...p}).select('*').single();must(error,'Créer campagne');return data;},
@@ -1090,6 +1092,9 @@ function makeTestBE(){
     async saveEquipment(h,p){const r={id:'eq'+Date.now(),hotel_id:h,...p,created_at:new Date().toISOString(),updated_at:new Date().toISOString()};equipmentItems.push(r);return r;},
     async updateEquipment(id,p){Object.assign(equipmentItems.find(x=>x.id===id)||{},p,{updated_at:new Date().toISOString()});},
     async deleteEquipment(id){const i=equipmentItems.findIndex(x=>x.id===id);if(i>=0)equipmentItems.splice(i,1);},
+    _equipmentHistory:[],
+    async listEquipmentHistory(equipmentId){return this._equipmentHistory.filter(x=>x.equipment_item_id===equipmentId);},
+    async logEquipmentAction(h,equipmentId,action,notes,userId){this._equipmentHistory.push({id:'eh'+Date.now(),hotel_id:h,equipment_item_id:equipmentId,action,notes,performed_by_user_id:userId||null,performed_at:new Date().toISOString()});},
     /* --- ENTRETIENS TEST STUBS --- */
     _reviewCampaigns:[], _employeeReviews:[], _reviewObjectives:[],
     async listReviewCampaigns(h){return this._reviewCampaigns.filter(x=>x.hotel_id===h);},
