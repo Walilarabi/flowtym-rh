@@ -502,7 +502,7 @@ const DOC_TYPES=[
   ['diplome','Diplôme','rh',false],
   ['autre','Autre','other',false]
 ];
-const CONTRACT_TYPES = ['CDI','CDD','Extra','Saisonnier','Stage','Apprentissage','Interim'];
+const CONTRACT_TYPES = ['CDI','CDD','Extra','Saisonnier','Stage','Apprentissage','Interim','Avenant'];
 const dim=(y,m)=>new Date(y,m+1,0).getDate();
 const iso=(y,m,d)=>`${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
 const initials=(f,l)=>((f?.[0]||'')+(l?.[0]||'')).toUpperCase();
@@ -666,6 +666,7 @@ async function makeRealBE(){
     async listGeneratedContracts(h){const {data,error}=await sb.from('generated_contracts').select('*,employees(first_name,last_name)').eq('hotel_id',h).order('created_at',{ascending:false});if(error&&error.code==='42P01'){console.warn('[migration-pending] generated_contracts non créée');return[];}must(error,'Contrats');return data||[];},
     async saveGeneratedContract(h,payload){const {data,error}=await sb.from('generated_contracts').insert({hotel_id:h,...payload}).select('*').single();must(error,'Contrat créer');return data;},
     async updateGeneratedContract(id,patch){const {data,error}=await sb.from('generated_contracts').update(patch).eq('id',id).select('*').single();must(error,'Contrat màj');return data;},
+    async nextContractNumber(h){const {data,error}=await sb.rpc('next_contract_number',{p_hotel_id:h});if(error){console.warn('contract_number_seq:',error.message);return'CTR-'+Date.now();}return data;},
 
     /* --- RYTHMES DE TRAVAIL --- */
     async listWorkPattern(h,eid){const {data,error}=await sb.from('employee_work_patterns').select('*').eq('hotel_id',h).eq('employee_id',eid).maybeSingle();if(error&&error.code!=='42P01')must(error,'Rythme de travail');return data||null;},
@@ -2917,20 +2918,24 @@ let contractsSubTab = 'dpae';  // dpae | templates | generate
 
 function renderContracts(){
   const hName = hotels.find(h=>h.id===hotelId)?.name||'';
+  const titles={dpae:'DPAE',templates:'Modèles de contrats',generate:'Générer un contrat',history:'Historique des contrats'};
+  const subs={dpae:'Déclarez vos embauches en ligne via l\'URSSAF.',templates:'Gérez vos modèles de contrats versionnés.',generate:'Sélectionnez un collaborateur et les informations du contrat pour générer le document.',history:'Tous les contrats générés, leur statut et leur historique de signature.'};
   $('view').innerHTML = `<div class="page">
-    <div class="phead"><div><h1>${contractsSubTab==='dpae'?'DPAE':contractsSubTab==='templates'?'Modèles de contrats':'Générer un contrat'}</h1>
-      <div class="sub">${contractsSubTab==='dpae'?'Déclarez vos embauches en ligne via l\'URSSAF.':contractsSubTab==='templates'?'Gérez vos modèles de contrats versionnés.':'Sélectionnez un collaborateur et les informations du contrat pour générer le document.'}</div>
+    <div class="phead"><div><h1>${titles[contractsSubTab]||'Contrats'}</h1>
+      <div class="sub">${subs[contractsSubTab]||''}</div>
     </div></div>
     <div class="ctab-bar" style="display:flex;gap:4px;margin-bottom:18px;border-bottom:1px solid var(--line)">
       <button class="ctab ${contractsSubTab==='dpae'?'on':''}" data-sub="dpae"><i class="fa-solid fa-building-columns"></i> DPAE</button>
       <button class="ctab ${contractsSubTab==='templates'?'on':''}" data-sub="templates"><i class="fa-regular fa-file-lines"></i> Modèles</button>
-      <button class="ctab ${contractsSubTab==='generate'?'on':''}" data-sub="generate"><i class="fa-solid fa-wand-magic-sparkles"></i> Génération de contrat</button>
+      <button class="ctab ${contractsSubTab==='generate'?'on':''}" data-sub="generate"><i class="fa-solid fa-wand-magic-sparkles"></i> Génération</button>
+      <button class="ctab ${contractsSubTab==='history'?'on':''}" data-sub="history"><i class="fa-solid fa-clock-rotate-left"></i> Historique</button>
     </div>
     <div id="csub"></div>
   </div>`;
   $('view').querySelectorAll('.ctab').forEach(b=>b.onclick=()=>{contractsSubTab=b.dataset.sub;renderContracts();});
   if(contractsSubTab==='dpae')           renderContractsDpae();
   else if(contractsSubTab==='templates') renderContractsTemplates();
+  else if(contractsSubTab==='history')   renderContractsHistory();
   else                                   renderContractsGenerate();
 }
 
@@ -4265,20 +4270,61 @@ async function _genStep3(){
       </div>
     </div>`;
   $('gs3_send').onclick=async()=>{
-    const email=$('gs3_email').value;
+    const email=$('gs3_email').value.trim();
     if(!email){flash('Email requis');return;}
     const btn=$('gs3_send'); btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Envoi…';
     try{
-      await BE.saveGeneratedContract(hotelId,{
+      // 1. Build rendered HTML to persist
+      const hotel=hotels.find(h=>h.id===hotelId)||{};
+      const mgr=staff.find(x=>x.id===s.fields.manager_id);
+      const ctx=buildContractContext(emp,hotel,{
+        contract_type:s.fields.contract_type,contract_start_date:s.fields.start_date,
+        contract_end_date:s.fields.end_date,trial_period:s.fields.trial_period,
+        weekly_hours:s.fields.weekly_hours,salary_amount:s.fields.salary_amount,
+        salary_type:s.fields.salary_type,manager_name:mgr?(mgr.first_name+' '+mgr.last_name):'',
+        work_location:s.fields.work_location||hotel?.city||'',
+        job_title:(rols.find(r=>r.id===s.fields.role_id)||{}).name||emp.role||'',
+        department:(deps.find(d=>d.id===s.fields.service_id)||{}).name||emp.department||'',
+      });
+      const tpl=s.tplList.find(t=>t.id===s.template_id)||s.tplList.find(t=>t.status==='active');
+      const renderedHtml=tpl?transformContractHtml(substituteVariables(tpl.body_html,ctx)):'';
+      // 2. Generate contract number from DB sequence
+      const contractNumber=await BE.nextContractNumber(hotelId);
+      // 3. Save contract record with rendered HTML
+      const saved=await BE.saveGeneratedContract(hotelId,{
         employee_id:s.employee_id, template_id:s.template_id||null,
-        contract_number:'CTR-'+Date.now(), status:'sent_signature',
+        contract_number:contractNumber, status:'sent_signature',
         contract_type:s.fields.contract_type, start_date:s.fields.start_date||null,
         end_date:s.fields.end_date||null, weekly_hours:s.fields.weekly_hours||null,
         salary_type:s.fields.salary_type, salary_amount:s.fields.salary_amount||null,
         trial_period:s.fields.trial_period||null, signature_method:s.fields.signature_method,
-        manager_id:s.fields.manager_id||null, sent_at:new Date().toISOString()
+        manager_id:s.fields.manager_id||null, sent_at:new Date().toISOString(),
+        generated_html:renderedHtml||null
       });
-      flash('Contrat envoyé pour signature !'); genInlineState.step=4; renderContractsGenerate();
+      // 4. Call yousign-create Edge Function
+      const SUPA_URL='https://hzrzkvdebaadditvbqis.supabase.co/functions/v1';
+      const {data:{session}}=await BE.sb.auth.getSession();
+      const ysResp=await fetch(`${SUPA_URL}/yousign-create`,{
+        method:'POST',
+        headers:{'Authorization':`Bearer ${session?.access_token}`,'Content-Type':'application/json'},
+        body:JSON.stringify({
+          document_id:saved.id, employee_id:s.employee_id, hotel_id:hotelId,
+          signer_first_name:emp.first_name, signer_name:emp.last_name,
+          signer_email:email, signer_phone:emp.phone||null,
+        }),
+      });
+      const ysResult=await ysResp.json();
+      if(!ysResp.ok||ysResult.error){
+        // YouSign failed but contract is saved — update status to reflect partial state
+        await BE.updateGeneratedContract(saved.id,{status:'error_yousign',yousign_status:ysResult.error||'error'}).catch(()=>{});
+        throw new Error('YouSign : '+(ysResult.error||ysResult.message||'Erreur inconnue'));
+      }
+      // 5. Save YouSign signature request ID
+      if(ysResult.sr_id||ysResult.signature_request_id){
+        await BE.updateGeneratedContract(saved.id,{yousign_sr_id:ysResult.sr_id||ysResult.signature_request_id,yousign_status:'pending'}).catch(()=>{});
+      }
+      flash('Contrat envoyé pour signature — '+contractNumber);
+      genInlineState.step=4; renderContractsGenerate();
     }catch(e){flash('Erreur : '+e.message); btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-paper-plane"></i> Envoyer pour signature';}
   };
 }
@@ -4299,6 +4345,60 @@ function _genStep4(){
         ${emp?`<button class="btn p" onclick="openFiche('${emp.id}')"><i class="fa-solid fa-user"></i> Voir la fiche salarié</button>`:''}
       </div>
     </div>`;
+}
+
+/* ===== HISTORIQUE DES CONTRATS ===== */
+async function renderContractsHistory(){
+  const el=$('csub'); if(!el)return;
+  el.innerHTML='<div style="padding:20px;text-align:center;color:var(--muted)"><i class="fa-solid fa-spinner fa-spin"></i> Chargement…</div>';
+  try{
+    const contracts=await BE.listGeneratedContracts(hotelId);
+    const STATUS_LABELS={draft:'Brouillon',generated:'Généré',preview_ok:'Aperçu OK',sent_signature:'Envoyé',pending_signature:'En attente',signed:'Signé',archived:'Archivé',cancelled:'Annulé',error_yousign:'Erreur signature'};
+    const STATUS_COLORS={draft:'#fef3c7|#92400e',generated:'#EEF2FF|#4338CA',preview_ok:'#EEF2FF|#4338CA',sent_signature:'#DBEAFE|#1D4ED8',pending_signature:'#FEF3C7|#92400E',signed:'#DCFCE7|#166534',archived:'#F3F4F6|#374151',cancelled:'#FEE2E2|#991B1B',error_yousign:'#FEE2E2|#991B1B'};
+    const badge=s=>{const[bg,fg]=(STATUS_COLORS[s]||'#F3F4F6|#374151').split('|');return`<span style="background:${bg};color:${fg};padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600">${STATUS_LABELS[s]||s}</span>`;};
+    const fmt=d=>d?new Date(d).toLocaleDateString('fr-FR'):'—';
+    if(!contracts.length){el.innerHTML='<div style="padding:40px;text-align:center;color:var(--muted)">Aucun contrat généré.</div>';return;}
+    const signed=contracts.filter(c=>c.status==='signed').length;
+    const pending=contracts.filter(c=>['sent_signature','pending_signature'].includes(c.status)).length;
+    const draft=contracts.filter(c=>c.status==='draft').length;
+    el.innerHTML=`
+      <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin-bottom:16px">
+        <div class="kpi"><div class="val">${contracts.length}</div><div class="lab">Total</div></div>
+        <div class="kpi"><div class="val" style="color:var(--green)">${signed}</div><div class="lab">Signés</div></div>
+        <div class="kpi"><div class="val" style="color:#D97706">${pending}</div><div class="lab">En attente</div></div>
+        <div class="kpi"><div class="val" style="color:var(--muted)">${draft}</div><div class="lab">Brouillons</div></div>
+      </div>
+      <div class="box" style="padding:0">
+        <table class="tbl">
+          <thead><tr><th>N° Contrat</th><th>Collaborateur</th><th>Type</th><th>Début</th><th>Statut</th><th>Créé le</th><th>Signé le</th><th></th></tr></thead>
+          <tbody>
+            ${contracts.map(c=>{const e=c.employees;return`<tr>
+              <td style="font-weight:600;font-size:12px">${c.contract_number||'—'}</td>
+              <td>${e?e.first_name+' '+e.last_name:'—'}</td>
+              <td style="font-size:12px">${c.contract_type||'—'}</td>
+              <td style="font-size:12px">${fmt(c.start_date)}</td>
+              <td>${badge(c.status)}</td>
+              <td style="font-size:12px">${fmt(c.created_at)}</td>
+              <td style="font-size:12px;color:var(--green)">${c.signed_at?fmt(c.signed_at):'—'}</td>
+              <td style="white-space:nowrap">
+                ${c.generated_html?`<button title="Aperçu HTML" onclick="_previewContractHtml(${JSON.stringify(c.id).replace(/"/g,'&quot;')},${JSON.stringify(c.generated_html||'').replace(/"/g,'&quot;')})"><i class="fa-solid fa-eye"></i></button>`:''}
+                ${c.signed_pdf_url?`<a href="${c.signed_pdf_url}" target="_blank" title="PDF signé" style="margin-left:4px;color:var(--green)"><i class="fa-solid fa-file-pdf"></i></a>`:''}
+                ${['draft','error_yousign'].includes(c.status)?`<button title="Archiver" data-archive="${c.id}" style="color:var(--muted)"><i class="fa-solid fa-box-archive"></i></button>`:''}
+              </td>
+            </tr>`;}).join('')}
+          </tbody>
+        </table>
+      </div>`;
+    el.querySelectorAll('[data-archive]').forEach(b=>b.onclick=async()=>{
+      await BE.updateGeneratedContract(b.dataset.archive,{status:'archived',archived_at:new Date().toISOString()}).catch(e=>flash('Erreur : '+e.message));
+      renderContractsHistory();
+    });
+  }catch(e){el.innerHTML=`<div style="padding:20px;color:var(--red)">Erreur : ${e.message}</div>`;}
+}
+
+function _previewContractHtml(id,html){
+  const w=window.open('','_blank','width=860,height=700');
+  if(w){w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Aperçu contrat</title></head><body style="background:#9ca3af;padding:20px"><div style="width:210mm;max-width:100%;min-height:297mm;padding:20mm;margin:0 auto;background:#fff;font-family:'Times New Roman',serif;font-size:11pt;line-height:1.6;color:#111">${html}</div></body></html>`);w.document.close();}
 }
 
 /* ===== MOTEUR DE SUBSTITUTION DE VARIABLES ===== */
@@ -5049,6 +5149,24 @@ function _dxRender(){
       <i class="fa-solid fa-lightbulb" style="color:var(--violet);margin-top:1px"></i>
       <span><b>Astuce</b> — Cliquez sur une case pour changer son statut : Fourni (✓) / À vérifier (◎) / Manquant (✗) / Non concerné (—). Les cellules "Non concerné" sont exclues des statistiques.</span>
     </div>`;
+
+  // Wire export button
+  const exportBtn=$('dxExport');
+  if(exportBtn) exportBtn.onclick=()=>{
+    const cols=['Collaborateur','Service','Poste',...DX_COLS.map(([,l])=>l.replace('\n',' ')),'Identité'];
+    const rows=list.map(s=>{
+      const idSt=_dxIdentityState(s.id);
+      return[`${s.last_name} ${s.first_name}`,s.department||'',s.role||'',
+        ...DX_COLS.map(([k])=>_dxStatus(s.id,k).status||'missing'),
+        idSt.type||idSt.status||'missing'
+      ].map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',');
+    });
+    const csv=[cols.join(','),...rows].join('\r\n');
+    const a=document.createElement('a');
+    a.href='data:text/csv;charset=utf-8,﻿'+encodeURIComponent(csv);
+    a.download=`documents_rh_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+  };
 
   // Wire up cell clicks (non-identity)
   // - Simple click  → cycle status (provided→pending→missing→not_applicable)
