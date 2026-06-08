@@ -110,6 +110,7 @@ Deno.serve(async (req) => {
       document_id,
       employee_id, hotel_id,
       signer_first_name, signer_name, signer_email, signer_phone,
+      sig_field,
     } = payload;
 
     const sb = createClient(SUPABASE_URL, SUPABASE_SVC);
@@ -212,6 +213,13 @@ Deno.serve(async (req) => {
     };
     if (normalizedPhone) signerInfo.phone_number = normalizedPhone;
 
+    // Champ de signature : coordonnées mesurées côté frontend (sig_field) ou fallback hardcodé.
+    // Unité : points (1pt = 1/72"), origine top-left de la page, système YouSign v3.
+    const signerField = (sig_field && sig_field.page && sig_field.x != null && sig_field.y != null)
+      ? { document_id: ysDoc.id, type: 'signature', page: sig_field.page, x: sig_field.x, y: sig_field.y, width: sig_field.width ?? 190, height: sig_field.height ?? 55 }
+      : { document_id: ysDoc.id, type: 'signature', page: 1, x: 80, y: 680, width: 200, height: 70 };
+    console.log('[yousign-create] signerField:', JSON.stringify(signerField));
+
     const signerRes = await ysError('add_signer',
       await ysFetch('add_signer', `${YOUSIGN_API}/signature_requests/${srId}/signers`, {
         method: 'POST',
@@ -219,13 +227,7 @@ Deno.serve(async (req) => {
         body: JSON.stringify({
           info: signerInfo,
           signature_level: 'electronic_signature',
-          fields: [{
-            document_id: ysDoc.id,
-            type: 'signature',
-            page: 1,
-            x: 80, y: 680,
-            width: 200, height: 70,
-          }],
+          fields: [signerField],
           signature_authentication_mode: normalizedPhone ? 'otp_sms' : 'otp_email',
         }),
       })

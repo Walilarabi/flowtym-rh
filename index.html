@@ -5524,7 +5524,7 @@ async function _genStep2(){
   $('gs2_pdf').onclick=async()=>{
     const btn=$('gs2_pdf'); btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Génération…';
     try{
-      const pdfBlob=await renderHtmlToPdfBlob(rendered,`Contrat ${s.fields.contract_type} — ${emp.first_name} ${emp.last_name}`);
+      const { blob: pdfBlob }=await renderHtmlToPdfBlob(rendered,`Contrat ${s.fields.contract_type} — ${emp.first_name} ${emp.last_name}`);
       const fn=`contrat_${emp.last_name}_${emp.first_name}_${new Date().toISOString().slice(0,10)}.pdf`;
       const url=URL.createObjectURL(pdfBlob); const a=document.createElement('a'); a.href=url; a.download=fn; a.click(); URL.revokeObjectURL(url);
     }catch(e){flash('Erreur PDF : '+e.message);}
@@ -5572,7 +5572,7 @@ async function _genStep3(){
       const renderedHtml=tpl?transformContractHtml(substituteVariables(tpl.body_html,ctx)):'';
       console.log('[step3] HTML rendered, length:', renderedHtml.length);
       // 2. Générer PDF blob dans le navigateur
-      const pdfBlob=await renderHtmlToPdfBlob(renderedHtml,`Contrat ${s.fields.contract_type} — ${emp.first_name} ${emp.last_name}`);
+      const { blob: pdfBlob, sigField }=await renderHtmlToPdfBlob(renderedHtml,`Contrat ${s.fields.contract_type} — ${emp.first_name} ${emp.last_name}`);
       console.log('[step3] PDF blob size:', pdfBlob.size);
       // 3. Convertir en base64
       const pdfBase64=await new Promise((res,rej)=>{
@@ -5613,6 +5613,7 @@ async function _genStep3(){
             employee_id:s.employee_id, hotel_id:hotelId,
             signer_first_name:emp.first_name, signer_name:emp.last_name,
             signer_email:email, signer_phone:emp.phone||null,
+            sig_field:sigField||null,
           }),
         });
         ysResult=await ysResp.json();
@@ -5948,7 +5949,7 @@ function transformContractHtml(html){
     else if(cls.includes('sig-block')){
       const tds = Array.from(el.querySelectorAll('table td'));
 
-      const renderSigTd = (td)=>{
+      const renderSigTd = (td, isEmployee)=>{
         let r = '';
         Array.from(td.children).forEach(child=>{
           const ct = (child.tagName||'').toUpperCase();
@@ -5963,20 +5964,23 @@ function transformContractHtml(html){
               r += `<div style="font-size:10pt;color:#555;margin:0 0 4pt">${child.textContent}</div>`;
             }
           } else if(ct === 'DIV'){
-            r += `<div style="margin-top:52pt;border-top:1px solid #333;max-width:180pt;padding-top:5pt;font-size:9pt;color:#777">${child.textContent}</div>`;
+            // Ancre YouSign : id="ys-sig-field" uniquement sur la colonne salarié
+            const idAttr = isEmployee ? ' id="ys-sig-field"' : '';
+            r += `<div${idAttr} style="margin-top:52pt;border-top:1px solid #333;max-width:180pt;padding-top:5pt;font-size:9pt;color:#777">${child.textContent}</div>`;
           }
         });
         return r;
       };
 
       if(tds.length >= 2){
-        out += `<div style="page-break-inside:avoid;margin-top:38pt">`
+        // page-break-before:always garantit que le bloc signatures est toujours sur sa propre dernière page
+        out += `<div style="page-break-before:always;page-break-inside:avoid;margin-top:38pt">`
              + `<table style="width:100%;border-collapse:collapse"><tr>`
-             + `<td style="vertical-align:top;width:50%;padding-right:24pt">${renderSigTd(tds[0])}</td>`
-             + `<td style="vertical-align:top;width:50%;padding-left:24pt">${renderSigTd(tds[1])}</td>`
+             + `<td style="vertical-align:top;width:50%;padding-right:24pt">${renderSigTd(tds[0], false)}</td>`
+             + `<td style="vertical-align:top;width:50%;padding-left:24pt">${renderSigTd(tds[1], true)}</td>`
              + `</tr></table></div>`;
       } else {
-        out += `<div style="page-break-inside:avoid;margin-top:38pt">${el.innerHTML}</div>`;
+        out += `<div style="page-break-before:always;page-break-inside:avoid;margin-top:38pt">${el.innerHTML}</div>`;
       }
     }
 
@@ -6130,7 +6134,7 @@ async function drawGenStep4(){
   $('gGen').onclick=async()=>{
     const btn=$('gGen'); btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Génération…';
     try{
-      const pdfBlob = await renderHtmlToPdfBlob(rendered, `Contrat - ${emp.first_name} ${emp.last_name}`);
+      const { blob: pdfBlob } = await renderHtmlToPdfBlob(rendered, `Contrat - ${emp.first_name} ${emp.last_name}`);
       const filename = `contrat_${(emp.last_name||'').toLowerCase()}_${(emp.first_name||'').toLowerCase()}_${new Date().toISOString().slice(0,10)}.pdf`;
       const file = new File([pdfBlob], filename, {type:'application/pdf'});
       // 1. Sauvegarder dans Storage + employee_documents (type 'contrat')
@@ -6160,6 +6164,32 @@ async function renderHtmlToPdfBlob(html, title){
   wrap.innerHTML = `<div style="text-align:right;font-size:11px;color:#888;margin-bottom:10px;padding-bottom:4px;border-bottom:1px solid #ccc">${title} · Généré le ${new Date().toLocaleDateString('fr-FR')}</div>${html}`;
   document.body.appendChild(wrap);
 
+  // ── Mesure de la zone signature YouSign ─────────────────────────────────
+  // Coordonnées en points (1pt = 1/72") — système YouSign v3 : origine top-left.
+  // A4 = 595.28 × 841.89 pt. La div #ys-sig-field est la ligne "Signature" du salarié.
+  let sigField = null;
+  const ysElem = wrap.querySelector('#ys-sig-field');
+  if(ysElem){
+    const wrapRect = wrap.getBoundingClientRect();
+    const elemRect = ysElem.getBoundingClientRect();
+    const PT_PER_PX = 595.28 / wrapRect.width;
+    const A4_H_PT   = 841.89;
+    // borderTopPt = position absolue (depuis le haut du document) de la ligne de signature
+    const borderTopPt = (elemRect.top - wrapRect.top) * PT_PER_PX;
+    // Le champ YouSign couvre l'espace vide au-dessus de la ligne (margin-top:52pt dans le HTML)
+    const fieldTopPt  = borderTopPt - 50;
+    const pageNum     = Math.floor(fieldTopPt / A4_H_PT) + 1;
+    const yOnPage     = fieldTopPt - (pageNum - 1) * A4_H_PT;
+    sigField = {
+      page   : pageNum,
+      x      : Math.round((elemRect.left - wrapRect.left) * PT_PER_PX),
+      y      : Math.round(Math.max(0, yOnPage)),
+      width  : Math.round(Math.min(190, elemRect.width * PT_PER_PX)),
+      height : 55,
+    };
+    console.log('[renderHtmlToPdfBlob] sigField:', JSON.stringify(sigField));
+  }
+
   try {
     const canvas = await window.html2canvas(wrap, {
       backgroundColor: '#ffffff',
@@ -6183,11 +6213,37 @@ async function renderHtmlToPdfBlob(html, title){
       if(pg > 0) doc.addPage();
       doc.addImage(imgData, 'JPEG', 0, -pg * A4_H, A4_W, totalMmH);
     }
-    return doc.output('blob');
+    // Vérification de cohérence : la page signature doit être la dernière
+    if(sigField && sigField.page !== pageCount){
+      console.warn('[renderHtmlToPdfBlob] sigField.page', sigField.page, '!== pageCount', pageCount, '— vérifiez le page-break-before:always');
+    }
+    return { blob: doc.output('blob'), sigField, pageCount };
   } finally {
     document.body.removeChild(wrap);
   }
 }
+
+// ── Test automatique : vérifie que #ys-sig-field est sur la dernière page ──
+// Usage console : await window._testYsFieldPlacement()
+window._testYsFieldPlacement = async function(){
+  const results = [];
+  const templates = [
+    { name:'CDI',   html: typeof DEFAULT_TEMPLATE_BODY !== 'undefined'       ? DEFAULT_TEMPLATE_BODY       : null },
+    { name:'CDD',   html: typeof DEFAULT_TEMPLATE_BODY_CDD !== 'undefined'   ? DEFAULT_TEMPLATE_BODY_CDD   : null },
+    { name:'Extra', html: typeof DEFAULT_TEMPLATE_BODY_EXTRA !== 'undefined' ? DEFAULT_TEMPLATE_BODY_EXTRA : null },
+  ];
+  for(const tpl of templates){
+    if(!tpl.html){ results.push({ template:tpl.name, error:'template non chargé' }); continue; }
+    try{
+      const rendered = typeof transformContractHtml === 'function' ? transformContractHtml(tpl.html) : tpl.html;
+      const { sigField, pageCount } = await renderHtmlToPdfBlob(rendered, `Test ${tpl.name}`);
+      const ok = sigField && sigField.page === pageCount;
+      results.push({ template:tpl.name, ok, sigField, pageCount });
+    }catch(e){ results.push({ template:tpl.name, error:e.message }); }
+  }
+  console.table(results);
+  return results;
+};
 
 /* ===================== VUE DOCUMENTS ===================== */
 /* ========================================================
@@ -9834,7 +9890,7 @@ async function generateDischargePDF(eq){
     <p style="margin-top:20px;color:#666;font-size:12px">Fait en double exemplaire le ${new Date().toLocaleDateString('fr-FR')}</p>
   </body></html>`;
   try{
-    const blob=await renderHtmlToPdfBlob(html,`décharge_${EQ_TYPES[eq.item_type]||eq.item_type}_${emp?.last_name||''}`);
+    const { blob }=await renderHtmlToPdfBlob(html,`décharge_${EQ_TYPES[eq.item_type]||eq.item_type}_${emp?.last_name||''}`);
     const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
     a.download=`decharge_${eq.item_type}_${(emp?.last_name||'').toLowerCase()}_${eq.given_date}.pdf`;
     a.click();
