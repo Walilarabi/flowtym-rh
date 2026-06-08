@@ -8035,6 +8035,63 @@ const MED_TYPES={embauche:{label:"Visite d'embauche",color:'#DBEAFE',fg:'#1D4ED8
   reprise:{label:'Visite de reprise',color:'#FEF3C7',fg:'#92400E',months:null}};
 const APT_LABELS={apte:'Apte',apte_amenagement:'Apte avec aménagement',inapte:'Inapte'};
 
+function _printMedicalConvocation(emp,visit,hotel){
+  const typeInfo=MED_TYPES[visit?.visit_type]||{label:'Visite médicale'};
+  const html=`<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"><title>Convocation visite médicale</title>
+  <style>
+    body{font-family:Arial,sans-serif;font-size:12px;color:#1f2937;margin:0;padding:0}
+    .page{padding:30px 40px;max-width:700px;margin:0 auto}
+    h1{font-size:18px;font-weight:700;margin-bottom:4px}
+    h2{font-size:13px;font-weight:700;margin:16px 0 8px;border-bottom:2px solid #7c3aed;padding-bottom:3px;color:#7c3aed}
+    .kv{display:grid;grid-template-columns:160px 1fr;gap:4px 12px;margin-bottom:6px}
+    .kv span:first-child{color:#6b7280;font-size:11px}
+    .kv span:last-child{font-weight:600}
+    .box{background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:12px 14px;margin-bottom:12px}
+    .sig-row{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:24px}
+    .sig-box{border:1px solid #e5e7eb;border-radius:6px;padding:14px;text-align:center}
+    @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+  </style></head><body>
+  <div class="page">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;border-bottom:2px solid #7c3aed;padding-bottom:14px">
+      <div>
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#7c3aed;font-weight:700;margin-bottom:4px">Convocation</div>
+        <h1>${typeInfo.label}</h1>
+        <div style="font-size:12px;color:#6b7280">${hotel?.name||''}</div>
+      </div>
+      <div style="text-align:right;font-size:11px;color:#6b7280">
+        <div style="font-weight:700;color:#111827">${hotel?.name||''}</div>
+        <div>Émise le ${new Date().toLocaleDateString('fr-FR')}</div>
+      </div>
+    </div>
+    <h2>Collaborateur convoqué</h2>
+    <div class="kv">
+      <span>Nom & Prénom</span><span>${emp?emp.first_name+' '+emp.last_name:'—'}</span>
+      <span>Poste</span><span>${emp?.role||'—'}</span>
+      <span>Service</span><span>${emp?.department||'—'}</span>
+    </div>
+    <h2>Objet de la visite</h2>
+    <div class="kv">
+      <span>Type</span><span>${typeInfo.label}</span>
+      ${visit?.next_visit_date?`<span>Date prévue</span><span>${visit.next_visit_date}</span>`:''}
+    </div>
+    <h2>Instructions</h2>
+    <div class="box" style="font-size:12px;line-height:1.6">
+      Vous êtes convoqué(e) à une visite médicale obligatoire dans le cadre de votre emploi. Veuillez vous présenter à la médecine du travail aux date et heure communiquées par votre employeur.<br><br>
+      Munissez-vous de votre carte vitale et de tout document médical utile. Cette visite est obligatoire et rémunérée comme temps de travail.
+    </div>
+    ${visit?.convocation_notes?`<h2>Notes complémentaires</h2><div class="box">${visit.convocation_notes}</div>`:''}
+    <div class="sig-row">
+      <div class="sig-box"><strong style="font-size:11px;display:block;margin-bottom:8px">Signature employeur</strong><div style="height:40px;border-bottom:1px solid #d1d5db;margin:8px 0"></div><span style="font-size:11px;color:#6b7280">Date & signature</span></div>
+      <div class="sig-box"><strong style="font-size:11px;display:block;margin-bottom:8px">Accusé de réception</strong><div style="height:40px;border-bottom:1px solid #d1d5db;margin:8px 0"></div><span style="font-size:11px;color:#6b7280">Lu et approuvé — collaborateur</span></div>
+    </div>
+    <div style="margin-top:24px;font-size:10px;color:#9ca3af;text-align:center">Flowtym RH · Document confidentiel · ${hotel?.name||''}</div>
+  </div>
+  <script>window.onload=()=>{window.print();setTimeout(()=>window.close(),1000)}<\/script>
+  </body></html>`;
+  const w=window.open('','_blank','width=800,height=650');
+  if(w){w.document.write(html);w.document.close();}
+}
+
 async function renderMedical(){
   const hName=hotels.find(h=>h.id===hotelId)?.name||'';
   $('view').innerHTML=`<div class="page">
@@ -8084,7 +8141,7 @@ async function drawMedicalList(){
       </div>`;
     }
     if(!visits.length){el.innerHTML='<div style="padding:30px;text-align:center;color:var(--muted)">Aucune visite enregistrée.</div>';return;}
-    el.innerHTML=`<table class="tbl"><thead><tr><th>Collaborateur</th><th>Service</th><th>Type</th><th>Date visite</th><th>Prochaine visite</th><th>Aptitude</th><th>Médecin</th><th></th></tr></thead><tbody>
+    el.innerHTML=`<table class="tbl"><thead><tr><th>Collaborateur</th><th>Service</th><th>Type</th><th>Date visite</th><th>Prochaine visite</th><th>Aptitude</th><th>Restrictions</th><th>Médecin</th><th></th></tr></thead><tbody>
       ${visits.map(v=>{const mt=MED_TYPES[v.visit_type]||{label:v.visit_type,color:'#f4f4f4',fg:'#666'};
         const e=v.employees; const overdue=v.next_visit_date&&v.next_visit_date<today;
         return `<tr>
@@ -8093,12 +8150,17 @@ async function drawMedicalList(){
           <td><span style="background:${mt.color};color:${mt.fg};padding:2px 8px;border-radius:6px;font-size:11.5px;font-weight:600">${mt.label}</span></td>
           <td>${v.visit_date}</td>
           <td style="color:${overdue?'var(--red)':v.next_visit_date&&v.next_visit_date<=soon?'#d97706':'inherit'}">${v.next_visit_date||'—'}${overdue?' <i class="fa-solid fa-triangle-exclamation"></i>':''}</td>
-          <td><span style="font-size:12px">${APT_LABELS[v.aptitude]||v.aptitude}</span></td>
+          <td><span style="font-size:12px">${APT_LABELS[v.aptitude]||v.aptitude||'—'}</span></td>
+          <td style="font-size:12px;color:${v.restrictions?'#D97706':'var(--muted)'}">${v.restrictions||'—'}</td>
           <td style="font-size:12px">${v.doctor||'—'}</td>
-          <td><button data-edit="${v.id}" title="Modifier"><i class="fa-solid fa-pen"></i></button>
-              <button data-del="${v.id}" title="Supprimer" style="color:var(--red)"><i class="fa-solid fa-trash"></i></button></td>
+          <td style="white-space:nowrap">
+            <button data-conv="${v.id}" title="Convocation PDF" style="color:#7c3aed"><i class="fa-regular fa-file-pdf"></i></button>
+            <button data-edit="${v.id}" title="Modifier"><i class="fa-solid fa-pen"></i></button>
+            <button data-del="${v.id}" title="Supprimer" style="color:var(--red)"><i class="fa-solid fa-trash"></i></button>
+          </td>
         </tr>`;}).join('')}
     </tbody></table>`;
+    el.querySelectorAll('[data-conv]').forEach(b=>b.onclick=()=>{const v=visits.find(x=>x.id===b.dataset.conv);_printMedicalConvocation(staff.find(e=>e.id===v.employee_id),v,hotels.find(h=>h.id===hotelId));});
     el.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openMedicalForm(visits.find(v=>v.id===b.dataset.edit)));
     el.querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{
       if(!confirm('Supprimer cette visite ?'))return;
@@ -8181,19 +8243,23 @@ async function drawEquipmentList(){
   const el=$('eqList'); if(!el)return;
   try{
     const items=await BE.listEquipment(hotelId);
-    const active=items.filter(i=>!i.returned_date);
-    const returned=items.filter(i=>i.returned_date);
+    const active=items.filter(i=>!i.returned_date&&(!i.status||i.status==='remis'||i.status==='a_restituer'));
+    const returned=items.filter(i=>i.returned_date||i.status==='restitue');
+    const lost=items.filter(i=>i.status==='perdu');
+    const broken=items.filter(i=>i.status==='casse');
+    const stock=items.filter(i=>i.status==='en_stock');
     if(!items.length){el.innerHTML='<div style="padding:30px;text-align:center;color:var(--muted)">Aucun matériel enregistré.</div>';return;}
+    const statusBadge=i=>{const s=EQ_STATUSES[i.status||'remis']||EQ_STATUSES.remis;return`<span style="background:${s.color};color:${s.fg};padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600">${s.label}</span>`;};
     const tblRow=i=>{const e=i.employees;return `<tr>
       <td><b>${e?e.first_name+' '+e.last_name:'—'}</b><br><span style="font-size:11px;color:var(--muted)">${e?.department||''}</span></td>
       <td><span style="background:#EEF2FF;color:#4338CA;padding:2px 8px;border-radius:6px;font-size:11.5px;font-weight:600">${EQ_TYPES[i.item_type]||i.item_type}</span></td>
       <td style="font-size:12px">${i.item_code||'—'}</td>
       <td style="font-size:12px">${i.description||'—'}</td>
       <td>${i.given_date}</td>
-      <td>${i.returned_date||'<span style="color:var(--green);font-weight:600">En cours</span>'}</td>
+      <td>${statusBadge(i)}</td>
       <td style="font-size:12px">${EQ_COND[i.condition_given]||i.condition_given}</td>
       <td style="white-space:nowrap">
-        ${!i.returned_date?`<button data-ret="${i.id}" title="Enregistrer la restitution" style="color:var(--green)"><i class="fa-solid fa-rotate-left"></i></button>`:''}
+        ${(!i.returned_date&&i.status!=='restitue'&&i.status!=='perdu'&&i.status!=='casse')?`<button data-ret="${i.id}" title="Restitution / changement statut" style="color:var(--green)"><i class="fa-solid fa-rotate-left"></i></button>`:''}
         <button data-edit="${i.id}" title="Modifier"><i class="fa-solid fa-pen"></i></button>
         <button data-del="${i.id}" title="Supprimer" style="color:var(--red)"><i class="fa-solid fa-trash"></i></button>
         <button data-pdf="${i.id}" title="Décharge PDF"><i class="fa-regular fa-file-pdf"></i></button>
@@ -8201,18 +8267,20 @@ async function drawEquipmentList(){
     </tr>`;};
     el.innerHTML=`
       <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr));margin-bottom:14px">
-        <div class="kpi"><div class="val">${active.length}</div><div class="lab">En cours</div></div>
+        <div class="kpi"><div class="val">${active.length}</div><div class="lab">Remis actifs</div></div>
         <div class="kpi"><div class="val">${returned.length}</div><div class="lab">Restitués</div></div>
-        <div class="kpi"><div class="val">${Object.values(EQ_TYPES).filter((_,i)=>active.some(a=>a.item_type===Object.keys(EQ_TYPES)[i])).length}</div><div class="lab">Types actifs</div></div>
+        <div class="kpi"><div class="val" style="color:var(--red)">${lost.length}</div><div class="lab">Perdus</div></div>
+        <div class="kpi"><div class="val" style="color:var(--red)">${broken.length}</div><div class="lab">Cassés</div></div>
+        <div class="kpi"><div class="val">${stock.length}</div><div class="lab">En stock</div></div>
       </div>
       ${active.length?`<h4 style="margin:0 0 8px;font-size:13px;font-weight:700">Matériel actuellement remis (${active.length})</h4>
         <div class="box" style="padding:0;margin-bottom:16px"><table class="tbl">
-          <thead><tr><th>Collaborateur</th><th>Type</th><th>Code</th><th>Description</th><th>Date remise</th><th>Restitution</th><th>État remise</th><th></th></tr></thead>
+          <thead><tr><th>Collaborateur</th><th>Type</th><th>Code</th><th>Description</th><th>Date remise</th><th>Statut</th><th>État remise</th><th></th></tr></thead>
           <tbody>${active.map(tblRow).join('')}</tbody></table></div>`:''}
-      ${returned.length?`<h4 style="margin:0 0 8px;font-size:13px;font-weight:700;color:var(--muted)">Historique restitutions (${returned.length})</h4>
+      ${(returned.length+lost.length+broken.length)?`<h4 style="margin:0 0 8px;font-size:13px;font-weight:700;color:var(--muted)">Historique (${returned.length+lost.length+broken.length})</h4>
         <div class="box" style="padding:0;opacity:.7"><table class="tbl">
-          <thead><tr><th>Collaborateur</th><th>Type</th><th>Code</th><th>Description</th><th>Date remise</th><th>Restitution</th><th>État remise</th><th></th></tr></thead>
-          <tbody>${returned.map(tblRow).join('')}</tbody></table></div>`:''}`;
+          <thead><tr><th>Collaborateur</th><th>Type</th><th>Code</th><th>Description</th><th>Date remise</th><th>Statut</th><th>État remise</th><th></th></tr></thead>
+          <tbody>${[...returned,...lost,...broken].map(tblRow).join('')}</tbody></table></div>`:''}`;
     el.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openEquipmentForm(items.find(i=>i.id===b.dataset.edit)));
     el.querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{
       if(!confirm('Supprimer cet enregistrement ?'))return;
@@ -8266,25 +8334,31 @@ function openEquipmentForm(eq){
 
 function openEquipmentReturnForm(eq){
   const condOpts=Object.entries(EQ_COND).map(([k,l])=>`<option value="${k}">${l}</option>`).join('');
+  const statusOpts=['restitue','perdu','casse'].map(k=>`<option value="${k}">${EQ_STATUSES[k]?.label||k}</option>`).join('');
   const emp=staff.find(e=>e.id===eq.employee_id);
-  $('modal').innerHTML=mhHTML('fa-solid fa-rotate-left','Restitution de matériel',`${EQ_TYPES[eq.item_type]||eq.item_type}${eq.item_code?' — '+eq.item_code:''} · ${emp?emp.first_name+' '+emp.last_name:''}`)+`
+  $('modal').innerHTML=mhHTML('fa-solid fa-rotate-left','Restitution / changement de statut',`${EQ_TYPES[eq.item_type]||eq.item_type}${eq.item_code?' — '+eq.item_code:''} · ${emp?emp.first_name+' '+emp.last_name:''}`)+`
   <div class="mb">
     <div class="row3">
-      <div class="fld"><label>Date de restitution *</label><input type="date" id="er_rd" value="${new Date().toISOString().slice(0,10)}"></div>
+      <div class="fld"><label>Nouveau statut *</label><select id="er_st">${statusOpts}</select></div>
+      <div class="fld"><label>Date *</label><input type="date" id="er_rd" value="${new Date().toISOString().slice(0,10)}"></div>
       <div class="fld"><label>État à la restitution</label><select id="er_cr">${condOpts}</select></div>
     </div>
     <div class="fld"><label>Notes</label><textarea id="er_no" rows="2"></textarea></div>
   </div>
   <div class="mact">
     <button class="btn g" onclick="closeModal()">Annuler</button>
-    <button class="btn p" id="er_ok"><i class="fa-solid fa-check"></i> Valider la restitution</button>
+    <button class="btn p" id="er_ok"><i class="fa-solid fa-check"></i> Valider</button>
   </div>`;
   $('modalbg').classList.add('on');
   $('er_ok').onclick=async()=>{
     const rd=$('er_rd').value; if(!rd){flash('Date requise');return;}
-    try{await BE.updateEquipment(eq.id,{returned_date:rd,condition_returned:$('er_cr').value,notes:$('er_no').value||eq.notes||null});
-      flash('Restitution enregistrée');closeModal();await drawEquipmentList();}
-    catch(e){flash('Erreur : '+e.message);}
+    const st=$('er_st').value;
+    try{
+      const patch={status:st,notes:$('er_no').value||eq.notes||null};
+      if(st==='restitue'){patch.returned_date=rd;patch.condition_returned=$('er_cr').value;patch.returned_at=rd;}
+      await BE.updateEquipment(eq.id,patch);
+      flash('Statut mis à jour');closeModal();await drawEquipmentList();
+    }catch(e){flash('Erreur : '+e.message);}
   };
 }
 
