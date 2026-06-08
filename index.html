@@ -305,6 +305,21 @@ td.day.repl-abs::before{content:"↔";position:absolute;bottom:1px;left:2px;font
 #replPanel .rp-loading{text-align:center;padding:30px;color:var(--muted);font-size:13px}
 #replPanel .rp-assigned{background:#f0fdf4;border-color:#bbf7d0;border-radius:12px;padding:12px 14px;margin-bottom:12px;font-size:12.5px}
 #replPanel .rp-assigned strong{color:#166534}
+/* Badges contraintes légales */
+.rc-blocker{background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:6px 10px;font-size:11px;color:#dc2626;margin-top:6px;display:flex;align-items:flex-start;gap:6px}
+.rc-warning{background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:6px 10px;font-size:11px;color:#d97706;margin-top:4px;display:flex;align-items:flex-start;gap:6px}
+.rc-constraint-ok{font-size:11px;color:#16a34a;display:flex;align-items:center;gap:5px;margin-top:4px}
+/* Badges statuts workflow */
+.repl-status{display:inline-flex;align-items:center;gap:4px;padding:2px 9px;border-radius:99px;font-size:10.5px;font-weight:700}
+.repl-status.pending{background:#f3f4f6;color:#6b7280}
+.repl-status.proposed{background:#eff6ff;color:#1d4ed8}
+.repl-status.accepted{background:#f0fdf4;color:#16a34a}
+.repl-status.refused{background:#fef2f2;color:#dc2626}
+.repl-status.confirmed{background:#f0fdf4;color:#15803d}
+.repl-status.cancelled{background:#f9fafb;color:#9ca3af;text-decoration:line-through}
+/* Mission card in openFiche */
+.mission-card{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;font-size:12px}
+.mission-card:hover{border-color:var(--violet)}
 /* action bar + save bar */
 .actionbar{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(40px);background:#15233b;color:#fff;border-radius:14px;padding:9px 12px;display:none;flex-direction:column;gap:6px;box-shadow:0 16px 40px rgba(0,0,0,.3);z-index:50;opacity:0;transition:.2s;max-width:90vw}
 .actionbar.on{display:flex;opacity:1;transform:translateX(-50%) translateY(0)}
@@ -791,9 +806,41 @@ async function makeRealBE(){
       if(error){console.warn('find_replacement_candidates:',error.message);return[];}
       return data||[];
     },
-    async listReplacementAssignments(h,dateFrom,dateTo){
-      const {data,error}=await sb.from('replacement_assignments').select('*,absent:absent_employee_id(first_name,last_name,role,department),replacement:replacement_employee_id(first_name,last_name,role),origin_hotel:origin_hotel_id(name)').eq('hotel_id',h).gte('assignment_date',dateFrom).lte('assignment_date',dateTo).eq('status','active').order('assignment_date');
+    async listReplacementAssignments(h,dateFrom,dateTo,statusFilter){
+      let q=sb.from('replacement_assignments').select('*,absent:absent_employee_id(first_name,last_name,role,department),replacement:replacement_employee_id(first_name,last_name,role),origin_hotel:origin_hotel_id(name)').eq('hotel_id',h).gte('assignment_date',dateFrom).lte('assignment_date',dateTo).order('assignment_date');
+      if(statusFilter&&statusFilter.length) q=q.in('status',statusFilter);
+      else q=q.not('status','eq','cancelled');
+      const {data,error}=await q;
       if(error&&error.code==='42P01'){return[];}must(error,'Affectations remplacement');return data||[];
+    },
+    async updateReplacementAssignment(id,patch){
+      const {data,error}=await sb.from('replacement_assignments').update(patch).eq('id',id).select('*').single();
+      must(error,'MAJ affectation');return data;
+    },
+    async checkReplacementConstraints(candidateId,targetHotelId,date,shiftStart,shiftEnd){
+      const {data,error}=await sb.rpc('check_replacement_constraints',{
+        p_candidate_id:candidateId,p_hotel_id:targetHotelId,p_date:date,
+        p_shift_start:shiftStart||null,p_shift_end:shiftEnd||null
+      });
+      if(error){console.warn('check_constraints:',error.message);return{ok:true,warnings:[],blockers:[]};}
+      return data;
+    },
+    async createReplacementNotification(h,assignId,empId,type,title,body,absentName,assignDate){
+      await sb.from('replacement_notifications').insert({
+        hotel_id:h,assignment_id:assignId,employee_id:empId,type,title,body,
+        absent_name:absentName,assignment_date:assignDate
+      }).then(null,e=>console.warn('notif:',e?.message));
+    },
+    async listReplacementNotifications(h,empId){
+      const {data,error}=await sb.from('replacement_notifications').select('*').eq('hotel_id',h).eq('employee_id',empId).order('created_at',{ascending:false}).limit(20);
+      if(error&&error.code==='42P01')return[];must(error,'Notifications');return data||[];
+    },
+    async markNotificationRead(id){
+      await sb.from('replacement_notifications').update({read_at:new Date().toISOString()}).eq('id',id).then(null,()=>{});
+    },
+    async listEmployeeMissions(empId){
+      const {data,error}=await sb.from('v_employee_replacement_missions').select('*').eq('employee_id',empId).order('assignment_date',{ascending:false}).limit(20);
+      if(error&&error.code==='42P01')return[];if(error)return[];return data||[];
     },
     async createReplacementAssignment(h,payload){
       const {data,error}=await sb.from('replacement_assignments').insert({hotel_id:h,...payload}).select('*').single();
@@ -2131,6 +2178,22 @@ async function _getReplacementCandidates(empId,date){
   }catch(e){console.warn('candidates:',e);return[];}
 }
 
+// Labels et couleurs du workflow de statut
+const REPL_STATUS_META={
+  pending:   {label:'À traiter',  icon:'fa-clock',         cls:'pending'},
+  proposed:  {label:'Proposé',    icon:'fa-paper-plane',   cls:'proposed'},
+  accepted:  {label:'Accepté',    icon:'fa-thumbs-up',     cls:'accepted'},
+  refused:   {label:'Refusé',     icon:'fa-thumbs-down',   cls:'refused'},
+  confirmed: {label:'Confirmé',   icon:'fa-check-circle',  cls:'confirmed'},
+  cancelled: {label:'Annulé',     icon:'fa-ban',           cls:'cancelled'},
+  active:    {label:'Confirmé',   icon:'fa-check-circle',  cls:'confirmed'}, // compat legacy
+};
+
+function _replStatusBadge(status){
+  const m=REPL_STATUS_META[status]||{label:status,icon:'fa-circle',cls:'pending'};
+  return `<span class="repl-status ${m.cls}"><i class="fa-solid ${m.icon}"></i> ${m.label}</span>`;
+}
+
 async function openReplPanel(absentEmpId,date,absCode){
   const panel=$('replPanel');
   const body=$('replPanelBody');
@@ -2140,13 +2203,13 @@ async function openReplPanel(absentEmpId,date,absCode){
   const emp=staff.find(s=>s.id===absentEmpId)||{};
   const fmtDate=new Date(date+'T00:00:00').toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long'});
   titleEl.textContent='Remplaçants disponibles';
-  subEl.innerHTML=`<b>${emp.first_name||''} ${emp.last_name||''}</b> · ${absCode} · ${fmtDate}`;
+  subEl.innerHTML=`<b>${emp.first_name||''} ${emp.last_name||''}</b> · ${absCode||''} · ${fmtDate}`;
 
-  body.innerHTML=`<div class="rp-loading"><i class="fa-solid fa-spinner fa-spin"></i> Recherche en cours…</div>`;
+  body.innerHTML=`<div class="rp-loading"><i class="fa-solid fa-spinner fa-spin"></i> Analyse en cours…</div>`;
   panel.classList.add('on');
   _replPanelOpen=true;
 
-  // Charger les settings + affectations existantes + extras externes
+  // Charger tout en parallèle
   const [settings,cands,existingAssign,extExtras]=await Promise.all([
     _loadReplSettings(),
     _getReplacementCandidates(absentEmpId,date),
@@ -2160,55 +2223,102 @@ async function openReplPanel(absentEmpId,date,absCode){
     return;
   }
 
+  // Vérifier les contraintes légales de TOUS les candidats en parallèle
+  const constraintsMap={};
+  if(cands.length){
+    await Promise.all(cands.map(async c=>{
+      try{
+        constraintsMap[c.candidate_id]=await BE.checkReplacementConstraints(
+          c.candidate_id, hotelId, date, null, null
+        );
+      }catch(e){constraintsMap[c.candidate_id]={ok:true,warnings:[],blockers:[]};}
+    }));
+  }
+
   let html='';
 
-  // Affectations actives ce jour
+  // Affectations existantes ce jour (tous statuts sauf cancelled)
   const assigned=existingAssign.filter(a=>a.absent_employee_id===absentEmpId);
   if(assigned.length){
     assigned.forEach(a=>{
-      html+=`<div class="rp-assigned">
-        <i class="fa-solid fa-check-circle" style="color:#16a34a;margin-right:6px"></i>
-        <strong>${a.replacement?.first_name||''} ${a.replacement?.last_name||''}</strong>
-        (${a.origin_hotel?.name||'même hôtel'}) affiché comme remplaçant
-        <button class="btn d" style="float:right;font-size:11px;padding:3px 10px" onclick="_cancelAssignment('${a.id}','${absentEmpId}','${date}')">Annuler</button>
+      const st=a.status||'confirmed';
+      const badge=_replStatusBadge(st);
+      const actorLine=a.assigned_by_email?`<div style="font-size:10.5px;color:var(--muted);margin-top:2px">Par ${a.assigned_by_email}</div>`:'';
+      html+=`<div class="rp-assigned" style="background:${st==='refused'?'#fef2f2':st==='proposed'?'#eff6ff':'#f0fdf4'};border-color:${st==='refused'?'#fecaca':st==='proposed'?'#bfdbfe':'#bbf7d0'}">
+        ${badge}
+        <strong style="margin-left:8px">${a.replacement?.first_name||''} ${a.replacement?.last_name||''}</strong>
+        <span style="color:var(--muted);font-size:11px;margin-left:4px">(${a.origin_hotel?.name||'même hôtel'})</span>
+        ${actorLine}
+        <div style="display:flex;gap:6px;margin-top:8px">
+          ${st==='proposed'?`
+            <button class="btn p" style="font-size:11px;padding:4px 10px" onclick="_confirmReplacement('${a.id}','${absentEmpId}','${date}','${a.replacement_employee_id}')"><i class="fa-solid fa-check"></i> Confirmer</button>
+            <button class="btn d" style="font-size:11px;padding:4px 10px" onclick="_refuseReplacement('${a.id}','${absentEmpId}','${date}')"><i class="fa-solid fa-xmark"></i> Refuser</button>`:''}
+          ${st==='accepted'?`
+            <button class="btn p" style="font-size:11px;padding:4px 10px" onclick="_confirmReplacement('${a.id}','${absentEmpId}','${date}','${a.replacement_employee_id}')"><i class="fa-solid fa-check"></i> Confirmer</button>`:''}
+          ${st!=='cancelled'?`<button class="btn" style="font-size:11px;padding:4px 8px;background:#f9fafb;color:var(--muted)" onclick="_cancelAssignment('${a.id}','${absentEmpId}','${date}')"><i class="fa-solid fa-ban"></i> Annuler</button>`:''}
+        </div>
       </div>`;
     });
+    html+=`<div style="border-bottom:1px solid var(--line);margin:12px 0;font-size:11.5px;color:var(--muted);text-align:center">Autres candidats disponibles</div>`;
   }
 
   if(!cands.length){
-    html+=`<div class="rp-empty"><i class="fa-solid fa-user-slash"></i><div>Aucun remplaçant disponible<br>pour ce poste et cette date.</div></div>`;
+    html+=`<div class="rp-empty"><i class="fa-solid fa-user-slash"></i><div>Aucun remplaçant interne disponible<br>pour ce poste et cette date.</div></div>`;
   } else {
     cands.forEach(c=>{
       const col=_replAvatarColor(c.last_name);
       const initials=((c.first_name||'?')[0]+(c.last_name||'?')[0]).toUpperCase();
+      const constraints=constraintsMap[c.candidate_id]||{ok:true,warnings:[],blockers:[]};
+      const isBlocked=!constraints.ok||constraints.blockers?.length>0;
+
       const authBadge=c.is_authorized
         ?`<span class="rc-badge" style="background:#dcfce7;color:#166534">✓ Autorisé</span>`
         :`<span class="rc-badge" style="background:#f3f4f6;color:#6b7280">Multi-hôtel</span>`;
       const samePoseBadge=c.score_details?.same_role
         ?`<span class="rc-badge" style="background:#ede9fe;color:#5b21b6">Même poste</span>`:'';
-      const alerts=c.alerts&&c.alerts.length
-        ?`<div class="rc-alerts"><i class="fa-solid fa-triangle-exclamation"></i> ${c.alerts.join(' · ')}</div>`:'';
       const dayStatusLabel={'repos':'Repos','P':'Présent','PE':'Extra'}[c.day_status]||c.day_status||'Repos';
-      const alreadyAssigned=assigned.some(a=>a.replacement_employee_id===c.candidate_id);
+      const alreadyAssigned=assigned.some(a=>a.replacement_employee_id===c.candidate_id&&a.status!=='cancelled');
 
-      html+=`<div class="rp-card" id="rc_${c.candidate_id}">
+      // Badges contraintes légales
+      let constraintHtml='';
+      if(constraints.blockers?.length){
+        constraints.blockers.forEach(b=>{
+          constraintHtml+=`<div class="rc-blocker"><i class="fa-solid fa-ban" style="flex-shrink:0;margin-top:1px"></i> ${b}</div>`;
+        });
+      }
+      if(constraints.warnings?.length){
+        constraints.warnings.forEach(w=>{
+          constraintHtml+=`<div class="rc-warning"><i class="fa-solid fa-triangle-exclamation" style="flex-shrink:0;margin-top:1px"></i> ${w}</div>`;
+        });
+      }
+      if(!isBlocked&&!constraints.warnings?.length){
+        constraintHtml=`<div class="rc-constraint-ok"><i class="fa-solid fa-circle-check"></i> Contraintes RH OK</div>`;
+      }
+
+      const daysWorked=constraints.days_worked||0;
+      const weeksInfo=daysWorked>0?`<span style="font-size:10.5px;color:${daysWorked>=5?'#d97706':'var(--muted)'};margin-left:6px"><i class="fa-solid fa-calendar-week"></i> ${daysWorked}j/sem.</span>`:'';
+
+      html+=`<div class="rp-card${isBlocked?' style="opacity:.75"':''}" id="rc_${c.candidate_id}">
         <div class="rc-top">
           <div style="width:38px;height:38px;border-radius:10px;background:${col};display:grid;place-items:center;color:#fff;font-weight:800;font-size:13px;flex-shrink:0">${initials}</div>
           <div style="flex:1">
-            <div style="font-weight:700;font-size:13px">${c.first_name} ${c.last_name}</div>
+            <div style="font-weight:700;font-size:13px">${c.first_name} ${c.last_name}${weeksInfo}</div>
             <div style="font-size:11px;color:var(--muted)">${c.role||'—'} · ${c.department||'—'}</div>
           </div>
-          <div class="rc-score">${c.score} pts</div>
+          <div class="rc-score" style="${isBlocked?'background:#fef2f2;color:#dc2626':''}">${c.score} pts</div>
         </div>
         <div class="rc-hotel"><i class="fa-solid fa-hotel"></i> ${c.origin_hotel_name||'Même hôtel'} · <span style="color:${c.day_status==='repos'?'#10b981':'#f59e0b'}">${dayStatusLabel}</span></div>
         <div style="font-size:11px;margin-bottom:4px">${authBadge}${samePoseBadge}</div>
         ${_replScoreBar(c.score)}
-        ${alerts}
+        ${constraintHtml}
         <div class="rc-actions">
           ${alreadyAssigned
-            ?`<span style="font-size:11.5px;color:#16a34a;font-weight:600;padding:6px"><i class="fa-solid fa-check"></i> Affecté</span>`
-            :`<button class="btn p" style="font-size:11.5px" onclick="_assignReplacement('${c.candidate_id}','${c.origin_hotel_name||''}','${absentEmpId}','${date}')"><i class="fa-solid fa-user-check"></i> Affecter</button>
-             <button class="btn g" style="font-size:11.5px" onclick="_proposeReplacement('${c.candidate_id}','${c.first_name} ${c.last_name}','${absentEmpId}','${date}')"><i class="fa-regular fa-paper-plane"></i> Proposer</button>`
+            ?`<span style="font-size:11.5px;color:#16a34a;font-weight:600;padding:6px"><i class="fa-solid fa-check"></i> Déjà affecté</span>`
+            :isBlocked
+              ?`<button class="btn" style="font-size:11.5px;background:#fee2e2;color:#dc2626;cursor:not-allowed" disabled title="Contrainte RH bloquante"><i class="fa-solid fa-ban"></i> Bloqué</button>
+                <button class="btn g" style="font-size:11.5px" onclick="_proposeReplacement('${c.candidate_id}','${c.first_name} ${c.last_name}','${absentEmpId}','${date}')" title="Proposer malgré les alertes"><i class="fa-regular fa-paper-plane"></i> Proposer quand même</button>`
+              :`<button class="btn p" style="font-size:11.5px" onclick="_confirmReplacement(null,'${absentEmpId}','${date}','${c.candidate_id}','${c.origin_hotel_name||''}')"><i class="fa-solid fa-user-check"></i> Confirmer</button>
+                <button class="btn g" style="font-size:11.5px" onclick="_proposeReplacement('${c.candidate_id}','${c.first_name} ${c.last_name}','${absentEmpId}','${date}')"><i class="fa-regular fa-paper-plane"></i> Proposer</button>`
           }
           <button class="btn" style="font-size:11.5px;background:#f9fafb;color:var(--muted)" onclick="this.closest('.rp-card').style.opacity='.3';this.closest('.rp-card').style.pointerEvents='none'"><i class="fa-solid fa-eye-slash"></i> Ignorer</button>
         </div>
@@ -2258,28 +2368,120 @@ async function openReplPanel(absentEmpId,date,absCode){
   body.innerHTML=html;
 }
 
-async function _assignReplacement(candidateId,originHotelName,absentEmpId,date){
-  const emp=staff.find(s=>s.id===candidateId)||{};
+/* ── WORKFLOW REMPLACEMENT ────────────────────────────────── */
+
+// Confirmer directement (créer ou passer confirmed)
+async function _confirmReplacement(existingId,absentEmpId,date,candidateId,originHotelName){
   const actorEmail=(await sb.auth.getUser()).data?.user?.email||'';
-  const payload={
-    absent_employee_id:absentEmpId,
-    replacement_employee_id:candidateId,
-    origin_hotel_id:hotels.find(h=>h.name===originHotelName)?.id||hotelId,
-    assignment_date:date,
-    status:'active',
-    assigned_by_email:actorEmail
-  };
+  const emp=staff.find(s=>s.id===candidateId)||{};
+  const absent=staff.find(s=>s.id===absentEmpId)||{};
+
   try{
-    const row=await BE.createReplacementAssignment(hotelId,payload);
-    await BE.logReplacementHistory(hotelId,row.id,'assigned',actorEmail,{candidate:candidateId,date});
-    // Marquer visuellement dans le planning : ajouter un badge 'REPL' sur la cellule du remplaçant
+    let row;
+    if(existingId){
+      // Transition d'une proposition existante → confirmed
+      row=await BE.updateReplacementAssignment(existingId,{
+        status:'confirmed',confirmed_at:new Date().toISOString()
+      });
+    } else {
+      // Nouvelle affectation directe
+      row=await BE.createReplacementAssignment(hotelId,{
+        absent_employee_id:absentEmpId,
+        replacement_employee_id:candidateId,
+        origin_hotel_id:hotels.find(h=>h.name===originHotelName)?.id||hotelId,
+        assignment_date:date,
+        status:'confirmed',
+        assigned_by_email:actorEmail,
+        confirmed_at:new Date().toISOString(),
+        creates_planning:true
+      });
+      candidateId=candidateId||row.replacement_employee_id;
+    }
+
+    // Historique
+    await BE.logReplacementHistory(hotelId,row.id,'confirmed',actorEmail,{absent:absentEmpId,date});
+
+    // Notification portail
+    const absentName=`${absent.first_name||''} ${absent.last_name||''}`.trim();
+    const fmtDate=new Date(date+'T00:00').toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long'});
+    const notifBody=`Mission confirmée : vous remplacez ${absentName||'un(e) collègue'} le ${fmtDate} à ${hotels.find(h=>h.id===hotelId)?.name||'l\'établissement'}.`;
+    await BE.createReplacementNotification(hotelId,row.id,candidateId,'mission_confirmed','Mission confirmée',notifBody,absentName,date);
+    if(emp.portal_enabled){
+      await BE.sendPortalMessage(hotelId,candidateId,notifBody).catch(()=>{});
+    }
+
+    // Badge visuel dans la grille
     _replCache.delete(absentEmpId+'|'+date);
-    flash(`${emp.first_name||''} ${emp.last_name||''} affecté comme remplaçant.`);
-    // Recharger le panneau
-    openReplPanel(absentEmpId,date,null);
-    // Ajouter badge visuel dans la cellule du remplaçant dans le planning
     _markReplacementInGrid(candidateId,date);
-  }catch(e){flash('Erreur : '+e.message,'d');}
+    flash(`${emp.first_name||''} ${emp.last_name||''} confirmé(e) — notification envoyée.`);
+    openReplPanel(absentEmpId,date,null);
+  }catch(e){flash('Erreur : '+e.message,'e');}
+}
+
+// Proposer (envoyer une proposition, attendre réponse)
+async function _proposeReplacement(candidateId,candidateName,absentEmpId,date){
+  const actorEmail=(await sb.auth.getUser()).data?.user?.email||'';
+  const emp=staff.find(s=>s.id===candidateId)||{};
+  const absent=staff.find(s=>s.id===absentEmpId)||{};
+
+  try{
+    // Créer ou mettre à jour l'affectation en statut 'proposed'
+    const {data:existing}=await sb.from('replacement_assignments')
+      .select('id').eq('hotel_id',hotelId).eq('absent_employee_id',absentEmpId)
+      .eq('replacement_employee_id',candidateId).eq('assignment_date',date)
+      .not('status','in','("cancelled","refused")').maybeSingle();
+
+    let row;
+    if(existing){
+      row=await BE.updateReplacementAssignment(existing.id,{status:'proposed',proposed_at:new Date().toISOString()});
+    } else {
+      row=await BE.createReplacementAssignment(hotelId,{
+        absent_employee_id:absentEmpId,
+        replacement_employee_id:candidateId,
+        origin_hotel_id:emp.hotel_id||hotelId,
+        assignment_date:date,
+        status:'proposed',
+        assigned_by_email:actorEmail,
+        proposed_at:new Date().toISOString()
+      });
+    }
+
+    await BE.logReplacementHistory(hotelId,row.id,'proposed',actorEmail,{candidate:candidateId});
+
+    // Notification
+    const absentName=`${absent.first_name||''} ${absent.last_name||''}`.trim();
+    const fmtDate=new Date(date+'T00:00').toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long'});
+    const hotelName=hotels.find(h=>h.id===hotelId)?.name||'l\'établissement';
+    const notifBody=`Bonjour ${emp.first_name||''},\n\nVous êtes sollicité(e) pour remplacer ${absentName||'un(e) collègue'} le ${fmtDate} à ${hotelName}.\n\nMerci de confirmer votre disponibilité via votre espace salarié ou en contactant votre manager.`;
+    await BE.createReplacementNotification(hotelId,row.id,candidateId,'mission_proposed','Mission proposée',notifBody,absentName,date);
+    if(emp.portal_enabled){
+      await BE.sendPortalMessage(hotelId,candidateId,notifBody).catch(()=>{});
+    }
+
+    _replCache.delete(absentEmpId+'|'+date);
+    flash(`Proposition envoyée à ${candidateName}.`);
+    const card=document.getElementById('rc_'+candidateId);
+    if(card){
+      const actionsDiv=card.querySelector('.rc-actions');
+      if(actionsDiv) actionsDiv.innerHTML=`${_replStatusBadge('proposed')} <button class="btn p" style="font-size:11px;padding:4px 10px;margin-left:8px" onclick="_confirmReplacement('${row.id}','${absentEmpId}','${date}','${candidateId}','')"><i class="fa-solid fa-check"></i> Confirmer</button>`;
+    }
+  }catch(e){flash('Erreur : '+e.message,'e');}
+}
+
+// Refuser / manager refuse une proposition
+async function _refuseReplacement(assignId,absentEmpId,date){
+  const reason=prompt('Motif du refus (optionnel) :','');
+  if(reason===null)return; // annulé
+  const actorEmail=(await sb.auth.getUser()).data?.user?.email||'';
+  try{
+    const row=await BE.updateReplacementAssignment(assignId,{
+      status:'refused',responded_at:new Date().toISOString(),refused_reason:reason||null
+    });
+    await BE.logReplacementHistory(hotelId,assignId,'refused',actorEmail,{reason});
+    _replCache.delete(absentEmpId+'|'+date);
+    flash('Remplacement refusé — chercher un autre candidat.','w');
+    openReplPanel(absentEmpId,date,null);
+  }catch(e){flash('Erreur : '+e.message,'e');}
 }
 
 function _markReplacementInGrid(empId,date){
@@ -2324,10 +2526,21 @@ async function _proposeReplacement(candidateId,candidateName,absentEmpId,date){
 async function _cancelAssignment(id,absentEmpId,date){
   if(!confirm('Annuler cette affectation ?'))return;
   const actorEmail=(await sb.auth.getUser()).data?.user?.email||'';
-  await BE.cancelReplacementAssignment(id,actorEmail);
-  _replCache.delete(absentEmpId+'|'+date);
-  openReplPanel(absentEmpId,date,null);
-  flash('Affectation annulée.');
+  try{
+    // Charger l'affectation pour notifier le remplaçant
+    const {data:assign}=await sb.from('replacement_assignments').select('replacement_employee_id').eq('id',id).maybeSingle();
+    await BE.cancelReplacementAssignment(id,actorEmail);
+    if(assign?.replacement_employee_id){
+      const emp=staff.find(s=>s.id===assign.replacement_employee_id)||{};
+      const fmtDate=new Date(date+'T00:00').toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long'});
+      const body=`Votre mission de remplacement du ${fmtDate} à ${hotels.find(h=>h.id===hotelId)?.name||'l\'établissement'} a été annulée.`;
+      await BE.createReplacementNotification(hotelId,id,assign.replacement_employee_id,'mission_cancelled','Mission annulée',body,null,date);
+      if(emp.portal_enabled) await BE.sendPortalMessage(hotelId,assign.replacement_employee_id,body).catch(()=>{});
+    }
+    _replCache.delete(absentEmpId+'|'+date);
+    openReplPanel(absentEmpId,date,null);
+    flash('Affectation annulée — salarié notifié.','w');
+  }catch(e){flash('Erreur : '+e.message,'e');}
 }
 
 function closeReplPanel(){
@@ -2425,14 +2638,15 @@ async function _renderReplTabContent(){
   try{assignments=await BE.listReplacementAssignments(hotelId,todayStr,in30Str);}catch(e){}
 
   // Filtrer selon l'onglet
+  const ACTIVE_STATUSES=['pending','proposed','accepted','confirmed'];
   if(_replTab==='pending'){
-    absences=absences.filter(a=>!assignments.some(ra=>ra.absent_employee_id===a.employee_id&&ra.assignment_date===a.day));
+    absences=absences.filter(a=>!assignments.some(ra=>ra.absent_employee_id===a.employee_id&&ra.assignment_date===a.day&&ACTIVE_STATUSES.includes(ra.status)));
   } else if(_replTab==='proposed'){
-    absences=absences.filter(a=>assignments.some(ra=>ra.absent_employee_id===a.employee_id&&ra.assignment_date===a.day&&ra.status==='active'));
+    absences=absences.filter(a=>assignments.some(ra=>ra.absent_employee_id===a.employee_id&&ra.assignment_date===a.day&&ra.status==='proposed'));
   } else if(_replTab==='confirmed'){
-    absences=assignments.map(ra=>({employee_id:ra.absent_employee_id,day:ra.assignment_date,status:'assigned',_assign:ra}));
+    absences=assignments.filter(ra=>ra.status==='confirmed'||ra.status==='accepted').map(ra=>({employee_id:ra.absent_employee_id,day:ra.assignment_date,status:ra.status,_assign:ra}));
   } else if(_replTab==='history'){
-    absences=assignments.map(ra=>({employee_id:ra.absent_employee_id,day:ra.assignment_date,status:'assigned',_assign:ra}));
+    absences=assignments.map(ra=>({employee_id:ra.absent_employee_id,day:ra.assignment_date,status:ra.status,_assign:ra}));
   }
 
   if(!absences.length){
@@ -2468,7 +2682,8 @@ async function _renderReplTabContent(){
     const col=_replAvatarColor(emp.last_name||'?');
     const initials=((emp.first_name||'?')[0]+(emp.last_name||'?')[0]).toUpperCase();
     const fmtDate=new Date(a.day+'T00:00').toLocaleDateString('fr-FR',{weekday:'short',day:'numeric',month:'short'});
-    const codeLabel=CMAP[a.status]?.label||a.status||'—';
+    const absCode=CMAP[a.status]; // peut être null si a.status est un statut workflow
+    const codeLabel=absCode?.label||a.status||'—';
     const assign=a._assign||assignments.find(ra=>ra.absent_employee_id===a.employee_id&&ra.assignment_date===a.day);
     const cands=candidatesMap[a.employee_id+'|'+a.day]||[];
     const bestCand=cands[0];
@@ -2485,7 +2700,11 @@ async function _renderReplTabContent(){
       </td>
       <td><div style="font-weight:500">${emp.role||'—'}</div><div style="font-size:10.5px;color:var(--muted)">${emp.department||'—'}</div></td>
       <td style="text-align:center;white-space:nowrap">${fmtDate}</td>
-      <td style="text-align:center"><span style="background:${CMAP[a.status]?.bg||'#f3f4f6'};color:${CMAP[a.status]?.fg||'#374151'};padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600">${codeLabel}</span></td>
+      <td style="text-align:center">
+        ${absCode
+          ?`<span style="background:${absCode.bg};color:${absCode.fg};padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600">${codeLabel}</span>`
+          :assign?_replStatusBadge(assign.status||a.status):`<span style="color:var(--muted)">${codeLabel}</span>`}
+      </td>
       ${_replTab==='pending'?`<td>${bestCand
         ?`<div style="display:flex;align-items:center;gap:6px;font-size:11.5px">
             <div style="width:22px;height:22px;border-radius:5px;background:${_replAvatarColor(bestCand.last_name)};display:grid;place-items:center;color:#fff;font-size:8px;font-weight:700">${((bestCand.first_name||'?')[0]+(bestCand.last_name||'?')[0]).toUpperCase()}</div>
@@ -10605,6 +10824,37 @@ async function decidePortalRequest(id,decision){
 }
 
 /* ===================== FICHE (drawer) ===================== */
+async function loadMissionsSection(s){
+  const el=$('missionsSection'),cnt=$('missionsCount');
+  if(!el)return;
+  try{
+    const missions=await BE.listEmployeeMissions(s.id);
+    if(cnt) cnt.textContent=missions.length?`${missions.length} mission${missions.length>1?'s':''}`:'' ;
+    if(!missions.length){
+      el.innerHTML=`<div style="color:var(--muted);font-size:12px;padding:4px 0">Aucune mission de remplacement enregistrée.</div>`;
+      return;
+    }
+    const STATUS_LABELS={pending:'À traiter',proposed:'Proposé',accepted:'Accepté',refused:'Refusé',confirmed:'Confirmé',cancelled:'Annulé',active:'Confirmé'};
+    el.innerHTML=missions.map(m=>{
+      const fmtDate=new Date(m.assignment_date+'T00:00').toLocaleDateString('fr-FR',{weekday:'short',day:'numeric',month:'short',year:'numeric'});
+      const statusMeta=REPL_STATUS_META[m.status]||{label:m.status,icon:'fa-circle',cls:'pending'};
+      const hotelLine=m.target_hotel_name&&m.target_hotel_name!==hotels.find(h=>h.id===hotelId)?.name
+        ?`<div style="font-size:10.5px;color:var(--muted)"><i class="fa-solid fa-hotel"></i> ${m.target_hotel_name}</div>`:'' ;
+      return`<div class="mission-card">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+          <span style="font-weight:600;font-size:12.5px">${fmtDate}</span>
+          <span class="repl-status ${statusMeta.cls}" style="margin-left:auto"><i class="fa-solid ${statusMeta.icon}"></i> ${statusMeta.label}</span>
+        </div>
+        <div style="font-size:11.5px">Remplacement de <b>${m.absent_first_name||''} ${m.absent_last_name||''}</b> (${m.absent_role||'—'})</div>
+        ${hotelLine}
+        ${m.refused_reason?`<div style="font-size:10.5px;color:#dc2626;margin-top:2px"><i class="fa-solid fa-comment-dots"></i> ${m.refused_reason}</div>`:''}
+      </div>`;
+    }).join('');
+  }catch(e){
+    el.innerHTML=`<div style="color:var(--muted);font-size:12px">Erreur chargement missions.</div>`;
+  }
+}
+
 async function loadPortalSection(s){
   const el=$('portalSection'), badge=$('portalStatusBadge');
   if(!el) return;
@@ -10711,6 +10961,8 @@ async function openFiche(eid){
       ${s.residency_permit_number?`<div class="fr"><span class="k">Titre de séjour</span><span class="v">${s.residency_permit_number}${s.residency_permit_expires?` (exp. ${s.residency_permit_expires})`:''}</span></div>`:''}
     </div>`:''}
     ${full?'<div class="sec"><h4>Documents RH <button class="btn p" data-upload style="float:right;padding:5px 10px;font-size:11.5px"><i class="fa-solid fa-upload"></i> Ajouter</button></h4><div id="docs">Chargement…</div></div>':''}
+    ${full?`<div class="sec"><h4>Missions de remplacement <span id="missionsCount" style="float:right;font-size:11px;color:var(--muted)"></span></h4>
+      <div id="missionsSection"><div style="color:var(--muted);font-size:12px">Chargement…</div></div></div>`:''}
     ${full?`<div class="sec"><h4>Portail salarié <span id="portalStatusBadge" style="float:right"></span></h4>
       <div id="portalSection">Chargement…</div></div>`:''}
     ${full?`<div class="sec" style="display:flex;gap:10px"><button class="btn g" data-edit style="flex:1;justify-content:center"><i class="fa-solid fa-pen"></i> Modifier</button>
@@ -10754,6 +11006,8 @@ async function openFiche(eid){
       ficheAv.appendChild(delPhotoBtn);
     }
   }
+  // Section Missions de remplacement
+  if(full && $('missionsSection')) loadMissionsSection(s);
   // Section Portail salarié
   if(full && $('portalSection')) loadPortalSection(s);
 
@@ -11981,7 +12235,14 @@ async function runImport(){
 
 /* ===================== UTILS ===================== */
 let toastT=null;
-function flash(msg){const t=$('toast');t.textContent=msg;t.classList.add('on');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('on'),1800);}
+function flash(msg,type){
+  const t=$('toast');
+  t.textContent=msg;
+  t.style.background=type==='e'?'#dc2626':type==='w'?'#d97706':'#15233b';
+  t.classList.add('on');
+  clearTimeout(toastT);
+  toastT=setTimeout(()=>t.classList.remove('on'),type==='e'?3000:1800);
+}
 
 /* ===================== API DE TEST ===================== */
 window.__rh={
