@@ -8160,7 +8160,15 @@ async function drawMedicalList(){
           </td>
         </tr>`;}).join('')}
     </tbody></table>`;
-    el.querySelectorAll('[data-conv]').forEach(b=>b.onclick=()=>{const v=visits.find(x=>x.id===b.dataset.conv);_printMedicalConvocation(staff.find(e=>e.id===v.employee_id),v,hotels.find(h=>h.id===hotelId));});
+    el.querySelectorAll('[data-conv]').forEach(b=>b.onclick=async()=>{
+      const v=visits.find(x=>x.id===b.dataset.conv);
+      _printMedicalConvocation(staff.find(e=>e.id===v.employee_id),v,hotels.find(h=>h.id===hotelId));
+      const today=new Date().toISOString().slice(0,10);
+      await BE.updateMedicalVisit(v.id,{convocation_sent_at:today}).catch(()=>{});
+      v.convocation_sent_at=today;
+      b.title='Convocation envoyée le '+today;
+      b.style.color='var(--green)';
+    });
     el.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openMedicalForm(visits.find(v=>v.id===b.dataset.edit)));
     el.querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{
       if(!confirm('Supprimer cette visite ?'))return;
@@ -8189,6 +8197,11 @@ function openMedicalForm(v){
       <div class="fld"><label>Médecin</label><input id="mf_dr" value="${v?.doctor||''}" placeholder="Dr …"></div>
     </div>
     <div class="fld"><label>Établissement</label><input id="mf_cl" value="${v?.clinic||''}" placeholder="Nom du cabinet / centre"></div>
+    <div class="row3">
+      <div class="fld"><label>Convocation envoyée le</label><input type="date" id="mf_conv" value="${v?.convocation_sent_at||''}"></div>
+      <div class="fld" style="grid-column:span 2"><label>Notes convocation</label><input id="mf_cvn" value="${v?.convocation_notes||''}" placeholder="Informations complémentaires pour la convocation"></div>
+    </div>
+    <div class="fld"><label>Restrictions / aménagements</label><input id="mf_res" value="${v?.restrictions||''}" placeholder="ex : port de charges limité, travail sur écran réduit…"></div>
     <div class="fld"><label>Notes</label><textarea id="mf_no" rows="2">${v?.notes||''}</textarea></div>
   </div>
   <div class="mact">
@@ -8210,7 +8223,8 @@ function openMedicalForm(v){
     const eid=$('mf_emp').value; if(!eid){flash('Collaborateur requis');return;}
     const vd=$('mf_vd').value; if(!vd){flash('Date requise');return;}
     const p={employee_id:eid,visit_type:$('mf_ty').value,visit_date:vd,next_visit_date:$('mf_nd').value||null,
-      aptitude:$('mf_ap').value,doctor:$('mf_dr').value||null,clinic:$('mf_cl').value||null,notes:$('mf_no').value||null};
+      aptitude:$('mf_ap').value,doctor:$('mf_dr').value||null,clinic:$('mf_cl').value||null,notes:$('mf_no').value||null,
+      convocation_sent_at:$('mf_conv').value||null,convocation_notes:$('mf_cvn').value||null,restrictions:$('mf_res').value||null};
     try{v?await BE.updateMedicalVisit(v.id,p):await BE.saveMedicalVisit(hotelId,p);
       flash(v?'Mis à jour':'Visite créée');closeModal();await drawMedicalList();}
     catch(e){flash('Erreur : '+e.message);}
@@ -8223,7 +8237,7 @@ function openMedicalForm(v){
 const EQ_TYPES={badge:'Badge',cle:'Clé',uniforme:'Uniforme',telephone:'Téléphone',
   ordinateur:'Ordinateur',tablette:'Tablette',vehicule:'Véhicule',autre:'Autre'};
 const EQ_COND={neuf:'Neuf',bon:'Bon état',usage:'Usagé',abime:'Abîmé',perdu:'Perdu'};
-const EQ_STATUSES={remis:{label:'Remis',color:'#DBEAFE',fg:'#1D4ED8'},restitue:{label:'Restitué',color:'#DCFCE7',fg:'#166534'},perdu:{label:'Perdu',color:'#FEE2E2',fg:'#991B1B'},casse:{label:'Cassé',color:'#FEE2E2',fg:'#991B1B'},en_stock:{label:'En stock',color:'#F3F4F6',fg:'#374151'},en_reparation:{label:'En réparation',color:'#FEF3C7',fg:'#92400E'},a_restituer:{label:'À restituer',color:'#FEF3C7',fg:'#D97706'},hors_service:{label:'Hors service',color:'#F3F4F6',fg:'#9CA3AF'}};
+const EQ_STATUSES={remis:{label:'Remis',color:'#DBEAFE',fg:'#1D4ED8'},en_service:{label:'En service',color:'#EDE9FE',fg:'#5B21B6'},a_restituer:{label:'À restituer',color:'#FEF3C7',fg:'#D97706'},restitue:{label:'Restitué',color:'#DCFCE7',fg:'#166534'},perdu:{label:'Perdu',color:'#FEE2E2',fg:'#991B1B'},casse:{label:'Cassé',color:'#FEE2E2',fg:'#7F1D1D'},facture:{label:'Facturé',color:'#FEF3C7',fg:'#92400E'},stock:{label:'En stock',color:'#F3F4F6',fg:'#374151'}};
 
 async function renderEquipment(){
   const hName=hotels.find(h=>h.id===hotelId)?.name||'';
@@ -8334,7 +8348,7 @@ function openEquipmentForm(eq){
 
 function openEquipmentReturnForm(eq){
   const condOpts=Object.entries(EQ_COND).map(([k,l])=>`<option value="${k}">${l}</option>`).join('');
-  const statusOpts=['restitue','perdu','casse'].map(k=>`<option value="${k}">${EQ_STATUSES[k]?.label||k}</option>`).join('');
+  const statusOpts=['restitue','perdu','casse','facture'].map(k=>`<option value="${k}">${EQ_STATUSES[k]?.label||k}</option>`).join('');
   const emp=staff.find(e=>e.id===eq.employee_id);
   $('modal').innerHTML=mhHTML('fa-solid fa-rotate-left','Restitution / changement de statut',`${EQ_TYPES[eq.item_type]||eq.item_type}${eq.item_code?' — '+eq.item_code:''} · ${emp?emp.first_name+' '+emp.last_name:''}`)+`
   <div class="mb">
@@ -9905,6 +9919,11 @@ function openEmpForm(s){
     const isLeft=$('estatus').value==='parti';
     const dep=$('edep').value;
     if(isLeft && !dep){flash('Date de départ requise pour un collaborateur Parti');return;}
+    if(isLeft&&s?.id){
+      const all=await BE.listEquipment(hotelId).catch(()=>[]);
+      const unreturned=all.filter(eq=>eq.employee_id===s.id&&!eq.returned_date&&eq.status!=='restitue'&&eq.status!=='perdu'&&eq.status!=='casse'&&eq.status!=='facture');
+      if(unreturned.length){flash(`Impossible : ${unreturned.length} matériel(s) non restitué(s). Régularisez avant le départ.`);return;}
+    }
     const p={
       first_name:$('ef').value.trim(), last_name:$('el').value.trim(),
       department:$('ed').value||null, role:$('er').value||null,
