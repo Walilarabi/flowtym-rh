@@ -273,6 +273,38 @@ tr.totals td{background:#f6f4fd;font-weight:700;border-top:2px solid var(--viole
 tr.totals .stickL{background:#f6f4fd}
 tr.totals td.lab{text-align:right;padding-right:10px;color:var(--violet-d)}
 
+/* ── REMPLACEMENT INTER-HÔTELS ── */
+td.day.repl-abs{cursor:pointer}
+td.day.repl-abs::before{content:"↔";position:absolute;bottom:1px;left:2px;font-size:8px;color:var(--violet);opacity:.7;line-height:1}
+.repl-tooltip{position:fixed;z-index:200;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.15);padding:12px 14px;min-width:220px;max-width:280px;pointer-events:none;font-size:12px}
+.repl-tooltip .rtip-head{font-weight:700;color:var(--violet-d);margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.repl-tooltip .rtip-item{display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--line)}
+.repl-tooltip .rtip-item:last-child{border:0}
+.repl-tooltip .rtip-av{width:24px;height:24px;border-radius:6px;display:grid;place-items:center;color:#fff;font-weight:700;font-size:9px;flex-shrink:0}
+.repl-tooltip .rtip-score{margin-left:auto;background:var(--violet-bg);color:var(--violet-d);padding:2px 7px;border-radius:99px;font-weight:700;font-size:10.5px}
+.repl-tooltip .rtip-empty{color:var(--muted);font-size:11.5px;padding:4px 0}
+/* Panneau remplacement */
+#replPanel{position:fixed;right:0;top:0;bottom:0;width:400px;background:#fff;border-left:1px solid var(--line);z-index:120;box-shadow:-8px 0 30px rgba(0,0,0,.1);transform:translateX(100%);transition:.25s cubic-bezier(.4,0,.2,1);display:flex;flex-direction:column}
+#replPanel.on{transform:translateX(0)}
+#replPanel .rp-head{padding:18px 20px 14px;border-bottom:1px solid var(--line);flex-shrink:0}
+#replPanel .rp-head h2{font-size:15px;font-weight:800;margin:0 0 3px;color:var(--ink)}
+#replPanel .rp-head .sub{font-size:12px;color:var(--muted)}
+#replPanel .rp-body{flex:1;overflow-y:auto;padding:16px 20px}
+#replPanel .rp-card{border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px;transition:.15s}
+#replPanel .rp-card:hover{border-color:var(--violet);box-shadow:0 2px 12px rgba(139,92,246,.1)}
+#replPanel .rp-card .rc-top{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+#replPanel .rp-card .rc-score{margin-left:auto;background:linear-gradient(135deg,var(--violet),var(--violet-d));color:#fff;padding:4px 10px;border-radius:99px;font-weight:700;font-size:11px}
+#replPanel .rp-card .rc-badge{display:inline-block;padding:2px 8px;border-radius:6px;font-size:10.5px;font-weight:600;margin-right:4px}
+#replPanel .rp-card .rc-hotel{font-size:11px;color:var(--muted);display:flex;align-items:center;gap:4px;margin-bottom:6px}
+#replPanel .rp-card .rc-alerts{background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:6px 10px;font-size:11px;color:#c2410c;margin-top:8px}
+#replPanel .rp-card .rc-actions{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+#replPanel .rp-card .rc-actions button{flex:1;min-width:80px}
+#replPanel .rp-close{position:absolute;top:14px;right:14px;border:0;background:#f4f2fd;color:var(--violet-d);width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:14px;display:grid;place-items:center}
+#replPanel .rp-empty{text-align:center;padding:40px 20px;color:var(--muted)}
+#replPanel .rp-empty i{font-size:36px;color:var(--violet);display:block;margin-bottom:12px}
+#replPanel .rp-loading{text-align:center;padding:30px;color:var(--muted);font-size:13px}
+#replPanel .rp-assigned{background:#f0fdf4;border-color:#bbf7d0;border-radius:12px;padding:12px 14px;margin-bottom:12px;font-size:12.5px}
+#replPanel .rp-assigned strong{color:#166534}
 /* action bar + save bar */
 .actionbar{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(40px);background:#15233b;color:#fff;border-radius:14px;padding:9px 12px;display:none;flex-direction:column;gap:6px;box-shadow:0 16px 40px rgba(0,0,0,.3);z-index:50;opacity:0;transition:.2s;max-width:90vw}
 .actionbar.on{display:flex;opacity:1;transform:translateX(-50%) translateY(0)}
@@ -410,6 +442,15 @@ tr.dept-sep td{pointer-events:none}
 </div>
 <div class="dbg" id="dbg"></div>
 <aside class="drawer" id="drawer"></aside>
+<div id="replPanel">
+  <button class="rp-close" onclick="closeReplPanel()"><i class="fa-solid fa-xmark"></i></button>
+  <div class="rp-head">
+    <h2 id="replPanelTitle">Remplaçants disponibles</h2>
+    <div class="sub" id="replPanelSub"></div>
+  </div>
+  <div class="rp-body" id="replPanelBody"></div>
+</div>
+<div id="replTooltip" class="repl-tooltip" style="display:none"></div>
 <div class="modalbg" id="modalbg"><div class="modal" id="modal"></div></div>
 <div class="pop" id="pop"></div>
 <div class="toast" id="toast"></div>
@@ -741,6 +782,37 @@ async function makeRealBE(){
     async createPortalDocRequest(h,employee_id,doc_type,message){const {data,error}=await sb.from('portal_document_requests').insert({hotel_id:h,employee_id,doc_type,message,status:'pending'}).select('*').single();must(error,'Création demande');return data;},
     async updatePortalDocRequest(id,patch){const {error}=await sb.from('portal_document_requests').update(patch).eq('id',id);must(error,'Mise à jour demande');},
     async sendPortalMessage(h,employee_id,body){const {error}=await sb.from('portal_messages').insert({hotel_id:h,employee_id,direction:'manager_to_employee',body,read_at:null});must(error,'Message portail');},
+
+    /* --- REMPLACEMENT INTER-HÔTELS --- */
+    async getReplacementSettings(h){const {data}=await sb.from('inter_hotel_replacement_settings').select('*').eq('hotel_id',h).maybeSingle();return data||null;},
+    async saveReplacementSettings(h,patch){const {error}=await sb.from('inter_hotel_replacement_settings').upsert({hotel_id:h,...patch,updated_at:new Date().toISOString()},{onConflict:'hotel_id'});must(error,'Paramètres remplacement');},
+    async findReplacementCandidates(hotelId,absentEmpId,date,limit){
+      const {data,error}=await sb.rpc('find_replacement_candidates',{p_hotel_id:hotelId,p_absent_emp_id:absentEmpId,p_date:date,p_limit:limit||8});
+      if(error){console.warn('find_replacement_candidates:',error.message);return[];}
+      return data||[];
+    },
+    async listReplacementAssignments(h,dateFrom,dateTo){
+      const {data,error}=await sb.from('replacement_assignments').select('*,absent:absent_employee_id(first_name,last_name,role,department),replacement:replacement_employee_id(first_name,last_name,role),origin_hotel:origin_hotel_id(name)').eq('hotel_id',h).gte('assignment_date',dateFrom).lte('assignment_date',dateTo).eq('status','active').order('assignment_date');
+      if(error&&error.code==='42P01'){return[];}must(error,'Affectations remplacement');return data||[];
+    },
+    async createReplacementAssignment(h,payload){
+      const {data,error}=await sb.from('replacement_assignments').insert({hotel_id:h,...payload}).select('*').single();
+      must(error,'Création affectation');return data;
+    },
+    async cancelReplacementAssignment(id,actorEmail){
+      const {error}=await sb.from('replacement_assignments').update({status:'cancelled',cancelled_at:new Date().toISOString()}).eq('id',id);
+      must(error,'Annulation affectation');
+      await sb.from('replacement_history').insert({hotel_id:hotelId,assignment_id:id,action:'cancelled',actor_email:actorEmail,details:{}}).then(null,()=>{});
+    },
+    async logReplacementHistory(h,assignId,action,actorEmail,details){
+      await sb.from('replacement_history').insert({hotel_id:h,assignment_id:assignId,action,actor_email:actorEmail,details:details||{}}).then(null,()=>{});
+    },
+    async listEmployeeSkills(h,empId){const {data,error}=await sb.from('employee_skills').select('*').eq('hotel_id',h).eq('employee_id',empId).order('level',{ascending:false});if(error&&error.code==='42P01'){return[];}must(error,'Compétences');return data||[];},
+    async saveEmployeeSkill(h,empId,skillCode,skillLabel,level){const {error}=await sb.from('employee_skills').upsert({hotel_id:h,employee_id:empId,skill_code:skillCode,skill_label:skillLabel,level:level||1},{onConflict:'hotel_id,employee_id,skill_code'});must(error,'Compétence');},
+    async deleteEmployeeSkill(h,empId,skillCode){const {error}=await sb.from('employee_skills').delete().eq('hotel_id',h).eq('employee_id',empId).eq('skill_code',skillCode);must(error,'Suppression compétence');},
+    async listHotelAssignments(h){const {data,error}=await sb.from('employee_hotel_assignments').select('*,employee:employee_id(first_name,last_name,role),target_hotel:target_hotel_id(name)').eq('source_hotel_id',h).eq('active',true).order('created_at',{ascending:false});if(error&&error.code==='42P01'){return[];}must(error,'Autorisations multi-hôtel');return data||[];},
+    async addHotelAssignment(empId,sourceHotelId,targetHotelId,notes,authorizedBy){const {error}=await sb.from('employee_hotel_assignments').upsert({employee_id:empId,source_hotel_id:sourceHotelId,target_hotel_id:targetHotelId,notes:notes||null,authorized_by:authorizedBy||null,active:true},{onConflict:'employee_id,target_hotel_id'});must(error,'Autorisation multi-hôtel');},
+    async removeHotelAssignment(id){const {error}=await sb.from('employee_hotel_assignments').update({active:false}).eq('id',id);must(error,'Révocation autorisation');},
 
     /* --- AUDIT --- */
     async logAudit(action,entity_type,entity_id,employee_id,details){
@@ -1793,6 +1865,7 @@ async function loadHotel(){
   ]);
   applyCustomColors(hotelId);
   applyCustomPerms(hotelId);
+  _replSettings=null; _replCache.clear(); // reset inter-hotel cache on hotel switch
   fillFilters();
   planView='month'; coverageCache=[]; curWeekStart=null; curDayDate=null;
   await loadMonth();
@@ -1911,6 +1984,7 @@ function render(){
   cellMap={}; $('grid').querySelectorAll('td.day').forEach(td=>cellMap[td.dataset.k]=td);
   $('grid').querySelectorAll('[data-emp]').forEach(el=>el.onclick=()=>openFiche(el.dataset.emp));
   wirePlanningRowDrag();
+  _wireReplTooltips();
   applyStickyWidths(); updateSaveBar();
 }
 function applyStickyWidths(){
@@ -1923,6 +1997,480 @@ function applyStickyWidths(){
   if(wEmp>0) g.querySelectorAll('.cRole').forEach(td=>{td.style.left=(wDrag+wEmp)+'px';});
 }
 window.addEventListener('resize',applyStickyWidths);
+
+/* ═══════════════════════════════════════════════════════════
+   REMPLACEMENT INTER-HÔTELS
+═══════════════════════════════════════════════════════════ */
+
+// Codes d'absence qui déclenchent la suggestion de remplaçants
+const ABSENCE_CODES_REPL=new Set(['MAL','CP','RTT','MAT','PAT','CSS','AE','ABS','REC','FORM']);
+
+let _replSettings=null;
+let _replTooltipTimeout=null;
+let _replPanelOpen=false;
+
+// Cache léger pour éviter les appels répétés
+const _replCache=new Map(); // key: "empId|date" → candidates[]
+
+async function _loadReplSettings(){
+  if(_replSettings!==null)return _replSettings;
+  try{_replSettings=await BE.getReplacementSettings(hotelId);}catch(e){_replSettings={};}
+  return _replSettings;
+}
+
+function _replAvatarColor(name){
+  const h=(name||'?').charCodeAt(0)*37+(name||'?').charCodeAt(1)*19;
+  const c=['#8B5CF6','#6366F1','#0EA5E9','#10B981','#F59E0B','#EF4444'];
+  return c[Math.abs(h)%c.length];
+}
+
+function _replScoreBar(score){
+  const pct=Math.min(100,score);
+  const col=score>=70?'#10b981':score>=40?'#f59e0b':'#ef4444';
+  return `<div style="height:4px;background:#e5e7eb;border-radius:2px;margin-top:4px"><div style="height:4px;width:${pct}%;background:${col};border-radius:2px"></div></div>`;
+}
+
+/* Attache les comportements tooltip + clic sur les cellules absence */
+function _wireReplTooltips(){
+  const g=$('grid'); if(!g)return;
+
+  // Overlay semi-transparent quand panneau ouvert
+  document.getElementById('replPanel').addEventListener('click',e=>e.stopPropagation());
+
+  g.querySelectorAll('td.day').forEach(td=>{
+    const k=td.dataset.k; if(!k)return;
+    const [empId,dayStr]=k.split('|');
+    const code=td.textContent.trim().replace(/[^A-Z]/g,'');
+    if(!ABSENCE_CODES_REPL.has(code))return;
+
+    // Marque visuelle
+    td.classList.add('repl-abs');
+
+    // Tooltip au survol
+    td.addEventListener('mouseenter',async e=>{
+      clearTimeout(_replTooltipTimeout);
+      const settings=await _loadReplSettings();
+      if(settings&&!settings.enabled)return;
+      _replTooltipTimeout=setTimeout(async()=>{
+        const tip=$('replTooltip');
+        const cands=await _getReplacementCandidates(empId,dayStr);
+        if(!cands||!tip)return;
+        const emp=staff.find(s=>s.id===empId);
+        let inner=`<div class="rtip-head"><i class="fa-solid fa-arrows-rotate" style="color:var(--violet)"></i> ${cands.length} remplaçant${cands.length>1?'s':''} dispo.</div>`;
+        if(!cands.length){
+          inner+=`<div class="rtip-empty">Aucun remplaçant disponible<br>pour ce jour.</div>`;
+        } else {
+          cands.slice(0,4).forEach(c=>{
+            const col=_replAvatarColor(c.last_name);
+            const initials=((c.first_name||'?')[0]+(c.last_name||'?')[0]).toUpperCase();
+            inner+=`<div class="rtip-item">
+              <div class="rtip-av" style="background:${col}">${initials}</div>
+              <div><div style="font-weight:600">${c.first_name} ${c.last_name}</div>
+              <div style="font-size:10.5px;color:var(--muted)">${c.origin_hotel_name||'—'} · ${c.role||'—'}</div></div>
+              <span class="rtip-score">${c.score}</span>
+            </div>`;
+          });
+          inner+=`<div style="margin-top:8px;font-size:10.5px;color:var(--muted);text-align:center">Cliquer pour voir le détail</div>`;
+        }
+        tip.innerHTML=inner;
+        tip.style.display='block';
+        _positionTooltip(tip,e);
+      },300);
+    });
+
+    td.addEventListener('mousemove',e=>{
+      const tip=$('replTooltip');
+      if(tip&&tip.style.display!=='none')_positionTooltip(tip,e);
+    });
+
+    td.addEventListener('mouseleave',()=>{
+      clearTimeout(_replTooltipTimeout);
+      const tip=$('replTooltip');
+      if(tip)tip.style.display='none';
+    });
+
+    // Clic → panneau
+    td.addEventListener('click',async e=>{
+      e.stopPropagation();
+      clearTimeout(_replTooltipTimeout);
+      const tip=$('replTooltip'); if(tip)tip.style.display='none';
+      openReplPanel(empId,dayStr,code);
+    },{capture:false});
+  });
+}
+
+function _positionTooltip(tip,e){
+  const margin=12;
+  let x=e.clientX+margin, y=e.clientY+margin;
+  const tw=tip.offsetWidth||260,th=tip.offsetHeight||120;
+  if(x+tw>window.innerWidth-10)x=e.clientX-tw-margin;
+  if(y+th>window.innerHeight-10)y=e.clientY-th-margin;
+  tip.style.left=x+'px'; tip.style.top=y+'px';
+}
+
+async function _getReplacementCandidates(empId,date){
+  const key=empId+'|'+date;
+  if(_replCache.has(key))return _replCache.get(key);
+  try{
+    const r=await BE.findReplacementCandidates(hotelId,empId,date,8);
+    _replCache.set(key,r);
+    // TTL : invalider après 5 minutes
+    setTimeout(()=>_replCache.delete(key),5*60*1000);
+    return r;
+  }catch(e){console.warn('candidates:',e);return[];}
+}
+
+async function openReplPanel(absentEmpId,date,absCode){
+  const panel=$('replPanel');
+  const body=$('replPanelBody');
+  const titleEl=$('replPanelTitle');
+  const subEl=$('replPanelSub');
+
+  const emp=staff.find(s=>s.id===absentEmpId)||{};
+  const fmtDate=new Date(date+'T00:00:00').toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long'});
+  titleEl.textContent='Remplaçants disponibles';
+  subEl.innerHTML=`<b>${emp.first_name||''} ${emp.last_name||''}</b> · ${absCode} · ${fmtDate}`;
+
+  body.innerHTML=`<div class="rp-loading"><i class="fa-solid fa-spinner fa-spin"></i> Recherche en cours…</div>`;
+  panel.classList.add('on');
+  _replPanelOpen=true;
+
+  // Charger les settings + affectations existantes
+  const [settings,cands,existingAssign]=await Promise.all([
+    _loadReplSettings(),
+    _getReplacementCandidates(absentEmpId,date),
+    BE.listReplacementAssignments(hotelId,date,date).catch(()=>[])
+  ]);
+
+  if(settings&&!settings.enabled){
+    body.innerHTML=`<div class="rp-empty"><i class="fa-solid fa-toggle-off"></i><div>Les remplacements inter-hôtels sont <b>désactivés</b>.<br><br><a href="#" onclick="event.preventDefault();_cfgTab='replacements';renderConfig()" style="color:var(--violet)">Activer dans les paramètres RH</a></div></div>`;
+    return;
+  }
+
+  let html='';
+
+  // Affectations actives ce jour
+  const assigned=existingAssign.filter(a=>a.absent_employee_id===absentEmpId);
+  if(assigned.length){
+    assigned.forEach(a=>{
+      html+=`<div class="rp-assigned">
+        <i class="fa-solid fa-check-circle" style="color:#16a34a;margin-right:6px"></i>
+        <strong>${a.replacement?.first_name||''} ${a.replacement?.last_name||''}</strong>
+        (${a.origin_hotel?.name||'même hôtel'}) affiché comme remplaçant
+        <button class="btn d" style="float:right;font-size:11px;padding:3px 10px" onclick="_cancelAssignment('${a.id}','${absentEmpId}','${date}')">Annuler</button>
+      </div>`;
+    });
+  }
+
+  if(!cands.length){
+    html+=`<div class="rp-empty"><i class="fa-solid fa-user-slash"></i><div>Aucun remplaçant disponible<br>pour ce poste et cette date.</div></div>`;
+  } else {
+    cands.forEach(c=>{
+      const col=_replAvatarColor(c.last_name);
+      const initials=((c.first_name||'?')[0]+(c.last_name||'?')[0]).toUpperCase();
+      const authBadge=c.is_authorized
+        ?`<span class="rc-badge" style="background:#dcfce7;color:#166534">✓ Autorisé</span>`
+        :`<span class="rc-badge" style="background:#f3f4f6;color:#6b7280">Multi-hôtel</span>`;
+      const samePoseBadge=c.score_details?.same_role
+        ?`<span class="rc-badge" style="background:#ede9fe;color:#5b21b6">Même poste</span>`:'';
+      const alerts=c.alerts&&c.alerts.length
+        ?`<div class="rc-alerts"><i class="fa-solid fa-triangle-exclamation"></i> ${c.alerts.join(' · ')}</div>`:'';
+      const dayStatusLabel={'repos':'Repos','P':'Présent','PE':'Extra'}[c.day_status]||c.day_status||'Repos';
+      const alreadyAssigned=assigned.some(a=>a.replacement_employee_id===c.candidate_id);
+
+      html+=`<div class="rp-card" id="rc_${c.candidate_id}">
+        <div class="rc-top">
+          <div style="width:38px;height:38px;border-radius:10px;background:${col};display:grid;place-items:center;color:#fff;font-weight:800;font-size:13px;flex-shrink:0">${initials}</div>
+          <div style="flex:1">
+            <div style="font-weight:700;font-size:13px">${c.first_name} ${c.last_name}</div>
+            <div style="font-size:11px;color:var(--muted)">${c.role||'—'} · ${c.department||'—'}</div>
+          </div>
+          <div class="rc-score">${c.score} pts</div>
+        </div>
+        <div class="rc-hotel"><i class="fa-solid fa-hotel"></i> ${c.origin_hotel_name||'Même hôtel'} · <span style="color:${c.day_status==='repos'?'#10b981':'#f59e0b'}">${dayStatusLabel}</span></div>
+        <div style="font-size:11px;margin-bottom:4px">${authBadge}${samePoseBadge}</div>
+        ${_replScoreBar(c.score)}
+        ${alerts}
+        <div class="rc-actions">
+          ${alreadyAssigned
+            ?`<span style="font-size:11.5px;color:#16a34a;font-weight:600;padding:6px"><i class="fa-solid fa-check"></i> Affecté</span>`
+            :`<button class="btn p" style="font-size:11.5px" onclick="_assignReplacement('${c.candidate_id}','${c.origin_hotel_name||''}','${absentEmpId}','${date}')"><i class="fa-solid fa-user-check"></i> Affecter</button>
+             <button class="btn g" style="font-size:11.5px" onclick="_proposeReplacement('${c.candidate_id}','${c.first_name} ${c.last_name}','${absentEmpId}','${date}')"><i class="fa-regular fa-paper-plane"></i> Proposer</button>`
+          }
+          <button class="btn" style="font-size:11.5px;background:#f9fafb;color:var(--muted)" onclick="this.closest('.rp-card').style.opacity='.3';this.closest('.rp-card').style.pointerEvents='none'"><i class="fa-solid fa-eye-slash"></i> Ignorer</button>
+        </div>
+      </div>`;
+    });
+  }
+
+  // Lien vers les paramètres
+  html+=`<div style="text-align:center;margin-top:16px;padding-top:12px;border-top:1px solid var(--line)">
+    <a href="#" onclick="event.preventDefault();closeReplPanel();_cfgTab='replacements';renderConfig()" style="color:var(--muted);font-size:11.5px"><i class="fa-solid fa-gear"></i> Paramétrer les remplacements</a>
+  </div>`;
+
+  body.innerHTML=html;
+}
+
+async function _assignReplacement(candidateId,originHotelName,absentEmpId,date){
+  const emp=staff.find(s=>s.id===candidateId)||{};
+  const actorEmail=(await sb.auth.getUser()).data?.user?.email||'';
+  const payload={
+    absent_employee_id:absentEmpId,
+    replacement_employee_id:candidateId,
+    origin_hotel_id:hotels.find(h=>h.name===originHotelName)?.id||hotelId,
+    assignment_date:date,
+    status:'active',
+    assigned_by_email:actorEmail
+  };
+  try{
+    const row=await BE.createReplacementAssignment(hotelId,payload);
+    await BE.logReplacementHistory(hotelId,row.id,'assigned',actorEmail,{candidate:candidateId,date});
+    // Marquer visuellement dans le planning : ajouter un badge 'REPL' sur la cellule du remplaçant
+    _replCache.delete(absentEmpId+'|'+date);
+    flash(`${emp.first_name||''} ${emp.last_name||''} affecté comme remplaçant.`);
+    // Recharger le panneau
+    openReplPanel(absentEmpId,date,null);
+    // Ajouter badge visuel dans la cellule du remplaçant dans le planning
+    _markReplacementInGrid(candidateId,date);
+  }catch(e){flash('Erreur : '+e.message,'d');}
+}
+
+function _markReplacementInGrid(empId,date){
+  const td=cellMap?.[empId+'|'+date];
+  if(!td)return;
+  td.style.outline='2px solid #10b981';
+  td.title='Remplaçant affecté';
+  if(!td.querySelector('.repl-marker')){
+    const m=document.createElement('span');
+    m.className='repl-marker';
+    m.style.cssText='position:absolute;bottom:1px;right:2px;font-size:7px;color:#10b981;font-weight:900;line-height:1';
+    m.textContent='R';
+    td.appendChild(m);
+  }
+}
+
+async function _proposeReplacement(candidateId,candidateName,absentEmpId,date){
+  const actorEmail=(await sb.auth.getUser()).data?.user?.email||'';
+  const emp=staff.find(s=>s.id===candidateId)||{};
+  // Enregistre la suggestion en DB
+  await sb.from('replacement_suggestions').upsert({
+    hotel_id:hotelId,
+    absent_employee_id:absentEmpId,
+    absent_date:date,
+    candidate_employee_id:candidateId,
+    candidate_hotel_id:hotels.find(h=>h.name===emp.hotel_name)?.id||hotelId,
+    status:'proposed',
+    computed_at:new Date().toISOString()
+  },{onConflict:'hotel_id,absent_employee_id,absent_date,candidate_employee_id'}).catch(()=>{});
+  // Notification portail si activé
+  const settings=_replSettings||{};
+  if(settings.notify_employee && emp.id){
+    const absent=staff.find(s=>s.id===absentEmpId)||{};
+    const msg=`Bonjour ${emp.first_name||''}, vous êtes proposé(e) comme remplaçant(e) de ${absent.first_name||''} ${absent.last_name||''} le ${new Date(date+'T00:00').toLocaleDateString('fr-FR')}. Veuillez confirmer votre disponibilité.`;
+    await BE.sendPortalMessage(hotelId,candidateId,msg).catch(()=>{});
+  }
+  flash(`Proposition envoyée à ${candidateName}.`);
+  const card=document.getElementById('rc_'+candidateId);
+  if(card){card.querySelector('.rc-actions').innerHTML='<span style="font-size:11.5px;color:var(--violet);font-weight:600"><i class="fa-solid fa-paper-plane"></i> Proposition envoyée</span>';}
+}
+
+async function _cancelAssignment(id,absentEmpId,date){
+  if(!confirm('Annuler cette affectation ?'))return;
+  const actorEmail=(await sb.auth.getUser()).data?.user?.email||'';
+  await BE.cancelReplacementAssignment(id,actorEmail);
+  _replCache.delete(absentEmpId+'|'+date);
+  openReplPanel(absentEmpId,date,null);
+  flash('Affectation annulée.');
+}
+
+function closeReplPanel(){
+  $('replPanel').classList.remove('on');
+  _replPanelOpen=false;
+  const tip=$('replTooltip'); if(tip)tip.style.display='none';
+}
+
+// Fermer le panneau si on clique ailleurs
+document.addEventListener('click',e=>{
+  if(_replPanelOpen&&!$('replPanel').contains(e.target)&&!e.target.closest('td.repl-abs')){
+    closeReplPanel();
+  }
+});
+
+/* ═══════════════════════════════════════════════════════════
+   CONFIG : onglet Remplacements
+═══════════════════════════════════════════════════════════ */
+async function _cfgReplacements(){
+  const s=await BE.getReplacementSettings(hotelId)||{};
+  const allH=hotels.filter(h=>h.id!==hotelId);
+  const authIds=s.authorized_hotel_ids||[];
+  const compatRoles=s.compatible_roles||[];
+  const weights=s.scoring_weights||{same_role:40,same_dept:20,no_overtime:15,proximity:10,history:15};
+
+  // Autorisations multi-hôtel pour cet hôtel
+  let assignments=[];
+  try{assignments=await BE.listHotelAssignments(hotelId);}catch(e){}
+
+  $('cfgBody').innerHTML=`
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+
+  <!-- ACTIVATION -->
+  <div class="box" style="grid-column:1/-1">
+    <h3 style="margin:0 0 14px"><i class="fa-solid fa-arrows-rotate" style="color:var(--violet)"></i> Remplacement inter-hôtels</h3>
+    <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600">
+        <input type="checkbox" id="rsCfgEnabled" ${s.enabled?'checked':''} style="width:16px;height:16px;accent-color:var(--violet)">
+        Activer les suggestions de remplacement
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="rsCfgAutoSuggest" ${s.auto_suggest!==false?'checked':''} style="width:16px;height:16px;accent-color:var(--violet)">
+        Suggestions automatiques à la saisie d'absence
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="rsCfgDirectAssign" ${s.allow_direct_assignment?'checked':''} style="width:16px;height:16px;accent-color:var(--violet)">
+        Autoriser l'affectation directe par les managers
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="rsCfgNotify" ${s.notify_employee!==false?'checked':''} style="width:16px;height:16px;accent-color:var(--violet)">
+        Notifier le salarié via le portail
+      </label>
+    </div>
+    <button class="btn p" style="margin-top:14px" onclick="_saveReplSettings()"><i class="fa-solid fa-floppy-disk"></i> Enregistrer</button>
+  </div>
+
+  <!-- HÔTELS AUTORISÉS -->
+  <div class="box">
+    <h3 style="margin:0 0 12px"><i class="fa-solid fa-hotel"></i> Hôtels sources autorisés</h3>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Cochez les hôtels du groupe pouvant fournir des remplaçants.</div>
+    ${allH.length?allH.map(h=>`
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer;font-size:13px">
+        <input type="checkbox" class="rsCfgHotel" value="${h.id}" ${authIds.includes(h.id)?'checked':''} style="width:14px;height:14px;accent-color:var(--violet)">
+        ${h.name}${h.city?' ('+h.city+')':''}
+      </label>`).join(''):`<div style="color:var(--muted);font-size:12px">Aucun autre hôtel dans le groupe.</div>`}
+  </div>
+
+  <!-- SCORING -->
+  <div class="box">
+    <h3 style="margin:0 0 12px"><i class="fa-solid fa-chart-bar"></i> Poids de scoring</h3>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Total recommandé : 100 points.</div>
+    ${[['same_role','Même poste',40],['same_dept','Même service',20],['no_overtime','Pas d\'heures sup.',15],['proximity','Même hôtel',10],['history','Historique remplacements',15]].map(([k,l,def])=>`
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <label style="flex:1;font-size:12.5px">${l}</label>
+        <input type="number" id="rsW_${k}" value="${weights[k]??def}" min="0" max="100" style="width:60px;text-align:center">
+        <span style="font-size:11px;color:var(--muted)">pts</span>
+      </div>`).join('')}
+  </div>
+
+  <!-- POSTES COMPATIBLES -->
+  <div class="box" style="grid-column:1/-1">
+    <h3 style="margin:0 0 12px"><i class="fa-solid fa-code-branch"></i> Postes compatibles</h3>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Un salarié ayant le poste B peut remplacer quelqu'un ayant le poste A.</div>
+    <div id="rsCompatList">${compatRoles.map((pair,i)=>`
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px" id="rsPair_${i}">
+        <input type="text" class="rsCompA" value="${esc(pair.role_a||'')}" placeholder="Poste A" style="flex:1">
+        <span style="color:var(--muted)">↔</span>
+        <input type="text" class="rsCompB" value="${esc(pair.role_b||'')}" placeholder="Poste B" style="flex:1">
+        <button class="btn d" style="padding:6px 10px" onclick="this.closest('[id^=rsPair_]').remove()"><i class="fa-solid fa-trash"></i></button>
+      </div>`).join('')}</div>
+    <button class="btn g" onclick="_addCompatPair()" style="margin-top:6px"><i class="fa-solid fa-plus"></i> Ajouter une paire</button>
+    <button class="btn p" onclick="_saveReplSettings()" style="margin-left:8px"><i class="fa-solid fa-floppy-disk"></i> Enregistrer</button>
+  </div>
+
+  <!-- AUTORISATIONS MULTI-HÔTEL -->
+  <div class="box" style="grid-column:1/-1">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <h3 style="margin:0"><i class="fa-solid fa-user-tag"></i> Autorisations individuelles multi-hôtel</h3>
+      <button class="btn g" onclick="_openAddHotelAssignment()"><i class="fa-solid fa-plus"></i> Autoriser un salarié</button>
+    </div>
+    <table class="tbl" style="font-size:12.5px">
+      <thead><tr><th>Collaborateur</th><th>Poste</th><th>Hôtel cible</th><th>Notes</th><th></th></tr></thead>
+      <tbody id="rsAssignTable">
+        ${assignments.length?assignments.map(a=>`
+          <tr>
+            <td>${a.employee?.first_name||''} ${a.employee?.last_name||''}</td>
+            <td>${a.employee?.role||'—'}</td>
+            <td>${a.target_hotel?.name||'—'}</td>
+            <td style="color:var(--muted)">${a.notes||'—'}</td>
+            <td><button class="btn d" style="padding:4px 9px;font-size:11px" onclick="_revokeHotelAssign('${a.id}')"><i class="fa-solid fa-ban"></i></button></td>
+          </tr>`).join(''):`<tr><td colspan="5" style="color:var(--muted);text-align:center;padding:16px">Aucune autorisation individuelle</td></tr>`}
+      </tbody>
+    </table>
+  </div>
+
+  </div>`;
+}
+
+function _addCompatPair(){
+  const list=$('rsCompatList');
+  const i=Date.now();
+  list.insertAdjacentHTML('beforeend',`
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px" id="rsPair_${i}">
+      <input type="text" class="rsCompA" placeholder="Poste A" style="flex:1">
+      <span style="color:var(--muted)">↔</span>
+      <input type="text" class="rsCompB" placeholder="Poste B" style="flex:1">
+      <button class="btn d" style="padding:6px 10px" onclick="this.closest('[id^=rsPair_]').remove()"><i class="fa-solid fa-trash"></i></button>
+    </div>`);
+}
+
+async function _saveReplSettings(){
+  const w={
+    same_role:parseInt($('rsW_same_role')?.value||40),
+    same_dept:parseInt($('rsW_same_dept')?.value||20),
+    no_overtime:parseInt($('rsW_no_overtime')?.value||15),
+    proximity:parseInt($('rsW_proximity')?.value||10),
+    history:parseInt($('rsW_history')?.value||15)
+  };
+  const authIds=Array.from(document.querySelectorAll('.rsCfgHotel:checked')).map(c=>c.value);
+  const pairs=[];
+  document.querySelectorAll('#rsCompatList [id^=rsPair_]').forEach(row=>{
+    const a=row.querySelector('.rsCompA')?.value?.trim();
+    const b=row.querySelector('.rsCompB')?.value?.trim();
+    if(a&&b)pairs.push({role_a:a,role_b:b});
+  });
+  const patch={
+    enabled:!!$('rsCfgEnabled')?.checked,
+    auto_suggest:!!$('rsCfgAutoSuggest')?.checked,
+    allow_direct_assignment:!!$('rsCfgDirectAssign')?.checked,
+    notify_employee:!!$('rsCfgNotify')?.checked,
+    authorized_hotel_ids:authIds,
+    compatible_roles:pairs,
+    scoring_weights:w
+  };
+  await BE.saveReplacementSettings(hotelId,patch);
+  _replSettings=null; // invalider le cache
+  flash('Paramètres de remplacement enregistrés.');
+}
+
+function _openAddHotelAssignment(){
+  const empOpts=staff.filter(s=>s.active).map(s=>`<option value="${s.id}">${s.first_name} ${s.last_name} (${s.role||'—'})</option>`).join('');
+  const hotelOpts=hotels.filter(h=>h.id!==hotelId).map(h=>`<option value="${h.id}">${h.name}</option>`).join('');
+  $('modal').innerHTML=`
+    <div class="mhd"><h2>Autoriser un salarié sur un autre hôtel</h2><button class="mhd-close" onclick="closeModal()"><i class="fa-solid fa-xmark"></i></button></div>
+    <div style="padding:20px;display:flex;flex-direction:column;gap:14px">
+      <div class="fld"><label>Collaborateur</label><select id="aaEmp">${empOpts}</select></div>
+      <div class="fld"><label>Hôtel cible</label><select id="aaTarget">${hotelOpts}</select></div>
+      <div class="fld"><label>Notes (optionnel)</label><input id="aaNotes" placeholder="Ex : Accord contractuel annex B"></div>
+      <button class="btn p" onclick="_confirmAddHotelAssign()"><i class="fa-solid fa-check"></i> Autoriser</button>
+    </div>`;
+  $('modalbg').classList.add('on');
+}
+
+async function _confirmAddHotelAssign(){
+  const empId=$('aaEmp').value;
+  const targetId=$('aaTarget').value;
+  const notes=$('aaNotes').value.trim();
+  const actorEmail=(await sb.auth.getUser()).data?.user?.email||'';
+  await BE.addHotelAssignment(empId,hotelId,targetId,notes,actorEmail);
+  closeModal();
+  _cfgReplacements();
+  flash('Autorisation ajoutée.');
+}
+
+async function _revokeHotelAssign(id){
+  if(!confirm('Révoquer cette autorisation ?'))return;
+  await BE.removeHotelAssignment(id);
+  _cfgReplacements();
+  flash('Autorisation révoquée.');
+}
 
 /* Row drag-and-drop reorder for planning */
 let _rowDragId=null, _rowDragOver=null;
@@ -5369,8 +5917,9 @@ async function renderConfig(){
     ['docs',      'fa-folder-open',        'Documents RH'],
     ['contrats',  'fa-file-signature',     'Contrats'],
     ['pointage',  'fa-qrcode',             'Pointage QR'],
-    ['access',    'fa-user-shield',        'Accès & Permissions'],
-    ['security',  'fa-shield-halved',      'Sécurité'],
+    ['access',        'fa-user-shield',        'Accès & Permissions'],
+    ['security',      'fa-shield-halved',      'Sécurité'],
+    ['replacements',  'fa-arrows-rotate',      'Remplacements'],
   ];
 
   const tabBar = TABS_CFG.map(([id,ic,lab])=>`
@@ -5393,7 +5942,8 @@ async function renderConfig(){
   else if(_cfgTab==='contrats') _cfgContrats();
   else if(_cfgTab==='pointage') await _cfgPointage(hotel, isAdmin);
   else if(_cfgTab==='access') await _cfgAccess(isAdmin);
-  else if(_cfgTab==='security') _cfgSecurity(hotel);
+  else if(_cfgTab==='security')      _cfgSecurity(hotel);
+  else if(_cfgTab==='replacements')  await _cfgReplacements();
 }
 
 /* ──────────────────────────────────────────────
