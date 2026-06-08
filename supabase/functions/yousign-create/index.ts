@@ -112,28 +112,6 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: 'pdf_base64 ou document_id requis' }), { status: 400, headers: CORS });
     }
 
-    // ── Test réseau YouSign (probe rapide) ────────────────────────────────────
-    console.log('[yousign-create] probe — testing network to YouSign...');
-    try {
-      const probe = await ysFetch('probe', `${YOUSIGN_API}/signature_requests?page_size=1`, {
-        method: 'GET',
-        headers: { 'Authorization': `Bearer ${YOUSIGN_KEY}`, 'Content-Type': 'application/json' },
-      });
-      console.log('[yousign-create] probe result — status:', probe.status);
-      if (probe.status === 401) {
-        console.error('[yousign-create] probe — 401 UNAUTHORIZED — YOUSIGN_API_KEY invalide ou mauvaise sandbox');
-        return new Response(JSON.stringify({ error: 'YOUSIGN_AUTH_FAILED', detail: 'Clé API YouSign invalide ou non autorisée pour le sandbox. Vérifiez YOUSIGN_API_KEY.' }), { status: 502, headers: CORS });
-      }
-    } catch (probeErr: unknown) {
-      const isTimeout = probeErr instanceof Error && probeErr.message.startsWith('YOUSIGN_TIMEOUT');
-      console.error('[yousign-create] probe FAILED:', String(probeErr));
-      return new Response(JSON.stringify({
-        error: isTimeout ? 'YOUSIGN_TIMEOUT' : 'YOUSIGN_UNREACHABLE',
-        step: 'probe',
-        detail: `Impossible de joindre ${YOUSIGN_API} — ${String(probeErr)}`,
-      }), { status: 502, headers: CORS });
-    }
-
     // ── Step 1 : Créer la signature request ──────────────────────────────────
     const srRes = await ysError('create_sr',
       await ysFetch('create_sr', `${YOUSIGN_API}/signature_requests`, {
