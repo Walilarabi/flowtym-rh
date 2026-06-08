@@ -1535,6 +1535,7 @@ function goView(v){
   }
   view=v;
   $('nav').querySelectorAll('.it').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
+  closeReplPanel(); // fermer tooltip/panneau remplacement à chaque changement de page
   const r={dashboard:renderDashboard, planning:renderPlanning, reporting:renderReporting,
            personnel:renderPersonnel, contracts:renderContracts, documents:renderDocuments,
            config:renderConfig, absences:renderAbsences, pointage:renderPointage,
@@ -1556,6 +1557,7 @@ function renderPlanning(){
           <button data-pv="week" class="${planView==='week'?'on':''}">Hebdo</button>
           <button data-pv="day" class="${planView==='day'?'on':''}">Journalier</button>
           <button data-pv="service" class="${planView==='service'?'on':''}">Par service</button>
+          <button data-pv="replacements" class="${planView==='replacements'?'on':''}" style="border-left:2px solid var(--violet-bg)"><i class="fa-solid fa-arrows-rotate" style="font-size:10px"></i> Remplacements</button>
         </div>
         <div class="search"><i class="fa-solid fa-magnifying-glass"></i><input type="text" id="search" placeholder="Rechercher…" value="${fSearch}"></div>
         <select id="fRole"></select>
@@ -1626,6 +1628,7 @@ function renderCurrentPlanView(){
     if(planView==='week')renderWeekGrid();
     else if(planView==='day')renderDayGrid();
     else if(planView==='service')renderServiceGrid();
+    else if(planView==='replacements')renderReplacementsView();
   }
 }
 
@@ -1643,6 +1646,7 @@ function updateNavLabel(){
 }
 
 async function switchPlanView(v){
+  closeReplPanel();
   planView=v;
   if(v==='week'&&!curWeekStart){
     const n=new Date(),dow=n.getDay();
@@ -1893,6 +1897,7 @@ async function loadRolePermissions(){
   }catch(e){hotelPerms=null;customRoles={};console.warn('loadRolePermissions:',e);}
 }
 async function loadMonth(){
+  closeReplPanel();
   pending.clear(); selection.clear();
   const rows=await BE.listMonthPlanning(hotelId,cur.getFullYear(),cur.getMonth());
   planningRows=rows;
@@ -2033,44 +2038,50 @@ function _replScoreBar(score){
 /* Attache les comportements tooltip + clic sur les cellules absence */
 function _wireReplTooltips(){
   const g=$('grid'); if(!g)return;
-
-  // Overlay semi-transparent quand panneau ouvert
-  document.getElementById('replPanel').addEventListener('click',e=>e.stopPropagation());
+  const today=new Date(); today.setHours(0,0,0,0);
 
   g.querySelectorAll('td.day').forEach(td=>{
     const k=td.dataset.k; if(!k)return;
     const [empId,dayStr]=k.split('|');
-    const code=td.textContent.trim().replace(/[^A-Z]/g,'');
+
+    // Exclure les dates passées (avant aujourd'hui)
+    const cellDate=new Date(dayStr+'T00:00:00');
+    if(cellDate<today)return;
+
+    // Code réel depuis la map (pas depuis le textContent qui peut contenir des badges)
+    const code=effective(k);
     if(!ABSENCE_CODES_REPL.has(code))return;
 
-    // Marque visuelle
     td.classList.add('repl-abs');
 
-    // Tooltip au survol
     td.addEventListener('mouseenter',async e=>{
       clearTimeout(_replTooltipTimeout);
       const settings=await _loadReplSettings();
       if(settings&&!settings.enabled)return;
       _replTooltipTimeout=setTimeout(async()=>{
-        const tip=$('replTooltip');
+        // Vérifier que la cellule est toujours dans le DOM et que le tooltip est pertinent
+        const tip=$('replTooltip'); if(!tip)return;
+        // Si la souris n'est plus sur la cellule, annuler
+        if(!td.matches(':hover'))return;
         const cands=await _getReplacementCandidates(empId,dayStr);
-        if(!cands||!tip)return;
-        const emp=staff.find(s=>s.id===empId);
-        let inner=`<div class="rtip-head"><i class="fa-solid fa-arrows-rotate" style="color:var(--violet)"></i> ${cands.length} remplaçant${cands.length>1?'s':''} dispo.</div>`;
+        if(!cands)return;
+        let inner=`<div class="rtip-head"><i class="fa-solid fa-arrows-rotate" style="color:var(--violet)"></i> ${cands.length} remplaçant${cands.length>1?'s':''} disponible${cands.length>1?'s':''}</div>`;
         if(!cands.length){
           inner+=`<div class="rtip-empty">Aucun remplaçant disponible<br>pour ce jour.</div>`;
         } else {
           cands.slice(0,4).forEach(c=>{
             const col=_replAvatarColor(c.last_name);
             const initials=((c.first_name||'?')[0]+(c.last_name||'?')[0]).toUpperCase();
+            const typeBadge=c.candidate_type==='internal_extra'
+              ?`<span style="font-size:9px;background:#fef3c7;color:#92400e;padding:1px 4px;border-radius:3px;margin-left:3px">Extra</span>`:'';
             inner+=`<div class="rtip-item">
               <div class="rtip-av" style="background:${col}">${initials}</div>
-              <div><div style="font-weight:600">${c.first_name} ${c.last_name}</div>
+              <div><div style="font-weight:600">${c.first_name} ${c.last_name}${typeBadge}</div>
               <div style="font-size:10.5px;color:var(--muted)">${c.origin_hotel_name||'—'} · ${c.role||'—'}</div></div>
               <span class="rtip-score">${c.score}</span>
             </div>`;
           });
-          inner+=`<div style="margin-top:8px;font-size:10.5px;color:var(--muted);text-align:center">Cliquer pour voir le détail</div>`;
+          inner+=`<div style="margin-top:8px;font-size:10.5px;color:var(--muted);text-align:center">Cliquer pour le détail complet</div>`;
         }
         tip.innerHTML=inner;
         tip.style.display='block';
@@ -2089,13 +2100,13 @@ function _wireReplTooltips(){
       if(tip)tip.style.display='none';
     });
 
-    // Clic → panneau
-    td.addEventListener('click',async e=>{
+    td.addEventListener('click',e=>{
       e.stopPropagation();
       clearTimeout(_replTooltipTimeout);
       const tip=$('replTooltip'); if(tip)tip.style.display='none';
-      openReplPanel(empId,dayStr,code);
-    },{capture:false});
+      const currentCode=effective(k);
+      openReplPanel(empId,dayStr,currentCode);
+    });
   });
 }
 
@@ -2135,11 +2146,13 @@ async function openReplPanel(absentEmpId,date,absCode){
   panel.classList.add('on');
   _replPanelOpen=true;
 
-  // Charger les settings + affectations existantes
-  const [settings,cands,existingAssign]=await Promise.all([
+  // Charger les settings + affectations existantes + extras externes
+  const [settings,cands,existingAssign,extExtras]=await Promise.all([
     _loadReplSettings(),
     _getReplacementCandidates(absentEmpId,date),
-    BE.listReplacementAssignments(hotelId,date,date).catch(()=>[])
+    BE.listReplacementAssignments(hotelId,date,date).catch(()=>[]),
+    sb.from('external_extras').select('*').eq('hotel_id',hotelId).eq('active',true)
+      .then(r=>r.data||[]).catch(()=>[])
   ]);
 
   if(settings&&!settings.enabled){
@@ -2203,9 +2216,43 @@ async function openReplPanel(absentEmpId,date,absCode){
     });
   }
 
+  // Si aucun interne disponible → extras externes (priorité 4)
+  const emp2=staff.find(s=>s.id===absentEmpId)||{};
+  const relevantExtras=extExtras.filter(e=>!e.department||e.department===emp2.department||e.role===emp2.role||!emp2.role);
+  if(!cands.length && relevantExtras.length){
+    html+=`<div style="margin:12px 0 8px;font-size:12px;font-weight:700;color:var(--ink2);display:flex;align-items:center;gap:6px">
+      <i class="fa-solid fa-address-book" style="color:var(--violet)"></i> Extras externes disponibles
+    </div>`;
+    relevantExtras.slice(0,5).forEach(e=>{
+      const col=_replAvatarColor(e.last_name);
+      const initials=((e.first_name||'?')[0]+(e.last_name||'?')[0]).toUpperCase();
+      html+=`<div class="rp-card">
+        <div class="rc-top">
+          <div style="width:38px;height:38px;border-radius:10px;background:${col};display:grid;place-items:center;color:#fff;font-weight:800;font-size:13px;flex-shrink:0">${initials}</div>
+          <div style="flex:1">
+            <div style="font-weight:700;font-size:13px">${e.first_name} ${e.last_name}</div>
+            <div style="font-size:11px;color:var(--muted)">${e.role||'—'} · ${e.department||'—'}</div>
+          </div>
+          <span style="font-size:10px;background:#fef3c7;color:#92400e;padding:3px 8px;border-radius:99px;font-weight:700">Extra ext.</span>
+        </div>
+        ${e.phone?`<div style="font-size:11.5px;color:var(--muted);margin-bottom:4px"><i class="fa-solid fa-phone"></i> ${e.phone}</div>`:''}
+        ${e.hourly_rate?`<div style="font-size:11.5px;color:var(--muted);margin-bottom:4px"><i class="fa-solid fa-coins"></i> ${e.hourly_rate}€/h</div>`:''}
+        ${!e.documents_ok?`<div style="font-size:11px;color:#dc2626;margin-top:6px"><i class="fa-solid fa-triangle-exclamation"></i> Documents manquants — vérifier avant affectation</div>`:''}
+        <div class="rc-actions" style="margin-top:10px">
+          <button class="btn p" style="font-size:11.5px" onclick="flash('Affectation manuelle : contactez ${esc(e.first_name)} ${esc(e.last_name)} au ${e.phone||e.email||\`—\`}')">
+            <i class="fa-solid fa-phone"></i> Contacter
+          </button>
+          <button class="btn g" style="font-size:11.5px" onclick="openExternalExtraForm('${e.id}')"><i class="fa-solid fa-pen"></i> Fiche</button>
+        </div>
+      </div>`;
+    });
+  }
+
   // Lien vers les paramètres
   html+=`<div style="text-align:center;margin-top:16px;padding-top:12px;border-top:1px solid var(--line)">
-    <a href="#" onclick="event.preventDefault();closeReplPanel();_cfgTab='replacements';renderConfig()" style="color:var(--muted);font-size:11.5px"><i class="fa-solid fa-gear"></i> Paramétrer les remplacements</a>
+    <a href="#" onclick="event.preventDefault();closeReplPanel();switchPlanView('replacements')" style="color:var(--muted);font-size:11.5px"><i class="fa-solid fa-table-list"></i> Vue cockpit remplacements</a>
+    &nbsp;·&nbsp;
+    <a href="#" onclick="event.preventDefault();closeReplPanel();_cfgTab='replacements';renderConfig()" style="color:var(--muted);font-size:11.5px"><i class="fa-solid fa-gear"></i> Paramètres</a>
   </div>`;
 
   body.innerHTML=html;
@@ -2297,6 +2344,309 @@ document.addEventListener('click',e=>{
 });
 
 /* ═══════════════════════════════════════════════════════════
+   VUE PLANNING : Remplacements cockpit
+═══════════════════════════════════════════════════════════ */
+
+let _replTab='pending'; // 'pending','proposed','confirmed','history','extras'
+
+async function renderReplacementsView(){
+  const gw=document.querySelector('.gridwrap');
+  if(!gw)return;
+
+  const today=new Date(); today.setHours(0,0,0,0);
+  const todayStr=today.toISOString().slice(0,10);
+  const in30=new Date(today); in30.setDate(today.getDate()+30);
+  const in30Str=in30.toISOString().slice(0,10);
+
+  const REPL_TABS=[
+    ['pending',   'fa-clock',        'À traiter'],
+    ['proposed',  'fa-paper-plane',  'Proposés'],
+    ['confirmed', 'fa-check-circle', 'Confirmés'],
+    ['history',   'fa-history',      'Historique'],
+    ['extras',    'fa-star',         'Extras disponibles'],
+  ];
+
+  gw.innerHTML=`<div style="padding:16px 20px;min-height:400px">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+      ${REPL_TABS.map(([id,ic,lb])=>`
+        <button class="btn ${_replTab===id?'p':'g'}" style="font-size:12px" onclick="_replTab='${id}';renderReplacementsView()">
+          <i class="fa-solid ${ic}"></i> ${lb}
+        </button>`).join('')}
+      <div class="spacer"></div>
+      <select id="replFltHotel" onchange="renderReplacementsView()" style="font-size:12px">
+        <option value="">Tous les hôtels</option>
+        ${hotels.map(h=>`<option value="${h.id}">${h.name}</option>`).join('')}
+      </select>
+      <select id="replFltDept" onchange="renderReplacementsView()" style="font-size:12px">
+        <option value="">Tous les services</option>
+        ${[...new Set(staff.map(s=>s.department).filter(Boolean))].sort().map(d=>`<option value="${d}">${d}</option>`).join('')}
+      </select>
+    </div>
+    <div id="replViewBody"><div style="text-align:center;padding:40px;color:var(--muted)"><i class="fa-solid fa-spinner fa-spin fa-2x"></i></div></div>
+  </div>`;
+
+  await _renderReplTabContent();
+}
+
+async function _renderReplTabContent(){
+  const body=$('replViewBody'); if(!body)return;
+  const today=new Date(); today.setHours(0,0,0,0);
+  const todayStr=today.toISOString().slice(0,10);
+  const in30=new Date(today); in30.setDate(today.getDate()+30);
+  const in30Str=in30.toISOString().slice(0,10);
+  const fltHotel=$('replFltHotel')?.value||'';
+  const fltDept=$('replFltDept')?.value||'';
+
+  if(_replTab==='extras'){
+    await _renderExtrasTab(body,fltDept);
+    return;
+  }
+
+  // Charger les absences du planning sur les 30 prochains jours
+  let absences=[];
+  try{
+    const rows=await BE.listMonthPlanning(hotelId,today.getFullYear(),today.getMonth());
+    // + mois suivant si dans les 30j
+    const nextM=new Date(today.getFullYear(),today.getMonth()+1,1);
+    if(in30>=nextM){
+      const rows2=await BE.listMonthPlanning(hotelId,nextM.getFullYear(),nextM.getMonth());
+      rows.push(...rows2);
+    }
+    absences=rows.filter(r=>{
+      if(!ABSENCE_CODES_REPL.has(r.status))return false;
+      if(r.day<todayStr||r.day>in30Str)return false;
+      if(fltDept){const e=staff.find(s=>s.id===r.employee_id);if(e?.department!==fltDept)return false;}
+      return true;
+    });
+  }catch(e){console.warn(e);}
+
+  // Charger les affectations existantes
+  let assignments=[];
+  try{assignments=await BE.listReplacementAssignments(hotelId,todayStr,in30Str);}catch(e){}
+
+  // Filtrer selon l'onglet
+  if(_replTab==='pending'){
+    absences=absences.filter(a=>!assignments.some(ra=>ra.absent_employee_id===a.employee_id&&ra.assignment_date===a.day));
+  } else if(_replTab==='proposed'){
+    absences=absences.filter(a=>assignments.some(ra=>ra.absent_employee_id===a.employee_id&&ra.assignment_date===a.day&&ra.status==='active'));
+  } else if(_replTab==='confirmed'){
+    absences=assignments.map(ra=>({employee_id:ra.absent_employee_id,day:ra.assignment_date,status:'assigned',_assign:ra}));
+  } else if(_replTab==='history'){
+    absences=assignments.map(ra=>({employee_id:ra.absent_employee_id,day:ra.assignment_date,status:'assigned',_assign:ra}));
+  }
+
+  if(!absences.length){
+    body.innerHTML=`<div style="text-align:center;padding:60px;color:var(--muted)"><i class="fa-solid ${_replTab==='pending'?'fa-check-circle':'fa-inbox'}" style="font-size:36px;color:var(--violet);display:block;margin-bottom:12px"></i>${_replTab==='pending'?'Aucune absence à pourvoir dans les 30 prochains jours':'Aucun élément'}</div>`;
+    return;
+  }
+
+  // Afficher sous forme de tableau
+  let html=`<table class="tbl" style="font-size:12.5px">
+    <thead><tr>
+      <th style="text-align:left;padding:8px 12px">Absent(e)</th>
+      <th style="text-align:left">Service / Poste</th>
+      <th>Date</th>
+      <th>Motif</th>
+      ${_replTab==='pending'?'<th>Meilleur remplaçant</th>':(_replTab==='confirmed'||_replTab==='history'?'<th>Remplaçant affecté</th>':'')}
+      <th>Actions</th>
+    </tr></thead><tbody>`;
+
+  // Dédupliquer (même absent/jour)
+  const seen=new Set();
+  const deduped=absences.filter(a=>{const key=a.employee_id+'|'+a.day;if(seen.has(key))return false;seen.add(key);return true;});
+
+  // Pour les absences "à traiter", précharger les meilleurs candidats
+  const candidatesMap={};
+  if(_replTab==='pending'){
+    await Promise.all(deduped.slice(0,10).map(async a=>{
+      try{const c=await _getReplacementCandidates(a.employee_id,a.day);candidatesMap[a.employee_id+'|'+a.day]=c;}catch(e){}
+    }));
+  }
+
+  deduped.forEach(a=>{
+    const emp=staff.find(s=>s.id===a.employee_id)||{};
+    const col=_replAvatarColor(emp.last_name||'?');
+    const initials=((emp.first_name||'?')[0]+(emp.last_name||'?')[0]).toUpperCase();
+    const fmtDate=new Date(a.day+'T00:00').toLocaleDateString('fr-FR',{weekday:'short',day:'numeric',month:'short'});
+    const codeLabel=CMAP[a.status]?.label||a.status||'—';
+    const assign=a._assign||assignments.find(ra=>ra.absent_employee_id===a.employee_id&&ra.assignment_date===a.day);
+    const cands=candidatesMap[a.employee_id+'|'+a.day]||[];
+    const bestCand=cands[0];
+
+    html+=`<tr>
+      <td style="padding:8px 12px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="width:28px;height:28px;border-radius:7px;background:${col};display:grid;place-items:center;color:#fff;font-weight:700;font-size:10px;flex-shrink:0">${initials}</div>
+          <div>
+            <div style="font-weight:600">${emp.first_name||'?'} ${emp.last_name||''}</div>
+            <div style="font-size:10.5px;color:var(--muted)">${hotels.find(h=>h.id===emp.hotel_id)?.name||'—'}</div>
+          </div>
+        </div>
+      </td>
+      <td><div style="font-weight:500">${emp.role||'—'}</div><div style="font-size:10.5px;color:var(--muted)">${emp.department||'—'}</div></td>
+      <td style="text-align:center;white-space:nowrap">${fmtDate}</td>
+      <td style="text-align:center"><span style="background:${CMAP[a.status]?.bg||'#f3f4f6'};color:${CMAP[a.status]?.fg||'#374151'};padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600">${codeLabel}</span></td>
+      ${_replTab==='pending'?`<td>${bestCand
+        ?`<div style="display:flex;align-items:center;gap:6px;font-size:11.5px">
+            <div style="width:22px;height:22px;border-radius:5px;background:${_replAvatarColor(bestCand.last_name)};display:grid;place-items:center;color:#fff;font-size:8px;font-weight:700">${((bestCand.first_name||'?')[0]+(bestCand.last_name||'?')[0]).toUpperCase()}</div>
+            <div><div style="font-weight:600">${bestCand.first_name} ${bestCand.last_name}</div><div style="font-size:10px;color:var(--muted)">${bestCand.origin_hotel_name||'—'}</div></div>
+            <span style="margin-left:auto;background:var(--violet-bg);color:var(--violet-d);padding:1px 6px;border-radius:99px;font-size:10px;font-weight:700">${bestCand.score}</span>
+           </div>`
+        :`<span style="color:var(--muted);font-size:11px">Aucun disponible</span>`
+        }</td>`:''}
+      ${(_replTab==='confirmed'||_replTab==='history')&&assign?`<td>
+        <div style="font-size:11.5px;font-weight:600">${assign.replacement?.first_name||''} ${assign.replacement?.last_name||''}</div>
+        <div style="font-size:10.5px;color:var(--muted)">${assign.origin_hotel?.name||'—'}</div>
+      </td>`:''}
+      <td style="text-align:right;padding-right:10px">
+        <div style="display:flex;gap:5px;justify-content:flex-end">
+          <button class="btn p" style="font-size:11px;padding:4px 10px" onclick="openReplPanel('${a.employee_id}','${a.day}','${a.status}')">
+            <i class="fa-solid fa-users"></i> Remplaçants
+          </button>
+          ${assign&&assign.status==='active'?`<button class="btn d" style="font-size:11px;padding:4px 8px" onclick="_cancelAssignment('${assign.id}','${a.employee_id}','${a.day}')"><i class="fa-solid fa-xmark"></i></button>`:''}
+        </div>
+      </td>
+    </tr>`;
+  });
+  html+='</tbody></table>';
+  body.innerHTML=html;
+}
+
+async function _renderExtrasTab(body, fltDept){
+  // Charger extras externes + salariés avec profil extra
+  let extExtras=[];
+  try{
+    const {data}=await sb.from('external_extras').select('*').eq('hotel_id',hotelId).eq('active',true).order('last_name');
+    if(fltDept&&data) extExtras=(data||[]).filter(e=>e.department===fltDept);
+    else extExtras=data||[];
+  }catch(e){console.warn(e);}
+
+  let intExtras=[];
+  try{
+    const {data}=await sb.from('employee_extra_profiles').select('*,employee:employee_id(first_name,last_name,role,department,phone,email)').eq('hotel_id',hotelId).eq('is_extra',true);
+    intExtras=data||[];
+    if(fltDept) intExtras=intExtras.filter(e=>e.employee?.department===fltDept);
+  }catch(e){console.warn(e);}
+
+  const DAYS_FR={monday:'Lun',tuesday:'Mar',wednesday:'Mer',thursday:'Jeu',friday:'Ven',saturday:'Sam',sunday:'Dim'};
+
+  body.innerHTML=`
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+
+  <!-- Extras internes -->
+  <div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <h3 style="margin:0;font-size:14px"><i class="fa-solid fa-user-tag" style="color:var(--violet)"></i> Extras internes (${intExtras.length})</h3>
+    </div>
+    ${intExtras.length?intExtras.map(ep=>{
+      const e=ep.employee||{};
+      const days=(ep.available_days||[]).map(d=>DAYS_FR[d]||d).join(', ');
+      return`<div style="border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:8px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+          <div style="width:30px;height:30px;border-radius:8px;background:${_replAvatarColor(e.last_name||'?')};display:grid;place-items:center;color:#fff;font-size:10px;font-weight:700">${((e.first_name||'?')[0]+(e.last_name||'?')[0]).toUpperCase()}</div>
+          <div>
+            <div style="font-weight:700;font-size:13px">${e.first_name||''} ${e.last_name||''}</div>
+            <div style="font-size:11px;color:var(--muted)">${e.role||'—'} · ${e.department||'—'}</div>
+          </div>
+          <span style="margin-left:auto;font-size:10.5px;background:#fef3c7;color:#92400e;padding:2px 7px;border-radius:6px;font-weight:600">${{internal_recurring:'Récurrent',internal_external:'Multi-hôtel',vacataire:'Vacataire',renfort:'Renfort'}[ep.extra_type]||ep.extra_type}</span>
+        </div>
+        ${days?`<div style="font-size:11px;color:var(--muted)"><i class="fa-regular fa-calendar"></i> ${days}</div>`:''}
+        ${ep.hourly_rate?`<div style="font-size:11px;color:var(--muted)"><i class="fa-solid fa-coins"></i> ${ep.hourly_rate}€/h</div>`:''}
+      </div>`;}).join(''):`<div style="color:var(--muted);font-size:12.5px;padding:16px;text-align:center">Aucun extra interne configuré.</div>`}
+  </div>
+
+  <!-- Extras externes -->
+  <div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <h3 style="margin:0;font-size:14px"><i class="fa-solid fa-address-book" style="color:var(--violet)"></i> Extras externes (${extExtras.length})</h3>
+      <button class="btn g" style="font-size:11.5px" onclick="openExternalExtraForm(null)"><i class="fa-solid fa-plus"></i> Ajouter</button>
+    </div>
+    ${extExtras.length?extExtras.map(e=>{
+      const days=(e.available_days||[]).map(d=>DAYS_FR[d]||d).join(', ');
+      return`<div style="border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:8px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+          <div style="width:30px;height:30px;border-radius:8px;background:${_replAvatarColor(e.last_name||'?')};display:grid;place-items:center;color:#fff;font-size:10px;font-weight:700">${((e.first_name||'?')[0]+(e.last_name||'?')[0]).toUpperCase()}</div>
+          <div style="flex:1">
+            <div style="font-weight:700;font-size:13px">${e.first_name} ${e.last_name}</div>
+            <div style="font-size:11px;color:var(--muted)">${e.role||'—'} · ${e.department||'—'}</div>
+          </div>
+          <button class="btn g" style="padding:3px 8px;font-size:10.5px" onclick="openExternalExtraForm('${e.id}')"><i class="fa-solid fa-pen"></i></button>
+        </div>
+        ${e.phone?`<div style="font-size:11px;color:var(--muted)"><i class="fa-solid fa-phone"></i> ${e.phone}</div>`:''}
+        ${e.email?`<div style="font-size:11px;color:var(--muted)"><i class="fa-solid fa-envelope"></i> ${e.email}</div>`:''}
+        ${days?`<div style="font-size:11px;color:var(--muted)"><i class="fa-regular fa-calendar"></i> ${days}</div>`:''}
+        ${e.hourly_rate?`<div style="font-size:11px;color:var(--muted)"><i class="fa-solid fa-coins"></i> ${e.hourly_rate}€/h</div>`:''}
+        ${e.documents_ok?`<div style="font-size:11px;color:#16a34a"><i class="fa-solid fa-check-circle"></i> Documents OK</div>`:`<div style="font-size:11px;color:#dc2626"><i class="fa-solid fa-triangle-exclamation"></i> Documents manquants</div>`}
+      </div>`;}).join(''):`<div style="color:var(--muted);font-size:12.5px;padding:16px;text-align:center">Aucun extra externe référencé.<br><br><button class="btn p" onclick="openExternalExtraForm(null)"><i class="fa-solid fa-plus"></i> Ajouter un extra externe</button></div>`}
+  </div>
+  </div>`;
+}
+
+/* Formulaire extra externe */
+function openExternalExtraForm(id){
+  const DEPTS=['Réception','Étages','Petit-déjeuner','Technique','Direction','Housekeeping','Restauration','Autre'];
+  const DAYS=[['monday','Lundi'],['tuesday','Mardi'],['wednesday','Mercredi'],['thursday','Jeudi'],['friday','Vendredi'],['saturday','Samedi'],['sunday','Dimanche']];
+  // Charger si édition
+  (async()=>{
+    let ee=null;
+    if(id){try{const {data}=await sb.from('external_extras').select('*').eq('id',id).maybeSingle();ee=data;}catch(e){}}
+    const v=ee||{};
+    const avDays=v.available_days||[];
+    $('modal').innerHTML=`
+      <div class="mhd"><h2>${id?'Modifier':'Ajouter'} un extra externe</h2><button class="mhd-close" onclick="closeModal()"><i class="fa-solid fa-xmark"></i></button></div>
+      <div style="padding:18px;display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div class="fld"><label>Prénom</label><input id="ee_fn" value="${esc(v.first_name||'')}"></div>
+        <div class="fld"><label>Nom</label><input id="ee_ln" value="${esc(v.last_name||'')}"></div>
+        <div class="fld"><label>Téléphone</label><input id="ee_ph" value="${esc(v.phone||'')}"></div>
+        <div class="fld"><label>Email</label><input id="ee_em" value="${esc(v.email||'')}"></div>
+        <div class="fld"><label>Service</label><select id="ee_dept">${DEPTS.map(d=>`<option value="${d}" ${v.department===d?'selected':''}>${d}</option>`).join('')}</select></div>
+        <div class="fld"><label>Poste</label><input id="ee_role" value="${esc(v.role||'')}"></div>
+        <div class="fld"><label>Tarif horaire (€)</label><input type="number" id="ee_rate" value="${v.hourly_rate||''}" step="0.5"></div>
+        <div class="fld"><label>Documents OK</label><select id="ee_docs"><option value="false" ${!v.documents_ok?'selected':''}>Non</option><option value="true" ${v.documents_ok?'selected':''}>Oui</option></select></div>
+        <div class="fld" style="grid-column:1/-1"><label>Disponibilités habituelles</label>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px">
+            ${DAYS.map(([k,l])=>`<label style="display:flex;align-items:center;gap:4px;font-size:12.5px;cursor:pointer">
+              <input type="checkbox" class="eeDayCheck" value="${k}" ${avDays.includes(k)?'checked':''} style="accent-color:var(--violet)"> ${l}</label>`).join('')}
+          </div>
+        </div>
+        <div class="fld" style="grid-column:1/-1"><label>Notes</label><textarea id="ee_notes" rows="2" style="width:100%;resize:vertical">${esc(v.notes||'')}</textarea></div>
+        <div style="grid-column:1/-1;display:flex;gap:8px;justify-content:flex-end">
+          ${id?`<button class="btn d" onclick="_deleteExternalExtra('${id}')"><i class="fa-solid fa-trash"></i> Supprimer</button>`:''}
+          <button class="btn p" onclick="_saveExternalExtra(${id?`'${id}'`:'null'})"><i class="fa-solid fa-floppy-disk"></i> Enregistrer</button>
+        </div>
+      </div>`;
+    $('modalbg').classList.add('on');
+  })();
+}
+
+async function _saveExternalExtra(id){
+  const avDays=Array.from(document.querySelectorAll('.eeDayCheck:checked')).map(c=>c.value);
+  const payload={
+    first_name:$('ee_fn').value.trim(),last_name:$('ee_ln').value.trim(),
+    phone:$('ee_ph').value.trim()||null,email:$('ee_em').value.trim()||null,
+    department:$('ee_dept').value,role:$('ee_role').value.trim(),
+    hourly_rate:parseFloat($('ee_rate').value)||null,
+    documents_ok:$('ee_docs').value==='true',
+    available_days:avDays,notes:$('ee_notes').value.trim()||null,
+    updated_at:new Date().toISOString()
+  };
+  if(!payload.first_name||!payload.last_name){flash('Nom et prénom obligatoires.','d');return;}
+  try{
+    if(id){await sb.from('external_extras').update(payload).eq('id',id);}
+    else{await sb.from('external_extras').insert({hotel_id:hotelId,...payload});}
+    closeModal();
+    flash('Extra enregistré.');
+    renderReplacementsView();
+  }catch(e){flash('Erreur : '+e.message,'d');}
+}
+
+async function _deleteExternalExtra(id){
+  if(!confirm('Supprimer cet extra externe ?'))return;
+  await sb.from('external_extras').delete().eq('id',id);
+  closeModal(); flash('Extra supprimé.'); renderReplacementsView();
+}
+
+/* ═══════════════════════════════════════════════════════════
    CONFIG : onglet Remplacements
 ═══════════════════════════════════════════════════════════ */
 async function _cfgReplacements(){
@@ -2375,25 +2725,72 @@ async function _cfgReplacements(){
     <button class="btn p" onclick="_saveReplSettings()" style="margin-left:8px"><i class="fa-solid fa-floppy-disk"></i> Enregistrer</button>
   </div>
 
-  <!-- AUTORISATIONS MULTI-HÔTEL -->
+  <!-- RÈGLES AVANCÉES -->
   <div class="box" style="grid-column:1/-1">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-      <h3 style="margin:0"><i class="fa-solid fa-user-tag"></i> Autorisations individuelles multi-hôtel</h3>
-      <button class="btn g" onclick="_openAddHotelAssignment()"><i class="fa-solid fa-plus"></i> Autoriser un salarié</button>
+    <h3 style="margin:0 0 14px"><i class="fa-solid fa-sliders"></i> Règles avancées</h3>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <div>
+        <label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px">Heures supplémentaires</label>
+        <select id="rsCfgOT" style="width:100%">
+          <option value="allowed" ${(s.overtime_rule||'allowed')==='allowed'?'selected':''}>Autorisées (non bloquantes)</option>
+          <option value="warning" ${s.overtime_rule==='warning'?'selected':''}>Alerte visible mais autorisées</option>
+          <option value="blocked" ${s.overtime_rule==='blocked'?'selected':''}>Bloquantes — remplacement refusé</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px">Priorité de remplacement</label>
+        <select id="rsCfgPriority" style="width:100%">
+          <option value="internal_first" ${(s.priority_rule||'internal_first')==='internal_first'?'selected':''}>Interne → Multi-hôtel → Extra interne → Externe</option>
+          <option value="same_hotel_only" ${s.priority_rule==='same_hotel_only'?'selected':''}>Même hôtel uniquement</option>
+          <option value="extra_allowed" ${s.priority_rule==='extra_allowed'?'selected':''}>Tous niveaux autorisés simultanément</option>
+        </select>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
+        <input type="checkbox" id="rsCfgShowExternal" ${s.show_external_extras!==false?'checked':''} style="accent-color:var(--violet)">
+        Proposer les extras externes si aucun interne disponible
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
+        <input type="checkbox" id="rsCfgManagerOnly" ${s.manager_propose_only?'checked':''} style="accent-color:var(--violet)">
+        Managers : proposer uniquement (pas d'affectation directe)
+      </label>
     </div>
-    <table class="tbl" style="font-size:12.5px">
-      <thead><tr><th>Collaborateur</th><th>Poste</th><th>Hôtel cible</th><th>Notes</th><th></th></tr></thead>
-      <tbody id="rsAssignTable">
-        ${assignments.length?assignments.map(a=>`
-          <tr>
-            <td>${a.employee?.first_name||''} ${a.employee?.last_name||''}</td>
-            <td>${a.employee?.role||'—'}</td>
-            <td>${a.target_hotel?.name||'—'}</td>
-            <td style="color:var(--muted)">${a.notes||'—'}</td>
-            <td><button class="btn d" style="padding:4px 9px;font-size:11px" onclick="_revokeHotelAssign('${a.id}')"><i class="fa-solid fa-ban"></i></button></td>
-          </tr>`).join(''):`<tr><td colspan="5" style="color:var(--muted);text-align:center;padding:16px">Aucune autorisation individuelle</td></tr>`}
-      </tbody>
-    </table>
+    <button class="btn p" style="margin-top:14px" onclick="_saveReplSettings()"><i class="fa-solid fa-floppy-disk"></i> Enregistrer les règles</button>
+  </div>
+
+  <!-- PERSONNEL ÉLIGIBLE AUX REMPLACEMENTS -->
+  <div class="box">
+    <h3 style="margin:0 0 12px"><i class="fa-solid fa-user-check"></i> Personnel éligible</h3>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Cochez les collaborateurs autorisés à effectuer des remplacements inter-hôtels.</div>
+    <div style="max-height:220px;overflow-y:auto">
+      ${staff.filter(s=>s.active).map(s=>`
+        <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer;font-size:12.5px">
+          <input type="checkbox" class="rsCfgElig" value="${s.id}" ${(s.replacement_eligible!==false)?'checked':''} style="accent-color:var(--violet)">
+          <div style="width:22px;height:22px;border-radius:5px;background:${avBg(s)};display:grid;place-items:center;color:#fff;font-size:8px;font-weight:700;flex-shrink:0">${((s.first_name||'?')[0]+(s.last_name||'?')[0]).toUpperCase()}</div>
+          ${s.first_name} ${s.last_name} <span style="color:var(--muted);font-size:11px">(${s.role||'—'})</span>
+        </label>`).join('')}
+    </div>
+    <div style="margin-top:10px;font-size:11.5px;color:var(--muted)">Note : l'éligibilité individuelle est gérée via le profil du salarié.</div>
+  </div>
+
+  <!-- AUTORISATIONS MULTI-HÔTEL -->
+  <div class="box">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <h3 style="margin:0"><i class="fa-solid fa-user-tag"></i> Autorisations multi-hôtel</h3>
+      <button class="btn g" style="font-size:11.5px" onclick="_openAddHotelAssignment()"><i class="fa-solid fa-plus"></i> Autoriser</button>
+    </div>
+    <div style="max-height:220px;overflow-y:auto">
+      <table class="tbl" style="font-size:12px">
+        <thead><tr><th>Collaborateur</th><th>Hôtel cible</th><th></th></tr></thead>
+        <tbody>
+          ${assignments.length?assignments.map(a=>`
+            <tr>
+              <td>${a.employee?.first_name||''} ${a.employee?.last_name||''} <span style="color:var(--muted);font-size:10.5px">(${a.employee?.role||'—'})</span></td>
+              <td>${a.target_hotel?.name||'—'}</td>
+              <td><button class="btn d" style="padding:3px 7px;font-size:10.5px" onclick="_revokeHotelAssign('${a.id}')"><i class="fa-solid fa-ban"></i></button></td>
+            </tr>`).join(''):`<tr><td colspan="3" style="color:var(--muted);text-align:center;padding:12px">Aucune autorisation</td></tr>`}
+        </tbody>
+      </table>
+    </div>
   </div>
 
   </div>`;
@@ -2431,6 +2828,10 @@ async function _saveReplSettings(){
     auto_suggest:!!$('rsCfgAutoSuggest')?.checked,
     allow_direct_assignment:!!$('rsCfgDirectAssign')?.checked,
     notify_employee:!!$('rsCfgNotify')?.checked,
+    overtime_rule:$('rsCfgOT')?.value||'allowed',
+    priority_rule:$('rsCfgPriority')?.value||'internal_first',
+    show_external_extras:!!$('rsCfgShowExternal')?.checked,
+    manager_propose_only:!!$('rsCfgManagerOnly')?.checked,
     authorized_hotel_ids:authIds,
     compatible_roles:pairs,
     scoring_weights:w
@@ -3350,8 +3751,17 @@ function renderReporting(){
 
 /* ===================== VUE PERSONNEL ===================== */
 let pSearch='', pStatus='actif', pDept='';
+// Catégories de contrats : contractuel vs extra
+const EXTRA_CONTRACT_TYPES=new Set(['Extra','Interim','Vacataire','Renfort']);
+const CONTRACTUAL_TYPES=new Set(['CDI','CDD','Apprentissage','Temps partiel','Stage','Saisonnier']);
+
+let _personnelTab='contractual'; // 'contractual' | 'extra'
+
 function renderPersonnel(){
   const deptOpts=deps.map(d=>`<option value="${d.name}" ${pDept===d.name?'selected':''}>${d.name}</option>`).join('');
+  const contractual=staff.filter(s=>!EXTRA_CONTRACT_TYPES.has(s.contract_type));
+  const extras=staff.filter(s=>EXTRA_CONTRACT_TYPES.has(s.contract_type));
+
   $('view').innerHTML=`<div class="page">
     <div class="phead"><div><h1>Personnel</h1><div class="sub">${hotels.find(h=>h.id===hotelId)?.name||''}</div></div>
       <div class="actions">
@@ -3365,33 +3775,136 @@ function renderPersonnel(){
         <button class="btn g" id="pImportCSV" title="Importer des collaborateurs depuis un fichier CSV"><i class="fa-solid fa-file-import"></i> Import CSV</button>
         <button class="btn p" id="pAdd"><i class="fa-solid fa-user-plus"></i> Collaborateur</button>
       </div></div>
-    <div class="cards" id="pcards"></div></div>`;
-  const draw=()=>{const list=staff.filter(s=>{
+    <!-- Onglets Personnel -->
+    <div style="display:flex;gap:0;border-bottom:2px solid var(--line);padding:0 18px;background:#fff">
+      <button class="ptab-btn ${_personnelTab==='contractual'?'active':''}" onclick="_personnelTab='contractual';_drawPersonnelCards()" style="padding:10px 18px;border:0;background:transparent;font-size:13px;font-weight:600;color:${_personnelTab==='contractual'?'var(--violet-d)':'var(--muted)'};border-bottom:2px solid ${_personnelTab==='contractual'?'var(--violet-d)':'transparent'};margin-bottom:-2px;cursor:pointer">
+        <i class="fa-solid fa-id-badge"></i> Personnel contractuel
+        <span style="background:${_personnelTab==='contractual'?'var(--violet)':'#e5e7eb'};color:${_personnelTab==='contractual'?'#fff':'var(--muted)'};border-radius:99px;padding:1px 8px;font-size:11px;margin-left:6px">${contractual.filter(s=>s.active).length}</span>
+      </button>
+      <button class="ptab-btn ${_personnelTab==='extra'?'active':''}" onclick="_personnelTab='extra';_drawPersonnelCards()" style="padding:10px 18px;border:0;background:transparent;font-size:13px;font-weight:600;color:${_personnelTab==='extra'?'var(--violet-d)':'var(--muted)'};border-bottom:2px solid ${_personnelTab==='extra'?'var(--violet-d)':'transparent'};margin-bottom:-2px;cursor:pointer">
+        <i class="fa-solid fa-star"></i> Personnel en extra
+        <span style="background:${_personnelTab==='extra'?'#f59e0b':'#e5e7eb'};color:${_personnelTab==='extra'?'#fff':'var(--muted)'};border-radius:99px;padding:1px 8px;font-size:11px;margin-left:6px">${extras.filter(s=>s.active).length}</span>
+      </button>
+    </div>
+    <div class="cards" id="pcards"></div>
+  </div>`;
+
+  function _drawPersonnelCards(){
+    // re-render tab headers
+    document.querySelectorAll('.ptab-btn').forEach((b,i)=>{
+      const t=i===0?'contractual':'extra';
+      b.style.color=_personnelTab===t?'var(--violet-d)':'var(--muted)';
+      b.style.borderBottom=`2px solid ${_personnelTab===t?'var(--violet-d)':'transparent'}`;
+    });
+
+    const baseList=_personnelTab==='contractual'
+      ?staff.filter(s=>!EXTRA_CONTRACT_TYPES.has(s.contract_type))
+      :staff.filter(s=>EXTRA_CONTRACT_TYPES.has(s.contract_type));
+
+    const list=baseList.filter(s=>{
       if(pStatus==='actif'&&!s.active)return false;
       if(pStatus==='parti'&&s.active)return false;
       if(pDept&&s.department!==pDept)return false;
       const q=pSearch.toLowerCase();
       if(q&&!(`${s.first_name} ${s.last_name} ${s.role||''} ${s.department||''}`.toLowerCase().includes(q)))return false;
-      return true;}).sort((a,b)=>(b.active?1:0)-(a.active?1:0));
-    $('pcards').innerHTML=list.map(s=>`<div class="card" data-emp="${s.id}" ${!s.active?'style="opacity:.6"':''}>
-      <div class="head"><div class="av" style="background:${avBg(s)}">${avInner(s)}</div>
-        <div><div class="nm">${s.first_name} ${s.last_name}${!s.active?' <span class="tag red">PARTI</span>':''}</div><div class="role">${s.role||'—'} · ${s.department||'—'}</div></div></div>
-      <div class="meta">
-        <span class="tag ${s.contract_type==='CDI'?'green':'gray'}">${s.contract_type||'CDI'}</span>
-        ${s.hire_date?`<span class="tag gray">depuis ${s.hire_date}</span>`:''}
-        ${!s.active&&s.departure_date?`<span class="tag red">parti ${s.departure_date}</span>`:''}
-      </div>
-      <div style="padding:8px 16px 14px;display:flex;justify-content:flex-end">
-        <button class="btn g qr-btn" data-qreid="${s.id}" title="QR Code pointage"><i class="fa-solid fa-qrcode"></i> QR Pointage</button>
-      </div></div>`).join('')||'<div style="padding:30px;text-align:center;color:var(--muted);grid-column:1/-1">Aucun collaborateur ne correspond.</div>';
+      return true;
+    }).sort((a,b)=>(b.active?1:0)-(a.active?1:0));
+
+    if(!list.length){
+      $('pcards').innerHTML=`<div style="padding:60px;text-align:center;color:var(--muted);grid-column:1/-1">
+        <i class="fa-solid ${_personnelTab==='extra'?'fa-star':'fa-users'}" style="font-size:36px;color:var(--violet);display:block;margin-bottom:12px"></i>
+        ${_personnelTab==='extra'?'Aucun collaborateur en extra.<br><small>Les extras sont des salariés avec le type de contrat : Extra, Intérim, Vacataire ou Renfort.</small>':'Aucun collaborateur ne correspond.'}
+      </div>`;
+      return;
+    }
+
+    $('pcards').innerHTML=list.map(s=>{
+      const isExtra=EXTRA_CONTRACT_TYPES.has(s.contract_type);
+      const ctColor=isExtra?'#f59e0b':(s.contract_type==='CDI'?'var(--green)':'var(--muted)');
+      return`<div class="card" data-emp="${s.id}" ${!s.active?'style="opacity:.6"':''}>
+        <div class="head"><div class="av" style="background:${avBg(s)}">${avInner(s)}</div>
+          <div><div class="nm">${s.first_name} ${s.last_name}${!s.active?' <span class="tag red">PARTI</span>':''}</div>
+          <div class="role">${s.role||'—'} · ${s.department||'—'}</div></div></div>
+        <div class="meta">
+          <span class="tag" style="background:${ctColor}18;color:${ctColor};border:1px solid ${ctColor}44">${s.contract_type||'CDI'}</span>
+          ${s.hire_date?`<span class="tag gray">depuis ${s.hire_date}</span>`:''}
+          ${!s.active&&s.departure_date?`<span class="tag red">parti ${s.departure_date}</span>`:''}
+          ${isExtra?`<span class="tag" style="background:#fef3c7;color:#92400e;border:1px solid #fde68a"><i class="fa-solid fa-star" style="font-size:9px"></i> Extra</span>`:''}
+        </div>
+        <div style="padding:8px 16px 14px;display:flex;justify-content:flex-end;gap:6px">
+          ${isExtra?`<button class="btn g" style="font-size:11px;padding:4px 8px" data-extprof="${s.id}" title="Profil extra" onclick="event.stopPropagation();_openExtraProfile('${s.id}')"><i class="fa-solid fa-star"></i> Profil extra</button>`:''}
+          <button class="btn g qr-btn" data-qreid="${s.id}" title="QR Code pointage"><i class="fa-solid fa-qrcode"></i> QR</button>
+        </div>
+      </div>`;
+    }).join('');
+
     $('pcards').querySelectorAll('.card').forEach(c=>c.onclick=()=>openFiche(c.dataset.emp));
-    $('pcards').querySelectorAll('.qr-btn').forEach(b=>b.onclick=e=>{e.stopPropagation();showQRCode(staff.find(s=>s.id===b.dataset.qreid));});};
-  $('pq').oninput=e=>{pSearch=e.target.value;draw();};
-  $('pst').onchange=e=>{pStatus=e.target.value;draw();};
-  $('pdept').onchange=e=>{pDept=e.target.value;draw();};
+    $('pcards').querySelectorAll('.qr-btn').forEach(b=>b.onclick=e=>{e.stopPropagation();showQRCode(staff.find(s=>s.id===b.dataset.qreid));});
+  }
+
+  // Assigner _drawPersonnelCards globalement pour les onglets
+  window._drawPersonnelCards=_drawPersonnelCards;
+
+  $('pq').oninput=e=>{pSearch=e.target.value;_drawPersonnelCards();};
+  $('pst').onchange=e=>{pStatus=e.target.value;_drawPersonnelCards();};
+  $('pdept').onchange=e=>{pDept=e.target.value;_drawPersonnelCards();};
   $('pAdd').onclick=()=>openEmpForm(null);
   $('pImportCSV').onclick=()=>openPersonnelImport();
-  draw();
+  _drawPersonnelCards();
+}
+
+/* Formulaire profil extra (salarié interne) */
+async function _openExtraProfile(empId){
+  const emp=staff.find(s=>s.id===empId)||{};
+  let profile=null;
+  try{const {data}=await sb.from('employee_extra_profiles').select('*').eq('employee_id',empId).maybeSingle();profile=data;}catch(e){}
+  const p=profile||{};
+  const DAYS=[['monday','Lundi'],['tuesday','Mardi'],['wednesday','Mercredi'],['thursday','Jeudi'],['friday','Vendredi'],['saturday','Samedi'],['sunday','Dimanche']];
+  const avDays=p.available_days||[];
+  const authH=p.authorized_hotel_ids||[];
+
+  $('modal').innerHTML=`
+    <div class="mhd"><h2>Profil extra — ${emp.first_name||''} ${emp.last_name||''}</h2><button class="mhd-close" onclick="closeModal()"><i class="fa-solid fa-xmark"></i></button></div>
+    <div style="padding:18px;display:flex;flex-direction:column;gap:14px">
+      <div class="fld"><label>Type d'extra</label>
+        <select id="epType">
+          <option value="internal_recurring" ${p.extra_type==='internal_recurring'?'selected':''}>Extra récurrent interne</option>
+          <option value="internal_external" ${p.extra_type==='internal_external'?'selected':''}>Extra multi-hôtel</option>
+          <option value="vacataire" ${p.extra_type==='vacataire'?'selected':''}>Vacataire</option>
+          <option value="renfort" ${p.extra_type==='renfort'?'selected':''}>Renfort ponctuel</option>
+        </select>
+      </div>
+      <div class="fld"><label>Disponibilités habituelles</label>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px">
+          ${DAYS.map(([k,l])=>`<label style="display:flex;align-items:center;gap:4px;font-size:12.5px;cursor:pointer">
+            <input type="checkbox" class="epDayCheck" value="${k}" ${avDays.includes(k)?'checked':''} style="accent-color:var(--violet)"> ${l}</label>`).join('')}
+        </div>
+      </div>
+      <div class="fld"><label>Hôtels autorisés</label>
+        ${hotels.map(h=>`<label style="display:flex;align-items:center;gap:6px;margin-bottom:6px;cursor:pointer;font-size:13px">
+          <input type="checkbox" class="epHotelCheck" value="${h.id}" ${authH.includes(h.id)?'checked':''} style="accent-color:var(--violet)"> ${h.name}
+        </label>`).join('')}
+      </div>
+      <div class="fld"><label>Tarif horaire (€)</label><input type="number" id="epRate" value="${p.hourly_rate||''}" step="0.5" placeholder="Ex: 12.50"></div>
+      <div class="fld"><label>Notes internes</label><textarea id="epNotes" rows="2" style="width:100%;resize:vertical">${esc(p.notes||'')}</textarea></div>
+      <button class="btn p" onclick="_saveExtraProfile('${empId}')"><i class="fa-solid fa-floppy-disk"></i> Enregistrer le profil extra</button>
+    </div>`;
+  $('modalbg').classList.add('on');
+}
+
+async function _saveExtraProfile(empId){
+  const avDays=Array.from(document.querySelectorAll('.epDayCheck:checked')).map(c=>c.value);
+  const authH=Array.from(document.querySelectorAll('.epHotelCheck:checked')).map(c=>c.value);
+  const payload={
+    hotel_id:hotelId,employee_id:empId,is_extra:true,
+    extra_type:$('epType').value,
+    available_days:avDays,authorized_hotel_ids:authH,
+    hourly_rate:parseFloat($('epRate').value)||null,
+    notes:$('epNotes').value.trim()||null,
+    updated_at:new Date().toISOString()
+  };
+  await sb.from('employee_extra_profiles').upsert(payload,{onConflict:'employee_id'});
+  closeModal(); flash('Profil extra enregistré.');
 }
 
 function openPersonnelImport(){
