@@ -12309,7 +12309,7 @@ async function openFiche(eid){
       ${s.residency_permit_number?`<div class="fr"><span class="k">Titre de séjour</span><span class="v">${s.residency_permit_number}${s.residency_permit_expires?` (exp. ${s.residency_permit_expires})`:''}</span></div>`:''}
     </div>`:''}
     ${full?'<div class="sec"><h4>Documents RH <button class="btn p" data-upload style="float:right;padding:5px 10px;font-size:11.5px"><i class="fa-solid fa-upload"></i> Ajouter</button></h4><div id="docs">Chargement…</div></div>':''}
-    ${full?`<div class="sec"><h4>Contrats <button class="btn p" onclick="contractsSubTab='generate';closeFiche();goView('contracts')" style="float:right;padding:4px 10px;font-size:11px"><i class="fa-solid fa-plus"></i></button></h4>
+    ${full?`<div class="sec"><h4>Parcours contractuel <button class="btn p" onclick="contractsSubTab='generate';closeFiche();goView('contracts')" style="float:right;padding:4px 10px;font-size:11px" title="Générer un nouveau contrat"><i class="fa-solid fa-plus"></i></button></h4>
       <div id="ficheContractsSection"><div style="color:var(--muted);font-size:12px">Chargement…</div></div></div>`:''}
     ${full?`<div class="sec"><h4>Missions de remplacement <span id="missionsCount" style="float:right;font-size:11px;color:var(--muted)"></span></h4>
       <div id="missionsSection"><div style="color:var(--muted);font-size:12px">Chargement…</div></div></div>`:''}
@@ -12400,35 +12400,129 @@ async function openFiche(eid){
 async function _loadFicheContracts(emp){
   const el=$('ficheContractsSection'); if(!el)return;
   const contracts=await BE.listContractsByEmployee(emp.id).catch(()=>[]);
-  const STATUS_LABELS={draft:'Brouillon',generated:'Généré',preview_ok:'Aperçu OK',sent_signature:'Envoyé',pending_signature:'En attente',signed:'Signé',archived:'Archivé',cancelled:'Annulé',error_signature:'Erreur signature'};
-  const STATUS_COLORS={draft:'#fef3c7|#92400e',generated:'#EEF2FF|#4338CA',preview_ok:'#EEF2FF|#4338CA',sent_signature:'#DBEAFE|#1D4ED8',pending_signature:'#FEF3C7|#92400E',signed:'#DCFCE7|#166534',archived:'#F3F4F6|#374151',cancelled:'#FEE2E2|#991B1B',error_signature:'#FEE2E2|#991B1B'};
+
+  if(!contracts.length){
+    el.innerHTML='<div style="color:var(--muted);font-size:12px;text-align:center;padding:12px 0">Aucun contrat généré</div>';
+    return;
+  }
+
+  const STATUS_LABELS={draft:'Brouillon',generated:'Généré',preview_ok:'Aperçu OK',sent_signature:'Envoyé',pending_signature:'En attente',signed:'Signé',archived:'Archivé',cancelled:'Annulé',refused:'Refusé',error_signature:'Erreur signature'};
+  const STATUS_COLORS={draft:'#fef3c7|#92400e',generated:'#EEF2FF|#4338CA',preview_ok:'#EEF2FF|#4338CA',sent_signature:'#DBEAFE|#1D4ED8',pending_signature:'#FEF3C7|#92400E',signed:'#DCFCE7|#166534',archived:'#F3F4F6|#374151',cancelled:'#FEE2E2|#991B1B',refused:'#FEE2E2|#991B1B',error_signature:'#FEE2E2|#991B1B'};
+  const STATUS_BORDER={signed:'#16a34a',sent_signature:'#2563eb',pending_signature:'#d97706',preview_ok:'#4338ca',generated:'#4338ca',draft:'#92400e',cancelled:'#991b1b',refused:'#991b1b',archived:'#9ca3af',error_signature:'#991b1b'};
+  const TERMINAL=['cancelled','refused','archived','error_signature'];
+
   const badge=s=>{const[bg,fg]=(STATUS_COLORS[s]||'#F3F4F6|#374151').split('|');return`<span style="background:${bg};color:${fg};padding:2px 7px;border-radius:5px;font-size:10.5px;font-weight:600">${STATUS_LABELS[s]||s}</span>`;};
-  const fmt=d=>d?new Date(d).toLocaleDateString('fr-FR'):'—';
-  if(!contracts.length){el.innerHTML=`<div style="color:var(--muted);font-size:12px;text-align:center;padding:12px 0">Aucun contrat généré</div>`;return;}
-  el.innerHTML=`<table style="width:100%;font-size:12px;border-collapse:collapse">
-    <thead><tr style="color:var(--ink2);font-size:10.5px;text-transform:uppercase;letter-spacing:.4px">
-      <th style="text-align:left;padding:4px 6px;border-bottom:1px solid var(--line)">Type</th>
-      <th style="text-align:left;padding:4px 6px;border-bottom:1px solid var(--line)">Début</th>
-      <th style="text-align:left;padding:4px 6px;border-bottom:1px solid var(--line)">Fin</th>
-      <th style="text-align:left;padding:4px 6px;border-bottom:1px solid var(--line)">Signé le</th>
-      <th style="text-align:left;padding:4px 6px;border-bottom:1px solid var(--line)">Statut</th>
-      <th style="text-align:center;padding:4px 6px;border-bottom:1px solid var(--line)">PDF</th>
-    </tr></thead>
-    <tbody>
-      ${contracts.map(c=>`<tr style="border-bottom:1px solid var(--line)">
-        <td style="padding:6px;font-weight:600">${c.contract_type||'—'}</td>
-        <td style="padding:6px">${fmt(c.start_date)}</td>
-        <td style="padding:6px;color:var(--muted)">${fmt(c.end_date)}</td>
-        <td style="padding:6px;color:#16a34a">${fmt(c.signed_at)}</td>
-        <td style="padding:6px">${badge(c.status)}</td>
-        <td style="padding:6px;text-align:center">
-          ${(c.signed_pdf_storage_path||c.signed_pdf_url)
-            ? `<button onclick="_openSignedPdf('${c.id}',false)" title="Ouvrir PDF signé" style="background:none;border:none;cursor:pointer;color:#16a34a;font-size:14px;padding:0"><i class="fa-solid fa-file-pdf"></i></button>`
-            : `<i class="fa-regular fa-file-pdf" style="color:#d1d5db;font-size:14px"></i>`}
-        </td>
-      </tr>`).join('')}
-    </tbody>
-  </table>`;
+  const fmt=d=>d?new Date(d+'T00:00').toLocaleDateString('fr-FR'):'—';
+  const now=new Date(); now.setHours(0,0,0,0);
+  const dLeft=c=>c.end_date?Math.round((new Date(c.end_date+'T00:00')-now)/86400000):null;
+
+  const sorted=[...contracts].sort((a,b)=>{
+    const da=a.start_date?new Date(a.start_date):new Date(a.created_at);
+    const db=b.start_date?new Date(b.start_date):new Date(b.created_at);
+    return db-da;
+  });
+
+  const byId=Object.fromEntries(contracts.map(c=>[c.id,c]));
+
+  const expiryBadge=c=>{
+    if(!c.end_date||TERMINAL.includes(c.status)) return '';
+    const d=dLeft(c);
+    if(d<0)  return '<span style="background:#fee2e2;color:#991b1b;padding:2px 7px;border-radius:5px;font-size:10.5px;font-weight:600"><i class="fa-solid fa-triangle-exclamation" style="margin-right:3px"></i>Expiré</span>';
+    if(d<=60)return '<span style="background:#fff7ed;color:#c2410c;padding:2px 7px;border-radius:5px;font-size:10.5px;font-weight:600"><i class="fa-solid fa-clock" style="margin-right:3px"></i>J−'+d+'</span>';
+    return '';
+  };
+
+  const renewalBadge=c=>{
+    if(!c.source_contract_id) return '';
+    const src=byId[c.source_contract_id];
+    const ref=src?(src.contract_number||'—'):'—';
+    return '<span style="background:#ede9fe;color:#7c3aed;padding:2px 7px;border-radius:5px;font-size:10.5px;font-weight:600"><i class="fa-solid fa-rotate-right" style="margin-right:3px"></i>Renouvellement de '+ref+'</span>';
+  };
+
+  const actionBtn=c=>{
+    const s='background:$c;color:#fff;border:none;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap';
+    if((c.status==='signed'||c.status==='archived')&&(c.signed_pdf_storage_path||c.signed_pdf_url))
+      return `<button onclick="_openSignedPdf('${c.id}',false)" style="${s.replace('$c','#16a34a')}"><i class="fa-solid fa-file-pdf" style="margin-right:4px"></i>PDF</button>`;
+    if(c.status==='generated'||c.status==='preview_ok')
+      return `<button onclick="_sendFromHistory('${c.id}')" style="${s.replace('$c','#2563eb')}"><i class="fa-solid fa-paper-plane" style="margin-right:4px"></i>Envoyer</button>`;
+    if(c.status==='sent_signature'||c.status==='pending_signature')
+      return `<button onclick="_relancerFromHistory('${c.id}')" style="${s.replace('$c','#d97706')}"><i class="fa-solid fa-rotate" style="margin-right:4px"></i>Relancer</button>`;
+    if(!TERMINAL.includes(c.status)&&c.end_date&&dLeft(c)<=60)
+      return `<button onclick="_renewContract('${c.id}')" style="${s.replace('$c','#7c3aed')}"><i class="fa-solid fa-rotate-right" style="margin-right:4px"></i>Renouveler</button>`;
+    return '';
+  };
+
+  const salaryLine=c=>{
+    if(!c.salary_amount) return '';
+    const lbl={brut_mensuel:'Brut/mois',brut_horaire:'Taux horaire',net_mensuel:'Net/mois'}[c.salary_type]||'Salaire';
+    return `<span><i class="fa-solid fa-euro-sign" style="margin-right:3px;color:var(--muted)"></i>${lbl} : ${Number(c.salary_amount).toLocaleString('fr-FR')} €</span>`;
+  };
+
+  const ACTIVE_PRIO=['signed','sent_signature','pending_signature','preview_ok','generated','draft'];
+  let current=null;
+  for(const st of ACTIVE_PRIO){
+    const m=sorted.find(c=>c.status===st);
+    if(m){current=m;break;}
+  }
+  if(!current) current=sorted[0];
+
+  const borderCol=STATUS_BORDER[current.status]||'#e5e7eb';
+
+  const currentCard=
+    `<div style="border:1.5px solid ${borderCol}40;border-left:4px solid ${borderCol};border-radius:10px;padding:12px 14px;margin-bottom:14px;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.06)">`
+      +`<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:7px">`
+        +`<div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">`
+          +`<span style="font-size:12.5px;font-weight:700;color:var(--ink)">${current.contract_type||'—'}</span>`
+          +(current.contract_number?`<span style="font-size:11px;color:var(--muted);font-family:monospace">n°${current.contract_number}</span>`:'')
+          +badge(current.status)
+          +expiryBadge(current)
+          +renewalBadge(current)
+        +'</div>'
+        +`<div style="flex-shrink:0">${actionBtn(current)}</div>`
+      +'</div>'
+      +`<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--ink2);margin-bottom:5px">`
+        +`<span><i class="fa-regular fa-calendar-check" style="margin-right:3px;color:var(--muted)"></i>${fmt(current.start_date)}${current.end_date?' → '+fmt(current.end_date):' <span style="color:var(--muted);font-style:italic">(CDI)</span>'}</span>`
+        +(current.weekly_hours?`<span><i class="fa-solid fa-clock" style="margin-right:3px;color:var(--muted)"></i>${current.weekly_hours} h/sem</span>`:'')
+        +salaryLine(current)
+      +'</div>'
+      +((current.department||current.job_title)?`<div style="font-size:11.5px;color:var(--muted)">${[current.department,current.job_title].filter(Boolean).join(' · ')}</div>`:'')
+      +(current.signed_at?`<div style="font-size:11px;color:#16a34a;margin-top:4px"><i class="fa-solid fa-signature" style="margin-right:3px"></i>Signé le ${fmt(current.signed_at)}</div>`:'')
+    +'</div>';
+
+  const rest=sorted.filter(c=>c.id!==current.id);
+  let histHtml='';
+  if(rest.length){
+    histHtml='<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:700;margin-bottom:10px">Historique</div>';
+    histHtml+='<div style="display:flex;flex-direction:column">';
+    rest.forEach((c,i)=>{
+      const last=i===rest.length-1;
+      const dot=STATUS_BORDER[c.status]||'#e5e7eb';
+      histHtml+=
+        `<div style="display:flex;gap:10px;align-items:stretch">`
+          +`<div style="display:flex;flex-direction:column;align-items:center;width:18px;flex-shrink:0">`
+            +`<div style="width:10px;height:10px;border-radius:50%;background:${dot};flex-shrink:0;margin-top:13px"></div>`
+            +(!last?`<div style="width:2px;flex:1;background:var(--line);min-height:10px"></div>`:'')
+          +'</div>'
+          +`<div style="flex:1;padding-bottom:${last?'0':'12'}px">`
+            +`<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:6px">`
+              +`<div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">`
+                +`<span style="font-size:12px;font-weight:600;color:var(--ink)">${c.contract_type||'—'}</span>`
+                +(c.contract_number?`<span style="font-size:10.5px;color:var(--muted);font-family:monospace">n°${c.contract_number}</span>`:'')
+                +badge(c.status)
+                +expiryBadge(c)
+                +renewalBadge(c)
+              +'</div>'
+              +`<div style="flex-shrink:0">${actionBtn(c)}</div>`
+            +'</div>'
+            +`<div style="font-size:11.5px;color:var(--ink2);margin-top:3px">${fmt(c.start_date)}${c.end_date?' → '+fmt(c.end_date):''}${c.weekly_hours?' · '+c.weekly_hours+' h/sem':''}</div>`
+            +(c.signed_at?`<div style="font-size:11px;color:#16a34a;margin-top:2px"><i class="fa-solid fa-signature" style="margin-right:3px"></i>Signé le ${fmt(c.signed_at)}</div>`:'')
+          +'</div>'
+        +'</div>';
+    });
+    histHtml+='</div>';
+  }
+
+  el.innerHTML=currentCard+histHtml;
 }
 
 async function _renderPortalContractsCoffre(employeeId, targetEl){
