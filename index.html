@@ -6417,13 +6417,28 @@ async function renderContractsHistory(){
 
     // Action recommandée helper
     const actionBtn=c=>{
+      const btnOn=(icon,label,onclick,color)=>'<button onclick="'+onclick+'" style="background:'+color+';color:#fff;border:none;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap"><i class="fa-solid '+icon+'" style="margin-right:4px"></i>'+label+'</button>';
+      const btnOff=(icon,label,tip)=>'<button disabled title="'+tip+'" style="background:#e5e7eb;color:#9ca3af;border:none;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:not-allowed;white-space:nowrap"><i class="fa-solid '+icon+'" style="margin-right:4px"></i>'+label+'</button>';
+      // Priorité 1 : signé → Voir PDF (même si expiré)
       if(c.status==='signed'&&(c.signed_pdf_storage_path||c.signed_pdf_url)){
-        return'<button onclick="_openSignedPdf(\''+c.id+'\',false)" style="background:#16a34a;color:#fff;border:none;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap"><i class="fa-solid fa-file-pdf" style="margin-right:4px"></i>Voir PDF</button>';
+        return btnOn('fa-file-pdf','Voir PDF',"_openSignedPdf('"+c.id+"',false)",'#16a34a');
       }
-      if(c.status==='pending_signature'){
-        return'<button onclick="_refreshContractStatus(\''+c.id+'\')" style="background:#d97706;color:#fff;border:none;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap" title="Vérifier si signé"><i class="fa-solid fa-rotate" style="margin-right:4px"></i>Actualiser</button>';
+      // Priorité 2 : archivé → Consulter HTML ou PDF
+      if(c.status==='archived'){
+        if(c.generated_html) return btnOn('fa-eye','Consulter',"_previewContractHtml('"+c.id+"',decodeURIComponent('"+encodeURIComponent(c.generated_html)+"'))",'#374151');
+        if(c.signed_pdf_storage_path||c.signed_pdf_url) return btnOn('fa-file-pdf','Consulter',"_openSignedPdf('"+c.id+"',false)",'#374151');
+        return btnOff('fa-eye','Consulter','Aucun document disponible');
       }
-      return'<span style="font-size:11px;color:var(--muted)" title="Action à venir">—</span>';
+      // Priorité 3 : expiré actif (hors signed/archived déjà traités)
+      if(c.end_date&&new Date(c.end_date)<now&&!['cancelled'].includes(c.status)){
+        return btnOff('fa-rotate-right','Renouveler','Renouvellement à venir');
+      }
+      // Priorité 4 : statut métier
+      if(c.status==='draft') return btnOff('fa-pen','Finaliser','Reprise de brouillon à venir');
+      if(c.status==='generated'||c.status==='preview_ok') return btnOff('fa-paper-plane','Envoyer','Envoi depuis l\'onglet Générer');
+      if(c.status==='sent_signature'||c.status==='pending_signature') return btnOff('fa-rotate','Relancer','Relance manuelle à venir');
+      if(c.status==='cancelled'||c.status==='error_signature') return btnOff('fa-rotate-left','Régénérer','Régénération à venir');
+      return'<span style="font-size:11px;color:var(--muted)">—</span>';
     };
 
     const _applyFilter=()=>{
