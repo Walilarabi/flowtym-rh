@@ -6279,7 +6279,7 @@ async function _genStep3(){
       });
       const result=await resp.json();
       if(!resp.ok||result.error) throw new Error(result.error||'Erreur envoi signature');
-      flash(`Contrat ${contractNumber} envoyé pour signature${result.email_sent?'',' ⚠️ Email non envoyé — vérifiez RESEND_API_KEY'}`);
+      flash(`Contrat ${contractNumber} envoyé pour signature${result.email_sent ? '' : ' ⚠️ Email non envoyé — vérifiez RESEND_API_KEY'}`);
       genInlineState.step=4; renderContractsGenerate();
     }catch(e){
       flash('Erreur : '+e.message,'e');
