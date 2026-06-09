@@ -2208,15 +2208,18 @@ function _replStatusBadge(status){
 }
 
 async function openReplPanel(absentEmpId,date,absCode){
-  const panel=$('replPanel');
-  const body=$('replPanelBody');
-  const titleEl=$('replPanelTitle');
-  const subEl=$('replPanelSub');
+  try{
+  const panel=document.getElementById('replPanel');
+  const body=document.getElementById('replPanelBody');
+  const titleEl=document.getElementById('replPanelTitle');
+  const subEl=document.getElementById('replPanelSub');
+
+  if(!panel||!body){flash('Erreur: panneau remplaçants introuvable','e');return;}
 
   const emp=staff.find(s=>s.id===absentEmpId)||{};
   const fmtDate=new Date(date+'T00:00:00').toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long'});
-  titleEl.textContent='Remplaçants disponibles';
-  subEl.innerHTML=`<b>${emp.first_name||''} ${emp.last_name||''}</b> · ${absCode||''} · ${fmtDate}`;
+  if(titleEl) titleEl.textContent='Remplaçants disponibles';
+  if(subEl) subEl.innerHTML=`<b>${emp.first_name||''} ${emp.last_name||''}</b> · ${absCode||''} · ${fmtDate}`;
 
   body.innerHTML=`<div class="rp-loading"><i class="fa-solid fa-spinner fa-spin"></i> Analyse en cours…</div>`;
   panel.classList.add('on');
@@ -2393,6 +2396,13 @@ async function openReplPanel(absentEmpId,date,absCode){
   </div>`;
 
   body.innerHTML=html;
+  }catch(err){
+    console.error('[openReplPanel]',err);
+    flash('Erreur panel remplaçants : '+err.message,'e');
+    const p=document.getElementById('replPanel');
+    if(p) p.classList.remove('on');
+    _replPanelOpen=false;
+  }
 }
 
 /* ── WORKFLOW REMPLACEMENT ────────────────────────────────── */
@@ -2890,34 +2900,50 @@ async function _renderExtrasTab(body, fltDept){
 function openExternalExtraForm(id, _absentEmpId, _date){
   const DEPTS=['Réception','Étages','Petit-déjeuner','Technique','Direction','Housekeeping','Restauration','Autre'];
   const DAYS=[['monday','Lundi'],['tuesday','Mardi'],['wednesday','Mercredi'],['thursday','Jeudi'],['friday','Vendredi'],['saturday','Samedi'],['sunday','Dimanche']];
-  // Charger si édition
   (async()=>{
     let ee=null;
     if(id){try{const {data}=await sb.from('external_extras').select('*').eq('id',id).maybeSingle();ee=data;}catch(e){}}
     const v=ee||{};
     const avDays=v.available_days||[];
     $('modal').innerHTML=`
-      <div class="mhd"><h2 style="font-size:15px">${id?'Modifier':'Ajouter'} un extra externe</h2><button class="mhd-close" onclick="closeModal()"><i class="fa-solid fa-xmark"></i></button></div>
-      <div style="padding:20px 24px 24px;max-height:70vh;overflow-y:auto;display:grid;grid-template-columns:1fr 1fr;gap:14px">
-        <div class="fld"><label>Prénom *</label><input id="ee_fn" value="${esc(v.first_name||'')}" placeholder="Prénom"></div>
-        <div class="fld"><label>Nom *</label><input id="ee_ln" value="${esc(v.last_name||'')}" placeholder="Nom"></div>
-        <div class="fld"><label>Téléphone</label><input id="ee_ph" value="${esc(v.phone||'')}" placeholder="+33 6 …"></div>
-        <div class="fld"><label>Email</label><input id="ee_em" value="${esc(v.email||'')}" placeholder="email@…"></div>
-        <div class="fld"><label>Service</label><select id="ee_dept"><option value="">— Sélectionner —</option>${DEPTS.map(d=>`<option value="${d}" ${v.department===d?'selected':''}>${d}</option>`).join('')}</select></div>
-        <div class="fld"><label>Poste</label><input id="ee_role" value="${esc(v.role||'')}" placeholder="Femme de chambre…"></div>
+      <div class="mh">
+        <div class="mh-ic"><i class="fa-solid fa-address-book"></i></div>
+        <div class="mh-ti">
+          <h2>${id?'Modifier l\'extra':'Ajouter un extra externe'}</h2>
+          <small>Collaborateur externe pouvant être affecté comme remplaçant</small>
+        </div>
+        <button class="mh-x" onclick="closeModal()" title="Fermer"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="mb" style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+        <div class="fld"><label>Prénom *</label><input id="ee_fn" type="text" value="${esc(v.first_name||'')}" placeholder="Prénom"></div>
+        <div class="fld"><label>Nom *</label><input id="ee_ln" type="text" value="${esc(v.last_name||'')}" placeholder="Nom"></div>
+        <div class="fld"><label>Téléphone</label><input id="ee_ph" type="text" value="${esc(v.phone||'')}" placeholder="+33 6 …"></div>
+        <div class="fld"><label>Email</label><input id="ee_em" type="text" value="${esc(v.email||'')}" placeholder="email@…"></div>
+        <div class="fld"><label>Service</label>
+          <select id="ee_dept">
+            <option value="">— Sélectionner —</option>
+            ${DEPTS.map(d=>`<option value="${d}" ${v.department===d?'selected':''}>${d}</option>`).join('')}
+          </select>
+        </div>
+        <div class="fld"><label>Poste</label><input id="ee_role" type="text" value="${esc(v.role||'')}" placeholder="Femme de chambre…"></div>
         <div class="fld"><label>Tarif horaire (€)</label><input type="number" id="ee_rate" value="${v.hourly_rate||''}" step="0.5" placeholder="12.50"></div>
-        <div class="fld"><label>Documents OK</label><select id="ee_docs"><option value="false" ${!v.documents_ok?'selected':''}>Non</option><option value="true" ${v.documents_ok?'selected':''}>Oui</option></select></div>
+        <div class="fld"><label>Documents OK</label>
+          <select id="ee_docs">
+            <option value="false" ${!v.documents_ok?'selected':''}>Non — manquants</option>
+            <option value="true" ${v.documents_ok?'selected':''}>Oui — complets</option>
+          </select>
+        </div>
         <div class="fld" style="grid-column:1/-1"><label>Disponibilités habituelles</label>
-          <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:8px">
-            ${DAYS.map(([k,l])=>`<label style="display:flex;align-items:center;gap:5px;font-size:12.5px;cursor:pointer;padding:4px 8px;border:1px solid var(--line);border-radius:7px;background:#fafafa">
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
+            ${DAYS.map(([k,l])=>`<label style="display:flex;align-items:center;gap:5px;font-size:12.5px;cursor:pointer;padding:5px 10px;border:1px solid var(--line);border-radius:8px;background:#fafafa;font-weight:500">
               <input type="checkbox" class="eeDayCheck" value="${k}" ${avDays.includes(k)?'checked':''} style="accent-color:var(--violet)"> ${l}</label>`).join('')}
           </div>
         </div>
-        <div class="fld" style="grid-column:1/-1"><label>Notes</label><textarea id="ee_notes" rows="2" style="width:100%;resize:vertical;box-sizing:border-box">${esc(v.notes||'')}</textarea></div>
-        <div style="grid-column:1/-1;display:flex;gap:8px;justify-content:flex-end;padding-top:4px;border-top:1px solid var(--line)">
+        <div class="fld" style="grid-column:1/-1"><label>Notes</label><textarea id="ee_notes" rows="2">${esc(v.notes||'')}</textarea></div>
+        <div style="grid-column:1/-1;display:flex;gap:8px;justify-content:flex-end;padding-top:8px;border-top:1px solid var(--line);margin-top:4px">
           ${id?`<button class="btn d" onclick="_deleteExternalExtra('${id}')"><i class="fa-solid fa-trash"></i> Supprimer</button>`:''}
           <button class="btn g" onclick="closeModal()">Annuler</button>
-          <button class="btn p" onclick="_saveExternalExtra(${id?`'${id}'`:'null'}${_absentEmpId?`,'${_absentEmpId}','${_date}'`:''})"  ><i class="fa-solid fa-floppy-disk"></i> Enregistrer</button>
+          <button class="btn p" onclick="_saveExternalExtra(${id?`'${id}'`:'null'}${_absentEmpId?`,'${_absentEmpId}','${_date}'`:''})"><i class="fa-solid fa-floppy-disk"></i> Enregistrer</button>
         </div>
       </div>`;
     $('modalbg').classList.add('on');
