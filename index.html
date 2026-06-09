@@ -6685,56 +6685,101 @@ async function _renewContract(contractId){
   }catch(e){flash('Erreur renouvellement : '+e.message,'e');}
 }
 
-async function _sendFromHistory(contractId){
+function _openSignatureModal(contractId, mode){
+  // mode: 'send' | 'relance'
+  (async()=>{
+    try{
+      const c=await BE.getGeneratedContract(contractId);
+      if(!c){flash('Contrat introuvable.','e');return;}
+      const emp=staff.find(s=>s.id===c.employee_id);
+      if(!emp){flash('Collaborateur introuvable.','e');return;}
+      const defaultEmail=c.signer_email||emp.email||'';
+      const isSend=mode==='send';
+      const title=isSend?'Envoyer le contrat à signer':'Relancer la signature';
+      const icon=isSend?'fa-paper-plane':'fa-rotate';
+      const iconColor=isSend?'#2563eb':'#d97706';
+      const btnLabel=isSend?'Envoyer pour signature':'Relancer';
+      const empFullName=emp.first_name+' '+emp.last_name;
+      const contractRef=c.contract_number||'—';
+      $('modal').innerHTML=
+        '<div class="mh">'
+          +'<div class="mh-ic" style="background:'+iconColor+'1a"><i class="fa-solid '+icon+'" style="color:'+iconColor+'"></i></div>'
+          +'<div class="mh-ti"><h2>'+title+'</h2>'
+            +'<small>Contrat n°'+contractRef+' — '+empFullName+'</small></div>'
+          +'<button class="mh-x" onclick="closeModal()" title="Fermer"><i class="fa-solid fa-xmark"></i></button>'
+        +'</div>'
+        +'<div class="mb">'
+          +'<div style="display:flex;flex-direction:column;gap:16px;padding:4px 0 8px">'
+            +'<div style="background:#f8f9fb;border-radius:10px;padding:12px 14px;font-size:13px;color:var(--ink2);display:flex;align-items:center;gap:10px">'
+              +'<i class="fa-solid fa-user" style="color:var(--muted);font-size:14px;flex-shrink:0"></i>'
+              +'<span><strong>'+empFullName+'</strong>'
+                +(c.job_title?' — '+c.job_title:'')
+              +'</span>'
+            +'</div>'
+            +'<div class="fld">'
+              +'<label>Adresse email du salarié <span style="color:#dc2626">*</span></label>'
+              +'<input type="email" id="sigModalEmail" value="'+esc(defaultEmail)+'" placeholder="email@exemple.com" autocomplete="email">'
+              +'<div id="sigModalEmailErr" style="display:none;font-size:11.5px;color:#dc2626;margin-top:4px"><i class="fa-solid fa-circle-exclamation"></i> <span></span></div>'
+            +'</div>'
+            +(isSend?'':'<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 12px;font-size:12px;color:#92400e"><i class="fa-solid fa-circle-info" style="margin-right:6px"></i>Un nouveau lien de signature sera envoyé à cette adresse.</div>')
+          +'</div>'
+          +'<div style="display:flex;gap:8px;justify-content:flex-end;padding-top:12px;border-top:1px solid var(--line);margin-top:4px">'
+            +'<button class="btn g" onclick="closeModal()">Annuler</button>'
+            +'<button class="btn p" id="sigModalSubmit" style="background:'+iconColor+'" onclick="_submitSignatureModal(\''+contractId+'\',\''+mode+'\',\''+c.employee_id+'\',\''+emp.first_name+'\',\''+emp.last_name+'\',\''+contractRef+'\')"><i class="fa-solid '+icon+'"></i> '+btnLabel+'</button>'
+          +'</div>'
+        +'</div>';
+      $('modalbg').classList.add('on');
+      setTimeout(()=>{const el=$('sigModalEmail');if(el){el.focus();el.select();}},50);
+    }catch(e){flash('Erreur : '+e.message,'e');}
+  })();
+}
+
+async function _submitSignatureModal(contractId, mode, employeeId, firstName, lastName, contractRef){
+  const emailEl=$('sigModalEmail');
+  const errEl=$('sigModalEmailErr');
+  const btn=$('sigModalSubmit');
+  const email=emailEl?.value.trim()||'';
+  const emailRe=/^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if(!email||!emailRe.test(email)){
+    if(errEl){errEl.style.display='';errEl.querySelector('span').textContent=email?'Adresse email invalide.':'Email requis.';}
+    emailEl?.focus();
+    return;
+  }
+  if(errEl) errEl.style.display='none';
+  btn.disabled=true;
+  btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Envoi en cours…';
   try{
-    const c=await BE.getGeneratedContract(contractId);
-    if(!c){flash('Contrat introuvable.','e');return;}
-    const emp=staff.find(s=>s.id===c.employee_id);
-    if(!emp){flash('Collaborateur introuvable.','e');return;}
-    const defaultEmail=c.signer_email||emp.email||'';
-    const email=window.prompt(`Adresse email du salarié ${emp.first_name} ${emp.last_name} pour la signature :`,defaultEmail);
-    if(email===null)return;
-    const trimmedEmail=email.trim();
-    if(!trimmedEmail){flash('Email requis.','e');return;}
-    await BE.updateGeneratedContract(contractId,{status:'sent_signature',sent_at:new Date().toISOString(),signer_email:trimmedEmail,signer_name:emp.last_name,signer_first_name:emp.first_name});
+    const isSend=mode==='send';
+    const patch=isSend
+      ?{status:'sent_signature',sent_at:new Date().toISOString(),signer_email:email,signer_name:lastName}
+      :{sent_at:new Date().toISOString(),signer_email:email};
+    await BE.updateGeneratedContract(contractId,patch);
     const {data:{session}}=await BE.sb.auth.getSession();
     const resp=await fetch(`${SUPABASE_FUNCTIONS_URL}/contract-send-signature`,{
       method:'POST',
       headers:{'Authorization':`Bearer ${session?.access_token}`,'Content-Type':'application/json'},
-      body:JSON.stringify({contract_id:contractId,employee_id:c.employee_id,hotel_id:hotelId,signer_first_name:emp.first_name,signer_name:emp.last_name,signer_email:trimmedEmail}),
+      body:JSON.stringify({contract_id:contractId,employee_id:employeeId,hotel_id:hotelId,signer_first_name:firstName,signer_name:lastName,signer_email:email}),
     });
     const result=await resp.json();
     if(!resp.ok||result.error) throw new Error(result.error||'Erreur envoi signature');
-    flash(`Contrat ${c.contract_number||contractId} envoyé pour signature${result.email_sent?'':' ⚠️ Email non envoyé — vérifiez RESEND_API_KEY'}`);
-    BE.logContractAudit(hotelId,contractId,c.employee_id,'sent_signature',null,{signer_email:trimmedEmail}).catch(()=>{});
+    closeModal();
+    flash((isSend?`Contrat n°${contractRef} envoyé pour signature`:`Relance envoyée pour le contrat n°${contractRef}`)+(result.email_sent?'':' ⚠️ Email non envoyé — vérifiez RESEND_API_KEY'));
+    const actorEmail=(await BE.sb.auth.getSession()).data?.session?.user?.email||null;
+    BE.logContractAudit(hotelId,contractId,employeeId,isSend?'sent_signature':'resent_signature',actorEmail,{signer_email:email}).catch(()=>{});
     renderContractsHistory();
-  }catch(e){flash('Erreur envoi : '+e.message,'e');}
+  }catch(e){
+    btn.disabled=false;
+    btn.innerHTML=(mode==='send'?'<i class="fa-solid fa-paper-plane"></i> Envoyer pour signature':'<i class="fa-solid fa-rotate"></i> Relancer');
+    flash('Erreur : '+e.message,'e');
+  }
+}
+
+async function _sendFromHistory(contractId){
+  _openSignatureModal(contractId,'send');
 }
 
 async function _relancerFromHistory(contractId){
-  try{
-    const c=await BE.getGeneratedContract(contractId);
-    if(!c){flash('Contrat introuvable.','e');return;}
-    const emp=staff.find(s=>s.id===c.employee_id);
-    if(!emp){flash('Collaborateur introuvable.','e');return;}
-    const defaultEmail=c.signer_email||emp.email||'';
-    const email=window.prompt(`Relancer la signature — email du salarié ${emp.first_name} ${emp.last_name} :`,defaultEmail);
-    if(email===null)return;
-    const trimmedEmail=email.trim();
-    if(!trimmedEmail){flash('Email requis.','e');return;}
-    await BE.updateGeneratedContract(contractId,{sent_at:new Date().toISOString(),signer_email:trimmedEmail});
-    const {data:{session}}=await BE.sb.auth.getSession();
-    const resp=await fetch(`${SUPABASE_FUNCTIONS_URL}/contract-send-signature`,{
-      method:'POST',
-      headers:{'Authorization':`Bearer ${session?.access_token}`,'Content-Type':'application/json'},
-      body:JSON.stringify({contract_id:contractId,employee_id:c.employee_id,hotel_id:hotelId,signer_first_name:emp.first_name,signer_name:emp.last_name,signer_email:trimmedEmail}),
-    });
-    const result=await resp.json();
-    if(!resp.ok||result.error) throw new Error(result.error||'Erreur relance signature');
-    flash(`Relance envoyée pour le contrat ${c.contract_number||contractId}${result.email_sent?'':' ⚠️ Email non envoyé — vérifiez RESEND_API_KEY'}`);
-    BE.logContractAudit(hotelId,contractId,c.employee_id,'resent_signature',null,{signer_email:trimmedEmail}).catch(()=>{});
-    renderContractsHistory();
-  }catch(e){flash('Erreur relance : '+e.message,'e');}
+  _openSignatureModal(contractId,'relance');
 }
 
 async function _syncYousign(contractId){
