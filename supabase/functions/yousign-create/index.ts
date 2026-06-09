@@ -280,11 +280,25 @@ Deno.serve(async (req) => {
 
     // ── Step 5 : Enregistrer en base ──────────────────────────────────────────
     if (pdf_base64 && contract_id) {
+      const sentNow = new Date().toISOString();
       const { error: updErr } = await sb.from('generated_contracts').update({
         yousign_sr_id: srId,
         yousign_status: 'pending',
+        status: 'pending_signature',
+        sent_at: sentNow,
+        signer_email: signer_email ?? null,
+        signer_name: [signer_first_name, signer_name].filter(Boolean).join(' ') || null,
+        signature_provider: 'yousign',
       }).eq('id', contract_id);
       if (updErr) console.warn('[yousign-create] generated_contracts update warn:', updErr.message);
+
+      // Audit log — envoi
+      await sb.from('contract_audit_logs').insert({
+        hotel_id, contract_id, employee_id: employee_id ?? null,
+        action: 'sent',
+        actor_email: user.email ?? null,
+        details: { yousign_sr_id: srId, signer_email, dual_signature: !!employerSigner },
+      }).then(null, () => {});
 
       if (employee_id && hotel_id) {
         await sb.from('portal_messages').insert({
