@@ -888,6 +888,27 @@ async function makeRealBE(){
       }catch(e){console.warn('audit failed',e);}
     },
     async listAuditLogs(h, limit){const {data,error}=await sb.from('hr_document_audit_logs').select('*').eq('hotel_id',h).order('created_at',{ascending:false}).limit(limit||50);must(error,'Audit');return data||[];},
+    async getHrMonthlyCost(h){
+      const {data,error}=await sb.from('v_hr_monthly_cost').select('*').eq('hotel_id',h).maybeSingle();
+      if(error&&(error.code==='42P01'||error.code==='PGRST116'))return null;
+      if(error)return null;return data;
+    },
+    async listOnboardingTasks(h,empId,flow){
+      let q=sb.from('onboarding_tasks').select('*').eq('hotel_id',h);
+      if(empId)q=q.eq('employee_id',empId);
+      if(flow)q=q.eq('flow',flow);
+      q=q.order('category').order('task_label');
+      const {data,error}=await q;
+      if(error&&error.code==='42P01')return[];if(error)return[];return data||[];
+    },
+    async upsertOnboardingTask(h,empId,flow,taskKey,taskLabel,category,done,doneBy){
+      const now=new Date().toISOString();
+      const {error}=await sb.from('onboarding_tasks').upsert({
+        hotel_id:h,employee_id:empId,flow,task_key:taskKey,task_label:taskLabel,category,
+        done:!!done,done_at:done?now:null,done_by:done?doneBy:null,
+      },{onConflict:'hotel_id,employee_id,flow,task_key'});
+      if(error&&error.code==='42P01')return;must(error,'Tâche onboarding');
+    },
     async signOut(){await sb.auth.signOut();},
     /* --- ABSENCES --- */
     async listAbsenceTypes(){
@@ -1491,6 +1512,8 @@ const TABS=[
     ['medical','Visites médicales','fa-solid fa-stethoscope'],
     ['equipment','Matériel remis','fa-solid fa-boxes-stacked'],
     ['orgchart','Organigramme','fa-solid fa-sitemap'],
+    ['conformite','Conformité','fa-solid fa-shield-check'],
+    ['onboarding','Onboarding','fa-solid fa-rocket'],
   ]],
   ['Portail salarié',[
     ['portal_inbox','Demandes portail','fa-solid fa-inbox'],
@@ -1606,7 +1629,8 @@ function goView(v){
            recruitment:renderRecruitment, training:renderTraining,
            reviews:renderReviews,
            medical:renderMedical, equipment:renderEquipment, orgchart:renderOrgChart,
-           tracking:renderTracking, payroll:renderPayroll, portal_inbox:renderPortalInbox};
+           tracking:renderTracking, payroll:renderPayroll, portal_inbox:renderPortalInbox,
+           conformite:renderConformite, onboarding:renderOnboardingView};
   (r[v]||r.dashboard)();
 }
 /* ===================== VUE PLANNING ===================== */
@@ -3599,6 +3623,42 @@ function renderDashboard(){
       </div>
     </div>
 
+    <!-- KPI row 2: absences, remplacements, extras, coût -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:22px" id="dashKpi2Row">
+      <div style="background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:var(--shadow)">
+        <div style="width:38px;height:38px;background:#fee2e2;border-radius:10px;display:grid;place-items:center;margin-bottom:14px">
+          <i class="fa-solid fa-calendar-xmark" style="color:#dc2626;font-size:15px"></i>
+        </div>
+        <div style="font-size:28px;font-weight:800;margin-bottom:4px" id="dashAbsentsToday">${actifs>0?actifs-presentsToday-reposToday:0}</div>
+        <div style="font-size:13px;font-weight:600;color:var(--ink)">Absents aujourd'hui</div>
+        <div style="font-size:11.5px;color:var(--muted)">${maladeToday} maladie</div>
+      </div>
+      <div style="background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:var(--shadow)">
+        <div style="width:38px;height:38px;background:#fef3c7;border-radius:10px;display:grid;place-items:center;margin-bottom:14px">
+          <i class="fa-solid fa-arrows-rotate" style="color:#d97706;font-size:15px"></i>
+        </div>
+        <div style="font-size:28px;font-weight:800;margin-bottom:4px" id="dashReplOpen">…</div>
+        <div style="font-size:13px;font-weight:600;color:var(--ink)">Remplacements ouverts</div>
+        <div style="font-size:11.5px;color:var(--muted)">Ce mois</div>
+      </div>
+      <div style="background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:var(--shadow)">
+        <div style="width:38px;height:38px;background:#f0fdf4;border-radius:10px;display:grid;place-items:center;margin-bottom:14px">
+          <i class="fa-solid fa-user-clock" style="color:#16a34a;font-size:15px"></i>
+        </div>
+        <div style="font-size:28px;font-weight:800;margin-bottom:4px" id="dashOnboardCount">…</div>
+        <div style="font-size:13px;font-weight:600;color:var(--ink)">Onboardings en cours</div>
+        <div style="font-size:11.5px;color:var(--muted);cursor:pointer" onclick="goView('onboarding')">Voir →</div>
+      </div>
+      <div style="background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:var(--shadow)">
+        <div style="width:38px;height:38px;background:#ede9fe;border-radius:10px;display:grid;place-items:center;margin-bottom:14px">
+          <i class="fa-solid fa-coins" style="color:#7c3aed;font-size:15px"></i>
+        </div>
+        <div style="font-size:28px;font-weight:800;margin-bottom:4px" id="dashMasseSalariale">…</div>
+        <div style="font-size:13px;font-weight:600;color:var(--ink)">Masse salariale/mois</div>
+        <div style="font-size:11.5px;color:var(--muted)" id="dashMasseSub">Coût total chargé</div>
+      </div>
+    </div>
+
     <!-- Effectifs par contrat + Conformité + Turnover -->
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:22px" id="dashContractRow">
       ${['CDI','CDD','Alternance','Extra / Intérim'].map((ct,i)=>{
@@ -3730,6 +3790,22 @@ function renderDashboard(){
       <div id="dashHKAlerts" style="margin-top:12px"></div>
     </div>
 
+    <!-- PMS Forecast -->
+    <div style="background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:var(--shadow);margin-bottom:18px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:36px;height:36px;background:#dbeafe;border-radius:10px;display:grid;place-items:center">
+            <i class="fa-solid fa-chart-line" style="color:#2563eb;font-size:15px"></i>
+          </div>
+          <div>
+            <div style="font-size:15px;font-weight:700">Prévisions PMS — 7 jours</div>
+            <div style="font-size:12px;color:var(--muted)">Taux d'occupation & arrivées</div>
+          </div>
+        </div>
+      </div>
+      <div id="dashPmsForecast"><div style="color:var(--muted);font-size:13px;text-align:center;padding:20px 0">Chargement…</div></div>
+    </div>
+
     <!-- Planning cette semaine -->
     <div style="background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:var(--shadow)">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
@@ -3832,6 +3908,12 @@ async function drawDashboardAlerts(){
     // Conformité RH + Alertes prioritaires
     _drawDashConformite().catch(()=>{});
     _drawDashPriorityAlerts().catch(()=>{});
+
+    // KPI 2e rangée
+    _drawDashKpi2().catch(()=>{});
+
+    // PMS Forecast
+    _drawDashPmsForecast().catch(()=>{});
 
   }catch(e){
     console.warn('Dashboard async error:', e);
@@ -3948,6 +4030,349 @@ async function _drawDashPriorityAlerts(){
     </div>`).join('')}
     ${alerts.length>6?`<div style="text-align:center;font-size:11.5px;color:var(--muted);padding:4px">+${alerts.length-6} alertes supplémentaires</div>`:''}
   </div>`;
+}
+
+async function _drawDashKpi2(){
+  const today=new Date();
+  const monthStart=today.toISOString().slice(0,8)+'01';
+  const monthEnd=new Date(today.getFullYear(),today.getMonth()+1,0).toISOString().slice(0,10);
+
+  const [assignments, hrCost, tasks] = await Promise.all([
+    BE.listReplacementAssignments(hotelId,monthStart,monthEnd).catch(()=>[]),
+    BE.getHrMonthlyCost(hotelId).catch(()=>null),
+    BE.listOnboardingTasks(hotelId,null,'onboarding').catch(()=>[]),
+  ]);
+
+  // Remplacements ouverts (pending)
+  const replEl=$('dashReplOpen');
+  if(replEl){
+    const open=assignments.filter(a=>a.status==='pending'||a.status==='proposed').length;
+    replEl.textContent=open;
+  }
+
+  // Onboardings en cours (employees avec des tâches onboarding non finies)
+  const onboardEl=$('dashOnboardCount');
+  if(onboardEl){
+    const newStaff=staff.filter(s=>{
+      if(!s.active||!s.hire_date)return false;
+      const d=new Date(s.hire_date);
+      const daysSince=Math.floor((Date.now()-d)/864e5);
+      return daysSince<=90;
+    });
+    onboardEl.textContent=newStaff.length;
+  }
+
+  // Masse salariale
+  const msEl=$('dashMasseSalariale');
+  const msSubEl=$('dashMasseSub');
+  if(msEl){
+    if(hrCost?.total_gross_monthly){
+      const gross=Math.round(hrCost.total_gross_monthly);
+      const charged=Math.round(hrCost.total_full_cost||gross*1.42);
+      msEl.textContent=gross.toLocaleString('fr-FR')+'€';
+      if(msSubEl) msSubEl.textContent=`Chargé : ${charged.toLocaleString('fr-FR')}€`;
+    } else {
+      // Fallback: sum from employee contracts in staff
+      const contracts=staff.filter(s=>s.active&&s.gross_monthly_salary>0);
+      if(contracts.length){
+        const sum=contracts.reduce((a,s)=>a+(s.gross_monthly_salary||0),0);
+        msEl.textContent=Math.round(sum).toLocaleString('fr-FR')+'€';
+        if(msSubEl) msSubEl.textContent='Estimé (contrats)';
+      } else {
+        msEl.textContent='—';
+        if(msSubEl) msSubEl.textContent='Données non renseignées';
+      }
+    }
+  }
+}
+
+async function _drawDashPmsForecast(){
+  const el=$('dashPmsForecast'); if(!el) return;
+  const today=new Date();
+  const from=today.toISOString().slice(0,10);
+  const to=new Date(today.getTime()+6*864e5).toISOString().slice(0,10);
+  const rows=await BE.listOccupancyForecast(hotelId,from,to).catch(()=>[]);
+  if(!rows.length){
+    el.innerHTML=`<div style="text-align:center;padding:20px 0;color:var(--muted);font-size:13px">
+      <i class="fa-solid fa-calendar-plus" style="font-size:24px;display:block;margin-bottom:8px;color:#ddd"></i>
+      Aucune prévision PMS saisie — <span onclick="goView('config')" style="color:var(--violet);cursor:pointer">Configurer</span>
+    </div>`;
+    return;
+  }
+  const days=['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'];
+  el.innerHTML=`<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:8px">
+    ${Array.from({length:7},(_,i)=>{
+      const d=new Date(today); d.setDate(today.getDate()+i);
+      const dk=d.toISOString().slice(0,10);
+      const row=rows.find(r=>r.date===dk);
+      const occ=row?.occupancy_rate||0;
+      const arr=row?.arrivals||0;
+      const dep=row?.departures||0;
+      const color=occ>=80?'#EF4444':occ>=60?'#F59E0B':'#22C55E';
+      const bg=occ>=80?'#fee2e2':occ>=60?'#fef3c7':'#dcfce7';
+      const dayName=days[(d.getDay()+6)%7];
+      return `<div style="text-align:center;padding:12px 6px;border-radius:12px;background:${row?bg:'#f9fafb'};border:1px solid ${row?color+'40':'var(--line)'}">
+        <div style="font-size:11px;font-weight:600;color:var(--ink2);margin-bottom:4px">${dayName} ${d.getDate()}</div>
+        <div style="font-size:22px;font-weight:800;color:${row?color:'#ccc'}">${row?occ+'%':'—'}</div>
+        ${row?`<div style="font-size:10px;color:var(--muted);margin-top:4px">↓${arr} ↑${dep}</div>`:'<div style="font-size:10px;color:#ddd">—</div>'}
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+/* ===================== VUE CONFORMITÉ RH ===================== */
+function renderConformite(){
+  $('view').innerHTML=`<div class="page">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
+      <div>
+        <h1 style="font-size:22px;font-weight:800;margin-bottom:4px"><i class="fa-solid fa-shield-check" style="color:var(--violet);margin-right:10px"></i>Centre de Conformité RH</h1>
+        <div style="font-size:13px;color:var(--muted)">Vue d'ensemble de la conformité réglementaire de l'hôtel</div>
+      </div>
+      <div id="confScoreBadge" style="background:#f1f5f9;border-radius:20px;padding:12px 20px;text-align:center">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:2px">Score global</div>
+        <div style="font-size:28px;font-weight:800" id="confScoreVal">…</div>
+      </div>
+    </div>
+    <!-- Résumé 4 indicateurs -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:24px" id="confKpiRow">
+      <div style="background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px;box-shadow:var(--shadow);text-align:center">
+        <div style="font-size:26px;font-weight:800;margin-bottom:4px" id="confDocOk">…</div>
+        <div style="font-size:12px;font-weight:600;color:var(--ink)">Documents complets</div>
+        <div style="font-size:11px;color:var(--muted)" id="confDocSub"></div>
+      </div>
+      <div style="background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px;box-shadow:var(--shadow);text-align:center">
+        <div style="font-size:26px;font-weight:800;margin-bottom:4px" id="confTrOk">…</div>
+        <div style="font-size:12px;font-weight:600;color:var(--ink)">Formations à jour</div>
+        <div style="font-size:11px;color:var(--muted)" id="confTrSub"></div>
+      </div>
+      <div style="background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px;box-shadow:var(--shadow);text-align:center">
+        <div style="font-size:26px;font-weight:800;margin-bottom:4px" id="confVmOk">…</div>
+        <div style="font-size:12px;font-weight:600;color:var(--ink)">Visites médicales</div>
+        <div style="font-size:11px;color:var(--muted)" id="confVmSub"></div>
+      </div>
+      <div style="background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px;box-shadow:var(--shadow);text-align:center">
+        <div style="font-size:26px;font-weight:800;margin-bottom:4px" id="confRsOk">…</div>
+        <div style="font-size:12px;font-weight:600;color:var(--ink)">Titres de séjour</div>
+        <div style="font-size:11px;color:var(--muted)" id="confRsSub"></div>
+      </div>
+    </div>
+    <!-- Alertes détaillées -->
+    <div style="background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:var(--shadow)">
+      <div style="font-size:15px;font-weight:700;margin-bottom:16px">Alertes par salarié</div>
+      <div id="confAlertList"><div style="color:var(--muted);font-size:13px;text-align:center;padding:40px 0">Chargement…</div></div>
+    </div>
+  </div>`;
+  _renderConformiteData().catch(e=>console.warn('Conformité error:',e));
+}
+
+async function _renderConformiteData(){
+  const today=new Date().toISOString().slice(0,10);
+  const soon60=new Date(Date.now()+60*864e5).toISOString().slice(0,10);
+  const actStaff=staff.filter(s=>s.active!==false);
+
+  const [alerts,trainings,visits]=await Promise.all([
+    BE.listDocumentAlerts(hotelId).catch(()=>[]),
+    BE.listEmployeeTrainings(hotelId).catch(()=>[]),
+    BE.listMedicalVisits(hotelId).catch(()=>[]),
+  ]);
+
+  // Documents
+  const empMissing=new Set(alerts.filter(a=>a.alert_kind==='missing').map(a=>a.employee_id));
+  const empDocOk=actStaff.filter(s=>!empMissing.has(s.id)).length;
+  const docPct=actStaff.length?Math.round(empDocOk/actStaff.length*100):100;
+
+  // Formations
+  const trExpired=trainings.filter(t=>t.expiry_date&&t.expiry_date<today);
+  const empTrBad=new Set(trExpired.map(t=>t.employee_id));
+  const trOk=actStaff.filter(s=>!empTrBad.has(s.id)).length;
+  const trPct=actStaff.length?Math.round(trOk/actStaff.length*100):100;
+
+  // Visites
+  const vmLate=visits.filter(v=>v.next_visit_date&&v.next_visit_date<today);
+  const empVmBad=new Set(vmLate.map(v=>v.employee_id));
+  const vmOk=actStaff.filter(s=>!empVmBad.has(s.id)).length;
+  const vmPct=actStaff.length?Math.round(vmOk/actStaff.length*100):100;
+
+  // Titres de séjour
+  const rsExpired=actStaff.filter(s=>s.residency_permit_expires&&s.residency_permit_expires<today);
+  const rsExpiring=actStaff.filter(s=>s.residency_permit_expires&&s.residency_permit_expires>=today&&s.residency_permit_expires<=soon60);
+  const rsBad=rsExpired.length+rsExpiring.length;
+  const rsOk=actStaff.length-rsBad;
+  const rsPct=actStaff.length?Math.round(rsOk/actStaff.length*100):100;
+
+  // Score global
+  const score=Math.round((docPct+trPct+vmPct+rsPct)/4);
+  const scoreEl=$('confScoreVal');
+  const scoreBadge=$('confScoreBadge');
+  if(scoreEl) scoreEl.textContent=score+'%';
+  if(scoreBadge){
+    const c=score>=80?'#16a34a':score>=60?'#d97706':'#dc2626';
+    const bg=score>=80?'#dcfce7':score>=60?'#fef3c7':'#fee2e2';
+    scoreBadge.style.background=bg;
+    if(scoreEl) scoreEl.style.color=c;
+  }
+
+  const pctEl=(id,val)=>{const e=$(id);if(e){e.textContent=val+'%';e.style.color=val>=80?'#16a34a':val>=60?'#d97706':'#dc2626';}};
+  pctEl('confDocOk',docPct);
+  pctEl('confTrOk',trPct);
+  pctEl('confVmOk',vmPct);
+  pctEl('confRsOk',rsPct);
+
+  const subEl=(id,txt)=>{const e=$(id);if(e)e.textContent=txt;};
+  subEl('confDocSub',`${empDocOk}/${actStaff.length} salariés`);
+  subEl('confTrSub',`${trOk}/${actStaff.length} salariés`);
+  subEl('confVmSub',`${vmOk}/${actStaff.length} salariés`);
+  subEl('confRsSub',`${rsOk}/${actStaff.length} salariés`);
+
+  // Build per-employee alert list
+  const empAlerts=new Map();
+  const add=(empId,sev,txt,link)=>{
+    if(!empAlerts.has(empId)) empAlerts.set(empId,[]);
+    empAlerts.get(empId).push({sev,txt,link});
+  };
+  alerts.forEach(a=>{
+    const sev=a.alert_kind==='missing'?'critique':a.alert_kind==='expired'?'critique':'important';
+    add(a.employee_id,sev,`${a.doc_label||a.doc_type_code} ${a.alert_kind==='missing'?'manquante':a.alert_kind==='expired'?'expirée':'bientôt expirée'}`,'documents');
+  });
+  trExpired.forEach(t=>{
+    add(t.employee_id,'critique',`Formation "${t.training_name||t.training_type}" expirée le ${t.expiry_date}`,'training');
+  });
+  trainings.filter(t=>t.expiry_date&&t.expiry_date>=today&&t.expiry_date<=soon60).forEach(t=>{
+    add(t.employee_id,'important',`Formation "${t.training_name||t.training_type}" expire le ${t.expiry_date}`,'training');
+  });
+  vmLate.forEach(v=>{add(v.employee_id,'critique',`Visite médicale en retard (prévu ${v.next_visit_date})`,'medical');});
+  visits.filter(v=>v.next_visit_date&&v.next_visit_date>=today&&v.next_visit_date<=soon60).forEach(v=>{
+    add(v.employee_id,'important',`Visite médicale dans 60j (${v.next_visit_date})`,'medical');
+  });
+  rsExpired.forEach(s=>{add(s.id,'critique',`Titre de séjour expiré le ${s.residency_permit_expires}`,'personnel');});
+  rsExpiring.forEach(s=>{add(s.id,'important',`Titre de séjour expire le ${s.residency_permit_expires}`,'personnel');});
+
+  const listEl=$('confAlertList'); if(!listEl) return;
+  if(!empAlerts.size){
+    listEl.innerHTML=`<div style="text-align:center;padding:40px 0;color:var(--muted)"><i class="fa-solid fa-circle-check" style="font-size:32px;color:#22C55E;display:block;margin-bottom:12px"></i>Aucune alerte — conformité 100% !</div>`;
+    return;
+  }
+  const SEV={critique:{bg:'#fee2e2',fg:'#dc2626',label:'Critique'},important:{bg:'#fef3c7',fg:'#d97706',label:'Important'},info:{bg:'#dbeafe',fg:'#2563eb',label:'Info'}};
+  listEl.innerHTML=[...empAlerts.entries()].map(([empId,issues])=>{
+    const s=actStaff.find(x=>x.id===empId)||{first_name:'?',last_name:'',role:''};
+    const hasCrit=issues.some(i=>i.sev==='critique');
+    return `<div style="border:1px solid ${hasCrit?'#fca5a5':'#fed7aa'};border-radius:12px;padding:14px 16px;margin-bottom:10px;background:${hasCrit?'#fff5f5':'#fffbf0'}">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div class="av" style="background:${avBg(s)};width:32px;height:32px;border-radius:8px;font-size:11px">${avInner(s)}</div>
+          <div>
+            <div style="font-size:13.5px;font-weight:700">${s.first_name} ${s.last_name}</div>
+            <div style="font-size:11.5px;color:var(--muted)">${s.role||'—'}</div>
+          </div>
+        </div>
+        <span style="font-size:11px;font-weight:700;padding:3px 8px;border-radius:6px;background:${hasCrit?SEV.critique.bg:SEV.important.bg};color:${hasCrit?SEV.critique.fg:SEV.important.fg}">${issues.length} alerte${issues.length>1?'s':''}</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:5px">
+        ${issues.map(i=>`<div onclick="goView('${i.link}')" style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:8px;background:#fff;border:1px solid ${SEV[i.sev]?.fg||'#ccc'}30;cursor:pointer">
+          <span style="font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;background:${SEV[i.sev]?.bg||'#eee'};color:${SEV[i.sev]?.fg||'#666'}">${SEV[i.sev]?.label||i.sev}</span>
+          <span style="font-size:12.5px;color:var(--ink);flex:1">${i.txt}</span>
+        </div>`).join('')}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+/* ===================== VUE ONBOARDING / OFFBOARDING ===================== */
+let _onboardFlow='onboarding';
+function renderOnboardingView(){
+  const newStaff=staff.filter(s=>{
+    if(!s.active||!s.hire_date)return false;
+    return Math.floor((Date.now()-new Date(s.hire_date))/864e5)<=90;
+  });
+  const deptStaff=_onboardFlow==='offboarding'?staff.filter(s=>s.active===false&&s.departure_date&&Math.floor((Date.now()-new Date(s.departure_date))/864e5)<=30):newStaff;
+  $('view').innerHTML=`<div class="page">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
+      <div>
+        <h1 style="font-size:22px;font-weight:800;margin-bottom:4px"><i class="fa-solid fa-rocket" style="color:var(--violet);margin-right:10px"></i>Onboarding / Offboarding</h1>
+        <div style="font-size:13px;color:var(--muted)">Suivi des intégrations et départs</div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button onclick="_onboardFlow='onboarding';renderOnboardingView()" class="btn ${_onboardFlow==='onboarding'?'p':'g'}">Onboarding</button>
+        <button onclick="_onboardFlow='offboarding';renderOnboardingView()" class="btn ${_onboardFlow==='offboarding'?'p':'g'}">Offboarding</button>
+      </div>
+    </div>
+    ${!deptStaff.length?`<div style="background:#fff;border:1px solid var(--line);border-radius:16px;padding:40px;text-align:center;color:var(--muted)">
+      <i class="fa-solid fa-${_onboardFlow==='onboarding'?'rocket':'door-open'}" style="font-size:32px;display:block;margin-bottom:12px;color:#ddd"></i>
+      ${_onboardFlow==='onboarding'?'Aucun nouveau collaborateur dans les 90 derniers jours':'Aucun départ récent (30 derniers jours)'}
+    </div>`:`<div style="display:flex;flex-direction:column;gap:14px" id="onboardList">
+      ${deptStaff.map(s=>`<div style="background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px 20px;box-shadow:var(--shadow)">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+          <div style="display:flex;align-items:center;gap:12px">
+            <div class="av" style="background:${avBg(s)};width:40px;height:40px;border-radius:10px;font-size:13px">${avInner(s)}</div>
+            <div>
+              <div style="font-size:14px;font-weight:700">${s.first_name} ${s.last_name}</div>
+              <div style="font-size:12px;color:var(--muted)">${s.role||'—'} • ${_onboardFlow==='onboarding'?'Arrivée':'Départ'} : ${_onboardFlow==='onboarding'?s.hire_date:s.departure_date}</div>
+            </div>
+          </div>
+          <div style="font-size:12px;color:var(--muted)">
+            ${_onboardFlow==='onboarding'?Math.floor((Date.now()-new Date(s.hire_date))/864e5):Math.floor((Date.now()-new Date(s.departure_date))/864e5)}j
+          </div>
+        </div>
+        <div id="tasks_${s.id}" style="color:var(--muted);font-size:12px">Chargement des tâches…</div>
+      </div>`).join('')}
+    </div>`}
+  </div>`;
+  if(deptStaff.length) _loadOnboardingTasks(deptStaff);
+}
+
+async function _loadOnboardingTasks(empList){
+  const flow=_onboardFlow;
+  const DEFAULT_TASKS={
+    onboarding:[
+      {key:'contract_signed',label:'Contrat signé',cat:'Administratif'},
+      {key:'dpae_done',label:'DPAE effectuée',cat:'Administratif'},
+      {key:'id_verified',label:'Pièce d\'identité vérifiée',cat:'Administratif'},
+      {key:'badge_created',label:'Badge créé',cat:'Accueil'},
+      {key:'uniform_given',label:'Uniforme remis',cat:'Accueil'},
+      {key:'locker_assigned',label:'Casier attribué',cat:'Accueil'},
+      {key:'tools_configured',label:'Accès outils configurés',cat:'Technique'},
+      {key:'tour_done',label:'Visite des lieux effectuée',cat:'Intégration'},
+      {key:'team_intro',label:'Présentation à l\'équipe',cat:'Intégration'},
+      {key:'first_week_review',label:'Point fin 1ère semaine',cat:'Suivi'},
+    ],
+    offboarding:[
+      {key:'resignation_letter',label:'Lettre de démission / solde tout compte',cat:'Administratif'},
+      {key:'badge_returned',label:'Badge rendu',cat:'Matériel'},
+      {key:'uniform_returned',label:'Uniforme rendu',cat:'Matériel'},
+      {key:'keys_returned',label:'Clés rendues',cat:'Matériel'},
+      {key:'access_revoked',label:'Accès systèmes révoqués',cat:'Technique'},
+      {key:'exit_interview',label:'Entretien de départ effectué',cat:'Suivi'},
+      {key:'certificate_issued',label:'Certificat de travail remis',cat:'Administratif'},
+    ],
+  };
+  const tasks=DEFAULT_TASKS[flow]||[];
+  const userEmail=(await sb.auth.getUser().catch(()=>({data:{user:{email:''}}})))?.data?.user?.email||'';
+
+  for(const s of empList){
+    const existing=await BE.listOnboardingTasks(hotelId,s.id,flow).catch(()=>[]);
+    const el=$(`tasks_${s.id}`); if(!el) continue;
+    const done=existing.filter(t=>t.done).length;
+    const total=tasks.length;
+    const pct=total?Math.round(done/total*100):0;
+    const barColor=pct>=80?'#22C55E':pct>=50?'#F59E0B':'#EF4444';
+    el.innerHTML=`
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+        <div style="flex:1;height:6px;background:#F3F4F6;border-radius:3px">
+          <div style="width:${pct}%;height:100%;background:${barColor};border-radius:3px;transition:width .4s"></div>
+        </div>
+        <span style="font-size:12px;font-weight:700;color:${barColor}">${done}/${total}</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px">
+        ${tasks.map(t=>{
+          const dbTask=existing.find(x=>x.task_key===t.key);
+          const isDone=dbTask?.done||false;
+          return `<label style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;background:${isDone?'#f0fdf4':'#fafafa'};border:1px solid ${isDone?'#bbf7d0':'var(--line)'};cursor:pointer;font-size:12px">
+            <input type="checkbox" ${isDone?'checked':''} onchange="BE.upsertOnboardingTask('${hotelId}','${s.id}','${flow}','${t.key}',${JSON.stringify(t.label)},${JSON.stringify(t.cat)},this.checked,'${userEmail}').then(()=>_loadOnboardingTasks([${JSON.stringify({id:s.id,first_name:s.first_name,last_name:s.last_name,role:s.role,hire_date:s.hire_date,departure_date:s.departure_date,active:s.active})}])).catch(e=>flash(e.message,'error'))" style="accent-color:${barColor}">
+            <span style="color:${isDone?'#16a34a':'var(--ink)'};${isDone?'text-decoration:line-through;':''}">${t.label}</span>
+          </label>`;
+        }).join('')}
+      </div>`;
+  }
 }
 
 /* Calcule et affiche la couverture 7 jours du service étages */
