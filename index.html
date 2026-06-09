@@ -2276,7 +2276,9 @@ async function openReplPanel(absentEmpId,date,absCode){
   }
 
   if(!cands.length){
-    html+=`<div class="rp-empty"><i class="fa-solid fa-user-slash"></i><div>Aucun remplaçant interne disponible<br>pour ce poste et cette date.</div></div>`;
+    html+=`<div class="rp-empty"><i class="fa-solid fa-user-slash"></i><div>Aucun remplaçant interne disponible pour ce poste et cette date.<br><br>
+      <button class="btn g" style="font-size:12px" onclick="openExternalExtraForm(null,'${absentEmpId}','${date}')"><i class="fa-solid fa-plus"></i> Ajouter un extra externe</button>
+    </div></div>`;
   } else {
     cands.forEach(c=>{
       const col=_replAvatarColor(c.last_name);
@@ -2333,43 +2335,55 @@ async function openReplPanel(absentEmpId,date,absCode){
               :`<button class="btn p" style="font-size:11.5px" onclick="_confirmReplacement(null,'${absentEmpId}','${date}','${c.candidate_id}','${c.origin_hotel_name||''}')"><i class="fa-solid fa-user-check"></i> Confirmer</button>
                 <button class="btn g" style="font-size:11.5px" onclick="_proposeReplacement('${c.candidate_id}','${c.first_name} ${c.last_name}','${absentEmpId}','${date}')"><i class="fa-regular fa-paper-plane"></i> Proposer</button>`
           }
-          <button class="btn" style="font-size:11.5px;background:#f9fafb;color:var(--muted)" onclick="this.closest('.rp-card').style.opacity='.3';this.closest('.rp-card').style.pointerEvents='none'"><i class="fa-solid fa-eye-slash"></i> Ignorer</button>
+          <button class="btn" style="font-size:11.5px;background:#f9fafb;color:var(--muted)" onclick="_ignoreReplacement('${absentEmpId}','${date}')"><i class="fa-solid fa-eye-slash"></i> Ignorer</button>
         </div>
       </div>`;
     });
   }
 
-  // Si aucun interne disponible → extras externes (priorité 4)
+  // Extras externes — toujours affichés (filtrés par département/poste si possible)
   const emp2=staff.find(s=>s.id===absentEmpId)||{};
-  const relevantExtras=extExtras.filter(e=>!e.department||e.department===emp2.department||e.role===emp2.role||!emp2.role);
-  if(!cands.length && relevantExtras.length){
-    html+=`<div style="margin:12px 0 8px;font-size:12px;font-weight:700;color:var(--ink2);display:flex;align-items:center;gap:6px">
-      <i class="fa-solid fa-address-book" style="color:var(--violet)"></i> Extras externes disponibles
+  const relevantExtras=extExtras.filter(e=>{
+    // Exclure si déjà affecté ce jour
+    if(assigned.some(a=>a.external_extra_id===e.id&&a.status!=='cancelled'))return false;
+    return true;
+  });
+  if(relevantExtras.length){
+    html+=`<div style="margin:16px 0 8px;font-size:12px;font-weight:700;color:var(--ink2);display:flex;align-items:center;gap:6px;border-top:1px solid var(--line);padding-top:14px">
+      <i class="fa-solid fa-address-book" style="color:var(--violet)"></i> Extras externes disponibles (${relevantExtras.length})
     </div>`;
-    relevantExtras.slice(0,5).forEach(e=>{
+    relevantExtras.forEach(e=>{
       const col=_replAvatarColor(e.last_name);
       const initials=((e.first_name||'?')[0]+(e.last_name||'?')[0]).toUpperCase();
+      const alreadyConfirmed=assigned.some(a=>a.external_extra_id===e.id&&['confirmed','proposed'].includes(a.status));
       html+=`<div class="rp-card">
         <div class="rc-top">
           <div style="width:38px;height:38px;border-radius:10px;background:${col};display:grid;place-items:center;color:#fff;font-weight:800;font-size:13px;flex-shrink:0">${initials}</div>
           <div style="flex:1">
-            <div style="font-weight:700;font-size:13px">${e.first_name} ${e.last_name}</div>
-            <div style="font-size:11px;color:var(--muted)">${e.role||'—'} · ${e.department||'—'}</div>
+            <div style="font-weight:700;font-size:13px">${esc(e.first_name)} ${esc(e.last_name)}</div>
+            <div style="font-size:11px;color:var(--muted)">${esc(e.role||'—')} · ${esc(e.department||'—')}</div>
           </div>
           <span style="font-size:10px;background:#fef3c7;color:#92400e;padding:3px 8px;border-radius:99px;font-weight:700">Extra ext.</span>
         </div>
-        ${e.phone?`<div style="font-size:11.5px;color:var(--muted);margin-bottom:4px"><i class="fa-solid fa-phone"></i> ${e.phone}</div>`:''}
+        ${e.phone?`<div style="font-size:11.5px;color:var(--muted);margin-bottom:4px"><i class="fa-solid fa-phone"></i> ${esc(e.phone)}</div>`:''}
         ${e.hourly_rate?`<div style="font-size:11.5px;color:var(--muted);margin-bottom:4px"><i class="fa-solid fa-coins"></i> ${e.hourly_rate}€/h</div>`:''}
-        ${!e.documents_ok?`<div style="font-size:11px;color:#dc2626;margin-top:6px"><i class="fa-solid fa-triangle-exclamation"></i> Documents manquants — vérifier avant affectation</div>`:''}
+        ${!e.documents_ok?`<div style="font-size:11px;color:#dc2626;margin-top:6px"><i class="fa-solid fa-triangle-exclamation"></i> Documents manquants</div>`:`<div style="font-size:11px;color:#16a34a"><i class="fa-solid fa-circle-check"></i> Documents OK</div>`}
         <div class="rc-actions" style="margin-top:10px">
-          <button class="btn p" style="font-size:11.5px" onclick="flash('Affectation manuelle : contactez ${esc(e.first_name)} ${esc(e.last_name)} au ${e.phone||e.email||'—'}')">
-            <i class="fa-solid fa-phone"></i> Contacter
-          </button>
-          <button class="btn g" style="font-size:11.5px" onclick="openExternalExtraForm('${e.id}')"><i class="fa-solid fa-pen"></i> Fiche</button>
+          ${alreadyConfirmed
+            ?`<span style="font-size:11.5px;color:#16a34a;font-weight:600;padding:4px"><i class="fa-solid fa-check"></i> Déjà affecté</span>`
+            :`<button class="btn p" style="font-size:11.5px" onclick="_confirmExternalExtraReplacement('${e.id}','${esc(e.first_name)} ${esc(e.last_name)}','${absentEmpId}','${date}')"><i class="fa-solid fa-user-check"></i> Choisir (PE)</button>`}
+          <button class="btn g" style="font-size:11.5px" onclick="openExternalExtraForm('${e.id}','${absentEmpId}','${date}')"><i class="fa-solid fa-pen"></i> Fiche</button>
         </div>
       </div>`;
     });
   }
+
+  // Bouton "Ajouter un extra externe" toujours accessible en bas
+  html+=`<div style="margin:14px 0 4px;text-align:center">
+    <button class="btn g" style="font-size:12px;width:100%" onclick="openExternalExtraForm(null,'${absentEmpId}','${date}')">
+      <i class="fa-solid fa-plus"></i> Ajouter un extra externe
+    </button>
+  </div>`;
 
   // Lien vers les paramètres
   html+=`<div style="text-align:center;margin-top:16px;padding-top:12px;border-top:1px solid var(--line)">
@@ -2464,6 +2478,7 @@ async function _ignoreReplacement(absentEmpId, date){
       });
     }
     flash('Absence ignorée.');
+    closeReplPanel();
     renderReplacementsView();
   }catch(e){flash('Erreur : '+e.message,'e');}
 }
@@ -2872,7 +2887,7 @@ async function _renderExtrasTab(body, fltDept){
 }
 
 /* Formulaire extra externe */
-function openExternalExtraForm(id){
+function openExternalExtraForm(id, _absentEmpId, _date){
   const DEPTS=['Réception','Étages','Petit-déjeuner','Technique','Direction','Housekeeping','Restauration','Autre'];
   const DAYS=[['monday','Lundi'],['tuesday','Mardi'],['wednesday','Mercredi'],['thursday','Jeudi'],['friday','Vendredi'],['saturday','Samedi'],['sunday','Dimanche']];
   // Charger si édition
@@ -2882,57 +2897,111 @@ function openExternalExtraForm(id){
     const v=ee||{};
     const avDays=v.available_days||[];
     $('modal').innerHTML=`
-      <div class="mhd"><h2>${id?'Modifier':'Ajouter'} un extra externe</h2><button class="mhd-close" onclick="closeModal()"><i class="fa-solid fa-xmark"></i></button></div>
-      <div style="padding:18px;display:grid;grid-template-columns:1fr 1fr;gap:12px">
-        <div class="fld"><label>Prénom</label><input id="ee_fn" value="${esc(v.first_name||'')}"></div>
-        <div class="fld"><label>Nom</label><input id="ee_ln" value="${esc(v.last_name||'')}"></div>
-        <div class="fld"><label>Téléphone</label><input id="ee_ph" value="${esc(v.phone||'')}"></div>
-        <div class="fld"><label>Email</label><input id="ee_em" value="${esc(v.email||'')}"></div>
-        <div class="fld"><label>Service</label><select id="ee_dept">${DEPTS.map(d=>`<option value="${d}" ${v.department===d?'selected':''}>${d}</option>`).join('')}</select></div>
-        <div class="fld"><label>Poste</label><input id="ee_role" value="${esc(v.role||'')}"></div>
-        <div class="fld"><label>Tarif horaire (€)</label><input type="number" id="ee_rate" value="${v.hourly_rate||''}" step="0.5"></div>
+      <div class="mhd"><h2 style="font-size:15px">${id?'Modifier':'Ajouter'} un extra externe</h2><button class="mhd-close" onclick="closeModal()"><i class="fa-solid fa-xmark"></i></button></div>
+      <div style="padding:20px 24px 24px;max-height:70vh;overflow-y:auto;display:grid;grid-template-columns:1fr 1fr;gap:14px">
+        <div class="fld"><label>Prénom *</label><input id="ee_fn" value="${esc(v.first_name||'')}" placeholder="Prénom"></div>
+        <div class="fld"><label>Nom *</label><input id="ee_ln" value="${esc(v.last_name||'')}" placeholder="Nom"></div>
+        <div class="fld"><label>Téléphone</label><input id="ee_ph" value="${esc(v.phone||'')}" placeholder="+33 6 …"></div>
+        <div class="fld"><label>Email</label><input id="ee_em" value="${esc(v.email||'')}" placeholder="email@…"></div>
+        <div class="fld"><label>Service</label><select id="ee_dept"><option value="">— Sélectionner —</option>${DEPTS.map(d=>`<option value="${d}" ${v.department===d?'selected':''}>${d}</option>`).join('')}</select></div>
+        <div class="fld"><label>Poste</label><input id="ee_role" value="${esc(v.role||'')}" placeholder="Femme de chambre…"></div>
+        <div class="fld"><label>Tarif horaire (€)</label><input type="number" id="ee_rate" value="${v.hourly_rate||''}" step="0.5" placeholder="12.50"></div>
         <div class="fld"><label>Documents OK</label><select id="ee_docs"><option value="false" ${!v.documents_ok?'selected':''}>Non</option><option value="true" ${v.documents_ok?'selected':''}>Oui</option></select></div>
         <div class="fld" style="grid-column:1/-1"><label>Disponibilités habituelles</label>
-          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px">
-            ${DAYS.map(([k,l])=>`<label style="display:flex;align-items:center;gap:4px;font-size:12.5px;cursor:pointer">
+          <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:8px">
+            ${DAYS.map(([k,l])=>`<label style="display:flex;align-items:center;gap:5px;font-size:12.5px;cursor:pointer;padding:4px 8px;border:1px solid var(--line);border-radius:7px;background:#fafafa">
               <input type="checkbox" class="eeDayCheck" value="${k}" ${avDays.includes(k)?'checked':''} style="accent-color:var(--violet)"> ${l}</label>`).join('')}
           </div>
         </div>
-        <div class="fld" style="grid-column:1/-1"><label>Notes</label><textarea id="ee_notes" rows="2" style="width:100%;resize:vertical">${esc(v.notes||'')}</textarea></div>
-        <div style="grid-column:1/-1;display:flex;gap:8px;justify-content:flex-end">
+        <div class="fld" style="grid-column:1/-1"><label>Notes</label><textarea id="ee_notes" rows="2" style="width:100%;resize:vertical;box-sizing:border-box">${esc(v.notes||'')}</textarea></div>
+        <div style="grid-column:1/-1;display:flex;gap:8px;justify-content:flex-end;padding-top:4px;border-top:1px solid var(--line)">
           ${id?`<button class="btn d" onclick="_deleteExternalExtra('${id}')"><i class="fa-solid fa-trash"></i> Supprimer</button>`:''}
-          <button class="btn p" onclick="_saveExternalExtra(${id?`'${id}'`:'null'})"><i class="fa-solid fa-floppy-disk"></i> Enregistrer</button>
+          <button class="btn g" onclick="closeModal()">Annuler</button>
+          <button class="btn p" onclick="_saveExternalExtra(${id?`'${id}'`:'null'}${_absentEmpId?`,'${_absentEmpId}','${_date}'`:''})"  ><i class="fa-solid fa-floppy-disk"></i> Enregistrer</button>
         </div>
       </div>`;
     $('modalbg').classList.add('on');
   })();
 }
 
-async function _saveExternalExtra(id){
+async function _saveExternalExtra(id, absentEmpIdAfter, dateAfter){
   const avDays=Array.from(document.querySelectorAll('.eeDayCheck:checked')).map(c=>c.value);
   const payload={
-    first_name:$('ee_fn').value.trim(),last_name:$('ee_ln').value.trim(),
-    phone:$('ee_ph').value.trim()||null,email:$('ee_em').value.trim()||null,
-    department:$('ee_dept').value,role:$('ee_role').value.trim(),
-    hourly_rate:parseFloat($('ee_rate').value)||null,
-    documents_ok:$('ee_docs').value==='true',
-    available_days:avDays,notes:$('ee_notes').value.trim()||null,
+    first_name:($('ee_fn')?.value||'').trim(),
+    last_name:($('ee_ln')?.value||'').trim(),
+    phone:($('ee_ph')?.value||'').trim()||null,
+    email:($('ee_em')?.value||'').trim()||null,
+    department:$('ee_dept')?.value||null,
+    role:($('ee_role')?.value||'').trim()||null,
+    hourly_rate:parseFloat($('ee_rate')?.value)||null,
+    documents_ok:$('ee_docs')?.value==='true',
+    available_days:avDays,
+    notes:($('ee_notes')?.value||'').trim()||null,
+    active:true,
     updated_at:new Date().toISOString()
   };
-  if(!payload.first_name||!payload.last_name){flash('Nom et prénom obligatoires.','d');return;}
+  if(!payload.first_name||!payload.last_name){flash('Nom et prénom obligatoires.','w');return;}
   try{
-    if(id){await sb.from('external_extras').update(payload).eq('id',id);}
-    else{await sb.from('external_extras').insert({hotel_id:hotelId,...payload});}
+    let savedId=id;
+    if(id){
+      const {error}=await sb.from('external_extras').update(payload).eq('id',id);
+      if(error)throw error;
+    } else {
+      const {data,error}=await sb.from('external_extras').insert({hotel_id:hotelId,...payload}).select('id').single();
+      if(error)throw error;
+      savedId=data?.id;
+    }
     closeModal();
     flash('Extra enregistré.');
-    renderReplacementsView();
-  }catch(e){flash('Erreur : '+e.message,'d');}
+    // Si appelé depuis le panel de remplacement, confirmer directement
+    if(absentEmpIdAfter&&dateAfter&&savedId){
+      await _confirmExternalExtraReplacement(savedId,`${payload.first_name} ${payload.last_name}`,absentEmpIdAfter,dateAfter);
+    } else {
+      renderReplacementsView();
+    }
+  }catch(e){flash('Erreur sauvegarde extra : '+e.message,'e');}
 }
 
 async function _deleteExternalExtra(id){
   if(!confirm('Supprimer cet extra externe ?'))return;
-  await sb.from('external_extras').delete().eq('id',id);
+  const {error}=await sb.from('external_extras').delete().eq('id',id);
+  if(error){flash('Erreur : '+error.message,'e');return;}
   closeModal(); flash('Extra supprimé.'); renderReplacementsView();
+}
+
+// Confirmer un extra externe comme remplaçant + insertion PE dans planning
+async function _confirmExternalExtraReplacement(extraId, extraName, absentEmpId, date){
+  const actorEmail=(await sb.auth.getUser()).data?.user?.email||'';
+  const absent=staff.find(s=>s.id===absentEmpId)||{};
+  try{
+    // Créer l'affectation avec référence à l'extra externe
+    const row=await BE.createReplacementAssignment(hotelId,{
+      absent_employee_id:absentEmpId,
+      external_extra_id:extraId,
+      assignment_date:date,
+      status:'confirmed',
+      assigned_by_email:actorEmail,
+      confirmed_at:new Date().toISOString(),
+      creates_planning:true
+    });
+
+    // Pour les extras externes, on ne peut pas upsert sur employee_id (null)
+    // On insère simplement une ligne de planning mémo
+    await sb.from('staff_planning').insert({
+      hotel_id:hotelId,
+      employee_id:null,
+      day:date,
+      status:'PE',
+      shift_label:`Extra ext.: ${extraName}`,
+      notes:`extra_externe:${extraId}`
+    }).then(({error:pe})=>{
+      if(pe)console.warn('[PE ext insert]',pe.message);
+    });
+
+    flash(`${extraName} confirmé(e) comme extra.`);
+    closeReplPanel();
+    renderReplacementsView();
+  }catch(e){flash('Erreur : '+e.message,'e');}
 }
 
 /* ═══════════════════════════════════════════════════════════
