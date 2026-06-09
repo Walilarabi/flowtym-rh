@@ -6496,7 +6496,7 @@ async function _syncYousign(contractId){
   const btn=document.getElementById('btnYousignSync');
   if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Synchronisation…';}
   try{
-    const {data:{session}}=await sb.auth.getSession();
+    const {data:{session}}=await BE.sb.auth.getSession();
     const resp=await fetch(`${SUPA_URL}/yousign-sync`,{
       method:'POST',
       headers:{'Authorization':`Bearer ${session?.access_token}`,'Content-Type':'application/json'},
