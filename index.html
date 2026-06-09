@@ -719,7 +719,20 @@ async function makeRealBE(){
     async deleteDpaeRecord(id){const {error}=await sb.from('dpae_records').delete().eq('id',id);must(error,'DPAE supprimer');},
     async updateHotelInfo(id,patch){const {data,error}=await sb.from('hotels').update(patch).eq('id',id).select('*').single();must(error,'Hôtel màj');return data;},
     // Generated contracts
-    async listGeneratedContracts(h){const {data,error}=await sb.from('generated_contracts').select('*,employees(first_name,last_name)').eq('hotel_id',h).order('created_at',{ascending:false});if(error&&error.code==='42P01'){console.warn('[migration-pending] generated_contracts non créée');return[];}must(error,'Contrats');return data||[];},
+    async listGeneratedContracts(h){
+      const {data,error}=await sb.from('generated_contracts').select('*').eq('hotel_id',h).order('created_at',{ascending:false});
+      if(error&&error.code==='42P01'){console.warn('[migration-pending] generated_contracts non créée');return[];}
+      must(error,'Contrats');
+      const rows=data||[];
+      // Résoudre les noms employés séparément pour éviter l'ambiguïté FK
+      const empIds=[...new Set(rows.map(r=>r.employee_id).filter(Boolean))];
+      if(empIds.length){
+        const {data:emps}=await sb.from('employees').select('id,first_name,last_name').in('id',empIds);
+        const empMap=Object.fromEntries((emps||[]).map(e=>[e.id,e]));
+        rows.forEach(r=>{r.employees=empMap[r.employee_id]||null;});
+      }
+      return rows;
+    },
     async saveGeneratedContract(h,payload){const {data,error}=await sb.from('generated_contracts').insert({hotel_id:h,...payload}).select('*').single();must(error,'Contrat créer');return data;},
     async updateGeneratedContract(id,patch){const {data,error}=await sb.from('generated_contracts').update(patch).eq('id',id).select('*').single();must(error,'Contrat màj');return data;},
     async nextContractNumber(h){const {data,error}=await sb.rpc('next_contract_number',{p_hotel_id:h});if(error){console.warn('contract_number_seq:',error.message);return'CTR-'+Date.now();}return data;},
@@ -2410,11 +2423,57 @@ async function _confirmReplacement(existingId,absentEmpId,date,candidateId,origi
       await BE.sendPortalMessage(hotelId,candidateId,notifBody).catch(()=>{});
     }
 
+    // Insérer PE dans le planning du remplaçant
+    if(candidateId){
+      await sb.from('staff_planning').upsert({
+        hotel_id:hotelId,
+        employee_id:candidateId,
+        day:date,
+        status:'PE',
+        duration:null,
+        shift_label:null
+      },{onConflict:'hotel_id,employee_id,day'}).then(({error:pe})=>{
+        if(pe)console.warn('[PE insert]',pe.message);
+      });
+    }
+
     // Badge visuel dans la grille
     _replCache.delete(absentEmpId+'|'+date);
     _markReplacementInGrid(candidateId,date);
     flash(`${emp.first_name||''} ${emp.last_name||''} confirmé(e) — notification envoyée.`);
     openReplPanel(absentEmpId,date,null);
+  }catch(e){flash('Erreur : '+e.message,'e');}
+}
+
+// Ignorer une absence (persisté en base, statut 'ignored')
+async function _ignoreReplacement(absentEmpId, date){
+  const actorEmail=(await sb.auth.getUser()).data?.user?.email||'';
+  try{
+    const {data:existing}=await sb.from('replacement_assignments')
+      .select('id').eq('hotel_id',hotelId).eq('absent_employee_id',absentEmpId).eq('assignment_date',date).maybeSingle();
+    if(existing){
+      await BE.updateReplacementAssignment(existing.id,{status:'ignored',ignored_at:new Date().toISOString(),ignored_by:actorEmail});
+    } else {
+      await BE.createReplacementAssignment(hotelId,{
+        absent_employee_id:absentEmpId,
+        assignment_date:date,
+        status:'ignored',
+        ignored_at:new Date().toISOString(),
+        ignored_by:actorEmail,
+        assigned_by_email:actorEmail
+      });
+    }
+    flash('Absence ignorée.');
+    renderReplacementsView();
+  }catch(e){flash('Erreur : '+e.message,'e');}
+}
+
+// Restaurer une absence ignorée → pending
+async function _restoreReplacement(assignId){
+  try{
+    await BE.updateReplacementAssignment(assignId,{status:'pending',ignored_at:null,ignored_by:null});
+    flash('Absence restaurée.');
+    renderReplacementsView();
   }catch(e){flash('Erreur : '+e.message,'e');}
 }
 
@@ -2560,31 +2619,39 @@ document.addEventListener('click',e=>{
    VUE PLANNING : Remplacements cockpit
 ═══════════════════════════════════════════════════════════ */
 
-let _replTab='pending'; // 'pending','proposed','confirmed','history','extras'
+let _replTab='pending'; // 'pending','proposed','confirmed','ignored','history','extras'
+let _replMonthOffset=0; // 0=mois courant, +1=mois suivant, etc.
 
 async function renderReplacementsView(){
   const gw=document.querySelector('.gridwrap');
   if(!gw)return;
 
-  const today=new Date(); today.setHours(0,0,0,0);
-  const todayStr=today.toISOString().slice(0,10);
-  const in30=new Date(today); in30.setDate(today.getDate()+30);
-  const in30Str=in30.toISOString().slice(0,10);
-
   const REPL_TABS=[
     ['pending',   'fa-clock',        'À traiter'],
     ['proposed',  'fa-paper-plane',  'Proposés'],
     ['confirmed', 'fa-check-circle', 'Confirmés'],
+    ['ignored',   'fa-eye-slash',    'Ignorés'],
     ['history',   'fa-history',      'Historique'],
     ['extras',    'fa-star',         'Extras disponibles'],
   ];
 
+  // Navigation mensuelle
+  const now=new Date();
+  const dispDate=new Date(now.getFullYear(),now.getMonth()+_replMonthOffset,1);
+  const monthLabel=dispDate.toLocaleDateString('fr-FR',{month:'long',year:'numeric'});
+
   gw.innerHTML=`<div style="padding:16px 20px;min-height:400px">
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
       ${REPL_TABS.map(([id,ic,lb])=>`
         <button class="btn ${_replTab===id?'p':'g'}" style="font-size:12px" onclick="_replTab='${id}';renderReplacementsView()">
           <i class="fa-solid ${ic}"></i> ${lb}
         </button>`).join('')}
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+      <button class="btn g" style="font-size:12px;padding:4px 10px" onclick="_replMonthOffset--;renderReplacementsView()"><i class="fa-solid fa-chevron-left"></i></button>
+      <span style="font-weight:600;font-size:13px;min-width:150px;text-align:center;text-transform:capitalize">${monthLabel}</span>
+      <button class="btn g" style="font-size:12px;padding:4px 10px" onclick="_replMonthOffset++;renderReplacementsView()"><i class="fa-solid fa-chevron-right"></i></button>
+      ${_replMonthOffset!==0?`<button class="btn g" style="font-size:11px;padding:3px 8px" onclick="_replMonthOffset=0;renderReplacementsView()">Aujourd'hui</button>`:''}
       <div class="spacer"></div>
       <select id="replFltHotel" onchange="renderReplacementsView()" style="font-size:12px">
         <option value="">Tous les hôtels</option>
@@ -2603,10 +2670,6 @@ async function renderReplacementsView(){
 
 async function _renderReplTabContent(){
   const body=$('replViewBody'); if(!body)return;
-  const today=new Date(); today.setHours(0,0,0,0);
-  const todayStr=today.toISOString().slice(0,10);
-  const in30=new Date(today); in30.setDate(today.getDate()+30);
-  const in30Str=in30.toISOString().slice(0,10);
   const fltHotel=$('replFltHotel')?.value||'';
   const fltDept=$('replFltDept')?.value||'';
 
@@ -2615,42 +2678,48 @@ async function _renderReplTabContent(){
     return;
   }
 
-  // Charger les absences du planning sur les 30 prochains jours
+  // Plage du mois sélectionné
+  const now=new Date();
+  const baseDate=new Date(now.getFullYear(),now.getMonth()+_replMonthOffset,1);
+  const monthStart=new Date(baseDate); monthStart.setHours(0,0,0,0);
+  const monthEnd=new Date(baseDate.getFullYear(),baseDate.getMonth()+1,0); monthEnd.setHours(23,59,59,999);
+  const monthStartStr=monthStart.toISOString().slice(0,10);
+  const monthEndStr=monthEnd.toISOString().slice(0,10);
+
+  // Charger les absences du mois sélectionné
   let absences=[];
   try{
-    const rows=await BE.listMonthPlanning(hotelId,today.getFullYear(),today.getMonth());
-    // + mois suivant si dans les 30j
-    const nextM=new Date(today.getFullYear(),today.getMonth()+1,1);
-    if(in30>=nextM){
-      const rows2=await BE.listMonthPlanning(hotelId,nextM.getFullYear(),nextM.getMonth());
-      rows.push(...rows2);
-    }
+    const rows=await BE.listMonthPlanning(hotelId,baseDate.getFullYear(),baseDate.getMonth());
     absences=rows.filter(r=>{
       if(!ABSENCE_CODES_REPL.has(r.status))return false;
-      if(r.day<todayStr||r.day>in30Str)return false;
+      if(r.day<monthStartStr||r.day>monthEndStr)return false;
       if(fltDept){const e=staff.find(s=>s.id===r.employee_id);if(e?.department!==fltDept)return false;}
       return true;
     });
   }catch(e){console.warn(e);}
 
-  // Charger les affectations existantes
+  // Charger les affectations existantes sur le mois
   let assignments=[];
-  try{assignments=await BE.listReplacementAssignments(hotelId,todayStr,in30Str);}catch(e){}
+  try{assignments=await BE.listReplacementAssignments(hotelId,monthStartStr,monthEndStr);}catch(e){}
 
   // Filtrer selon l'onglet
   const ACTIVE_STATUSES=['pending','proposed','accepted','confirmed'];
   if(_replTab==='pending'){
-    absences=absences.filter(a=>!assignments.some(ra=>ra.absent_employee_id===a.employee_id&&ra.assignment_date===a.day&&ACTIVE_STATUSES.includes(ra.status)));
+    absences=absences.filter(a=>!assignments.some(ra=>ra.absent_employee_id===a.employee_id&&ra.assignment_date===a.day&&[...ACTIVE_STATUSES,'ignored'].includes(ra.status)));
   } else if(_replTab==='proposed'){
     absences=absences.filter(a=>assignments.some(ra=>ra.absent_employee_id===a.employee_id&&ra.assignment_date===a.day&&ra.status==='proposed'));
   } else if(_replTab==='confirmed'){
     absences=assignments.filter(ra=>ra.status==='confirmed'||ra.status==='accepted').map(ra=>({employee_id:ra.absent_employee_id,day:ra.assignment_date,status:ra.status,_assign:ra}));
+  } else if(_replTab==='ignored'){
+    absences=assignments.filter(ra=>ra.status==='ignored').map(ra=>({employee_id:ra.absent_employee_id,day:ra.assignment_date,status:ra.status,_assign:ra}));
   } else if(_replTab==='history'){
     absences=assignments.map(ra=>({employee_id:ra.absent_employee_id,day:ra.assignment_date,status:ra.status,_assign:ra}));
   }
 
   if(!absences.length){
-    body.innerHTML=`<div style="text-align:center;padding:60px;color:var(--muted)"><i class="fa-solid ${_replTab==='pending'?'fa-check-circle':'fa-inbox'}" style="font-size:36px;color:var(--violet);display:block;margin-bottom:12px"></i>${_replTab==='pending'?'Aucune absence à pourvoir dans les 30 prochains jours':'Aucun élément'}</div>`;
+    const icons={pending:'fa-check-circle',ignored:'fa-eye-slash',proposed:'fa-paper-plane',confirmed:'fa-check-circle',history:'fa-inbox'};
+    const msgs={pending:'Aucune absence à pourvoir ce mois-ci',ignored:'Aucune absence ignorée ce mois-ci',proposed:'Aucune proposition en attente',confirmed:'Aucun remplacement confirmé',history:'Aucun historique'};
+    body.innerHTML=`<div style="text-align:center;padding:60px;color:var(--muted)"><i class="fa-solid ${icons[_replTab]||'fa-inbox'}" style="font-size:36px;color:var(--violet);display:block;margin-bottom:12px"></i>${msgs[_replTab]||'Aucun élément'}</div>`;
     return;
   }
 
@@ -2661,7 +2730,7 @@ async function _renderReplTabContent(){
       <th style="text-align:left">Service / Poste</th>
       <th>Date</th>
       <th>Motif</th>
-      ${_replTab==='pending'?'<th>Meilleur remplaçant</th>':(_replTab==='confirmed'||_replTab==='history'?'<th>Remplaçant affecté</th>':'')}
+      ${_replTab==='pending'?'<th>Meilleur remplaçant</th>':((_replTab==='confirmed'||_replTab==='history'||_replTab==='ignored')?'<th>Remplaçant affecté</th>':'')}
       <th>Actions</th>
     </tr></thead><tbody>`;
 
@@ -2713,16 +2782,17 @@ async function _renderReplTabContent(){
            </div>`
         :`<span style="color:var(--muted);font-size:11px">Aucun disponible</span>`
         }</td>`:''}
-      ${(_replTab==='confirmed'||_replTab==='history')&&assign?`<td>
-        <div style="font-size:11.5px;font-weight:600">${assign.replacement?.first_name||''} ${assign.replacement?.last_name||''}</div>
+      ${((_replTab==='confirmed'||_replTab==='history'||_replTab==='ignored')&&assign)?`<td>
+        <div style="font-size:11.5px;font-weight:600">${assign.replacement?.first_name||assign.replacement_employee_id||'—'} ${assign.replacement?.last_name||''}</div>
         <div style="font-size:10.5px;color:var(--muted)">${assign.origin_hotel?.name||'—'}</div>
       </td>`:''}
       <td style="text-align:right;padding-right:10px">
         <div style="display:flex;gap:5px;justify-content:flex-end">
-          <button class="btn p" style="font-size:11px;padding:4px 10px" onclick="openReplPanel('${a.employee_id}','${a.day}','${a.status}')">
-            <i class="fa-solid fa-users"></i> Remplaçants
-          </button>
-          ${assign&&assign.status==='active'?`<button class="btn d" style="font-size:11px;padding:4px 8px" onclick="_cancelAssignment('${assign.id}','${a.employee_id}','${a.day}')"><i class="fa-solid fa-xmark"></i></button>`:''}
+          ${_replTab==='ignored'&&assign
+            ?`<button class="btn g" style="font-size:11px;padding:4px 10px" onclick="_restoreReplacement('${assign.id}')"><i class="fa-solid fa-rotate-left"></i> Restaurer</button>`
+            :`<button class="btn p" style="font-size:11px;padding:4px 10px" onclick="openReplPanel('${a.employee_id}','${a.day}','${a.status}')"><i class="fa-solid fa-users"></i> Remplaçants</button>
+             ${_replTab==='pending'?`<button class="btn g" style="font-size:11px;padding:4px 8px" title="Ignorer" onclick="_ignoreReplacement('${a.employee_id}','${a.day}')"><i class="fa-solid fa-eye-slash"></i></button>`:''}
+             ${assign&&assign.status==='active'?`<button class="btn d" style="font-size:11px;padding:4px 8px" onclick="_cancelAssignment('${assign.id}','${a.employee_id}','${a.day}')"><i class="fa-solid fa-xmark"></i></button>`:''}`}
         </div>
       </td>
     </tr>`;
