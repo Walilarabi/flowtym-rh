@@ -6462,8 +6462,8 @@ async function renderContractsHistory(){
       }
       // Priorité 4 : statut métier
       if(c.status==='draft') return btnOff('fa-pen','Finaliser','Reprise de brouillon à venir');
-      if(c.status==='generated'||c.status==='preview_ok') return btnOff('fa-paper-plane','Envoyer','Envoi depuis l\'onglet Générer');
-      if(c.status==='sent_signature'||c.status==='pending_signature') return btnOff('fa-rotate','Relancer','Relance manuelle à venir');
+      if(c.status==='generated'||c.status==='preview_ok') return btnOn('fa-paper-plane','Envoyer',"_sendFromHistory('"+c.id+"')",'#2563eb');
+      if(c.status==='sent_signature'||c.status==='pending_signature') return btnOn('fa-rotate','Relancer',"_relancerFromHistory('"+c.id+"')",'#d97706');
       if(c.status==='cancelled'||c.status==='refused'||c.status==='error_signature') return btnOff('fa-rotate-left','Régénérer','Régénération à venir');
       return'<span style="font-size:11px;color:var(--muted)">—</span>';
     };
@@ -6683,6 +6683,58 @@ async function _renewContract(contractId){
     contractsSubTab='generate';
     renderContracts();
   }catch(e){flash('Erreur renouvellement : '+e.message,'e');}
+}
+
+async function _sendFromHistory(contractId){
+  try{
+    const c=await BE.getGeneratedContract(contractId);
+    if(!c){flash('Contrat introuvable.','e');return;}
+    const emp=staff.find(s=>s.id===c.employee_id);
+    if(!emp){flash('Collaborateur introuvable.','e');return;}
+    const defaultEmail=c.signer_email||emp.email||'';
+    const email=window.prompt(`Adresse email du salarié ${emp.first_name} ${emp.last_name} pour la signature :`,defaultEmail);
+    if(email===null)return;
+    const trimmedEmail=email.trim();
+    if(!trimmedEmail){flash('Email requis.','e');return;}
+    await BE.updateGeneratedContract(contractId,{status:'sent_signature',sent_at:new Date().toISOString(),signer_email:trimmedEmail,signer_name:emp.last_name,signer_first_name:emp.first_name});
+    const {data:{session}}=await BE.sb.auth.getSession();
+    const resp=await fetch(`${SUPABASE_FUNCTIONS_URL}/contract-send-signature`,{
+      method:'POST',
+      headers:{'Authorization':`Bearer ${session?.access_token}`,'Content-Type':'application/json'},
+      body:JSON.stringify({contract_id:contractId,employee_id:c.employee_id,hotel_id:hotelId,signer_first_name:emp.first_name,signer_name:emp.last_name,signer_email:trimmedEmail}),
+    });
+    const result=await resp.json();
+    if(!resp.ok||result.error) throw new Error(result.error||'Erreur envoi signature');
+    flash(`Contrat ${c.contract_number||contractId} envoyé pour signature${result.email_sent?'':' ⚠️ Email non envoyé — vérifiez RESEND_API_KEY'}`);
+    BE.logContractAudit(hotelId,contractId,c.employee_id,'sent_signature',null,{signer_email:trimmedEmail}).catch(()=>{});
+    renderContractsHistory();
+  }catch(e){flash('Erreur envoi : '+e.message,'e');}
+}
+
+async function _relancerFromHistory(contractId){
+  try{
+    const c=await BE.getGeneratedContract(contractId);
+    if(!c){flash('Contrat introuvable.','e');return;}
+    const emp=staff.find(s=>s.id===c.employee_id);
+    if(!emp){flash('Collaborateur introuvable.','e');return;}
+    const defaultEmail=c.signer_email||emp.email||'';
+    const email=window.prompt(`Relancer la signature — email du salarié ${emp.first_name} ${emp.last_name} :`,defaultEmail);
+    if(email===null)return;
+    const trimmedEmail=email.trim();
+    if(!trimmedEmail){flash('Email requis.','e');return;}
+    await BE.updateGeneratedContract(contractId,{sent_at:new Date().toISOString(),signer_email:trimmedEmail});
+    const {data:{session}}=await BE.sb.auth.getSession();
+    const resp=await fetch(`${SUPABASE_FUNCTIONS_URL}/contract-send-signature`,{
+      method:'POST',
+      headers:{'Authorization':`Bearer ${session?.access_token}`,'Content-Type':'application/json'},
+      body:JSON.stringify({contract_id:contractId,employee_id:c.employee_id,hotel_id:hotelId,signer_first_name:emp.first_name,signer_name:emp.last_name,signer_email:trimmedEmail}),
+    });
+    const result=await resp.json();
+    if(!resp.ok||result.error) throw new Error(result.error||'Erreur relance signature');
+    flash(`Relance envoyée pour le contrat ${c.contract_number||contractId}${result.email_sent?'':' ⚠️ Email non envoyé — vérifiez RESEND_API_KEY'}`);
+    BE.logContractAudit(hotelId,contractId,c.employee_id,'resent_signature',null,{signer_email:trimmedEmail}).catch(()=>{});
+    renderContractsHistory();
+  }catch(e){flash('Erreur relance : '+e.message,'e');}
 }
 
 async function _syncYousign(contractId){
