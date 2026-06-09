@@ -869,6 +869,39 @@ async function makeRealBE(){
       if(error){console.warn('listStaffPlanningForDate:',error.message);return null;}
       return data||null;
     },
+    async upsertPlanningRow(h,row){
+      const {error}=await sb.from('staff_planning').upsert({hotel_id:h,...row},{onConflict:'hotel_id,employee_id,day'});
+      if(error)console.warn('upsertPlanningRow:',error.message);
+    },
+    async findReplacementAssignment(h,absentEmpId,date){
+      const {data,error}=await sb.from('replacement_assignments').select('id').eq('hotel_id',h).eq('absent_employee_id',absentEmpId).eq('assignment_date',date).maybeSingle();
+      if(error){console.warn('findReplacementAssignment:',error.message);return null;}
+      return data||null;
+    },
+    async findActiveReplacementAssignment(h,absentEmpId,candidateId,date){
+      const {data,error}=await sb.from('replacement_assignments').select('id').eq('hotel_id',h).eq('absent_employee_id',absentEmpId).eq('replacement_employee_id',candidateId).eq('assignment_date',date).not('status','in','("cancelled","refused")').maybeSingle();
+      if(error){console.warn('findActiveReplacementAssignment:',error.message);return null;}
+      return data||null;
+    },
+    async getReplacementAssignment(id){
+      const {data,error}=await sb.from('replacement_assignments').select('replacement_employee_id').eq('id',id).maybeSingle();
+      if(error){console.warn('getReplacementAssignment:',error.message);return null;}
+      return data||null;
+    },
+    async listExtraProfiles(h){
+      const {data,error}=await sb.from('employee_extra_profiles').select('*,employee:employee_id(first_name,last_name,role,department,phone,email)').eq('hotel_id',h).eq('is_extra',true);
+      if(error){console.warn('listExtraProfiles:',error.message);return[];}
+      return data||[];
+    },
+    async getExtraProfile(empId){
+      const {data,error}=await sb.from('employee_extra_profiles').select('*').eq('employee_id',empId).maybeSingle();
+      if(error){console.warn('getExtraProfile:',error.message);return null;}
+      return data||null;
+    },
+    async saveExtraProfile(payload){
+      const {error}=await sb.from('employee_extra_profiles').upsert(payload,{onConflict:'employee_id'});
+      must(error,'Profil extra');
+    },
     async createReplacementAssignment(h,payload){
       const {data,error}=await sb.from('replacement_assignments').insert({hotel_id:h,...payload}).select('*').single();
       must(error,'Création affectation');return data;
@@ -2559,16 +2592,7 @@ async function _confirmReplacement(existingId,absentEmpId,date,candidateId,origi
 
     // Insérer PE dans le planning du remplaçant
     if(candidateId){
-      await sb.from('staff_planning').upsert({
-        hotel_id:hotelId,
-        employee_id:candidateId,
-        day:date,
-        status:'PE',
-        duration:null,
-        shift_label:null
-      },{onConflict:'hotel_id,employee_id,day'}).then(({error:pe})=>{
-        if(pe)console.warn('[PE insert]',pe.message);
-      });
+      await BE.upsertPlanningRow(hotelId,{employee_id:candidateId,day:date,status:'PE',duration:null,shift_label:null});
     }
 
     // Badge visuel dans la grille
@@ -2583,8 +2607,7 @@ async function _confirmReplacement(existingId,absentEmpId,date,candidateId,origi
 async function _ignoreReplacement(absentEmpId, date){
   const actorEmail=(await sb.auth.getUser()).data?.user?.email||'';
   try{
-    const {data:existing}=await sb.from('replacement_assignments')
-      .select('id').eq('hotel_id',hotelId).eq('absent_employee_id',absentEmpId).eq('assignment_date',date).maybeSingle();
+    const existing=await BE.findReplacementAssignment(hotelId,absentEmpId,date);
     if(existing){
       await BE.updateReplacementAssignment(existing.id,{status:'ignored',ignored_at:new Date().toISOString(),ignored_by:actorEmail});
     } else {
@@ -2620,10 +2643,7 @@ async function _proposeReplacement(candidateId,candidateName,absentEmpId,date){
 
   try{
     // Créer ou mettre à jour l'affectation en statut 'proposed'
-    const {data:existing}=await sb.from('replacement_assignments')
-      .select('id').eq('hotel_id',hotelId).eq('absent_employee_id',absentEmpId)
-      .eq('replacement_employee_id',candidateId).eq('assignment_date',date)
-      .not('status','in','("cancelled","refused")').maybeSingle();
+    const existing=await BE.findActiveReplacementAssignment(hotelId,absentEmpId,candidateId,date);
 
     let row;
     if(existing){
@@ -2697,7 +2717,7 @@ async function _cancelAssignment(id,absentEmpId,date){
   const actorEmail=(await sb.auth.getUser()).data?.user?.email||'';
   try{
     // Charger l'affectation pour notifier le remplaçant
-    const {data:assign}=await sb.from('replacement_assignments').select('replacement_employee_id').eq('id',id).maybeSingle();
+    const assign=await BE.getReplacementAssignment(id);
     await BE.cancelReplacementAssignment(id,actorEmail);
     if(assign?.replacement_employee_id){
       const emp=staff.find(s=>s.id===assign.replacement_employee_id)||{};
@@ -2940,16 +2960,14 @@ async function _renderExtrasTab(body, fltDept){
   // Charger extras externes + salariés avec profil extra
   let extExtras=[];
   try{
-    const {data}=await sb.from('external_extras').select('*').eq('hotel_id',hotelId).eq('active',true).order('last_name');
-    if(fltDept&&data) extExtras=(data||[]).filter(e=>e.department===fltDept);
-    else extExtras=data||[];
+    const data=await BE.listExternalExtras(hotelId);
+    extExtras=fltDept?data.filter(e=>e.department===fltDept):data;
   }catch(e){console.warn(e);}
 
   let intExtras=[];
   try{
-    const {data}=await sb.from('employee_extra_profiles').select('*,employee:employee_id(first_name,last_name,role,department,phone,email)').eq('hotel_id',hotelId).eq('is_extra',true);
-    intExtras=data||[];
-    if(fltDept) intExtras=intExtras.filter(e=>e.employee?.department===fltDept);
+    const data=await BE.listExtraProfiles(hotelId);
+    intExtras=fltDept?data.filter(e=>e.employee?.department===fltDept):data;
   }catch(e){console.warn(e);}
 
   const DAYS_FR={monday:'Lun',tuesday:'Mar',wednesday:'Mer',thursday:'Jeu',friday:'Ven',saturday:'Sam',sunday:'Dim'};
@@ -4772,7 +4790,7 @@ function renderPersonnel(){
 async function _openExtraProfile(empId){
   const emp=staff.find(s=>s.id===empId)||{};
   let profile=null;
-  try{const {data}=await sb.from('employee_extra_profiles').select('*').eq('employee_id',empId).maybeSingle();profile=data;}catch(e){}
+  try{profile=await BE.getExtraProfile(empId);}catch(e){}
   const p=profile||{};
   const DAYS=[['monday','Lundi'],['tuesday','Mardi'],['wednesday','Mercredi'],['thursday','Jeudi'],['friday','Vendredi'],['saturday','Samedi'],['sunday','Dimanche']];
   const avDays=p.available_days||[];
@@ -4818,7 +4836,7 @@ async function _saveExtraProfile(empId){
     notes:$('epNotes').value.trim()||null,
     updated_at:new Date().toISOString()
   };
-  await sb.from('employee_extra_profiles').upsert(payload,{onConflict:'employee_id'});
+  await BE.saveExtraProfile(payload);
   closeModal(); flash('Profil extra enregistré.');
 }
 
