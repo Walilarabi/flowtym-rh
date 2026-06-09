@@ -2419,7 +2419,7 @@ async function openReplPanel(absentEmpId,date,absCode){
       const daysWorked=constraints.days_worked||0;
       const weeksInfo=daysWorked>0?`<span style="font-size:10.5px;color:${daysWorked>=5?'#d97706':'var(--muted)'};margin-left:6px"><i class="fa-solid fa-calendar-week"></i> ${daysWorked}j/sem.</span>`:'';
 
-      html+=`<div class="rp-card${isBlocked?' style="opacity:.75"':''}" id="rc_${c.candidate_id}">
+      html+=`<div class="rp-card" style="${isBlocked?'opacity:.75':''}" id="rc_${c.candidate_id}">
         <div class="rc-top">
           <div style="width:38px;height:38px;border-radius:10px;background:${col};display:grid;place-items:center;color:#fff;font-weight:800;font-size:13px;flex-shrink:0">${initials}</div>
           <div style="flex:1">
@@ -2690,31 +2690,6 @@ function _markReplacementInGrid(empId,date){
     m.textContent='R';
     td.appendChild(m);
   }
-}
-
-async function _proposeReplacement(candidateId,candidateName,absentEmpId,date){
-  const actorEmail=(await sb.auth.getUser()).data?.user?.email||'';
-  const emp=staff.find(s=>s.id===candidateId)||{};
-  // Enregistre la suggestion en DB
-  await sb.from('replacement_suggestions').upsert({
-    hotel_id:hotelId,
-    absent_employee_id:absentEmpId,
-    absent_date:date,
-    candidate_employee_id:candidateId,
-    candidate_hotel_id:hotels.find(h=>h.name===emp.hotel_name)?.id||hotelId,
-    status:'proposed',
-    computed_at:new Date().toISOString()
-  },{onConflict:'hotel_id,absent_employee_id,absent_date,candidate_employee_id'}).catch(()=>{});
-  // Notification portail si activé
-  const settings=_replSettings||{};
-  if(settings.notify_employee && emp.id){
-    const absent=staff.find(s=>s.id===absentEmpId)||{};
-    const msg=`Bonjour ${emp.first_name||''}, vous êtes proposé(e) comme remplaçant(e) de ${absent.first_name||''} ${absent.last_name||''} le ${new Date(date+'T00:00').toLocaleDateString('fr-FR')}. Veuillez confirmer votre disponibilité.`;
-    await BE.sendPortalMessage(hotelId,candidateId,msg).catch(()=>{});
-  }
-  flash(`Proposition envoyée à ${candidateName}.`);
-  const card=document.getElementById('rc_'+candidateId);
-  if(card){card.querySelector('.rc-actions').innerHTML='<span style="font-size:11.5px;color:var(--violet);font-weight:600"><i class="fa-solid fa-paper-plane"></i> Proposition envoyée</span>';}
 }
 
 async function _cancelAssignment(id,absentEmpId,date){
@@ -3144,19 +3119,6 @@ async function _confirmExternalExtraReplacement(extraId, extraName, absentEmpId,
       assigned_by_email:actorEmail,
       confirmed_at:new Date().toISOString(),
       creates_planning:true
-    });
-
-    // Pour les extras externes, on ne peut pas upsert sur employee_id (null)
-    // On insère simplement une ligne de planning mémo
-    await sb.from('staff_planning').insert({
-      hotel_id:hotelId,
-      employee_id:null,
-      day:date,
-      status:'PE',
-      shift_label:`Extra ext.: ${extraName}`,
-      notes:`extra_externe:${extraId}`
-    }).then(({error:pe})=>{
-      if(pe)console.warn('[PE ext insert]',pe.message);
     });
 
     flash(`${extraName} confirmé(e) comme extra.`);
