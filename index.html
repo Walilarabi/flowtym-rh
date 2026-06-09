@@ -6402,6 +6402,12 @@ async function renderContractsHistory(){
     };
 
     el.innerHTML=`
+      <!-- Sync YouSign -->
+      <div style="display:flex;justify-content:flex-end;margin-bottom:14px">
+        <button id="btnYousignSync" onclick="_syncYousign()" class="btn g" style="font-size:12.5px;gap:7px">
+          <i class="fa-solid fa-rotate"></i> Synchroniser avec YouSign
+        </button>
+      </div>
       <!-- KPIs contrats -->
       <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:18px">
         ${[
@@ -6484,6 +6490,32 @@ async function renderContractsHistory(){
       renderContractsHistory();
     });
   }catch(e){el.innerHTML=`<div style="padding:20px;color:var(--red)">Erreur : ${e.message}</div>`;}
+}
+
+async function _syncYousign(contractId){
+  const btn=document.getElementById('btnYousignSync');
+  if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Synchronisation…';}
+  try{
+    const {data:{session}}=await sb.auth.getSession();
+    const resp=await fetch(`${SUPA_URL}/yousign-sync`,{
+      method:'POST',
+      headers:{'Authorization':`Bearer ${session?.access_token}`,'Content-Type':'application/json'},
+      body:JSON.stringify(contractId?{contract_id:contractId,hotel_id:hotelId}:{hotel_id:hotelId}),
+    });
+    const result=await resp.json();
+    if(!resp.ok) throw new Error(result.error||'Erreur sync');
+    if(result.synced===0){
+      flash(`Aucun changement — ${result.total_checked} contrat${result.total_checked!==1?'s':''} vérifiés`,'info');
+    } else {
+      const signed=result.results.filter(r=>r.new_status==='signed').length;
+      flash(`✅ ${result.synced} contrat${result.synced!==1?'s':''} mis à jour${signed?` (${signed} signé${signed!==1?'s':''})`:''}`);;
+      renderContractsHistory();
+    }
+  }catch(e){
+    flash('Erreur synchronisation : '+e.message,'error');
+  }finally{
+    if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-rotate"></i> Synchroniser avec YouSign';}
+  }
 }
 
 function _previewContractHtml(id,html){
