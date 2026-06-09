@@ -1,0 +1,4 @@
+-- Migration 38 : Edge Function contract-pdf-url
+-- Génère des signed URLs courtes (15 min) à la demande avec validation sécurité.
+-- Le frontend ne stocke plus aucune URL en base — source de vérité = signed_pdf_storage_path.
+-- Déployée via Supabase MCP (Edge Function contract-pdf-url v1)

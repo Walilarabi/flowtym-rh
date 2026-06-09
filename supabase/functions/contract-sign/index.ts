@@ -460,54 +460,64 @@ Deno.serve(async (req) => {
     const hashBuf = await crypto.subtle.digest('SHA-256', pdfBytes);
     const pdfHash = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2,'0')).join('');
 
-    // Stocker le PDF dans Supabase Storage
+    // Stocker le PDF dans Supabase Storage (bucket privé — source de vérité = storagePath)
     const storagePath = `contracts/signed/${sess.hotel_id}/${sess.employee_id ?? sess.id}/${sess.contract_id}_${Date.now()}.pdf`;
-    let signedPdfUrl: string | null = null;
+    let actualBucket = 'contracts';
 
     const { error: upErr } = await sb.storage.from('contracts')
       .upload(storagePath, pdfBytes, { contentType: 'application/pdf', upsert: true });
 
-    if (!upErr) {
-      const { data: urlData } = sb.storage.from('contracts').getPublicUrl(storagePath);
-      signedPdfUrl = urlData?.publicUrl ?? null;
-    } else {
-      // Fallback portal-documents
+    if (upErr) {
+      // Fallback portal-documents si bucket contracts inaccessible
+      actualBucket = 'portal-documents';
       const { error: upErr2 } = await sb.storage.from('portal-documents')
         .upload(storagePath, pdfBytes, { contentType: 'application/pdf', upsert: true });
-      if (!upErr2) {
-        const { data: urlData2 } = sb.storage.from('portal-documents').getPublicUrl(storagePath);
-        signedPdfUrl = urlData2?.publicUrl ?? null;
+      if (upErr2) {
+        console.error('[contract-sign] upload failed on both buckets:', upErr.message, upErr2.message);
       }
     }
 
-    // Mettre à jour la session
+    // URL courte (15 min) pour le lien de téléchargement immédiat du signataire uniquement.
+    // Ne jamais stocker cette URL en base — la source de vérité est signed_pdf_storage_path.
+    const { data: signerUrlData } = await sb.storage
+      .from(actualBucket)
+      .createSignedUrl(storagePath, 900);
+    const signerDownloadUrl = signerUrlData?.signedUrl ?? null;
+
+    // Mettre à jour la session (pas d'URL stockée — path seulement)
     await sb.from('signature_sessions').update({
       signed_at: now, ip_address: ip, user_agent: ua,
-      pdf_hash: pdfHash, signed_pdf_url: signedPdfUrl, signed_pdf_path: storagePath,
+      pdf_hash: pdfHash, signed_pdf_path: storagePath,
     }).eq('token', token);
 
-    // Mettre à jour le contrat
+    // Mettre à jour le contrat (signed_pdf_url = null — accès via contract-pdf-url Edge Function)
     await sb.from('generated_contracts').update({
       status: 'signed',
       yousign_status: null,
       signed_at: now,
-      signed_pdf_url: signedPdfUrl,
+      signed_pdf_url: null,
       signed_pdf_storage_path: storagePath,
       signer_name: sess.signer_name,
       signer_email: sess.signer_email,
       signature_provider: 'native',
     }).eq('id', sess.contract_id);
 
-    // Archiver dans coffre-fort salarié
-    if (signedPdfUrl && sess.employee_id) {
+    // Archiver dans coffre-fort salarié (file_path = chemin Storage, pas d'URL stockée)
+    if (sess.employee_id) {
       const { data: contract } = await sb.from('generated_contracts')
         .select('contract_number,contract_type').eq('id', sess.contract_id).single().catch(() => ({ data: null }));
       await sb.from('employee_documents').insert({
-        hotel_id: sess.hotel_id, employee_id: sess.employee_id,
-        doc_type: 'contrat_signe',
-        label: `Contrat ${contract?.contract_type ?? ''} ${contract?.contract_number ?? ''} — signé`.trim(),
-        storage_path: storagePath, signature_status: 'signed', signed_at: now,
-      }).then(null, () => {});
+        hotel_id:         sess.hotel_id,
+        employee_id:      sess.employee_id,
+        doc_type:         'contrat_signe',
+        doc_type_code:    'contrat_signe',
+        status:           'provided',
+        file_path:        storagePath,
+        file_url:         null,
+        issued_at:        now.slice(0, 10),
+        signature_status: 'signed',
+        notes:            `Contrat ${contract?.contract_type ?? ''} ${contract?.contract_number ?? ''} — signé électroniquement`.trim(),
+      }).then(null, (e) => console.warn('[contract-sign] employee_documents insert failed:', e?.message));
     }
 
     // Message portail salarié
@@ -523,11 +533,12 @@ Deno.serve(async (req) => {
     await sb.from('contract_audit_logs').insert({
       hotel_id: sess.hotel_id, contract_id: sess.contract_id, employee_id: sess.employee_id ?? null,
       action: 'signed', actor_email: sess.signer_email,
-      details: { ip, ua, pdf_hash: pdfHash, signed_pdf_url: signedPdfUrl, method: 'native_canvas_otp' },
+      details: { ip, ua, pdf_hash: pdfHash, storage_path: storagePath, bucket: actualBucket, method: 'native_canvas_otp' },
     }).then(null, () => {});
 
-    console.log('[contract-sign] signed:', sess.contract_id, 'by:', sess.signer_email, 'ip:', ip);
-    return jsonResp({ success: true, signed_at: now, signed_pdf_url: signedPdfUrl });
+    console.log('[contract-sign] signed:', sess.contract_id, 'by:', sess.signer_email, 'bucket:', actualBucket);
+    // signerDownloadUrl : URL courte 15 min pour téléchargement immédiat par le signataire
+    return jsonResp({ success: true, signed_at: now, signed_pdf_url: signerDownloadUrl });
   }
 
   return jsonResp({ error: 'Action inconnue' }, 400);

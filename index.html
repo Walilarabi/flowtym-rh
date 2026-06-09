@@ -913,12 +913,17 @@ async function makeRealBE(){
       const {data,error}=await sb.from('generated_contracts').select('*').eq('employee_id',empId).order('created_at',{ascending:false});
       if(error&&error.code==='42P01')return[];if(error)return[];return data||[];
     },
-    async getSignedContractPdfUrl(storagePath){
-      if(!storagePath) return null;
-      const bucket=storagePath.startsWith('contracts/')?'contracts':'portal-documents';
-      const {data,error}=await sb.storage.from(bucket).createSignedUrl(storagePath,3600);
-      if(error){console.warn('getSignedContractPdfUrl:',error.message);return null;}
-      return data?.signedUrl||null;
+    async getSignedContractPdfUrl(contractId){
+      if(!contractId) return null;
+      const {data:{session}}=await sb.auth.getSession();
+      const resp=await fetch(`${SUPABASE_FUNCTIONS_URL}/contract-pdf-url`,{
+        method:'POST',
+        headers:{'Authorization':`Bearer ${session?.access_token}`,'Content-Type':'application/json'},
+        body:JSON.stringify({contract_id:contractId}),
+      });
+      if(!resp.ok){const e=await resp.json().catch(()=>({}));throw new Error(e.error||'PDF inaccessible');}
+      const d=await resp.json();
+      return d.url||null;
     },
     async getHrMonthlyCost(h){
       const {data,error}=await sb.from('v_hr_monthly_cost').select('*').eq('hotel_id',h).maybeSingle();
@@ -6444,7 +6449,7 @@ async function renderContractsHistory(){
               const e=c.employees;
               const empName=e?e.first_name+' '+e.last_name:'—';
               const searchStr=[c.contract_number,empName,c.department,c.job_title,c.contract_type,c.signer_email,c.signer_name].filter(Boolean).join(' ');
-              const hasPdf=!!c.signed_pdf_url;
+              const hasPdf=!!(c.signed_pdf_storage_path||c.signed_pdf_url);
               return`<tr data-cid="${c.id}" data-search="${searchStr.replace(/"/g,'&quot;')}">
                 <td style="font-weight:700;font-size:12px;white-space:nowrap">${c.contract_number||'—'}</td>
                 <td style="font-weight:600">${empName}</td>
@@ -6458,8 +6463,8 @@ async function renderContractsHistory(){
                 <td style="text-align:center">
                   ${hasPdf
                     ? `<div style="display:flex;align-items:center;justify-content:center;gap:6px">
-                        <a href="${c.signed_pdf_url}" target="_blank" title="Ouvrir PDF" style="color:#16a34a;font-size:16px"><i class="fa-solid fa-file-pdf"></i></a>
-                        <a href="${c.signed_pdf_url}" download title="Télécharger" style="color:var(--ink2);font-size:13px"><i class="fa-solid fa-download"></i></a>
+                        <button onclick="_openSignedPdf('${c.id}',false)" title="Ouvrir PDF" style="background:none;border:none;cursor:pointer;color:#16a34a;font-size:16px;padding:0"><i class="fa-solid fa-file-pdf"></i></button>
+                        <button onclick="_openSignedPdf('${c.id}',true)" title="Télécharger" style="background:none;border:none;cursor:pointer;color:var(--ink2);font-size:13px;padding:0"><i class="fa-solid fa-download"></i></button>
                       </div>`
                     : `<i class="fa-regular fa-file-pdf" style="color:#d1d5db;font-size:16px" title="Pas encore signé"></i>`}
                 </td>
@@ -6484,6 +6489,18 @@ async function renderContractsHistory(){
       renderContractsHistory();
     });
   }catch(e){el.innerHTML=`<div style="padding:20px;color:var(--red)">Erreur : ${e.message}</div>`;}
+}
+
+async function _openSignedPdf(contractId, download=false){
+  try{
+    const url=await BE.getSignedContractPdfUrl(contractId);
+    if(!url){flash('PDF non disponible pour ce contrat','w');return;}
+    if(download){
+      const a=document.createElement('a');a.href=url;a.download='contrat_signe.pdf';a.target='_blank';document.body.appendChild(a);a.click();document.body.removeChild(a);
+    } else {
+      window.open(url,'_blank');
+    }
+  }catch(e){flash('Erreur : '+e.message,'e');}
 }
 
 async function _refreshContractStatus(contractId){
@@ -6627,7 +6644,7 @@ async function renderContractsSignes(){
               const e=c.employees;
               const empName=e?e.first_name+' '+e.last_name:'—';
               const searchStr=[c.contract_number,empName,c.department,c.job_title,c.contract_type,c.signer_email].filter(Boolean).join(' ');
-              const hasPdf=!!c.signed_pdf_url;
+              const hasPdf=!!(c.signed_pdf_storage_path||c.signed_pdf_url);
               return`<tr data-cid="${c.id}" data-search="${searchStr.replace(/"/g,'&quot;')}" data-dept="${c.department||''}" data-type="${c.contract_type||''}" data-status="${c.status||''}">
                 <td style="font-weight:700;font-size:12px">${c.contract_number||'—'}</td>
                 <td style="font-weight:600">${empName}</td>
@@ -6639,8 +6656,8 @@ async function renderContractsSignes(){
                 <td style="text-align:center">
                   ${hasPdf
                     ? `<div style="display:flex;align-items:center;justify-content:center;gap:8px">
-                        <a href="${c.signed_pdf_url}" target="_blank" title="Visualiser" style="color:#16a34a;font-size:18px"><i class="fa-solid fa-file-pdf"></i></a>
-                        <a href="${c.signed_pdf_url}" download title="Télécharger" style="color:var(--ink2)"><i class="fa-solid fa-download"></i></a>
+                        <button onclick="_openSignedPdf('${c.id}',false)" title="Visualiser" style="background:none;border:none;cursor:pointer;color:#16a34a;font-size:18px;padding:0"><i class="fa-solid fa-file-pdf"></i></button>
+                        <button onclick="_openSignedPdf('${c.id}',true)" title="Télécharger" style="background:none;border:none;cursor:pointer;color:var(--ink2);padding:0"><i class="fa-solid fa-download"></i></button>
                       </div>`
                     : `<span style="color:#d1d5db;font-size:12px">—</span>`}
                 </td>
@@ -12133,8 +12150,8 @@ async function _loadFicheContracts(emp){
         <td style="padding:6px;color:#16a34a">${fmt(c.signed_at)}</td>
         <td style="padding:6px">${badge(c.status)}</td>
         <td style="padding:6px;text-align:center">
-          ${c.signed_pdf_url
-            ? `<a href="${c.signed_pdf_url}" target="_blank" style="color:#16a34a;font-size:14px"><i class="fa-solid fa-file-pdf"></i></a>`
+          ${(c.signed_pdf_storage_path||c.signed_pdf_url)
+            ? `<button onclick="_openSignedPdf('${c.id}',false)" title="Ouvrir PDF signé" style="background:none;border:none;cursor:pointer;color:#16a34a;font-size:14px;padding:0"><i class="fa-solid fa-file-pdf"></i></button>`
             : `<i class="fa-regular fa-file-pdf" style="color:#d1d5db;font-size:14px"></i>`}
         </td>
       </tr>`).join('')}
@@ -12146,7 +12163,7 @@ async function _renderPortalContractsCoffre(employeeId, targetEl){
   if(!targetEl) return;
   const fmt=d=>d?new Date(d).toLocaleDateString('fr-FR'):'—';
   const contracts=await BE.listContractsByEmployee(employeeId).catch(()=>[]);
-  const signed=contracts.filter(c=>c.signed_pdf_url);
+  const signed=contracts.filter(c=>c.signed_pdf_storage_path||c.signed_pdf_url);
   if(!signed.length){targetEl.innerHTML=`<div style="color:var(--muted);font-size:13px;text-align:center;padding:16px 0">Aucun contrat signé disponible</div>`;return;}
   targetEl.innerHTML=`<div style="display:flex;flex-direction:column;gap:10px">
     ${signed.map(c=>{
@@ -12158,8 +12175,8 @@ async function _renderPortalContractsCoffre(employeeId, targetEl){
           <div style="font-size:11.5px;color:var(--muted)">Signé le ${fmt(c.signed_at)}${sz?' · '+sz:''}</div>
         </div>
         <div style="display:flex;gap:8px">
-          <a href="${c.signed_pdf_url}" target="_blank" class="btn g" style="padding:5px 10px;font-size:12px" title="Visualiser"><i class="fa-solid fa-eye"></i></a>
-          <a href="${c.signed_pdf_url}" download class="btn g" style="padding:5px 10px;font-size:12px" title="Télécharger"><i class="fa-solid fa-download"></i></a>
+          <button onclick="_openSignedPdf('${c.id}',false)" class="btn g" style="padding:5px 10px;font-size:12px" title="Visualiser"><i class="fa-solid fa-eye"></i></button>
+          <button onclick="_openSignedPdf('${c.id}',true)" class="btn g" style="padding:5px 10px;font-size:12px" title="Télécharger"><i class="fa-solid fa-download"></i></button>
         </div>
       </div>`;
     }).join('')}
