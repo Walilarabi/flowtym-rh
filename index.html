@@ -835,7 +835,7 @@ async function makeRealBE(){
         p_candidate_id:candidateId,p_hotel_id:targetHotelId,p_date:date,
         p_shift_start:shiftStart||null,p_shift_end:shiftEnd||null
       });
-      if(error){console.warn('check_constraints:',error.message);return{ok:true,warnings:[],blockers:[]};}
+      if(error){console.warn('check_constraints:',error.message);return{ok:false,warnings:[],blockers:['Contraintes non vérifiables — candidat bloqué par précaution']};}
       return data;
     },
     async createReplacementNotification(h,assignId,empId,type,title,body,absentName,assignDate){
@@ -858,6 +858,16 @@ async function makeRealBE(){
     async listEmployeeMissions(empId){
       const {data,error}=await sb.from('v_employee_replacement_missions').select('*').eq('employee_id',empId).order('assignment_date',{ascending:false}).limit(20);
       if(error&&error.code==='42P01')return[];if(error)return[];return data||[];
+    },
+    async listExternalExtras(h){
+      const {data,error}=await sb.from('external_extras').select('*').eq('hotel_id',h).eq('active',true);
+      if(error){console.warn('listExternalExtras:',error.message);return[];}
+      return data||[];
+    },
+    async listStaffPlanningForDate(empId,day){
+      const {data,error}=await sb.from('staff_planning').select('shift_start,shift_end,shift_label,duration').eq('employee_id',empId).eq('day',day).maybeSingle();
+      if(error){console.warn('listStaffPlanningForDate:',error.message);return null;}
+      return data||null;
     },
     async createReplacementAssignment(h,payload){
       const {data,error}=await sb.from('replacement_assignments').insert({hotel_id:h,...payload}).select('*').single();
@@ -2280,11 +2290,8 @@ async function openReplPanel(absentEmpId,date,absCode){
     _loadReplSettings(),
     _getReplacementCandidates(absentEmpId,date),
     BE.listReplacementAssignments(hotelId,date,date).catch(()=>[]),
-    sb.from('external_extras').select('*').eq('hotel_id',hotelId).eq('active',true)
-      .then(r=>r.data||[]).catch(()=>[]),
-    sb.from('staff_planning').select('shift_start,shift_end,shift_label,duration')
-      .eq('employee_id',absentEmpId).eq('day',date).maybeSingle()
-      .then(r=>r.data||null).catch(()=>null)
+    BE.listExternalExtras(hotelId).catch(()=>[]),
+    BE.listStaffPlanningForDate(absentEmpId,date).catch(()=>null)
   ]);
   // Horaires de l'absent pour le check repos 11h
   const absentShiftStart=absentPlanning?.shift_start||null;
@@ -2303,7 +2310,7 @@ async function openReplPanel(absentEmpId,date,absCode){
         constraintsMap[c.candidate_id]=await BE.checkReplacementConstraints(
           c.candidate_id, hotelId, date, absentShiftStart, absentShiftEnd
         );
-      }catch(e){constraintsMap[c.candidate_id]={ok:true,warnings:[],blockers:[]};}
+      }catch(e){constraintsMap[c.candidate_id]={ok:false,warnings:[],blockers:['Contraintes non vérifiables — candidat bloqué par précaution']};}
     }));
   }
 
@@ -2498,6 +2505,13 @@ async function _confirmReplacement(existingId,absentEmpId,date,candidateId,origi
   const absent=staff.find(s=>s.id===absentEmpId)||{};
 
   try{
+    // Vérifier les contraintes légales avant toute action — fallback bloquant
+    const constraints=await BE.checkReplacementConstraints(candidateId,hotelId,date,null,null);
+    if(constraints.blockers&&constraints.blockers.length>0){
+      flash('Candidat non éligible : '+constraints.blockers[0],'e');
+      return;
+    }
+
     let row;
     if(existingId){
       // Transition d'une proposition existante → confirmed
@@ -2863,7 +2877,7 @@ async function _renderReplTabContent(){
             if(r.blockers?.length) blocked++;
             else if(r.warnings?.length) warned++;
             else ok++;
-          }catch(e){ok++;}
+          }catch(e){blocked++;}
         }));
         constraintsSummary[a.employee_id+'|'+a.day]={blocked,warned,available:c.length};
       }catch(e){}
@@ -3527,10 +3541,24 @@ async function saveChanges(){
       ups.push({hotel_id:hotelId,employee_id:eid,day,status:cur.status,duration:cur.duration||1.0,shift_label:sh||null});
     }
     await BE.savePlanning(hotelId,ups,dels);
-    pending.forEach((v,k)=>{ if(v==='')committed.delete(k); else committed.set(k,{status:v,duration:1}); });
-    pendingShifts.forEach((sh,k)=>{ const c=committed.get(k); if(c) c.shift_label=sh||null; });
-    pending.clear(); pendingShifts.clear(); renderCurrentPlanView(); flash('Modifications enregistrées');
-  }catch(e){flash('Erreur : '+e.message); console.error(e);}
+    // Sauvegarde DB réussie — mettre à jour committed en mémoire
+    try{
+      pending.forEach((v,k)=>{ if(v==='')committed.delete(k); else committed.set(k,{status:v,duration:1}); });
+      pendingShifts.forEach((sh,k)=>{ const c=committed.get(k); if(c) c.shift_label=sh||null; });
+      pending.clear(); pendingShifts.clear(); renderCurrentPlanView(); flash('Modifications enregistrées');
+    }catch(e){
+      // Mise à jour mémoire échouée après sauvegarde DB — recharger depuis la DB pour éviter la désync
+      console.error('[saveChanges] sync post-save échouée, rechargement depuis DB',e);
+      pending.clear(); pendingShifts.clear();
+      await loadMonth();
+      renderCurrentPlanView();
+      flash('Sauvegardé — données rechargées depuis la base','w');
+    }
+  }catch(e){
+    // Sauvegarde DB échouée — pending intact, committed non touché
+    flash('Erreur lors de la sauvegarde : '+e.message,'e');
+    console.error('[saveChanges]',e);
+  }
   finally{$('saveBtn').disabled=false;}
 }
 function cancelChanges(){pending.clear(); pendingShifts.clear(); renderCurrentPlanView(); flash('Modifications annulées');}
@@ -4572,6 +4600,25 @@ function wireNotifBell(){
     const n=docAlerts.length+portalPending.length;
     if(n){b.textContent=n>9?'9+':n;b.style.display='block';}
   }).catch(()=>{});
+}
+
+function aggCommitted(){
+  const counts={};
+  if(committed&&committed.size>0){
+    committed.forEach((v)=>{
+      const s=v&&v.status;
+      if(s) counts[s]=(counts[s]||0)+1;
+    });
+  }
+  // Fusionner pending (écrase committed pour les cellules modifiées non sauvegardées)
+  if(pending&&pending.size>0){
+    pending.forEach((v,k)=>{
+      const old=committed.get(k);
+      if(old&&old.status) counts[old.status]=Math.max(0,(counts[old.status]||0)-1);
+      if(v&&v!=='') counts[v]=(counts[v]||0)+1;
+    });
+  }
+  return {counts};
 }
 
 function renderReporting(){
