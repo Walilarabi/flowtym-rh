@@ -844,6 +844,10 @@ async function makeRealBE(){
         absent_name:absentName,assignment_date:assignDate
       }).then(null,e=>console.warn('notif:',e?.message));
     },
+    async listReplacementHistory(assignId){
+      const {data,error}=await sb.from('replacement_history').select('*').eq('assignment_id',assignId).order('created_at',{ascending:true});
+      if(error&&error.code==='42P01')return[];if(error)return[];return data||[];
+    },
     async listReplacementNotifications(h,empId){
       const {data,error}=await sb.from('replacement_notifications').select('*').eq('hotel_id',h).eq('employee_id',empId).order('created_at',{ascending:false}).limit(20);
       if(error&&error.code==='42P01')return[];must(error,'Notifications');return data||[];
@@ -2225,14 +2229,20 @@ async function openReplPanel(absentEmpId,date,absCode){
   panel.classList.add('on');
   _replPanelOpen=true;
 
-  // Charger tout en parallèle
-  const [settings,cands,existingAssign,extExtras]=await Promise.all([
+  // Charger tout en parallèle — inclut le planning de l'absent pour récupérer les horaires
+  const [settings,cands,existingAssign,extExtras,absentPlanning]=await Promise.all([
     _loadReplSettings(),
     _getReplacementCandidates(absentEmpId,date),
     BE.listReplacementAssignments(hotelId,date,date).catch(()=>[]),
     sb.from('external_extras').select('*').eq('hotel_id',hotelId).eq('active',true)
-      .then(r=>r.data||[]).catch(()=>[])
+      .then(r=>r.data||[]).catch(()=>[]),
+    sb.from('staff_planning').select('shift_start,shift_end,shift_label,duration')
+      .eq('employee_id',absentEmpId).eq('day',date).maybeSingle()
+      .then(r=>r.data||null).catch(()=>null)
   ]);
+  // Horaires de l'absent pour le check repos 11h
+  const absentShiftStart=absentPlanning?.shift_start||null;
+  const absentShiftEnd=absentPlanning?.shift_end||null;
 
   if(settings&&!settings.enabled){
     body.innerHTML=`<div class="rp-empty"><i class="fa-solid fa-toggle-off"></i><div>Les remplacements inter-hôtels sont <b>désactivés</b>.<br><br><a href="#" onclick="event.preventDefault();_cfgTab='replacements';renderConfig()" style="color:var(--violet)">Activer dans les paramètres RH</a></div></div>`;
@@ -2245,7 +2255,7 @@ async function openReplPanel(absentEmpId,date,absCode){
     await Promise.all(cands.map(async c=>{
       try{
         constraintsMap[c.candidate_id]=await BE.checkReplacementConstraints(
-          c.candidate_id, hotelId, date, null, null
+          c.candidate_id, hotelId, date, absentShiftStart, absentShiftEnd
         );
       }catch(e){constraintsMap[c.candidate_id]={ok:true,warnings:[],blockers:[]};}
     }));
@@ -2254,28 +2264,56 @@ async function openReplPanel(absentEmpId,date,absCode){
   let html='';
 
   // Affectations existantes ce jour (tous statuts sauf cancelled)
+  // Afficher shift de l'absent en entête du panel
+  if(absentPlanning){
+    const shiftInfo=absentPlanning.shift_label||
+      (absentShiftStart&&absentShiftEnd?`${absentShiftStart.slice(0,5)}–${absentShiftEnd.slice(0,5)}`:'');
+    if(shiftInfo) html+=`<div style="background:#f5f3ff;border:1px solid #ede9fe;border-radius:8px;padding:7px 12px;margin-bottom:12px;font-size:11.5px;color:#6d28d9">
+      <i class="fa-solid fa-clock"></i> Shift à remplacer : <b>${shiftInfo}</b>${absentShiftStart?` (repos minimum 11h requis avant ce début)`:''}
+    </div>`;
+  }
+
   const assigned=existingAssign.filter(a=>a.absent_employee_id===absentEmpId);
   if(assigned.length){
-    assigned.forEach(a=>{
+    // Pour chaque affectation : afficher card + historique des actions
+    for(const a of assigned){
       const st=a.status||'confirmed';
       const badge=_replStatusBadge(st);
-      const actorLine=a.assigned_by_email?`<div style="font-size:10.5px;color:var(--muted);margin-top:2px">Par ${a.assigned_by_email}</div>`:'';
-      html+=`<div class="rp-assigned" style="background:${st==='refused'?'#fef2f2':st==='proposed'?'#eff6ff':'#f0fdf4'};border-color:${st==='refused'?'#fecaca':st==='proposed'?'#bfdbfe':'#bbf7d0'}">
+      const actorLine=a.assigned_by_email?`<div style="font-size:10.5px;color:var(--muted);margin-top:2px"><i class="fa-solid fa-user-tie" style="font-size:9px"></i> Par ${a.assigned_by_email}</div>`:'';
+
+      // Charger l'historique de cette affectation
+      let histHtml='';
+      const hist=await BE.listReplacementHistory(a.id).catch(()=>[]);
+      if(hist.length){
+        const ACTION_LABELS={proposed:'Proposition envoyée',confirmed:'Confirmé',refused:'Refusé',cancelled:'Annulé',ignored:'Ignoré',pending:'Réinitialisé',accepted:'Accepté par le salarié'};
+        histHtml=`<div style="margin-top:8px;padding-top:8px;border-top:1px dashed #e5e7eb">
+          <div style="font-size:10.5px;font-weight:600;color:var(--muted);margin-bottom:4px"><i class="fa-solid fa-timeline"></i> Historique</div>
+          ${hist.map(h=>`<div style="font-size:10px;color:var(--muted);display:flex;gap:6px;align-items:baseline;margin-bottom:2px">
+            <span style="color:var(--violet-d);font-weight:600">${ACTION_LABELS[h.action]||h.action}</span>
+            <span>· ${new Date(h.created_at).toLocaleDateString('fr-FR',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</span>
+            ${h.actor_email?`<span style="margin-left:auto;font-size:9.5px">${h.actor_email}</span>`:''}
+          </div>`).join('')}
+        </div>`;
+      }
+
+      html+=`<div class="rp-assigned" style="background:${st==='refused'?'#fef2f2':st==='proposed'?'#eff6ff':st==='cancelled'?'#f9fafb':'#f0fdf4'};border-color:${st==='refused'?'#fecaca':st==='proposed'?'#bfdbfe':st==='cancelled'?'#e5e7eb':'#bbf7d0'}">
         ${badge}
         <strong style="margin-left:8px">${a.replacement?.first_name||''} ${a.replacement?.last_name||''}</strong>
         <span style="color:var(--muted);font-size:11px;margin-left:4px">(${a.origin_hotel?.name||'même hôtel'})</span>
         ${actorLine}
+        ${a.refused_reason?`<div style="font-size:10.5px;color:#dc2626;margin-top:4px"><i class="fa-solid fa-comment"></i> ${a.refused_reason}</div>`:''}
+        ${histHtml}
         <div style="display:flex;gap:6px;margin-top:8px">
           ${st==='proposed'?`
             <button class="btn p" style="font-size:11px;padding:4px 10px" onclick="_confirmReplacement('${a.id}','${absentEmpId}','${date}','${a.replacement_employee_id}')"><i class="fa-solid fa-check"></i> Confirmer</button>
             <button class="btn d" style="font-size:11px;padding:4px 10px" onclick="_refuseReplacement('${a.id}','${absentEmpId}','${date}')"><i class="fa-solid fa-xmark"></i> Refuser</button>`:''}
           ${st==='accepted'?`
             <button class="btn p" style="font-size:11px;padding:4px 10px" onclick="_confirmReplacement('${a.id}','${absentEmpId}','${date}','${a.replacement_employee_id}')"><i class="fa-solid fa-check"></i> Confirmer</button>`:''}
-          ${st!=='cancelled'?`<button class="btn" style="font-size:11px;padding:4px 8px;background:#f9fafb;color:var(--muted)" onclick="_cancelAssignment('${a.id}','${absentEmpId}','${date}')"><i class="fa-solid fa-ban"></i> Annuler</button>`:''}
+          ${st!=='cancelled'&&st!=='refused'?`<button class="btn" style="font-size:11px;padding:4px 8px;background:#f9fafb;color:var(--muted)" onclick="_cancelAssignment('${a.id}','${absentEmpId}','${date}')"><i class="fa-solid fa-ban"></i> Annuler</button>`:''}
         </div>
       </div>`;
-    });
-    html+=`<div style="border-bottom:1px solid var(--line);margin:12px 0;font-size:11.5px;color:var(--muted);text-align:center">Autres candidats disponibles</div>`;
+    }
+    html+=`<div style="border-bottom:1px solid var(--line);margin:12px 0;font-size:11.5px;color:var(--muted);text-align:center;padding-bottom:4px">Autres candidats disponibles</div>`;
   }
 
   if(!cands.length){
@@ -2755,7 +2793,7 @@ async function _renderReplTabContent(){
       <th style="text-align:left">Service / Poste</th>
       <th>Date</th>
       <th>Motif</th>
-      ${_replTab==='pending'?'<th>Meilleur remplaçant</th>':((_replTab==='confirmed'||_replTab==='history'||_replTab==='ignored')?'<th>Remplaçant affecté</th>':'')}
+      ${_replTab==='pending'?'<th>Meilleur remplaçant</th><th>Candidats</th>':((_replTab==='confirmed'||_replTab==='history'||_replTab==='ignored')?'<th>Remplaçant affecté</th>':'')}
       <th>Actions</th>
     </tr></thead><tbody>`;
 
@@ -2763,11 +2801,26 @@ async function _renderReplTabContent(){
   const seen=new Set();
   const deduped=absences.filter(a=>{const key=a.employee_id+'|'+a.day;if(seen.has(key))return false;seen.add(key);return true;});
 
-  // Pour les absences "à traiter", précharger les meilleurs candidats
+  // Pour les absences "à traiter", précharger les meilleurs candidats + contraintes résumées
   const candidatesMap={};
+  const constraintsSummary={}; // key → {blocked:0,warned:0,available:0}
   if(_replTab==='pending'){
     await Promise.all(deduped.slice(0,10).map(async a=>{
-      try{const c=await _getReplacementCandidates(a.employee_id,a.day);candidatesMap[a.employee_id+'|'+a.day]=c;}catch(e){}
+      try{
+        const c=await _getReplacementCandidates(a.employee_id,a.day);
+        candidatesMap[a.employee_id+'|'+a.day]=c;
+        // Résumé contraintes sur les 3 premiers candidats
+        let blocked=0,warned=0,ok=0;
+        await Promise.all(c.slice(0,5).map(async cand=>{
+          try{
+            const r=await BE.checkReplacementConstraints(cand.candidate_id,hotelId,a.day,null,null);
+            if(r.blockers?.length) blocked++;
+            else if(r.warnings?.length) warned++;
+            else ok++;
+          }catch(e){ok++;}
+        }));
+        constraintsSummary[a.employee_id+'|'+a.day]={blocked,warned,available:c.length};
+      }catch(e){}
     }));
   }
 
@@ -2806,7 +2859,17 @@ async function _renderReplTabContent(){
             <span style="margin-left:auto;background:var(--violet-bg);color:var(--violet-d);padding:1px 6px;border-radius:99px;font-size:10px;font-weight:700">${bestCand.score}</span>
            </div>`
         :`<span style="color:var(--muted);font-size:11px">Aucun disponible</span>`
-        }</td>`:''}
+        }</td><td style="text-align:center">${(()=>{
+          const cs=constraintsSummary[a.employee_id+'|'+a.day];
+          if(!cs) return `<span style="color:var(--muted);font-size:10.5px">—</span>`;
+          if(cs.available===0) return `<span style="font-size:10.5px;color:#dc2626"><i class="fa-solid fa-circle-xmark"></i> 0 dispo</span>`;
+          const parts=[];
+          if(cs.blocked) parts.push(`<span style="color:#dc2626"><i class="fa-solid fa-ban"></i> ${cs.blocked} bloqué${cs.blocked>1?'s':''}</span>`);
+          if(cs.warned) parts.push(`<span style="color:#d97706"><i class="fa-solid fa-triangle-exclamation"></i> ${cs.warned} alerte${cs.warned>1?'s':''}</span>`);
+          const avail=cs.available-(cs.blocked||0);
+          if(avail>0) parts.push(`<span style="color:#16a34a"><i class="fa-solid fa-circle-check"></i> ${avail} OK</span>`);
+          return `<div style="font-size:10.5px;display:flex;flex-direction:column;gap:2px">${parts.join('')}</div>`;
+        })()}</td>`:''}
       ${((_replTab==='confirmed'||_replTab==='history'||_replTab==='ignored')&&assign)?`<td>
         <div style="font-size:11.5px;font-weight:600">${assign.replacement?.first_name||assign.replacement_employee_id||'—'} ${assign.replacement?.last_name||''}</div>
         <div style="font-size:10.5px;color:var(--muted)">${assign.origin_hotel?.name||'—'}</div>
