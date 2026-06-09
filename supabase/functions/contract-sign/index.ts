@@ -374,13 +374,14 @@ Deno.serve(async (req) => {
   // ── GET → page HTML ───────────────────────────────────────────────────────
   if (req.method === 'GET') {
     const token = url.searchParams.get('token') ?? '';
-    if (!token) return new Response(errorPage('Lien invalide', 'Token manquant.'), { headers: { 'Content-Type': 'text/html' } });
+    const htmlHeaders = new Headers({ 'Content-Type': 'text/html; charset=utf-8' });
+    if (!token) return new Response(errorPage('Lien invalide', 'Token manquant.'), { headers: htmlHeaders });
 
     const { data: sess } = await sb.from('signature_sessions')
       .select('*, contract:contract_id(contract_number,contract_type,generated_html)')
       .eq('token', token).maybeSingle();
 
-    if (!sess) return new Response(errorPage('Lien invalide', 'Ce lien de signature est invalide.'), { headers: { 'Content-Type': 'text/html' } });
+    if (!sess) return new Response(errorPage('Lien invalide', 'Ce lien de signature est invalide.'), { headers: htmlHeaders });
 
     const contract = sess.contract as { contract_number: string; contract_type: string; generated_html: string } | null;
     const page = signingPage({
@@ -394,7 +395,7 @@ Deno.serve(async (req) => {
       expired:        sess.expires_at ? new Date(sess.expires_at) < new Date() : false,
       already_signed: !!sess.signed_at,
     });
-    return new Response(page, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+    return new Response(page, { headers: htmlHeaders });
   }
 
   // ── POST → API ────────────────────────────────────────────────────────────
