@@ -6355,6 +6355,8 @@ function _genStep4(){
 
 /* ===== HISTORIQUE DES CONTRATS ===== */
 let _histSearch='';
+let _histFltDept='';
+let _histFltRole='';
 async function renderContractsHistory(){
   const el=$('csub'); if(!el)return;
   el.innerHTML='<div style="padding:20px;text-align:center;color:var(--muted)"><i class="fa-solid fa-spinner fa-spin"></i> Chargement…</div>';
@@ -6377,7 +6379,10 @@ async function renderContractsHistory(){
       let vis=0;
       rows.forEach(r=>{
         const txt=(r.dataset.search||'').toLowerCase();
-        const show=!q||txt.includes(q);
+        const matchQ=!q||txt.includes(q);
+        const matchDept=!_histFltDept||(r.dataset.dept||'')=== _histFltDept;
+        const matchRole=!_histFltRole||(r.dataset.role||'')=== _histFltRole;
+        const show=matchQ&&matchDept&&matchRole;
         r.style.display=show?'':'none';
         if(show)vis++;
       });
@@ -6400,12 +6405,20 @@ async function renderContractsHistory(){
           ${k.lab==='Signés'?`<div style="font-size:10px;color:var(--muted)">${signedThisMonth} ce mois</div>`:''}
         </div>`).join('')}
       </div>
-      <!-- Recherche -->
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
-        <div style="flex:1;position:relative">
+      <!-- Recherche + filtres -->
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+        <div style="flex:1;min-width:220px;position:relative">
           <i class="fa-solid fa-magnifying-glass" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:13px"></i>
-          <input id="histSearchInput" type="text" class="input" placeholder="Rechercher par nom, prénom, email, matricule, N° contrat, poste, service…" value="${_histSearch}" style="padding-left:36px;width:100%">
+          <input id="histSearchInput" type="text" class="input" placeholder="Rechercher par nom, N° contrat, poste, service…" value="${_histSearch}" style="padding-left:36px;width:100%">
         </div>
+        <select id="histFltDept" style="font-size:12px;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);min-width:140px">
+          <option value="">Tous les services</option>
+          ${[...new Set(contracts.map(c=>c.department).filter(Boolean))].sort().map(d=>`<option value="${d}" ${_histFltDept===d?'selected':''}>${d}</option>`).join('')}
+        </select>
+        <select id="histFltRole" style="font-size:12px;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);min-width:140px">
+          <option value="">Tous les postes</option>
+          ${[...new Set(contracts.map(c=>c.job_title).filter(Boolean))].sort().map(r=>`<option value="${r}" ${_histFltRole===r?'selected':''}>${r}</option>`).join('')}
+        </select>
         <span id="histCount" style="font-size:13px;color:var(--muted);white-space:nowrap">${contracts.length} contrat${contracts.length!==1?'s':''}</span>
       </div>
       <!-- Tableau -->
@@ -6430,7 +6443,7 @@ async function renderContractsHistory(){
               const empName=e?e.first_name+' '+e.last_name:'—';
               const searchStr=[c.contract_number,empName,c.department,c.job_title,c.contract_type,c.signer_email,c.signer_name].filter(Boolean).join(' ');
               const hasPdf=!!(c.signed_pdf_storage_path||c.signed_pdf_url);
-              return`<tr data-cid="${c.id}" data-search="${searchStr.replace(/"/g,'&quot;')}">
+              return`<tr data-cid="${c.id}" data-search="${searchStr.replace(/"/g,'&quot;')}" data-dept="${(c.department||'').replace(/"/g,'&quot;')}" data-role="${(c.job_title||'').replace(/"/g,'&quot;')}">
                 <td style="font-weight:700;font-size:12px;white-space:nowrap">${c.contract_number||'—'}</td>
                 <td style="font-weight:600">${empName}</td>
                 <td style="font-size:12px;color:var(--ink2)">${c.department||'—'}</td>
@@ -6461,7 +6474,11 @@ async function renderContractsHistory(){
 
     const si=el.querySelector('#histSearchInput');
     if(si){si.value=_histSearch;si.oninput=e=>{_histSearch=e.target.value;_applyFilter();};}
-    if(_histSearch)_applyFilter();
+    const sd=el.querySelector('#histFltDept');
+    if(sd){sd.value=_histFltDept;sd.onchange=e=>{_histFltDept=e.target.value;_applyFilter();};}
+    const sr=el.querySelector('#histFltRole');
+    if(sr){sr.value=_histFltRole;sr.onchange=e=>{_histFltRole=e.target.value;_applyFilter();};}
+    if(_histSearch||_histFltDept||_histFltRole)_applyFilter();
 
     el.querySelectorAll('[data-archive]').forEach(b=>b.onclick=async()=>{
       await BE.updateGeneratedContract(b.dataset.archive,{status:'archived',archived_at:new Date().toISOString()}).catch(e=>flash('Erreur : '+e.message));
