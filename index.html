@@ -619,7 +619,7 @@ async function makeRealBE(){
     },
     async listDepartments(h){const {data,error}=await sb.from('staff_departments').select('id,name,sort_order,default_start_time,default_end_time,break_minutes,hours_per_day,cp_days_per_month').eq('hotel_id',h).order('sort_order');must(error,"Départements");return data||[];},
     async listRoles(h){const {data,error}=await sb.from('staff_roles').select('id,name,department_id').eq('hotel_id',h).order('name');must(error,"Rôles");return data||[];},
-    async listEmployees(h){const {data,error}=await sb.from('employees').select('*').eq('hotel_id',h).order('active',{ascending:false}).order('last_name');must(error,"Collaborateurs");return data||[];},
+    async listEmployees(h){const {data,error}=await sb.from('employees').select('*').eq('hotel_id',h).order('last_name');must(error,"Collaborateurs");return (data||[]).map(e=>({...e,status:e.status||(e.active?'actif':'parti')}));},
     async addEmployee(h,p){const {data,error}=await sb.from('employees').insert({hotel_id:h,...p}).select('*').single();must(error,"Création collaborateur");return data;},
     async addEmployeesBulk(h,list){
       if(!list.length)return [];
@@ -1666,9 +1666,10 @@ function renderPlanning(){
         <select id="fRole"></select>
         <select id="fDept"></select>
         <select id="fStatus">
-          <option value="actif" ${fStatus==='actif'?'selected':''}>Statut : Actifs</option>
-          <option value="parti" ${fStatus==='parti'?'selected':''}>Partis</option>
-          <option value="tous"  ${fStatus==='tous' ?'selected':''}>Tous</option>
+          <option value="actif"  ${fStatus==='actif' ?'selected':''}>Statut : Actifs</option>
+          <option value="pause"  ${fStatus==='pause' ?'selected':''}>En pause</option>
+          <option value="parti"  ${fStatus==='parti' ?'selected':''}>Partis</option>
+          <option value="tous"   ${fStatus==='tous'  ?'selected':''}>Tous</option>
         </select>
         <div class="spacer" style="flex:1"></div>
         <button class="btn g ${editMode?'on':''}" id="editToggle"><i class="fa-solid fa-pen-to-square"></i> Édition</button>
@@ -1713,9 +1714,11 @@ function renderCurrentPlanView(){
   } else {
     // Recalcule visibleRows avec les mêmes filtres que render()
     visibleRows=staff.filter(s=>{
-      if(fStatus==='actif'&&!s.active)return false;
-      if(fStatus==='parti'&&s.active)return false;
-      if(!s.active&&s.departure_date){const dd=new Date(s.departure_date);if(cur>=new Date(dd.getFullYear(),dd.getMonth()+1,1))return false;}
+      const st=s.status||(s.active?'actif':'parti');
+      if(fStatus==='actif'){if(st==='parti')return false;if(st==='pause'){const hasSh=planningRows.some(r=>r.employee_id===s.id);if(!hasSh)return false;}}
+      if(fStatus==='pause'&&st!=='pause')return false;
+      if(fStatus==='parti'&&st!=='parti')return false;
+      if(st==='parti'&&s.departure_date){const dd=new Date(s.departure_date);if(cur>=new Date(dd.getFullYear(),dd.getMonth()+1,1)&&fStatus!=='parti'&&fStatus!=='tous')return false;}
       if(fRole&&s.role!==fRole)return false;
       if(fDept&&s.department!==fDept)return false;
       if(fSearch&&!(`${s.first_name} ${s.last_name} ${s.role||''} ${s.department||''}`.toLowerCase().includes(fSearch)))return false;
@@ -2015,13 +2018,17 @@ function render(){
   $('mlabel').textContent=`${MONTHS[m]} ${y}`;
   const now=new Date(), isThisMonth=(now.getFullYear()===y&&now.getMonth()===m), toDay=now.getDate();
   visibleRows=staff.filter(s=>{
-    if(fStatus==='actif' && !s.active) return false;
-    if(fStatus==='parti' && s.active)  return false;
-    // Parti : caché à partir du mois suivant la date de départ
-    if(!s.active && s.departure_date){
+    const st=s.status||(s.active?'actif':'parti');
+    if(fStatus==='actif'){
+      if(st==='parti') return false;
+      if(st==='pause'){const hasSh=planningRows.some(r=>r.employee_id===s.id);if(!hasSh)return false;}
+    }
+    if(fStatus==='pause' && st!=='pause') return false;
+    if(fStatus==='parti' && st!=='parti') return false;
+    if(st==='parti' && s.departure_date){
       const dd=new Date(s.departure_date);
       const monthAfter=new Date(dd.getFullYear(), dd.getMonth()+1, 1);
-      if(cur >= monthAfter) return false;
+      if(cur >= monthAfter && fStatus!=='parti' && fStatus!=='tous') return false;
     }
     if(fRole&&s.role!==fRole)return false;
     if(fDept&&s.department!==fDept)return false;
@@ -2066,7 +2073,7 @@ function render(){
     h+=`<tr data-emprow="${s.id}"${!s.active?' style="opacity:.55"':''}>`
       +`<td class="stickL cDrag dh" title="Réordonner"><i class="fa-solid fa-grip-vertical" style="color:var(--muted);font-size:11px;cursor:grab"></i></td>`
       +`<td class="stickL cEmp"><div class="emp" data-emp="${s.id}"><div class="av" style="background:${avBg(s)}">${avInner(s)}</div>`
-      +`<div><div class="nm">${s.first_name} ${s.last_name}${!s.active?' <span style="font-size:9.5px;color:var(--red);font-weight:700;background:var(--red-bg);padding:1px 5px;border-radius:5px;margin-left:4px">PARTI</span>':''}</div><div class="sub">${s.department||'—'} · ${s.contract_type||'CDI'}</div></div></div></td>`
+      +`<div><div class="nm">${s.first_name} ${s.last_name}${(s.status||'')==='parti'?' <span style="font-size:9.5px;color:var(--red);font-weight:700;background:var(--red-bg);padding:1px 5px;border-radius:5px;margin-left:4px">PARTI</span>':(s.status||'')==='pause'?' <span style="font-size:9.5px;color:#92400E;font-weight:700;background:#FEF3C7;padding:1px 5px;border-radius:5px;margin-left:4px">EN PAUSE</span>':''}</div><div class="sub">${s.department||'—'} · ${s.contract_type||'CDI'}</div></div></div></td>`
       +`<td class="stickL cRole">${s.role||'—'}</td>`;
     let trav=0,cp=0,abs=0,rep=0;
     for(let d=1;d<=nd;d++){const k=s.id+'|'+iso(y,m,d);const code=effective(k);const c=code?CMAP[code]:null;
@@ -11934,8 +11941,8 @@ async function openFiche(eid){
       <input type="file" id="fichePhotoIn" accept="image/*" style="display:none">
       <h2>${s.first_name} ${s.last_name}</h2><div class="role">${s.role||'—'} · ${s.department||'—'} <span class="badge ${badge}">${s.contract_type||'CDI'}</span></div></div>
     <div class="sec"><h4>Informations</h4>
-      <div class="fr"><span class="k">Statut</span><span class="v" style="${s.active?'color:var(--green)':'color:var(--red)'}">${s.active?'Actif':'Parti'}</span></div>
-      ${!s.active&&s.departure_date?`<div class="fr"><span class="k">Date de départ</span><span class="v">${s.departure_date}</span></div>`:''}
+      <div class="fr"><span class="k">Statut</span><span class="v" style="${(s.status||'')==='actif'?'color:var(--green)':(s.status||'')==='pause'?'color:#D97706':'color:var(--red)'}">${(s.status||'')==='actif'?'Actif':(s.status||'')==='pause'?'⏸ En pause':'Parti'}</span></div>
+      ${(s.status||'')==='parti'&&s.departure_date?`<div class="fr"><span class="k">Date de départ</span><span class="v">${s.departure_date}</span></div>`:''}
       ${full?`<div class="fr"><span class="k">Date d'entrée</span><span class="v">${s.hire_date||'—'}</span></div>
       <div class="fr"><span class="k">Jours de repos</span><span class="v">${restNames}</span></div>`:''}
       <div class="fr"><span class="k">Téléphone</span><span class="v">${s.phone||'—'}</span></div>
@@ -11959,10 +11966,13 @@ async function openFiche(eid){
       <div id="portalSection">Chargement…</div></div>`:''}
     ${full?`<div class="sec"><h4>Coffre-fort contrats <span style="float:right;font-size:10.5px;color:var(--muted);font-weight:normal;cursor:pointer" onclick="contractsSubTab='signed';closeFiche();goView('contracts')">Tous les contrats →</span></h4>
       <div id="ficheContratsSignes"><div style="color:var(--muted);font-size:12px">Chargement…</div></div></div>`:''}
-    ${full?`<div class="sec" style="display:flex;gap:10px"><button class="btn g" data-edit style="flex:1;justify-content:center"><i class="fa-solid fa-pen"></i> Modifier</button>
-      ${s.active
-        ? '<button class="btn d" data-del style="flex:1;justify-content:center"><i class="fa-solid fa-trash"></i> Marquer comme parti</button>'
-        : '<button class="btn p" data-react style="flex:1;justify-content:center"><i class="fa-solid fa-rotate-left"></i> Réactiver</button>'}</div>`:''}`;
+    ${full?`<div class="sec" style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn g" data-edit style="flex:1;justify-content:center"><i class="fa-solid fa-pen"></i> Modifier</button>
+      ${(s.status||'')==='actif'
+        ? '<button class="btn" data-pause style="flex:1;justify-content:center;background:#FEF3C7;color:#92400E;border:1px solid #FCD34D"><i class="fa-solid fa-pause"></i> Mettre en pause</button><button class="btn d" data-del style="flex:1;justify-content:center"><i class="fa-solid fa-right-from-bracket"></i> Marquer comme parti</button>'
+        : (s.status||'')==='pause'
+          ? '<button class="btn p" data-react style="flex:1;justify-content:center"><i class="fa-solid fa-play"></i> Réactiver</button><button class="btn d" data-del style="flex:1;justify-content:center"><i class="fa-solid fa-right-from-bracket"></i> Marquer comme parti</button>'
+          : '<button class="btn p" data-react style="flex:1;justify-content:center"><i class="fa-solid fa-rotate-left"></i> Réactiver</button>'
+      }</div>`:''}`;
   $('dbg').classList.add('on'); $('drawer').classList.add('on');
   $('drawer').querySelector('[data-x]').onclick=closeFiche;
   // Photo drag-and-drop / click on fiche avatar
@@ -12018,13 +12028,18 @@ async function openFiche(eid){
     if(d===null) return;
     const date=d.trim()||today;
     if(!/^\d{4}-\d{2}-\d{2}$/.test(date)){flash('Format de date invalide (AAAA-MM-JJ)');return;}
-    await BE.updateEmployee(s.id, {active:false, departure_date:date});
-    s.active=false; s.departure_date=date;
+    await BE.updateEmployee(s.id, {status:'parti', active:false, departure_date:date});
+    s.status='parti'; s.active=false; s.departure_date=date;
     closeFiche(); render(); flash('Collaborateur marqué comme parti');};
+  const pa=$('drawer').querySelector('[data-pause]');
+  if(pa) pa.onclick=async()=>{
+    await BE.updateEmployee(s.id, {status:'pause', active:true, departure_date:null});
+    s.status='pause'; s.active=true; s.departure_date=null;
+    closeFiche(); render(); flash('Collaborateur mis en pause — il n\'apparaîtra sur le planning que s\'il a des jours programmés');};
   const rc=$('drawer').querySelector('[data-react]');
   if(rc) rc.onclick=async()=>{
-    await BE.updateEmployee(s.id, {active:true, departure_date:null});
-    s.active=true; s.departure_date=null;
+    await BE.updateEmployee(s.id, {status:'actif', active:true, departure_date:null});
+    s.status='actif'; s.active=true; s.departure_date=null;
     closeFiche(); render(); flash('Collaborateur réactivé');};
   if(!full) return;
   $('drawer').querySelector('[data-upload]').onclick=()=>openDocUploadForm(s);
@@ -12326,10 +12341,11 @@ function openEmpForm(s){
       </div>
       <div class="row2">
         <div class="fld"><label>Statut</label><select id="estatus">
-          <option value="actif" ${s?.active===false?'':'selected'}>Actif</option>
-          <option value="parti" ${s?.active===false?'selected':''}>Parti</option>
+          <option value="actif"  ${(s?.status||'')==='actif' ||(s?.status===undefined&&s?.active!==false)?'selected':''}>Actif</option>
+          <option value="pause"  ${(s?.status||'')==='pause' ?'selected':''}>En pause</option>
+          <option value="parti"  ${(s?.status||'')==='parti' ||(s?.status===undefined&&s?.active===false)?'selected':''}>Parti</option>
         </select></div>
-        <div class="fld" id="edepWrap" style="${s?.active===false?'':'display:none'}"><label>Date de départ</label><input type="date" id="edep" value="${s?.departure_date||''}"></div>
+        <div class="fld" id="edepWrap" style="${(s?.status||'')==='parti'||(s?.status===undefined&&s?.active===false)?'':'display:none'}"><label>Date de départ</label><input type="date" id="edep" value="${s?.departure_date||''}"></div>
       </div>
       <div id="eqDepartureCheck" style="${s?.active===false&&s?.id?'':'display:none'}">
         <div style="margin-top:14px;padding:12px 14px;background:#FEF3C7;border:1px solid #F59E0B;border-radius:8px;font-size:13px">
@@ -12417,9 +12433,10 @@ function openEmpForm(s){
     if(isParti&&s?.id){$('eqDepartureCheck').style.display='';_loadDepartureEq();}
     else $('eqDepartureCheck').style.display='none';
   };
-  if(s?.active===false&&s?.id) _loadDepartureEq();
+  if((s?.status==='parti'||s?.active===false)&&s?.id) _loadDepartureEq();
   $('esave').onclick=async()=>{
-    const isLeft=$('estatus').value==='parti';
+    const statusVal=$('estatus').value;
+    const isLeft=statusVal==='parti';
     const dep=$('edep').value;
     if(isLeft && !dep){flash('Date de départ requise pour un collaborateur Parti');return;}
     if(isLeft&&s?.id){
@@ -12436,7 +12453,7 @@ function openEmpForm(s){
       address:$('ea').value.trim()||null, emergency_contact:$('eu').value.trim()||null,
       manager_id:$('emgr').value||null,
       schedule_id:$('esched').value||null,
-      active:!isLeft, departure_date: isLeft?dep:null,
+      status:statusVal, active:!isLeft, departure_date: isLeft?dep:null,
     };
     if(canFicheFull()){
       p.birth_date  = $('ebd').value||null;
