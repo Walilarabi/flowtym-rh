@@ -6437,7 +6437,7 @@ async function renderContractsHistory(){
       if(c.status==='draft') return btnOff('fa-pen','Finaliser','Reprise de brouillon à venir');
       if(c.status==='generated'||c.status==='preview_ok') return btnOff('fa-paper-plane','Envoyer','Envoi depuis l\'onglet Générer');
       if(c.status==='sent_signature'||c.status==='pending_signature') return btnOff('fa-rotate','Relancer','Relance manuelle à venir');
-      if(c.status==='cancelled'||c.status==='error_signature') return btnOff('fa-rotate-left','Régénérer','Régénération à venir');
+      if(c.status==='cancelled'||c.status==='refused'||c.status==='error_signature') return btnOff('fa-rotate-left','Régénérer','Régénération à venir');
       return'<span style="font-size:11px;color:var(--muted)">—</span>';
     };
 
