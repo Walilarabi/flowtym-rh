@@ -6208,36 +6208,16 @@ async function _genStep3(){
   const s = genInlineState;
   const emp = staff.find(x=>x.id===s.employee_id);
   if(!emp){$('genInlineBody').innerHTML='<div style="color:var(--red);padding:20px">Données manquantes</div>';return;}
-  const hotel3 = hotels.find(h=>h.id===hotelId)||{};
   $('genInlineBody').innerHTML=`
     <div class="box" style="padding:28px;max-width:560px;margin:0 auto">
-      <h3 style="font-size:15px;font-weight:700;margin-bottom:4px">Envoi pour signature</h3>
-      <p style="font-size:13px;color:var(--ink2);margin-bottom:20px">Le contrat sera envoyé à <b>${emp.first_name} ${emp.last_name}</b> pour signature électronique.</p>
+      <h3 style="font-size:15px;font-weight:700;margin-bottom:4px">Envoi pour signature électronique</h3>
+      <p style="font-size:13px;color:var(--ink2);margin-bottom:20px">Le contrat sera envoyé à <b>${emp.first_name} ${emp.last_name}</b> par email. Le salarié devra vérifier son identité par code OTP avant de signer.</p>
 
       <div class="fld"><label>Adresse email du salarié</label>
         <input type="email" id="gs3_email" value="${emp.email||''}" placeholder="email@exemple.com"></div>
 
-      <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:16px">
-        <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">Mode de signature</div>
-        <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;cursor:pointer;font-size:12px">
-          <input type="radio" name="gs3_sigmode" value="default" checked style="margin-top:2px"
-            onchange="$('gs3_dual_section').style.display='none'">
-          <div><b>Standard</b><br>
-            <span style="color:var(--muted);font-size:11px">Employeur pré-signé automatiquement (${esc(hotel3.legal_representative||'représentant légal')}), seul le salarié signe via YouSign.</span>
-          </div>
-        </label>
-        <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:12px">
-          <input type="radio" name="gs3_sigmode" value="dual" style="margin-top:2px"
-            onchange="$('gs3_dual_section').style.display=this.checked?'block':'none'">
-          <div><b>Double signature</b><br>
-            <span style="color:var(--muted);font-size:11px">Employeur ET salarié signent tous les deux via YouSign.</span>
-          </div>
-        </label>
-        <div id="gs3_dual_section" style="display:none;margin-top:10px;background:#f5f3ff;border-radius:6px;padding:12px">
-          <div class="fld" style="margin:0"><label style="font-size:11px">Email de l'employeur</label>
-            <input type="email" id="gs3_employer_email" value="${esc(hotel3.email||'')}" placeholder="directeur@hotel.com">
-          </div>
-        </div>
+      <div style="margin-top:12px;padding:12px 14px;background:#EDE9FE;border-radius:8px;font-size:12px;color:#5B21B6">
+        <i class="fa-solid fa-shield-halved"></i> Signature électronique simple conforme au règlement eIDAS (UE) n°910/2014. Vérification d'identité par code à usage unique.
       </div>
 
       <div style="display:flex;gap:10px;margin-top:20px">
@@ -6248,10 +6228,9 @@ async function _genStep3(){
   $('gs3_send').onclick=async()=>{
     const email=$('gs3_email').value.trim();
     if(!email){flash('Email requis','e');return;}
-    const btn=$('gs3_send'); btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Génération PDF…';
+    const btn=$('gs3_send'); btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Génération HTML…';
     let saved=null; let contractNumber=null;
     try{
-      console.log('[step3] start — employee:', s.employee_id, 'email:', email);
       // 1. Contexte + rendu HTML
       const hotel=hotels.find(h=>h.id===hotelId)||{};
       const mgr=staff.find(x=>x.id===s.fields.manager_id);
@@ -6265,27 +6244,15 @@ async function _genStep3(){
         department:(deps.find(d=>d.id===s.fields.service_id)||{}).name||emp.department||'',
       });
       const tpl=s.tplList.find(t=>t.id===s.template_id)||s.tplList.find(t=>t.status==='active');
-      const sigMode = document.querySelector('input[name="gs3_sigmode"]:checked')?.value || 'default';
-      const isDual  = sigMode === 'dual';
       const renderedHtml=tpl?transformContractHtml(substituteVariables(tpl.body_html,ctx),{
-        sigMode,
+        sigMode:'default',
         sigDate: new Date().toLocaleDateString('fr-FR'),
         employerName: hotel.legal_representative||'',
         employerFunction: hotel.representative_role||'',
       }):'';
-      console.log('[step3] HTML rendered, length:', renderedHtml.length, 'sigMode:', sigMode);
-      // 2. Générer PDF blob dans le navigateur
-      const { blob: pdfBlob, sigField, sigFieldEmployer }=await renderHtmlToPdfBlob(renderedHtml,`Contrat ${s.fields.contract_type} — ${emp.first_name} ${emp.last_name}`);
-      console.log('[step3] PDF blob size:', pdfBlob.size);
-      // 3. Convertir en base64
-      const pdfBase64=await new Promise((res,rej)=>{
-        const reader=new FileReader();reader.onload=()=>res(reader.result.split(',')[1]);reader.onerror=rej;reader.readAsDataURL(pdfBlob);
-      });
-      console.log('[step3] base64 length:', pdfBase64.length);
-      // 4. Numéro + sauvegarde DB
+      // 2. Numéro + sauvegarde DB
       btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Enregistrement…';
       contractNumber=await BE.nextContractNumber(hotelId);
-      console.log('[step3] contract number:', contractNumber);
       saved=await BE.saveGeneratedContract(hotelId,{
         employee_id:s.employee_id, template_id:s.template_id||null,
         contract_number:contractNumber, status:'sent_signature',
@@ -6296,55 +6263,26 @@ async function _genStep3(){
         manager_id:s.fields.manager_id||null, sent_at:new Date().toISOString(),
         generated_html:renderedHtml||null,
       });
-      console.log('[step3] contract saved — id:', saved?.id);
-      // 5. Appel YouSign (Mode A : pdf_base64 + contract_id) avec timeout 60s
-      btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Envoi YouSign…';
+      // 3. Envoi via contract-send-signature
+      btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Envoi du lien de signature…';
       const SUPA_URL='https://hzrzkvdebaadditvbqis.supabase.co/functions/v1';
       const {data:{session}}=await BE.sb.auth.getSession();
-      console.log('[step3] calling yousign-create — session ok:', !!session?.access_token);
-      const abortCtrl=new AbortController();
-      const ysTimeout=setTimeout(()=>abortCtrl.abort(),60000);
-      let ysResp, ysResult;
-      try{
-        ysResp=await fetch(`${SUPA_URL}/yousign-create`,{
-          method:'POST',signal:abortCtrl.signal,
-          headers:{'Authorization':`Bearer ${session?.access_token}`,'Content-Type':'application/json'},
-          body:JSON.stringify({
-            pdf_base64:pdfBase64,
-            contract_id:saved.id,
-            contract_label:`Contrat ${s.fields.contract_type} — ${emp.first_name} ${emp.last_name} — ${contractNumber}`,
-            employee_id:s.employee_id, hotel_id:hotelId,
-            signer_first_name:emp.first_name, signer_name:emp.last_name,
-            signer_email:email, signer_phone:emp.phone||null,
-            sig_field:sigField||null,
-            dual_signature:isDual,
-            sig_field_employer:isDual?(sigFieldEmployer||null):null,
-            employer_email:isDual?($('gs3_employer_email')?.value.trim()||null):null,
-            employer_name:isDual?(hotel.legal_representative||null):null,
-          }),
-        });
-        ysResult=await ysResp.json();
-      }finally{clearTimeout(ysTimeout);}
-      console.log('[step3] yousign-create response — status:', ysResp.status, 'result:', JSON.stringify(ysResult));
-      if(!ysResp.ok||ysResult.error){
-        if(ysResult.error==='YOUSIGN_NOT_CONFIGURED'){
-          flash(`Contrat ${contractNumber} enregistré. ⚠️ YouSign non configuré — ajoutez YOUSIGN_API_KEY dans les secrets Supabase.`,'w');
-          genInlineState.step=4; renderContractsGenerate(); return;
-        }
-        if(saved?.id) await BE.updateGeneratedContract(saved.id,{status:'error_yousign',yousign_status:ysResult.error||'error'}).catch(()=>{});
-        const detail=ysResult.detail?` (${ysResult.detail})`:'';
-        throw new Error((ysResult.error||ysResult.message||'Erreur YouSign inconnue')+detail);
-      }
-      if(ysResult.sr_id){
-        await BE.updateGeneratedContract(saved.id,{yousign_sr_id:ysResult.sr_id,yousign_status:'pending',status:'pending_signature'}).catch(()=>{});
-      }
-      console.log('[step3] success — sr_id:', ysResult.sr_id);
-      flash(`Contrat ${contractNumber} envoyé pour signature`);
+      const resp=await fetch(`${SUPA_URL}/contract-send-signature`,{
+        method:'POST',
+        headers:{'Authorization':`Bearer ${session?.access_token}`,'Content-Type':'application/json'},
+        body:JSON.stringify({
+          contract_id:saved.id,
+          employee_id:s.employee_id, hotel_id:hotelId,
+          signer_first_name:emp.first_name, signer_name:emp.last_name,
+          signer_email:email,
+        }),
+      });
+      const result=await resp.json();
+      if(!resp.ok||result.error) throw new Error(result.error||'Erreur envoi signature');
+      flash(`Contrat ${contractNumber} envoyé pour signature${result.email_sent?'',' ⚠️ Email non envoyé — vérifiez RESEND_API_KEY'}`);
       genInlineState.step=4; renderContractsGenerate();
     }catch(e){
-      console.error('[step3] error:', e);
-      const msg=e.name==='AbortError'?'Timeout (60s) — vérifiez les logs Supabase':e.message;
-      flash('Erreur : '+msg,'e');
+      flash('Erreur : '+e.message,'e');
     }finally{
       btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-paper-plane"></i> Envoyer pour signature';
     }
@@ -6376,8 +6314,8 @@ async function renderContractsHistory(){
   el.innerHTML='<div style="padding:20px;text-align:center;color:var(--muted)"><i class="fa-solid fa-spinner fa-spin"></i> Chargement…</div>';
   try{
     const contracts=await BE.listGeneratedContracts(hotelId);
-    const STATUS_LABELS={draft:'Brouillon',generated:'Généré',preview_ok:'Aperçu OK',sent_signature:'Envoyé',pending_signature:'En attente',signed:'Signé',archived:'Archivé',cancelled:'Annulé',error_yousign:'Erreur signature'};
-    const STATUS_COLORS={draft:'#fef3c7|#92400e',generated:'#EEF2FF|#4338CA',preview_ok:'#EEF2FF|#4338CA',sent_signature:'#DBEAFE|#1D4ED8',pending_signature:'#FEF3C7|#92400E',signed:'#DCFCE7|#166534',archived:'#F3F4F6|#374151',cancelled:'#FEE2E2|#991B1B',error_yousign:'#FEE2E2|#991B1B'};
+    const STATUS_LABELS={draft:'Brouillon',generated:'Généré',preview_ok:'Aperçu OK',sent_signature:'Envoyé',pending_signature:'En attente',signed:'Signé',archived:'Archivé',cancelled:'Annulé',error_signature:'Erreur signature'};
+    const STATUS_COLORS={draft:'#fef3c7|#92400e',generated:'#EEF2FF|#4338CA',preview_ok:'#EEF2FF|#4338CA',sent_signature:'#DBEAFE|#1D4ED8',pending_signature:'#FEF3C7|#92400E',signed:'#DCFCE7|#166534',archived:'#F3F4F6|#374151',cancelled:'#FEE2E2|#991B1B',error_signature:'#FEE2E2|#991B1B'};
     const badge=s=>{const[bg,fg]=(STATUS_COLORS[s]||'#F3F4F6|#374151').split('|');return`<span style="background:${bg};color:${fg};padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600">${STATUS_LABELS[s]||s}</span>`;};
     const fmt=d=>d?new Date(d).toLocaleDateString('fr-FR'):'—';
     const signed=contracts.filter(c=>c.status==='signed').length;
@@ -6402,12 +6340,6 @@ async function renderContractsHistory(){
     };
 
     el.innerHTML=`
-      <!-- Sync YouSign -->
-      <div style="display:flex;justify-content:flex-end;margin-bottom:14px">
-        <button id="btnYousignSync" onclick="_syncYousign()" class="btn g" style="font-size:12.5px;gap:7px">
-          <i class="fa-solid fa-rotate"></i> Synchroniser avec YouSign
-        </button>
-      </div>
       <!-- KPIs contrats -->
       <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:18px">
         ${[
@@ -6472,7 +6404,7 @@ async function renderContractsHistory(){
                 </td>
                 <td style="white-space:nowrap">
                   ${c.generated_html?`<button title="Aperçu" onclick="_previewContractHtml(${JSON.stringify(c.id).replace(/"/g,'&quot;')},${JSON.stringify(c.generated_html||'').replace(/"/g,'&quot;')})"><i class="fa-solid fa-eye"></i></button>`:''}
-                  ${['draft','error_yousign'].includes(c.status)?`<button title="Archiver" data-archive="${c.id}" style="color:var(--muted)"><i class="fa-solid fa-box-archive"></i></button>`:''}
+                  ${['draft','error_signature'].includes(c.status)?`<button title="Archiver" data-archive="${c.id}" style="color:var(--muted)"><i class="fa-solid fa-box-archive"></i></button>`:''}
                   <button title="Historique" onclick="_showContractAuditModal('${c.id}','${(c.contract_number||'Contrat').replace(/'/g,'')}')"><i class="fa-solid fa-list-check" style="font-size:11px"></i></button>
                 </td>
               </tr>`;}).join('')}
@@ -6493,6 +6425,9 @@ async function renderContractsHistory(){
 }
 
 async function _syncYousign(contractId){
+  // Fonction désactivée — YouSign retiré
+  flash('Synchronisation YouSign non disponible','w');
+  return;
   const btn=document.getElementById('btnYousignSync');
   if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Synchronisation…';}
   try{
@@ -6525,8 +6460,8 @@ function _previewContractHtml(id,html){
 
 async function _showContractAuditModal(contractId, contractLabel){
   const logs=await BE.listContractAuditLogs(hotelId, contractId).catch(()=>[]);
-  const ACTION_LABELS={created:'Contrat créé',sent:'Envoyé pour signature',signed:'Signé électroniquement',refused:'Refusé',archived:'Archivé',viewed:'PDF consulté',downloaded:'PDF téléchargé',error_yousign:'Erreur YouSign'};
-  const ACTION_COLORS={created:'#8B5CF6',sent:'#2563EB',signed:'#16a34a',refused:'#dc2626',archived:'#6b7280',viewed:'#0891b2',downloaded:'#0891b2',error_yousign:'#dc2626'};
+  const ACTION_LABELS={created:'Contrat créé',sent:'Envoyé pour signature',signed:'Signé électroniquement',refused:'Refusé',archived:'Archivé',viewed:'PDF consulté',downloaded:'PDF téléchargé',error_signature:'Erreur signature'};
+  const ACTION_COLORS={created:'#8B5CF6',sent:'#2563EB',signed:'#16a34a',refused:'#dc2626',archived:'#6b7280',viewed:'#0891b2',downloaded:'#0891b2',error_signature:'#dc2626'};
   showModal(`<div style="padding:24px;min-width:360px;max-width:560px">
     <div style="font-size:16px;font-weight:700;margin-bottom:16px"><i class="fa-solid fa-list-check" style="color:var(--violet);margin-right:8px"></i>Historique — ${contractLabel}</div>
     ${!logs.length
@@ -6556,8 +6491,8 @@ async function renderContractsSignes(){
   el.innerHTML='<div style="padding:20px;text-align:center;color:var(--muted)"><i class="fa-solid fa-spinner fa-spin"></i> Chargement…</div>';
   try{
     const allContracts=await BE.listGeneratedContracts(hotelId);
-    const STATUS_LABELS={draft:'Brouillon',generated:'Généré',preview_ok:'Aperçu OK',sent_signature:'Envoyé',pending_signature:'En attente',signed:'Signé',archived:'Archivé',cancelled:'Annulé',error_yousign:'Erreur signature'};
-    const STATUS_COLORS={draft:'#fef3c7|#92400e',generated:'#EEF2FF|#4338CA',preview_ok:'#EEF2FF|#4338CA',sent_signature:'#DBEAFE|#1D4ED8',pending_signature:'#FEF3C7|#92400E',signed:'#DCFCE7|#166534',archived:'#F3F4F6|#374151',cancelled:'#FEE2E2|#991B1B',error_yousign:'#FEE2E2|#991B1B'};
+    const STATUS_LABELS={draft:'Brouillon',generated:'Généré',preview_ok:'Aperçu OK',sent_signature:'Envoyé',pending_signature:'En attente',signed:'Signé',archived:'Archivé',cancelled:'Annulé',error_signature:'Erreur signature'};
+    const STATUS_COLORS={draft:'#fef3c7|#92400e',generated:'#EEF2FF|#4338CA',preview_ok:'#EEF2FF|#4338CA',sent_signature:'#DBEAFE|#1D4ED8',pending_signature:'#FEF3C7|#92400E',signed:'#DCFCE7|#166534',archived:'#F3F4F6|#374151',cancelled:'#FEE2E2|#991B1B',error_signature:'#FEE2E2|#991B1B'};
     const badge=s=>{const[bg,fg]=(STATUS_COLORS[s]||'#F3F4F6|#374151').split('|');return`<span style="background:${bg};color:${fg};padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600">${STATUS_LABELS[s]||s}</span>`;};
     const fmt=d=>d?new Date(d).toLocaleDateString('fr-FR'):'—';
 
@@ -12099,8 +12034,8 @@ async function openFiche(eid){
 async function _loadFicheContracts(emp){
   const el=$('ficheContractsSection'); if(!el)return;
   const contracts=await BE.listContractsByEmployee(emp.id).catch(()=>[]);
-  const STATUS_LABELS={draft:'Brouillon',generated:'Généré',preview_ok:'Aperçu OK',sent_signature:'Envoyé',pending_signature:'En attente',signed:'Signé',archived:'Archivé',cancelled:'Annulé',error_yousign:'Erreur signature'};
-  const STATUS_COLORS={draft:'#fef3c7|#92400e',generated:'#EEF2FF|#4338CA',preview_ok:'#EEF2FF|#4338CA',sent_signature:'#DBEAFE|#1D4ED8',pending_signature:'#FEF3C7|#92400E',signed:'#DCFCE7|#166534',archived:'#F3F4F6|#374151',cancelled:'#FEE2E2|#991B1B',error_yousign:'#FEE2E2|#991B1B'};
+  const STATUS_LABELS={draft:'Brouillon',generated:'Généré',preview_ok:'Aperçu OK',sent_signature:'Envoyé',pending_signature:'En attente',signed:'Signé',archived:'Archivé',cancelled:'Annulé',error_signature:'Erreur signature'};
+  const STATUS_COLORS={draft:'#fef3c7|#92400e',generated:'#EEF2FF|#4338CA',preview_ok:'#EEF2FF|#4338CA',sent_signature:'#DBEAFE|#1D4ED8',pending_signature:'#FEF3C7|#92400E',signed:'#DCFCE7|#166534',archived:'#F3F4F6|#374151',cancelled:'#FEE2E2|#991B1B',error_signature:'#FEE2E2|#991B1B'};
   const badge=s=>{const[bg,fg]=(STATUS_COLORS[s]||'#F3F4F6|#374151').split('|');return`<span style="background:${bg};color:${fg};padding:2px 7px;border-radius:5px;font-size:10.5px;font-weight:600">${STATUS_LABELS[s]||s}</span>`;};
   const fmt=d=>d?new Date(d).toLocaleDateString('fr-FR'):'—';
   if(!contracts.length){el.innerHTML=`<div style="color:var(--muted);font-size:12px;text-align:center;padding:12px 0">Aucun contrat généré</div>`;return;}
