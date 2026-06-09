@@ -913,6 +913,13 @@ async function makeRealBE(){
       const {data,error}=await sb.from('generated_contracts').select('*').eq('employee_id',empId).order('created_at',{ascending:false});
       if(error&&error.code==='42P01')return[];if(error)return[];return data||[];
     },
+    async getSignedContractPdfUrl(storagePath){
+      if(!storagePath) return null;
+      const bucket=storagePath.startsWith('contracts/')?'contracts':'portal-documents';
+      const {data,error}=await sb.storage.from(bucket).createSignedUrl(storagePath,3600);
+      if(error){console.warn('getSignedContractPdfUrl:',error.message);return null;}
+      return data?.signedUrl||null;
+    },
     async getHrMonthlyCost(h){
       const {data,error}=await sb.from('v_hr_monthly_cost').select('*').eq('hotel_id',h).maybeSingle();
       if(error&&(error.code==='42P01'||error.code==='PGRST116'))return null;
@@ -6459,6 +6466,7 @@ async function renderContractsHistory(){
                 <td style="white-space:nowrap">
                   ${c.generated_html?`<button title="Aperçu" onclick="_previewContractHtml(${JSON.stringify(c.id).replace(/"/g,'&quot;')},${JSON.stringify(c.generated_html||'').replace(/"/g,'&quot;')})"><i class="fa-solid fa-eye"></i></button>`:''}
                   ${['draft','error_signature'].includes(c.status)?`<button title="Archiver" data-archive="${c.id}" style="color:var(--muted)"><i class="fa-solid fa-box-archive"></i></button>`:''}
+                  ${c.status==='pending_signature'?`<button title="Rafraîchir statut" data-refresh="${c.id}" style="color:#d97706" onclick="_refreshContractStatus('${c.id}')"><i class="fa-solid fa-rotate"></i></button>`:''}
                   <button title="Historique" onclick="_showContractAuditModal('${c.id}','${(c.contract_number||'Contrat').replace(/'/g,'')}')"><i class="fa-solid fa-list-check" style="font-size:11px"></i></button>
                 </td>
               </tr>`;}).join('')}
@@ -6476,6 +6484,13 @@ async function renderContractsHistory(){
       renderContractsHistory();
     });
   }catch(e){el.innerHTML=`<div style="padding:20px;color:var(--red)">Erreur : ${e.message}</div>`;}
+}
+
+async function _refreshContractStatus(contractId){
+  try{
+    await renderContractsHistory();
+    flash('Statut mis à jour');
+  }catch(e){flash('Erreur rafraîchissement : '+e.message,'e');}
 }
 
 async function _syncYousign(contractId){
