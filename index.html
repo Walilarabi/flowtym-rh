@@ -734,6 +734,7 @@ async function makeRealBE(){
       return rows;
     },
     async saveGeneratedContract(h,payload){const {data,error}=await sb.from('generated_contracts').insert({hotel_id:h,...payload}).select('*').single();must(error,'Contrat créer');return data;},
+    async getGeneratedContract(id){const {data,error}=await sb.from('generated_contracts').select('*').eq('id',id).maybeSingle();must(error,'Lecture contrat');return data;},
     async updateGeneratedContract(id,patch){const {data,error}=await sb.from('generated_contracts').update(patch).eq('id',id).select('*').single();must(error,'Contrat màj');return data;},
     async nextContractNumber(h){const {data,error}=await sb.rpc('next_contract_number',{p_hotel_id:h});if(error){console.warn('contract_number_seq:',error.message);return'CTR-'+Date.now();}return data;},
 
@@ -6098,6 +6099,22 @@ async function _genStep1(){
     </div>
   </div>`;
 
+  // Bandeau renouvellement (si genInlineState.renewalSource défini)
+  if(s.renewalSource){
+    const fmtD=d=>d?new Date(d+'T00:00').toLocaleDateString('fr-FR'):'—';
+    const src=s.renewalSource;
+    $('genInlineBody').insertAdjacentHTML('afterbegin',
+      '<div style="background:#ede9fe;border:1.5px solid var(--violet);border-radius:10px;padding:12px 16px;margin-bottom:16px;display:flex;align-items:flex-start;gap:12px">'
+      +'<i class="fa-solid fa-rotate-right" style="color:var(--violet);font-size:18px;margin-top:2px;flex-shrink:0"></i>'
+      +'<div>'
+        +'<div style="font-weight:700;font-size:13px;color:#5b21b6">Renouvellement du contrat n°'+src.contract_number+'</div>'
+        +'<div style="font-size:12px;color:var(--ink2);margin-top:2px">Contrat initial du '+fmtD(src.start_date)+' au '+fmtD(src.end_date)+'</div>'
+        +'<div style="font-size:11.5px;color:var(--muted);margin-top:4px"><i class="fa-solid fa-circle-info"></i> Veuillez renseigner les nouvelles dates de début et de fin.</div>'
+      +'</div>'
+      +'</div>'
+    );
+  }
+
   window._genZoomLevel = 100;
   window._genZoom = (delta)=>{
     _genZoomLevel = Math.min(150, Math.max(60, _genZoomLevel+delta));
@@ -6331,7 +6348,16 @@ async function _genStep3(){
         trial_period:s.fields.trial_period||null, signature_method:s.fields.signature_method,
         manager_id:s.fields.manager_id||null, sent_at:new Date().toISOString(),
         generated_html:renderedHtml||null,
+        source_contract_id:s.renewalSource?.id||null,
       });
+      // Audit renouvellement
+      if(s.renewalSource?.id){
+        const actorEmail=(await BE.sb.auth.getSession()).data?.session?.user?.email||null;
+        BE.logContractAudit(hotelId,saved.id,s.employee_id,'renewal_generated',actorEmail,{
+          source_contract_id:s.renewalSource.id,
+          source_contract_number:s.renewalSource.contract_number,
+        }).catch(()=>{});
+      }
       // 3. Envoi via contract-send-signature
       btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Envoi du lien de signature…';
       const SUPA_URL='https://hzrzkvdebaadditvbqis.supabase.co/functions/v1';
@@ -6429,9 +6455,10 @@ async function renderContractsHistory(){
         if(c.signed_pdf_storage_path||c.signed_pdf_url) return btnOn('fa-file-pdf','Consulter',"_openSignedPdf('"+c.id+"',false)",'#374151');
         return btnOff('fa-eye','Consulter','Aucun document disponible');
       }
-      // Priorité 3 : expiré actif (hors signed/archived déjà traités)
-      if(c.end_date&&new Date(c.end_date)<now&&!['cancelled'].includes(c.status)){
-        return btnOff('fa-rotate-right','Renouveler','Renouvellement à venir');
+      // Priorité 3 : expiré ou échéance ≤60j (hors signed/archived déjà traités, hors cancelled/refused/draft)
+      if(c.end_date&&!['cancelled','refused','error_signature','draft'].includes(c.status)){
+        const dLeft=Math.round((new Date(c.end_date)-now)/(1000*60*60*24));
+        if(dLeft<=60) return btnOn('fa-rotate-right','Renouveler',"_renewContract('"+c.id+"')",'#7c3aed');
       }
       // Priorité 4 : statut métier
       if(c.status==='draft') return btnOff('fa-pen','Finaliser','Reprise de brouillon à venir');
@@ -6610,6 +6637,52 @@ async function _refreshContractStatus(contractId){
     await renderContractsHistory();
     flash('Statut mis à jour');
   }catch(e){flash('Erreur rafraîchissement : '+e.message,'e');}
+}
+
+async function _renewContract(contractId){
+  try{
+    const c=await BE.getGeneratedContract(contractId);
+    if(!c){flash('Contrat introuvable.','e');return;}
+    // Validation salarié
+    const emp=staff.find(s=>s.id===c.employee_id);
+    if(!emp||emp.active===false){flash('Le collaborateur n\'existe plus ou est inactif.','e');return;}
+    // Validation modèle
+    const tplList=await BE.listTemplates(hotelId).catch(()=>[]);
+    const activeTpl=tplList.find(t=>t.id===c.template_id&&t.status==='active');
+    if(!c.template_id||!activeTpl){flash('Aucun modèle actif associé à ce contrat. Sélectionnez un modèle dans l\'onglet Générer.','e');return;}
+    // Reverse-lookup service_id / role_id depuis les tableaux globaux
+    const serviceId=deps.find(d=>d.name===c.department)?.id||'';
+    const roleId=rols.find(r=>r.name===c.job_title)?.id||'';
+    // Pré-remplir genInlineState — dates vidées, tout le reste repris
+    genInlineState={
+      step:1,
+      employee_id:c.employee_id,
+      template_id:c.template_id,
+      renewalSource:{
+        id:c.id,
+        contract_number:c.contract_number||'—',
+        start_date:c.start_date,
+        end_date:c.end_date,
+      },
+      fields:{
+        contract_type:    c.contract_type||'CDD',
+        start_date:       '',
+        end_date:         '',
+        trial_period:     c.trial_period||'',
+        weekly_hours:     c.weekly_hours!=null?String(c.weekly_hours):'',
+        salary_type:      c.salary_type||'brut_mensuel',
+        salary_amount:    c.salary_amount!=null?String(c.salary_amount):'',
+        manager_id:       c.manager_id||'',
+        work_location:    c.work_location||'',
+        signature_method: c.signature_method||'email',
+        service_id:       serviceId,
+        role_id:          roleId,
+      },
+      tplList:tplList,
+    };
+    contractsSubTab='generate';
+    renderContracts();
+  }catch(e){flash('Erreur renouvellement : '+e.message,'e');}
 }
 
 async function _syncYousign(contractId){
