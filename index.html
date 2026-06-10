@@ -1098,6 +1098,15 @@ async function makeRealBE(){
     },
     async updateMedicalVisit(id,p){const {error}=await sb.from('medical_visits').update(p).eq('id',id);must(error,'MAJ visite');},
     async deleteMedicalVisit(id){const {error}=await sb.from('medical_visits').delete().eq('id',id);must(error,'Supprimer visite');},
+    // Certificat d'aptitude → bucket hr-documents (RH uniquement, NON exposé au portail salarié)
+    async uploadMedicalDocument(hotel_id, employee_id, file){
+      const safe=(file.name||'certificat').replace(/[^\w.\-]+/g,'_').slice(0,80);
+      const ext=(safe.match(/\.[^.]+$/)||['.pdf'])[0];
+      const path=`${hotel_id}/${employee_id}/medical_${Date.now()}${ext}`;
+      const {error}=await sb.storage.from('hr-documents').upload(path, file, {contentType:file.type, upsert:false});
+      must(error,'Upload certificat');
+      return path;
+    },
     /* ---- Matériel ---- */
     async listEquipment(h){const {data,error}=await sb.from('equipment_items').select('*, employees(first_name,last_name,department)').eq('hotel_id',h).order('given_date',{ascending:false});must(error,'Matériel');return data||[];},
     async saveEquipment(h,p){
@@ -1340,6 +1349,7 @@ function makeTestBE(){
     async saveMedicalVisit(h,p){const r={id:'mv'+Date.now(),hotel_id:h,...p,created_at:new Date().toISOString(),updated_at:new Date().toISOString()};medicalVisits.push(r);return r;},
     async updateMedicalVisit(id,p){Object.assign(medicalVisits.find(x=>x.id===id)||{},p,{updated_at:new Date().toISOString()});},
     async deleteMedicalVisit(id){const i=medicalVisits.findIndex(x=>x.id===id);if(i>=0)medicalVisits.splice(i,1);},
+    async uploadMedicalDocument(hotel_id, employee_id, file){return `${hotel_id}/${employee_id}/medical_${Date.now()}.pdf`;},
     /* ---- Matériel ---- */
     async listEquipment(h){return equipmentItems.filter(x=>x.hotel_id===h).map(eq=>({...eq,employees:emps.find(e=>e.id===eq.employee_id)||null}));},
     async saveEquipment(h,p){const r={id:'eq'+Date.now(),hotel_id:h,...p,created_at:new Date().toISOString(),updated_at:new Date().toISOString()};equipmentItems.push(r);return r;},
@@ -4225,11 +4235,17 @@ async function _drawDashPriorityAlerts(){
   if(trExpired.length) alerts.push({icon:'fa-graduation-cap',color:'#EF4444',label:`${trExpired.length} formation${trExpired.length>1?'s':''} expirée${trExpired.length>1?'s':''}`,link:'training'});
   if(trExpiring30.length) alerts.push({icon:'fa-graduation-cap',color:'#F59E0B',label:`${trExpiring30.length} formation${trExpiring30.length>1?'s':''} expirant dans 30j`,link:'training'});
 
-  // Visites médicales en retard
-  const vmLate=visits.filter(v=>v.next_visit_date&&v.next_visit_date<today);
-  const vmSoon=visits.filter(v=>v.next_visit_date&&v.next_visit_date>=today&&v.next_visit_date<=soon60);
+  // Visites médicales — on ignore les visites annulées pour les échéances
+  const vmLive=visits.filter(v=>v.status!=='annulee');
+  const vmLate=vmLive.filter(v=>v.next_visit_date&&v.next_visit_date<today);
+  const vmSoon=vmLive.filter(v=>v.next_visit_date&&v.next_visit_date>=today&&v.next_visit_date<=soon60);
+  const vmPlanned=visits.filter(v=>v.status==='planifiee');
+  const vmEmpSet=new Set(visits.map(v=>v.employee_id));
+  const vmNoVisit=actStaff.filter(s=>!vmEmpSet.has(s.id));
   if(vmLate.length) alerts.push({icon:'fa-stethoscope',color:'#EF4444',label:`${vmLate.length} visite${vmLate.length>1?'s':''} médicale${vmLate.length>1?'s':''} en retard`,link:'medical'});
   if(vmSoon.length) alerts.push({icon:'fa-stethoscope',color:'#F59E0B',label:`${vmSoon.length} visite${vmSoon.length>1?'s':''} médicale${vmSoon.length>1?'s':''} dans 60j`,link:'medical'});
+  if(vmPlanned.length) alerts.push({icon:'fa-stethoscope',color:'#3B82F6',label:`${vmPlanned.length} visite${vmPlanned.length>1?'s':''} médicale${vmPlanned.length>1?'s':''} planifiée${vmPlanned.length>1?'s':''} non réalisée${vmPlanned.length>1?'s':''}`,link:'medical'});
+  if(vmNoVisit.length) alerts.push({icon:'fa-user-slash',color:'#F59E0B',label:`${vmNoVisit.length} collaborateur${vmNoVisit.length>1?'s':''} sans visite médicale`,link:'medical'});
 
   if(!alerts.length){
     el.innerHTML=`<div style="text-align:center;padding:28px 0;color:var(--muted);font-size:13px"><i class="fa-solid fa-circle-check" style="font-size:24px;color:#22C55E;display:block;margin-bottom:10px"></i>Aucune alerte active — tout est conforme !</div>`;
@@ -11539,6 +11555,9 @@ const MED_TYPES={embauche:{label:"Visite d'embauche",color:'#DBEAFE',fg:'#1D4ED8
   periodique:{label:'Visite périodique',color:'#F0FDF4',fg:'#166534',months:24},
   reprise:{label:'Visite de reprise',color:'#FEF3C7',fg:'#92400E',months:null}};
 const APT_LABELS={apte:'Apte',apte_amenagement:'Apte avec aménagement',inapte:'Inapte'};
+const MED_STATUS={planifiee:{label:'Planifiée',color:'#DBEAFE',fg:'#1D4ED8',ic:'fa-calendar'},
+  realisee:{label:'Réalisée',color:'#DCFCE7',fg:'#166534',ic:'fa-circle-check'},
+  annulee:{label:'Annulée',color:'#F3F4F6',fg:'#6B7280',ic:'fa-ban'}};
 
 function _printMedicalConvocation(emp,visit,hotel){
   const typeInfo=MED_TYPES[visit?.visit_type]||{label:'Visite médicale'};
@@ -11591,74 +11610,153 @@ function _printMedicalConvocation(emp,visit,hotel){
     </div>
     <div style="margin-top:24px;font-size:10px;color:#9ca3af;text-align:center">Flowtym RH · Document confidentiel · ${hotel?.name||''}</div>
   </div>
-  <script>window.onload=()=>{window.print();setTimeout(()=>window.close(),1000)}<\/script>
   </body></html>`;
-  const w=window.open('','_blank','width=800,height=650');
-  if(w){w.document.write(html);w.document.close();}
+  const ifr=document.createElement('iframe');
+  ifr.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0';
+  document.body.appendChild(ifr);
+  ifr.contentDocument.open();ifr.contentDocument.write(html);ifr.contentDocument.close();
+  setTimeout(()=>{try{ifr.contentWindow.focus();ifr.contentWindow.print();}catch(e){flash('Impression impossible : '+(e.message||e));}
+    setTimeout(()=>ifr.remove(),2000);},150);
 }
 
+let _medFltDept='', _medFltType='', _medFltStatus='', _medFltSpecial='';
 async function renderMedical(){
   const hName=hotels.find(h=>h.id===hotelId)?.name||'';
+  const depts=[...new Set(staff.filter(s=>s.active).map(s=>s.department).filter(Boolean))].sort();
   $('view').innerHTML=`<div class="page">
     <div class="phead">
       <div><h1>Visites médicales</h1><div class="sub">${hName}</div></div>
       <div class="actions"><button class="btn p" id="medNew"><i class="fa-solid fa-plus"></i> Nouvelle visite</button></div></div>
     <div id="medKpis"></div>
     <div id="medAlerts"></div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px">
+      <select id="medFltDept" style="font-size:13px;padding:7px 10px;border:1px solid var(--line);border-radius:8px">
+        <option value="">Tous les services</option>
+        ${depts.map(d=>`<option value="${d}" ${_medFltDept===d?'selected':''}>${d}</option>`).join('')}
+      </select>
+      <select id="medFltType" style="font-size:13px;padding:7px 10px;border:1px solid var(--line);border-radius:8px">
+        <option value="">Tous les types</option>
+        ${Object.entries(MED_TYPES).map(([k,mt])=>`<option value="${k}" ${_medFltType===k?'selected':''}>${mt.label}</option>`).join('')}
+      </select>
+      <select id="medFltStatus" style="font-size:13px;padding:7px 10px;border:1px solid var(--line);border-radius:8px">
+        <option value="">Tous les statuts</option>
+        ${Object.entries(MED_STATUS).map(([k,st])=>`<option value="${k}" ${_medFltStatus===k?'selected':''}>${st.label}</option>`).join('')}
+      </select>
+      <select id="medFltSpecial" style="font-size:13px;padding:7px 10px;border:1px solid var(--line);border-radius:8px">
+        <option value="">— Filtre rapide —</option>
+        <option value="overdue" ${_medFltSpecial==='overdue'?'selected':''}>En retard</option>
+        <option value="soon" ${_medFltSpecial==='soon'?'selected':''}>Échéance ≤ 60j</option>
+        <option value="planned_pending" ${_medFltSpecial==='planned_pending'?'selected':''}>Planifiées non réalisées</option>
+        <option value="novisit" ${_medFltSpecial==='novisit'?'selected':''}>Salariés sans visite</option>
+      </select>
+      <button class="btn g" id="medFltReset" style="font-size:13px"><i class="fa-solid fa-xmark"></i> Réinitialiser</button>
+    </div>
     <div id="medList">Chargement…</div>
   </div>`;
   $('medNew').onclick=()=>openMedicalForm(null);
+  $('medFltDept').onchange=e=>{_medFltDept=e.target.value;drawMedicalList();};
+  $('medFltType').onchange=e=>{_medFltType=e.target.value;drawMedicalList();};
+  $('medFltStatus').onchange=e=>{_medFltStatus=e.target.value;drawMedicalList();};
+  $('medFltSpecial').onchange=e=>{_medFltSpecial=e.target.value;drawMedicalList();};
+  $('medFltReset').onclick=()=>{_medFltDept=_medFltType=_medFltStatus=_medFltSpecial='';renderMedical();};
   await drawMedicalList();
+}
+
+function _medCountdown(dateStr){
+  if(!dateStr) return '';
+  const today=new Date(); today.setHours(0,0,0,0);
+  const d=new Date(dateStr+'T00:00:00');
+  const days=Math.round((d-today)/86400000);
+  if(days<0) return `<span style="color:var(--red);font-size:11px;font-weight:700">en retard de ${-days}j</span>`;
+  if(days===0) return `<span style="color:var(--red);font-size:11px;font-weight:700">aujourd'hui</span>`;
+  if(days<=60) return `<span style="color:#d97706;font-size:11px;font-weight:700">dans ${days}j</span>`;
+  return `<span style="color:var(--muted);font-size:11px">dans ${days}j</span>`;
 }
 
 async function drawMedicalList(){
   const el=$('medList'); if(!el)return;
   try{
-    const visits=await BE.listMedicalVisits(hotelId);
+    const allVisits=await BE.listMedicalVisits(hotelId);
     const today=new Date().toISOString().slice(0,10);
     const soon=new Date(Date.now()+60*86400000).toISOString().slice(0,10);
-    // KPIs conformité
     const actStaff=staff.filter(s=>s.active);
-    const empWithVisit=new Set(visits.map(v=>v.employee_id));
+    const empWithVisit=new Set(allVisits.map(v=>v.employee_id));
     const withoutVisit=actStaff.filter(s=>!empWithVisit.has(s.id));
-    const overdue=visits.filter(v=>v.next_visit_date&&v.next_visit_date<today);
-    const upcomingSoon=visits.filter(v=>v.next_visit_date&&v.next_visit_date>=today&&v.next_visit_date<=soon);
+    // Une visite "active" pour les compteurs = non annulée
+    const liveVisits=allVisits.filter(v=>v.status!=='annulee');
+    const overdue=liveVisits.filter(v=>v.next_visit_date&&v.next_visit_date<today);
+    const upcomingSoon=liveVisits.filter(v=>v.next_visit_date&&v.next_visit_date>=today&&v.next_visit_date<=soon);
+    const plannedPending=allVisits.filter(v=>v.status==='planifiee');
     const conformPct=actStaff.length?Math.round((actStaff.length-withoutVisit.length-overdue.length)/Math.max(actStaff.length,1)*100):100;
     const kpiEl=$('medKpis');
-    if(kpiEl) kpiEl.innerHTML=`<div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr));margin-bottom:14px">
+    if(kpiEl) kpiEl.innerHTML=`<div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:14px">
       ${[{v:conformPct+'%',l:'Conformité',c:conformPct>=90?'var(--green)':conformPct>=70?'#d97706':'var(--red)',ic:'fa-shield-halved'},
          {v:withoutVisit.length,l:'Sans visite',c:withoutVisit.length?'var(--red)':'var(--green)',ic:'fa-user-slash'},
          {v:overdue.length,l:'En retard',c:overdue.length?'var(--red)':'var(--green)',ic:'fa-triangle-exclamation'},
          {v:upcomingSoon.length,l:'Échéances 60j',c:upcomingSoon.length?'#d97706':'var(--green)',ic:'fa-clock'},
-         {v:visits.length,l:'Total visites',c:'',ic:'fa-stethoscope'}
+         {v:plannedPending.length,l:'Planifiées',c:plannedPending.length?'#1D4ED8':'',ic:'fa-calendar'},
+         {v:allVisits.length,l:'Total visites',c:'',ic:'fa-stethoscope'}
       ].map(k=>`<div class="kpi"><div class="val" style="${k.c?'color:'+k.c:''}">${k.v}</div><div class="lab"><i class="fa-solid ${k.ic}"></i> ${k.l}</div></div>`).join('')}
     </div>`;
-    // Alerts
-    const alerts=visits.filter(v=>v.next_visit_date&&v.next_visit_date<=soon&&v.next_visit_date>=today);
+    // Bandeau alertes
     const alertsEl=$('medAlerts');
-    if(alertsEl&&(alerts.length||withoutVisit.length||overdue.length)){
+    if(alertsEl){
       const parts=[];
       if(overdue.length) parts.push(`<b>${overdue.length} visite(s) en retard</b>`);
-      if(alerts.length) parts.push(`<b>${alerts.length} échéance(s)</b> dans 60j`);
-      if(withoutVisit.length) parts.push(`<b>${withoutVisit.length} collaborateur(s)</b> sans visite enregistrée`);
-      alertsEl.innerHTML=`<div style="background:#fef3c7;border-radius:10px;padding:12px 16px;margin-bottom:14px;font-size:13px;color:#92400e">
+      if(upcomingSoon.length) parts.push(`<b>${upcomingSoon.length} échéance(s)</b> dans 60j`);
+      if(plannedPending.length) parts.push(`<b>${plannedPending.length} planifiée(s)</b> non réalisée(s)`);
+      if(withoutVisit.length) parts.push(`<b>${withoutVisit.length} collaborateur(s)</b> sans visite`);
+      alertsEl.innerHTML=parts.length?`<div style="background:#fef3c7;border-radius:10px;padding:12px 16px;margin-bottom:14px;font-size:13px;color:#92400e">
         <i class="fa-solid fa-triangle-exclamation"></i> ${parts.join(' · ')}
-      </div>`;
+      </div>`:'';
     }
-    if(!visits.length){el.innerHTML='<div style="padding:30px;text-align:center;color:var(--muted)">Aucune visite enregistrée.</div>';return;}
-    el.innerHTML=`<table class="tbl"><thead><tr><th>Collaborateur</th><th>Service</th><th>Type</th><th>Date visite</th><th>Prochaine visite</th><th>Aptitude</th><th>Restrictions</th><th>Médecin</th><th></th></tr></thead><tbody>
+
+    // ── Filtre "Salariés sans visite" : affichage dédié ──
+    if(_medFltSpecial==='novisit'){
+      const filtered=withoutVisit.filter(s=>!_medFltDept||s.department===_medFltDept);
+      el.innerHTML=!filtered.length
+        ? '<div style="padding:30px;text-align:center;color:var(--green)"><i class="fa-solid fa-circle-check"></i> Tous les salariés ont au moins une visite.</div>'
+        : `<table class="tbl"><thead><tr><th>Collaborateur</th><th>Service</th><th>Poste</th><th></th></tr></thead><tbody>
+          ${filtered.map(s=>`<tr>
+            <td><b>${s.first_name} ${s.last_name}</b></td>
+            <td style="font-size:12px">${s.department||'—'}</td>
+            <td style="font-size:12px">${s.role||'—'}</td>
+            <td style="text-align:right"><button class="btn p" data-plan="${s.id}" style="padding:4px 10px;font-size:12px"><i class="fa-solid fa-calendar-plus"></i> Planifier</button></td>
+          </tr>`).join('')}
+        </tbody></table>`;
+      el.querySelectorAll('[data-plan]').forEach(b=>b.onclick=()=>openMedicalForm({employee_id:b.dataset.plan,status:'planifiee'}));
+      return;
+    }
+
+    // ── Filtrage des visites ──
+    let visits=allVisits.filter(v=>{
+      if(_medFltDept&&(v.employees?.department||'')!==_medFltDept) return false;
+      if(_medFltType&&v.visit_type!==_medFltType) return false;
+      if(_medFltStatus&&(v.status||'realisee')!==_medFltStatus) return false;
+      if(_medFltSpecial==='overdue'&&!(v.status!=='annulee'&&v.next_visit_date&&v.next_visit_date<today)) return false;
+      if(_medFltSpecial==='soon'&&!(v.status!=='annulee'&&v.next_visit_date&&v.next_visit_date>=today&&v.next_visit_date<=soon)) return false;
+      if(_medFltSpecial==='planned_pending'&&v.status!=='planifiee') return false;
+      return true;
+    });
+
+    if(!allVisits.length){el.innerHTML='<div style="padding:30px;text-align:center;color:var(--muted)">Aucune visite enregistrée.</div>';return;}
+    if(!visits.length){el.innerHTML='<div style="padding:30px;text-align:center;color:var(--muted)">Aucune visite ne correspond aux filtres.</div>';return;}
+    el.innerHTML=`<table class="tbl"><thead><tr><th>Collaborateur</th><th>Service</th><th>Type</th><th>Statut</th><th>Date visite</th><th>Prochaine échéance</th><th>Aptitude</th><th>Restrictions</th><th>Médecin</th><th></th></tr></thead><tbody>
       ${visits.map(v=>{const mt=MED_TYPES[v.visit_type]||{label:v.visit_type,color:'#f4f4f4',fg:'#666'};
-        const e=v.employees; const overdue=v.next_visit_date&&v.next_visit_date<today;
-        return `<tr>
+        const st=MED_STATUS[v.status||'realisee']||MED_STATUS.realisee;
+        const e=v.employees; const isLive=v.status!=='annulee'; const overdue=isLive&&v.next_visit_date&&v.next_visit_date<today;
+        return `<tr${v.status==='annulee'?' style="opacity:.55"':''}>
           <td><b>${e?e.first_name+' '+e.last_name:'—'}</b></td>
           <td style="font-size:12px">${e?.department||'—'}</td>
           <td><span style="background:${mt.color};color:${mt.fg};padding:2px 8px;border-radius:6px;font-size:11.5px;font-weight:600">${mt.label}</span></td>
+          <td><span style="background:${st.color};color:${st.fg};padding:2px 8px;border-radius:6px;font-size:11.5px;font-weight:600"><i class="fa-solid ${st.ic}"></i> ${st.label}</span></td>
           <td>${v.visit_date}</td>
-          <td style="color:${overdue?'var(--red)':v.next_visit_date&&v.next_visit_date<=soon?'#d97706':'inherit'}">${v.next_visit_date||'—'}${overdue?' <i class="fa-solid fa-triangle-exclamation"></i>':''}</td>
+          <td style="color:${overdue?'var(--red)':isLive&&v.next_visit_date&&v.next_visit_date<=soon?'#d97706':'inherit'}">${v.next_visit_date||'—'}${isLive&&v.next_visit_date?'<br>'+_medCountdown(v.next_visit_date):''}${overdue?' <i class="fa-solid fa-triangle-exclamation"></i>':''}</td>
           <td><span style="font-size:12px">${APT_LABELS[v.aptitude]||v.aptitude||'—'}</span></td>
           <td style="font-size:12px;color:${v.restrictions?'#D97706':'var(--muted)'}">${v.restrictions||'—'}</td>
           <td style="font-size:12px">${v.doctor||'—'}</td>
           <td style="white-space:nowrap">
+            ${v.document_path?`<button data-doc="${v.id}" title="Certificat d'aptitude" style="color:#166534"><i class="fa-solid fa-file-medical"></i></button>`:''}
             <button data-conv="${v.id}" title="Convocation PDF" style="color:#7c3aed"><i class="fa-regular fa-file-pdf"></i></button>
             <button data-edit="${v.id}" title="Modifier"><i class="fa-solid fa-pen"></i></button>
             <button data-del="${v.id}" title="Supprimer" style="color:var(--red)"><i class="fa-solid fa-trash"></i></button>
@@ -11668,11 +11766,16 @@ async function drawMedicalList(){
     el.querySelectorAll('[data-conv]').forEach(b=>b.onclick=async()=>{
       const v=visits.find(x=>x.id===b.dataset.conv);
       _printMedicalConvocation(staff.find(e=>e.id===v.employee_id),v,hotels.find(h=>h.id===hotelId));
-      const today=new Date().toISOString().slice(0,10);
-      await BE.updateMedicalVisit(v.id,{convocation_sent_at:today}).catch(()=>{});
-      v.convocation_sent_at=today;
-      b.title='Convocation envoyée le '+today;
+      const td=new Date().toISOString().slice(0,10);
+      await BE.updateMedicalVisit(v.id,{convocation_sent_at:td}).catch(()=>{});
+      v.convocation_sent_at=td;
+      b.title='Convocation envoyée le '+td;
       b.style.color='var(--green)';
+    });
+    el.querySelectorAll('[data-doc]').forEach(b=>b.onclick=async()=>{
+      const v=visits.find(x=>x.id===b.dataset.doc);
+      try{const url=await BE.getSignedDocUrl(v.document_path,120);if(url)window.open(url,'_blank');}
+      catch(e){flash('Erreur : '+(e.message||e));}
     });
     el.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openMedicalForm(visits.find(v=>v.id===b.dataset.edit)));
     el.querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{
@@ -11682,10 +11785,44 @@ async function drawMedicalList(){
   }catch(e){el.innerHTML=`<div style="padding:20px;color:var(--red)">Erreur : ${e.message}</div>`;}
 }
 
+async function _loadFicheMedical(s){
+  const el=$('ficheMedicalSection'); if(!el)return;
+  try{
+    const all=await BE.listMedicalVisits(hotelId);
+    const visits=all.filter(v=>v.employee_id===s.id)
+      .sort((a,b)=>(b.visit_date||'').localeCompare(a.visit_date||''));
+    if(!visits.length){el.innerHTML='<div style="color:var(--muted);font-size:12px">Aucune visite enregistrée.</div>';return;}
+    const today=new Date().toISOString().slice(0,10);
+    el.innerHTML=visits.map(v=>{
+      const mt=MED_TYPES[v.visit_type]||{label:v.visit_type,color:'#f4f4f4',fg:'#666'};
+      const st=MED_STATUS[v.status||'realisee']||MED_STATUS.realisee;
+      const overdue=v.status!=='annulee'&&v.next_visit_date&&v.next_visit_date<today;
+      return `<div style="padding:8px 0;border-bottom:1px solid var(--line)">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+          <span style="font-size:12.5px;font-weight:600">${v.visit_date||'—'}</span>
+          <span style="background:${mt.color};color:${mt.fg};padding:1px 7px;border-radius:5px;font-size:10.5px;font-weight:600">${mt.label}</span>
+          <span style="background:${st.color};color:${st.fg};padding:1px 7px;border-radius:5px;font-size:10.5px;font-weight:600">${st.label}</span>
+          ${v.document_path?`<button data-fmed-doc="${v.id}" title="Certificat d'aptitude" style="color:#166534;background:none;border:0;cursor:pointer;font-size:13px"><i class="fa-solid fa-file-medical"></i></button>`:''}
+        </div>
+        <div style="font-size:11.5px;color:var(--muted);margin-top:2px">
+          ${APT_LABELS[v.aptitude]||v.aptitude||'—'}${v.restrictions?' · '+v.restrictions:''}
+          ${v.next_visit_date?` · prochaine : <span style="color:${overdue?'var(--red)':'inherit'}">${v.next_visit_date}</span>`:''}
+        </div>
+      </div>`;
+    }).join('');
+    el.querySelectorAll('[data-fmed-doc]').forEach(b=>b.onclick=async()=>{
+      const v=visits.find(x=>x.id===b.dataset.fmedDoc);
+      try{const url=await BE.getSignedDocUrl(v.document_path,120);if(url)window.open(url,'_blank');}
+      catch(e){flash('Erreur : '+(e.message||e));}
+    });
+  }catch(e){el.innerHTML=`<div style="color:var(--red);font-size:12px">Erreur : ${e.message}</div>`;}
+}
+
 function openMedicalForm(v){
   const empOpts=staff.filter(s=>s.active).sort((a,b)=>a.last_name.localeCompare(b.last_name))
     .map(e=>`<option value="${e.id}" ${v?.employee_id===e.id?'selected':''}>${e.first_name} ${e.last_name}</option>`).join('');
-  $('modal').innerHTML=mhHTML('fa-solid fa-stethoscope',v?'Modifier la visite':'Nouvelle visite médicale')+`
+  const isEdit=!!v?.id;
+  $('modal').innerHTML=mhHTML('fa-solid fa-stethoscope',isEdit?'Modifier la visite':'Nouvelle visite médicale')+`
   <div class="mb">
     <div class="row3">
       <div class="fld"><label>Collaborateur *</label><select id="mf_emp"><option value="">— choisir —</option>${empOpts}</select></div>
@@ -11695,23 +11832,33 @@ function openMedicalForm(v){
       <div class="fld"><label>Date visite *</label><input type="date" id="mf_vd" value="${v?.visit_date||new Date().toISOString().slice(0,10)}"></div>
     </div>
     <div class="row3">
+      <div class="fld"><label>Statut</label><select id="mf_st">
+        ${Object.entries(MED_STATUS).map(([k,st])=>`<option value="${k}" ${(v?.status||'realisee')===k?'selected':''}>${st.label}</option>`).join('')}
+      </select></div>
       <div class="fld"><label>Prochaine visite</label><input type="date" id="mf_nd" value="${v?.next_visit_date||''}"></div>
       <div class="fld"><label>Aptitude</label><select id="mf_ap">
         ${Object.entries(APT_LABELS).map(([k,l])=>`<option value="${k}" ${(v?.aptitude||'apte')===k?'selected':''}>${l}</option>`).join('')}
       </select></div>
-      <div class="fld"><label>Médecin</label><input id="mf_dr" value="${v?.doctor||''}" placeholder="Dr …"></div>
     </div>
-    <div class="fld"><label>Établissement</label><input id="mf_cl" value="${v?.clinic||''}" placeholder="Nom du cabinet / centre"></div>
+    <div class="row2">
+      <div class="fld"><label>Médecin</label><input id="mf_dr" value="${v?.doctor||''}" placeholder="Dr …"></div>
+      <div class="fld"><label>Établissement</label><input id="mf_cl" value="${v?.clinic||''}" placeholder="Nom du cabinet / centre"></div>
+    </div>
     <div class="row3">
       <div class="fld"><label>Convocation envoyée le</label><input type="date" id="mf_conv" value="${v?.convocation_sent_at||''}"></div>
       <div class="fld" style="grid-column:span 2"><label>Notes convocation</label><input id="mf_cvn" value="${v?.convocation_notes||''}" placeholder="Informations complémentaires pour la convocation"></div>
     </div>
     <div class="fld"><label>Restrictions / aménagements</label><input id="mf_res" value="${v?.restrictions||''}" placeholder="ex : port de charges limité, travail sur écran réduit…"></div>
     <div class="fld"><label>Notes</label><textarea id="mf_no" rows="2">${v?.notes||''}</textarea></div>
+    <div class="fld"><label>Certificat d'aptitude (PDF/image) — visible RH uniquement</label>
+      ${v?.document_path?`<div style="font-size:12px;color:#166534;margin-bottom:4px"><i class="fa-solid fa-file-medical"></i> Document déjà attaché — sélectionnez un fichier pour le remplacer</div>`:''}
+      <input type="file" id="mf_doc" accept="application/pdf,image/*">
+      <div style="font-size:11px;color:var(--muted);margin-top:3px"><i class="fa-solid fa-lock"></i> Stocké dans le coffre RH, non exposé au portail salarié.</div>
+    </div>
   </div>
   <div class="mact">
     <button class="btn g" onclick="closeModal()">Annuler</button>
-    <button class="btn p" id="mf_save"><i class="fa-solid fa-check"></i> ${v?'Enregistrer':'Créer'}</button>
+    <button class="btn p" id="mf_save"><i class="fa-solid fa-check"></i> ${isEdit?'Enregistrer':'Créer'}</button>
   </div>`;
   $('modalbg').classList.add('on');
   // Auto-compute next visit date based on type
@@ -11727,12 +11874,20 @@ function openMedicalForm(v){
   $('mf_save').onclick=async()=>{
     const eid=$('mf_emp').value; if(!eid){flash('Collaborateur requis');return;}
     const vd=$('mf_vd').value; if(!vd){flash('Date requise');return;}
-    const p={employee_id:eid,visit_type:$('mf_ty').value,visit_date:vd,next_visit_date:$('mf_nd').value||null,
-      aptitude:$('mf_ap').value,doctor:$('mf_dr').value||null,clinic:$('mf_cl').value||null,notes:$('mf_no').value||null,
-      convocation_sent_at:$('mf_conv').value||null,convocation_notes:$('mf_cvn').value||null,restrictions:$('mf_res').value||null};
-    try{v?await BE.updateMedicalVisit(v.id,p):await BE.saveMedicalVisit(hotelId,p);
-      flash(v?'Mis à jour':'Visite créée');closeModal();await drawMedicalList();}
-    catch(e){flash('Erreur : '+e.message);}
+    const btn=$('mf_save'); btn.disabled=true;
+    try{
+      // Upload du certificat si un fichier est sélectionné
+      let docPath=v?.document_path||null;
+      const f=$('mf_doc')?.files?.[0];
+      if(f){ btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Envoi…'; docPath=await BE.uploadMedicalDocument(hotelId,eid,f); }
+      const p={employee_id:eid,visit_type:$('mf_ty').value,visit_date:vd,next_visit_date:$('mf_nd').value||null,
+        status:$('mf_st').value,aptitude:$('mf_ap').value,doctor:$('mf_dr').value||null,clinic:$('mf_cl').value||null,notes:$('mf_no').value||null,
+        convocation_sent_at:$('mf_conv').value||null,convocation_notes:$('mf_cvn').value||null,restrictions:$('mf_res').value||null,
+        document_path:docPath};
+      isEdit?await BE.updateMedicalVisit(v.id,p):await BE.saveMedicalVisit(hotelId,p);
+      flash(isEdit?'Mis à jour':'Visite créée');closeModal();await drawMedicalList();
+    }
+    catch(e){flash('Erreur : '+e.message);btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> '+(isEdit?'Enregistrer':'Créer');}
   };
 }
 
@@ -13095,6 +13250,8 @@ async function openFiche(eid){
       <div id="portalSection">Chargement…</div></div>`:''}
     ${full?`<div class="sec"><h4>Coffre-fort contrats <span style="float:right;font-size:10.5px;color:var(--muted);font-weight:normal;cursor:pointer" onclick="contractsSubTab='signed';closeFiche();goView('contracts')">Tous les contrats →</span></h4>
       <div id="ficheContratsSignes"><div style="color:var(--muted);font-size:12px">Chargement…</div></div></div>`:''}
+    ${full?`<div class="sec"><h4>Visites médicales <span style="float:right;font-size:10.5px;color:var(--muted);font-weight:normal;cursor:pointer" onclick="closeFiche();goView('medical')">Gérer →</span></h4>
+      <div id="ficheMedicalSection"><div style="color:var(--muted);font-size:12px">Chargement…</div></div></div>`:''}
     ${full?`<div class="sec" style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn g" data-edit style="flex:1;justify-content:center"><i class="fa-solid fa-pen"></i> Modifier</button>
       ${(s.status||'')==='actif'
         ? '<button class="btn" data-pause style="flex:1;justify-content:center;background:#FEF3C7;color:#92400E;border:1px solid #FCD34D"><i class="fa-solid fa-pause"></i> Mettre en pause</button><button class="btn d" data-del style="flex:1;justify-content:center"><i class="fa-solid fa-right-from-bracket"></i> Marquer comme parti</button>'
@@ -13147,6 +13304,8 @@ async function openFiche(eid){
   if(full && $('portalSection')) loadPortalSection(s);
   // Coffre-fort contrats signés
   if(full && $('ficheContratsSignes')) _renderPortalContractsCoffre(s.id, $('ficheContratsSignes'));
+  // Section Visites médicales (RH uniquement — certificat non exposé au portail)
+  if(full && $('ficheMedicalSection')) _loadFicheMedical(s);
 
   const ed=$('drawer').querySelector('[data-edit]');
   if(ed) ed.onclick=()=>{closeFiche();openEmpForm(s);};
