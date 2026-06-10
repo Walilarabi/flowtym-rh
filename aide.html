@@ -1,0 +1,867 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Aide & support — Flowtym RH</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --violet:#7C3AED;--violet-bg:#F5F3FF;--violet-d:#5b21b6;
+  --ink:#111827;--ink2:#374151;--muted:#6B7280;
+  --line:#E5E7EB;--bg:#F9FAFB;--white:#fff;
+  --shadow:0 1px 4px rgba(0,0,0,.07);
+  --shadow-lg:0 8px 32px rgba(0,0,0,.10);
+  --radius:14px;--radius-sm:8px;
+  --green:#16a34a;--amber:#d97706;--red:#dc2626;
+}
+body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--ink);min-height:100vh;line-height:1.6}
+a{color:var(--violet);text-decoration:none}
+a:hover{text-decoration:underline}
+
+/* ── Header ── */
+.top{background:var(--white);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:100}
+.top-in{max-width:1100px;margin:0 auto;padding:0 24px;height:60px;display:flex;align-items:center;gap:16px}
+.logo{display:flex;align-items:center;gap:10px;font-weight:800;font-size:18px;color:var(--ink)}
+.logo .mk{width:32px;height:32px;background:var(--violet);border-radius:8px;display:grid;place-items:center;color:#fff;font-size:15px}
+.logo small{font-size:13px;font-weight:600;color:var(--muted)}
+.spacer{flex:1}
+.back-btn{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:600;color:var(--ink2);background:none;border:1px solid var(--line);border-radius:8px;padding:7px 14px;cursor:pointer;transition:background .15s}
+.back-btn:hover{background:var(--bg)}
+
+/* ── Hero ── */
+.hero{background:linear-gradient(135deg,var(--violet) 0%,#4f46e5 100%);padding:52px 24px 48px;text-align:center;color:#fff}
+.hero h1{font-size:32px;font-weight:800;margin-bottom:10px}
+.hero p{font-size:16px;opacity:.85;margin-bottom:32px}
+.search-wrap{max-width:560px;margin:0 auto;position:relative}
+.search-wrap input{width:100%;padding:14px 20px 14px 48px;border-radius:12px;border:none;font-size:15px;font-family:inherit;color:var(--ink);outline:none;box-shadow:var(--shadow-lg)}
+.search-wrap input::placeholder{color:var(--muted)}
+.search-wrap .si{position:absolute;left:16px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:16px}
+#searchClear{position:absolute;right:14px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--muted);font-size:14px;display:none}
+
+/* ── Layout ── */
+.page{max-width:1100px;margin:0 auto;padding:40px 24px}
+.cols{display:grid;grid-template-columns:220px 1fr;gap:28px;align-items:start}
+@media(max-width:760px){.cols{grid-template-columns:1fr}}
+
+/* ── Sidebar nav ── */
+.sidenav{position:sticky;top:78px;background:var(--white);border:1px solid var(--line);border-radius:var(--radius);padding:8px 0;box-shadow:var(--shadow)}
+.sidenav-section{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);padding:12px 16px 4px}
+.sidenav a{display:flex;align-items:center;gap:10px;padding:9px 16px;font-size:13px;font-weight:500;color:var(--ink2);border-radius:0;transition:background .12s,color .12s}
+.sidenav a:hover,.sidenav a.active{background:var(--violet-bg);color:var(--violet);text-decoration:none}
+.sidenav a i{width:16px;text-align:center;font-size:13px}
+.sidenav hr{border:none;border-top:1px solid var(--line);margin:6px 12px}
+
+/* ── Sections ── */
+.section{margin-bottom:48px;scroll-margin-top:86px}
+.section-header{display:flex;align-items:center;gap:12px;margin-bottom:20px}
+.section-icon{width:40px;height:40px;border-radius:10px;background:var(--violet-bg);display:grid;place-items:center;color:var(--violet);font-size:18px;flex-shrink:0}
+.section-header h2{font-size:20px;font-weight:800}
+
+/* ── Guide cards ── */
+.guides-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+.guide-card{background:var(--white);border:1px solid var(--line);border-radius:var(--radius);padding:20px;cursor:pointer;transition:box-shadow .15s,border-color .15s;position:relative}
+.guide-card:hover{box-shadow:var(--shadow-lg);border-color:var(--violet)}
+.guide-card.coming-soon{opacity:.55;cursor:default}
+.guide-card.coming-soon:hover{box-shadow:none;border-color:var(--line)}
+.guide-badge{position:absolute;top:14px;right:14px;font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px}
+.badge-new{background:#dcfce7;color:#16a34a}
+.badge-soon{background:#f3f4f6;color:var(--muted)}
+.guide-card h3{font-size:14px;font-weight:700;margin-bottom:6px;display:flex;align-items:center;gap:8px}
+.guide-card h3 i{color:var(--violet);font-size:14px}
+.guide-card p{font-size:13px;color:var(--ink2);line-height:1.5}
+
+/* ── Article (guide detail) ── */
+.article-wrap{background:var(--white);border:1px solid var(--line);border-radius:var(--radius);padding:32px;box-shadow:var(--shadow)}
+.article-breadcrumb{font-size:12px;color:var(--muted);margin-bottom:20px;display:flex;align-items:center;gap:6px}
+.article-breadcrumb span{cursor:pointer;color:var(--violet)}
+.article-breadcrumb span:hover{text-decoration:underline}
+.article h1{font-size:24px;font-weight:800;margin-bottom:8px}
+.article .article-meta{font-size:12px;color:var(--muted);margin-bottom:28px;display:flex;gap:16px}
+.article h2{font-size:17px;font-weight:700;margin:28px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+.article h3{font-size:14px;font-weight:700;margin:18px 0 6px;color:var(--ink2)}
+.article p{font-size:14px;line-height:1.7;color:var(--ink2);margin-bottom:12px}
+.article ul,.article ol{font-size:14px;line-height:1.7;color:var(--ink2);margin:8px 0 14px 20px}
+.article li{margin-bottom:4px}
+.article .tip{background:#eff6ff;border-left:3px solid #3b82f6;border-radius:0 8px 8px 0;padding:12px 16px;margin:14px 0;font-size:13px;color:#1e40af}
+.article .tip i{margin-right:6px}
+.article .warn{background:#fffbeb;border-left:3px solid var(--amber);border-radius:0 8px 8px 0;padding:12px 16px;margin:14px 0;font-size:13px;color:#92400e}
+.article .warn i{margin-right:6px}
+.article .success{background:#f0fdf4;border-left:3px solid var(--green);border-radius:0 8px 8px 0;padding:12px 16px;margin:14px 0;font-size:13px;color:#14532d}
+.article .success i{margin-right:6px}
+.article .step-block{background:var(--bg);border:1px solid var(--line);border-radius:var(--radius-sm);padding:14px 16px;margin-bottom:10px;font-size:13px}
+.article .step-num{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;background:var(--violet);color:#fff;border-radius:50%;font-size:11px;font-weight:700;margin-right:8px;flex-shrink:0;vertical-align:middle}
+.article kbd{background:#f3f4f6;border:1px solid var(--line);border-radius:4px;padding:1px 6px;font-size:12px;font-family:monospace;color:var(--ink)}
+.article .tag-status{display:inline-block;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:700}
+
+/* ── FAQ ── */
+.faq-item{border:1px solid var(--line);border-radius:var(--radius-sm);margin-bottom:8px;overflow:hidden}
+.faq-q{padding:16px 18px;font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:space-between;background:var(--white);transition:background .12s}
+.faq-q:hover{background:var(--bg)}
+.faq-q i.chevron{transition:transform .2s;color:var(--muted);font-size:12px}
+.faq-q.open i.chevron{transform:rotate(180deg)}
+.faq-a{display:none;padding:0 18px 16px;font-size:13px;color:var(--ink2);line-height:1.7;background:var(--white)}
+.faq-a.open{display:block}
+
+/* ── Contact ── */
+.contact-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px}
+.contact-card{background:var(--white);border:1px solid var(--line);border-radius:var(--radius);padding:22px;text-align:center}
+.contact-card .cc-icon{width:48px;height:48px;border-radius:12px;display:grid;place-items:center;font-size:22px;margin:0 auto 12px}
+.contact-card h4{font-size:14px;font-weight:700;margin-bottom:6px}
+.contact-card p{font-size:12px;color:var(--muted);margin-bottom:14px}
+.contact-card a.btn{display:inline-flex;align-items:center;gap:7px;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;text-decoration:none;transition:opacity .15s}
+.contact-card a.btn:hover{opacity:.85}
+.btn-primary{background:var(--violet);color:#fff}
+.btn-green{background:#16a34a;color:#fff}
+.btn-blue{background:#2563eb;color:#fff}
+
+/* ── Changelog ── */
+.changelog-item{display:flex;gap:20px;margin-bottom:24px}
+.cl-dot{width:10px;height:10px;border-radius:50%;margin-top:6px;flex-shrink:0}
+.cl-body{flex:1}
+.cl-date{font-size:11px;color:var(--muted);margin-bottom:4px}
+.cl-title{font-size:14px;font-weight:700;margin-bottom:6px}
+.cl-items{font-size:13px;color:var(--ink2);line-height:1.7}
+.cl-items li{margin-bottom:3px}
+.cl-line{border:none;border-left:2px solid var(--line);height:100%;min-height:20px;margin-left:4px;margin-bottom:0}
+
+/* ── Security ── */
+.security-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}
+.security-card{background:var(--white);border:1px solid var(--line);border-radius:var(--radius);padding:20px}
+.security-card .sc-head{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.security-card .sc-icon{width:36px;height:36px;border-radius:9px;display:grid;place-items:center;font-size:16px;flex-shrink:0}
+.security-card h4{font-size:14px;font-weight:700}
+.security-card p{font-size:13px;color:var(--ink2);line-height:1.6}
+
+/* ── Search results ── */
+#searchResults{display:none;background:var(--white);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow-lg);margin-bottom:28px;overflow:hidden}
+#searchResults h3{font-size:13px;font-weight:700;padding:14px 18px 8px;border-bottom:1px solid var(--line);color:var(--muted)}
+.sr-item{padding:12px 18px;border-bottom:1px solid var(--line);cursor:pointer;transition:background .12s}
+.sr-item:last-child{border-bottom:none}
+.sr-item:hover{background:var(--violet-bg)}
+.sr-item .sr-title{font-size:14px;font-weight:600;color:var(--violet)}
+.sr-item .sr-excerpt{font-size:12px;color:var(--muted);margin-top:2px}
+#noResults{padding:20px 18px;color:var(--muted);font-size:14px;text-align:center}
+
+/* ── Responsive ── */
+@media(max-width:640px){
+  .hero h1{font-size:24px}
+  .guides-grid{grid-template-columns:1fr}
+  .page{padding:24px 16px}
+  .contact-grid{grid-template-columns:1fr}
+  .security-grid{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="top">
+  <div class="top-in">
+    <div class="logo">
+      <div class="mk"><i class="fa-solid fa-hotel"></i></div>
+      Flowtym <small>RH</small>
+    </div>
+    <span style="font-size:13px;color:var(--muted);font-weight:500">Centre d'aide</span>
+    <div class="spacer"></div>
+    <button class="back-btn" onclick="window.history.length>1?window.history.back():window.location.href='/'">
+      <i class="fa-solid fa-arrow-left"></i> Retour à l'application
+    </button>
+  </div>
+</div>
+
+<!-- Hero + Search -->
+<div class="hero">
+  <h1>Comment pouvons-nous vous aider&nbsp;?</h1>
+  <p>Guides, FAQ et ressources pour maîtriser Flowtym RH</p>
+  <div class="search-wrap">
+    <i class="fa-solid fa-magnifying-glass si"></i>
+    <input type="text" id="searchInput" placeholder="Rechercher un guide, une fonctionnalité…" autocomplete="off">
+    <button id="searchClear" onclick="clearSearch()" title="Effacer"><i class="fa-solid fa-xmark"></i></button>
+  </div>
+</div>
+
+<div class="page">
+
+  <!-- Search results -->
+  <div id="searchResults">
+    <h3 id="searchResultsLabel">Résultats</h3>
+    <div id="searchResultsList"></div>
+  </div>
+
+  <div class="cols" id="mainCols">
+
+    <!-- Sidebar nav -->
+    <nav class="sidenav" id="sidenav">
+      <div class="sidenav-section">Guides</div>
+      <a href="#guides" onclick="scrollTo('guides')"><i class="fa-solid fa-book-open"></i> Tous les guides</a>
+      <div class="sidenav-section">Support</div>
+      <a href="#faq" onclick="scrollTo('faq')"><i class="fa-solid fa-circle-question"></i> FAQ</a>
+      <a href="#contact" onclick="scrollTo('contact')"><i class="fa-solid fa-headset"></i> Contact</a>
+      <div class="sidenav-section">À propos</div>
+      <a href="#changelog" onclick="scrollTo('changelog')"><i class="fa-solid fa-rocket"></i> Nouveautés</a>
+      <a href="#securite" onclick="scrollTo('securite')"><i class="fa-solid fa-shield-check"></i> Sécurité</a>
+    </nav>
+
+    <!-- Main content -->
+    <main id="mainContent">
+
+      <!-- ═══════════════ GUIDES ═══════════════ -->
+      <section class="section" id="guides">
+        <div class="section-header">
+          <div class="section-icon"><i class="fa-solid fa-book-open"></i></div>
+          <h2>Guides par module</h2>
+        </div>
+        <div class="guides-grid" id="guidesGrid">
+
+          <div class="guide-card" onclick="openGuide('contrats')">
+            <span class="guide-badge badge-new">Complet</span>
+            <h3><i class="fa-solid fa-file-contract"></i> Contrats</h3>
+            <p>Générer, configurer et gérer les contrats de travail — CDD, CDI, Alternance.</p>
+          </div>
+
+          <div class="guide-card" onclick="openGuide('signature')">
+            <span class="guide-badge badge-new">Complet</span>
+            <h3><i class="fa-solid fa-signature"></i> Signature électronique</h3>
+            <p>Envoyer un contrat à signer, suivre son état et télécharger le signé.</p>
+          </div>
+
+          <div class="guide-card" onclick="openGuide('portail')">
+            <span class="guide-badge badge-new">Complet</span>
+            <h3><i class="fa-solid fa-user-tie"></i> Portail salarié</h3>
+            <p>Accès salarié, consultation des documents, demandes et coffre-fort.</p>
+          </div>
+
+          <div class="guide-card" onclick="openGuide('renouvellement')">
+            <h3><i class="fa-solid fa-rotate-right"></i> Renouvellement CDD</h3>
+            <p>Renouveler un CDD depuis l'historique avec pré-remplissage automatique.</p>
+          </div>
+
+          <div class="guide-card coming-soon">
+            <span class="guide-badge badge-soon">Bientôt</span>
+            <h3><i class="fa-solid fa-calendar-days"></i> Planning</h3>
+            <p>Créer et gérer les plannings d'équipe, importer et exporter.</p>
+          </div>
+
+          <div class="guide-card coming-soon">
+            <span class="guide-badge badge-soon">Bientôt</span>
+            <h3><i class="fa-solid fa-right-left"></i> Remplacements</h3>
+            <p>Trouver un remplaçant disponible, notifier et confirmer un remplacement.</p>
+          </div>
+
+          <div class="guide-card coming-soon">
+            <span class="guide-badge badge-soon">Bientôt</span>
+            <h3><i class="fa-regular fa-calendar-xmark"></i> Absences</h3>
+            <p>Déclarer, valider et suivre les absences, congés et RTT.</p>
+          </div>
+
+          <div class="guide-card coming-soon">
+            <span class="guide-badge badge-soon">Bientôt</span>
+            <h3><i class="fa-solid fa-vault"></i> Coffre-fort salarié</h3>
+            <p>Documents personnels, bulletins de paie et accès sécurisé.</p>
+          </div>
+
+          <div class="guide-card coming-soon">
+            <span class="guide-badge badge-soon">Bientôt</span>
+            <h3><i class="fa-solid fa-user-shield"></i> Accès & permissions</h3>
+            <p>Rôles Manager, RH, Admin — configuration et droits par module.</p>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- ═══════════════ ARTICLE ZONE ═══════════════ -->
+      <div id="articleZone" style="display:none;margin-bottom:48px"></div>
+
+      <!-- ═══════════════ FAQ ═══════════════ -->
+      <section class="section" id="faq">
+        <div class="section-header">
+          <div class="section-icon"><i class="fa-solid fa-circle-question"></i></div>
+          <h2>Questions fréquentes</h2>
+        </div>
+        <div id="faqList">
+
+          <div class="faq-item" data-search="contrat générer pdf modèle template">
+            <div class="faq-q" onclick="toggleFaq(this)">
+              <span>Comment générer un contrat depuis un modèle&nbsp;?</span>
+              <i class="fa-solid fa-chevron-down chevron"></i>
+            </div>
+            <div class="faq-a">
+              Allez dans <strong>Contrats → Générer</strong>, choisissez un modèle, remplissez les champs salarié, poste, dates et salaire. Le système génère un aperçu PDF. Validez l'aperçu puis cliquez <strong>Envoyer à signer</strong>.
+            </div>
+          </div>
+
+          <div class="faq-item" data-search="signature eidas légal valeur juridique">
+            <div class="faq-q" onclick="toggleFaq(this)">
+              <span>La signature électronique a-t-elle une valeur légale&nbsp;?</span>
+              <i class="fa-solid fa-chevron-down chevron"></i>
+            </div>
+            <div class="faq-a">
+              Oui. La signature Flowtym RH est conforme au règlement européen <strong>eIDAS</strong> (niveau Simple). Elle est opposable en France conformément à l'article 1367 du Code Civil. Chaque acte de signature est horodaté et conservé dans le coffre-fort.
+            </div>
+          </div>
+
+          <div class="faq-item" data-search="contrat non reçu email salarié signature">
+            <div class="faq-q" onclick="toggleFaq(this)">
+              <span>Le salarié n'a pas reçu l'email de signature, que faire&nbsp;?</span>
+              <i class="fa-solid fa-chevron-down chevron"></i>
+            </div>
+            <div class="faq-a">
+              Dans <strong>Historique contrats</strong>, trouvez le contrat concerné (statut <em>En attente</em>) et cliquez <strong>Relancer</strong>. Vous pouvez corriger l'adresse email si nécessaire. Vérifiez aussi les spams côté salarié.
+            </div>
+          </div>
+
+          <div class="faq-item" data-search="cdd renouveler renouvellement contrat">
+            <div class="faq-q" onclick="toggleFaq(this)">
+              <span>Comment renouveler un CDD arrivant à échéance&nbsp;?</span>
+              <i class="fa-solid fa-chevron-down chevron"></i>
+            </div>
+            <div class="faq-a">
+              Dans <strong>Historique contrats</strong>, repérez le CDD avec le badge <em>Échéance proche</em> et cliquez <strong>Renouveler</strong>. Le wizard s'ouvre avec les informations du salarié pré-remplies. Il ne vous reste qu'à définir les nouvelles dates.
+            </div>
+          </div>
+
+          <div class="faq-item" data-search="portail salarié accès connexion code lien">
+            <div class="faq-q" onclick="toggleFaq(this)">
+              <span>Comment un salarié accède-t-il au portail&nbsp;?</span>
+              <i class="fa-solid fa-chevron-down chevron"></i>
+            </div>
+            <div class="faq-a">
+              Le salarié reçoit un email avec un lien magique (sans mot de passe). Ce lien est valable 24h. Il peut également demander un nouveau lien depuis <code>flowtym.com/salarie</code> en saisissant son adresse email professionnelle.
+            </div>
+          </div>
+
+          <div class="faq-item" data-search="rôle permission manager rh admin droits">
+            <div class="faq-q" onclick="toggleFaq(this)">
+              <span>Quelle est la différence entre les rôles Manager, RH et Admin&nbsp;?</span>
+              <i class="fa-solid fa-chevron-down chevron"></i>
+            </div>
+            <div class="faq-a">
+              <strong>Admin</strong> : accès complet à tous les modules et paramètres, gestion des utilisateurs.<br>
+              <strong>RH</strong> : accès aux modules RH (contrats, documents, absences, formations) mais pas aux paramètres avancés.<br>
+              <strong>Manager</strong> : accès limité à son équipe — planning, absences, fiches salarié de ses collaborateurs directs.
+            </div>
+          </div>
+
+          <div class="faq-item" data-search="coffre-fort document bulletin paie accès sécurisé url">
+            <div class="faq-q" onclick="toggleFaq(this)">
+              <span>Comment fonctionne le coffre-fort documentaire&nbsp;?</span>
+              <i class="fa-solid fa-chevron-down chevron"></i>
+            </div>
+            <div class="faq-a">
+              Les documents signés ne sont jamais exposés directement. Chaque téléchargement génère une URL sécurisée temporaire (valable 15 minutes). L'accès est validé par JWT côté serveur : aucun document ne peut être consulté sans authentification valide.
+            </div>
+          </div>
+
+          <div class="faq-item" data-search="données rgpd hébergement europe">
+            <div class="faq-q" onclick="toggleFaq(this)">
+              <span>Où sont hébergées mes données&nbsp;?</span>
+              <i class="fa-solid fa-chevron-down chevron"></i>
+            </div>
+            <div class="faq-a">
+              Toutes les données sont hébergées sur des serveurs situés en Europe (AWS eu-west-1, Irlande). Flowtym RH est conforme au RGPD. Aucune donnée n'est transmise à des tiers à des fins commerciales.
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- ═══════════════ CONTACT ═══════════════ -->
+      <section class="section" id="contact">
+        <div class="section-header">
+          <div class="section-icon"><i class="fa-solid fa-headset"></i></div>
+          <h2>Contact & support</h2>
+        </div>
+        <div class="contact-grid">
+
+          <div class="contact-card">
+            <div class="cc-icon" style="background:#eff6ff;color:#2563eb"><i class="fa-solid fa-envelope"></i></div>
+            <h4>Email support</h4>
+            <p>Réponse garantie sous 24h ouvrées. Idéal pour les demandes non urgentes.</p>
+            <a class="btn btn-blue" href="mailto:support@flowtym.com"><i class="fa-solid fa-paper-plane"></i> support@flowtym.com</a>
+          </div>
+
+          <div class="contact-card">
+            <div class="cc-icon" style="background:#f0fdf4;color:#16a34a"><i class="fa-brands fa-whatsapp"></i></div>
+            <h4>WhatsApp</h4>
+            <p>Pour les urgences opérationnelles — contrat bloqué, accès impossible, salarié en attente.</p>
+            <a class="btn btn-green" href="https://wa.me/33600000000" target="_blank"><i class="fa-brands fa-whatsapp"></i> Ouvrir WhatsApp</a>
+          </div>
+
+          <div class="contact-card">
+            <div class="cc-icon" style="background:var(--violet-bg);color:var(--violet)"><i class="fa-solid fa-calendar-check"></i></div>
+            <h4>Prendre un RDV</h4>
+            <p>Session de 30 min avec un expert Flowtym — onboarding, formation, questions avancées.</p>
+            <a class="btn btn-primary" href="mailto:support@flowtym.com?subject=Demande%20de%20RDV"><i class="fa-solid fa-calendar-plus"></i> Demander un RDV</a>
+          </div>
+
+        </div>
+        <div style="margin-top:16px;padding:16px 20px;background:#fffbeb;border:1px solid #fde68a;border-radius:var(--radius-sm);font-size:13px;color:#92400e">
+          <i class="fa-solid fa-clock" style="margin-right:6px"></i>
+          <strong>Horaires support :</strong> Lundi – Vendredi, 9h – 18h (heure de Paris). En dehors de ces horaires, utilisez l'email — nous répondons dès l'ouverture.
+        </div>
+      </section>
+
+      <!-- ═══════════════ CHANGELOG ═══════════════ -->
+      <section class="section" id="changelog">
+        <div class="section-header">
+          <div class="section-icon"><i class="fa-solid fa-rocket"></i></div>
+          <h2>Nouveautés & changelog</h2>
+        </div>
+
+        <div class="changelog-item">
+          <div>
+            <div class="cl-dot" style="background:#7c3aed"></div>
+            <div class="cl-line"></div>
+          </div>
+          <div class="cl-body">
+            <div class="cl-date">Juin 2025</div>
+            <div class="cl-title">Dashboard RH — Widget Contrats</div>
+            <ul class="cl-items">
+              <li>5 indicateurs clés : actifs, en attente de signature, échéance ≤30j, expirés, signés ce mois</li>
+              <li>Chaque indicateur est cliquable et filtre l'historique contrats instantanément</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="changelog-item">
+          <div>
+            <div class="cl-dot" style="background:#2563eb"></div>
+            <div class="cl-line"></div>
+          </div>
+          <div class="cl-body">
+            <div class="cl-date">Juin 2025</div>
+            <div class="cl-title">Parcours contractuel dans la fiche collaborateur</div>
+            <ul class="cl-items">
+              <li>Carte "Contrat actuel" avec statut, dates, salaire et heures</li>
+              <li>Timeline visuelle de l'historique contractuel</li>
+              <li>Badges d'expiration et de renouvellement</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="changelog-item">
+          <div>
+            <div class="cl-dot" style="background:#16a34a"></div>
+            <div class="cl-line"></div>
+          </div>
+          <div class="cl-body">
+            <div class="cl-date">Juin 2025</div>
+            <div class="cl-title">Signature électronique — modale premium</div>
+            <ul class="cl-items">
+              <li>Modale Flowtym pour Envoyer et Relancer depuis l'historique</li>
+              <li>Validation email inline, spinner d'envoi, audit log automatique</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="changelog-item">
+          <div>
+            <div class="cl-dot" style="background:#d97706"></div>
+            <div class="cl-line"></div>
+          </div>
+          <div class="cl-body">
+            <div class="cl-date">Juin 2025</div>
+            <div class="cl-title">Renouvellement CDD intelligent</div>
+            <ul class="cl-items">
+              <li>Bouton Renouveler dans l'historique pour tout CDD à ≤60j d'échéance</li>
+              <li>Wizard pré-rempli salarié, poste, service, salaire et heures</li>
+              <li>Traçabilité <code>source_contract_id</code> en base</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="changelog-item">
+          <div>
+            <div class="cl-dot" style="background:#0891b2"></div>
+          </div>
+          <div class="cl-body">
+            <div class="cl-date">Mai 2025</div>
+            <div class="cl-title">Portail salarié & signature native eIDAS</div>
+            <ul class="cl-items">
+              <li>Portail salarié autonome sur <code>/salarie</code></li>
+              <li>Signature électronique native (sans dépendance YouSign)</li>
+              <li>Coffre-fort documentaire avec URLs sécurisées 15 min</li>
+            </ul>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- ═══════════════ SÉCURITÉ ═══════════════ -->
+      <section class="section" id="securite">
+        <div class="section-header">
+          <div class="section-icon"><i class="fa-solid fa-shield-check"></i></div>
+          <h2>Sécurité & confidentialité</h2>
+        </div>
+        <div class="security-grid">
+
+          <div class="security-card">
+            <div class="sc-head">
+              <div class="sc-icon" style="background:#f0fdf4;color:#16a34a"><i class="fa-solid fa-lock"></i></div>
+              <h4>Chiffrement des données</h4>
+            </div>
+            <p>Toutes les données sont chiffrées en transit (TLS 1.3) et au repos (AES-256). Aucune donnée n'est accessible en clair.</p>
+          </div>
+
+          <div class="security-card">
+            <div class="sc-head">
+              <div class="sc-icon" style="background:#eff6ff;color:#2563eb"><i class="fa-solid fa-fingerprint"></i></div>
+              <h4>Authentification sécurisée</h4>
+            </div>
+            <p>Connexion par lien magique (magic link) — aucun mot de passe stocké. Sessions JWT avec expiration automatique.</p>
+          </div>
+
+          <div class="security-card">
+            <div class="sc-head">
+              <div class="sc-icon" style="background:var(--violet-bg);color:var(--violet)"><i class="fa-solid fa-shield-halved"></i></div>
+              <h4>Isolation des données</h4>
+            </div>
+            <p>Row Level Security (RLS) activé sur toutes les tables. Chaque établissement accède uniquement à ses propres données.</p>
+          </div>
+
+          <div class="security-card">
+            <div class="sc-head">
+              <div class="sc-icon" style="background:#fffbeb;color:#d97706"><i class="fa-solid fa-scale-balanced"></i></div>
+              <h4>Conformité eIDAS & RGPD</h4>
+            </div>
+            <p>Signature électronique conforme au règlement européen eIDAS (niveau Simple). Données hébergées en Europe, conformes RGPD.</p>
+          </div>
+
+          <div class="security-card">
+            <div class="sc-head">
+              <div class="sc-icon" style="background:#fef2f2;color:#dc2626"><i class="fa-solid fa-eye-slash"></i></div>
+              <h4>Accès documents</h4>
+            </div>
+            <p>Les documents signés ne sont jamais accessibles par URL permanente. Chaque téléchargement génère une URL temporaire valable 15 minutes, validée côté serveur.</p>
+          </div>
+
+          <div class="security-card">
+            <div class="sc-head">
+              <div class="sc-icon" style="background:#f0fdf4;color:#16a34a"><i class="fa-solid fa-timeline"></i></div>
+              <h4>Audit log</h4>
+            </div>
+            <p>Chaque action contractuelle (génération, envoi, signature, relance) est enregistrée avec horodatage et identité de l'acteur.</p>
+          </div>
+
+        </div>
+      </section>
+
+    </main>
+  </div><!-- .cols -->
+</div><!-- .page -->
+
+<!-- ═══════════════ GUIDES (articles) ═══════════════ -->
+<script>
+// ── Search index ──────────────────────────────────────────────────────────────
+const SEARCH_INDEX=[
+  {id:'contrats',title:'Guide Contrats',excerpt:'Générer, configurer et gérer les contrats CDD, CDI, Alternance.',keywords:'contrat générer pdf modèle template dpae'},
+  {id:'signature',title:'Guide Signature électronique',excerpt:'Envoyer à signer, suivre l\'état, relancer, télécharger le contrat signé.',keywords:'signature eidas envoyer relancer email signer statut'},
+  {id:'portail',title:'Guide Portail salarié',excerpt:'Accès salarié, consultation des documents, coffre-fort, demandes.',keywords:'portail salarié accès connexion lien magique coffre documents'},
+  {id:'renouvellement',title:'Guide Renouvellement CDD',excerpt:'Renouveler un CDD depuis l\'historique avec pré-remplissage.',keywords:'cdd renouveler renouvellement contrat echéance wizard'},
+  {id:'faq-gen',title:'FAQ — Générer un contrat',excerpt:'Comment générer un contrat depuis un modèle ?',keywords:'contrat générer pdf modèle template'},
+  {id:'faq-sig',title:'FAQ — Valeur légale signature',excerpt:'La signature électronique a-t-elle une valeur légale ?',keywords:'signature eidas légal valeur juridique'},
+  {id:'faq-relance',title:'FAQ — Email non reçu',excerpt:'Le salarié n\'a pas reçu l\'email de signature.',keywords:'contrat non reçu email salarié signature relancer'},
+  {id:'faq-portail',title:'FAQ — Accès portail salarié',excerpt:'Comment un salarié accède-t-il au portail ?',keywords:'portail salarié accès connexion code lien magique'},
+  {id:'faq-roles',title:'FAQ — Rôles & permissions',excerpt:'Différence entre Manager, RH et Admin.',keywords:'rôle permission manager rh admin droits'},
+];
+
+const ARTICLES={
+  contrats:{
+    title:'Contrats — Guide complet',
+    updated:'Juin 2025',
+    body:`
+<h2>Vue d'ensemble</h2>
+<p>Le module Contrats de Flowtym RH vous permet de générer, suivre et archiver tous les contrats de travail de votre établissement. Il couvre les types CDD, CDI, Alternance et Extra.</p>
+<div class="tip"><i class="fa-solid fa-lightbulb"></i><strong>Bon à savoir :</strong> Tous les contrats générés sont accessibles depuis l'onglet <strong>Historique</strong>, avec filtres avancés par statut, service et poste.</div>
+
+<h2>1. Générer un contrat</h2>
+<div class="step-block"><span class="step-num">1</span> Allez dans <strong>Contrats → Générer un contrat</strong> depuis la sidebar.</div>
+<div class="step-block"><span class="step-num">2</span> Choisissez un <strong>modèle</strong> dans la liste (ex. CDD Hôtellerie, CDI Cuisine).</div>
+<div class="step-block"><span class="step-num">3</span> Sélectionnez le <strong>salarié</strong> depuis l'annuaire ou créez une fiche à la volée.</div>
+<div class="step-block"><span class="step-num">4</span> Renseignez le <strong>poste</strong>, le <strong>service</strong>, les <strong>dates</strong> et le <strong>salaire brut</strong>.</div>
+<div class="step-block"><span class="step-num">5</span> Cliquez <strong>Aperçu PDF</strong> — le contrat est généré en temps réel.</div>
+<div class="step-block"><span class="step-num">6</span> Validez l'aperçu puis <strong>Envoyer à signer</strong> pour déclencher la signature électronique.</div>
+
+<h2>2. Statuts des contrats</h2>
+<p>Chaque contrat passe par plusieurs statuts :</p>
+<ul>
+  <li><span class="tag-status" style="background:#fef3c7;color:#92400e">Brouillon</span> — En cours de saisie, non finalisé.</li>
+  <li><span class="tag-status" style="background:#dbeafe;color:#1e40af">Généré</span> — PDF créé, prêt à envoyer.</li>
+  <li><span class="tag-status" style="background:#fef3c7;color:#d97706">En attente</span> — Envoyé au salarié, en attente de signature.</li>
+  <li><span class="tag-status" style="background:#dcfce7;color:#16a34a">Signé</span> — Contrat signé, conservé dans le coffre-fort.</li>
+  <li><span class="tag-status" style="background:#fee2e2;color:#dc2626">Refusé</span> — Le salarié a refusé la signature.</li>
+  <li><span class="tag-status" style="background:#f3f4f6;color:#374151">Archivé</span> — Contrat clôturé manuellement.</li>
+</ul>
+
+<h2>3. Historique et filtres</h2>
+<p>L'onglet <strong>Historique</strong> affiche tous les contrats avec :</p>
+<ul>
+  <li>Filtres par statut (boutons KPI en haut), par service et par poste.</li>
+  <li>Recherche plein texte sur le nom, le numéro de contrat, le poste.</li>
+  <li>Actions contextuelles selon l'état : Envoyer, Relancer, Renouveler.</li>
+</ul>
+
+<h2>4. DPAE</h2>
+<p>La Déclaration Préalable à l'Embauche (DPAE) est accessible depuis <strong>Contrats → DPAE</strong>. Elle doit être effectuée avant toute prise de poste.</p>
+<div class="warn"><i class="fa-solid fa-triangle-exclamation"></i><strong>Obligation légale :</strong> La DPAE doit être envoyée au plus tard dans l'heure précédant l'embauche.</div>
+
+<h2>5. Modèles de contrats</h2>
+<p>Vos modèles personnalisés sont gérés dans <strong>Contrats → Modèles</strong>. Vous pouvez y créer des variables dynamiques (<kbd>{{prenom}}</kbd>, <kbd>{{salaire}}</kbd>…) qui seront remplies automatiquement à la génération.</p>
+`
+  },
+
+  signature:{
+    title:'Signature électronique — Guide complet',
+    updated:'Juin 2025',
+    body:`
+<h2>Vue d'ensemble</h2>
+<p>Flowtym RH intègre une signature électronique native, conforme au règlement européen <strong>eIDAS (niveau Simple)</strong>. Aucune dépendance à un prestataire tiers — tout est géré en interne pour garantir la disponibilité et la sécurité.</p>
+<div class="success"><i class="fa-solid fa-circle-check"></i><strong>Valeur légale :</strong> Conforme à l'article 1367 du Code Civil. La signature est horodatée et opposable.</div>
+
+<h2>1. Envoyer un contrat à signer</h2>
+<div class="step-block"><span class="step-num">1</span> Depuis <strong>Historique contrats</strong>, repérez le contrat au statut <em>Généré</em> ou <em>Aperçu validé</em>.</div>
+<div class="step-block"><span class="step-num">2</span> Cliquez le bouton <strong>Envoyer</strong> <i class="fa-solid fa-paper-plane" style="color:#2563eb"></i>.</div>
+<div class="step-block"><span class="step-num">3</span> Une modale s'ouvre avec l'email du salarié pré-rempli. Vérifiez-le et confirmez.</div>
+<div class="step-block"><span class="step-num">4</span> Le salarié reçoit un email avec un lien sécurisé vers la page de signature.</div>
+<div class="step-block"><span class="step-num">5</span> Une fois signé, le statut passe à <em>Signé</em> et le PDF est conservé dans le coffre-fort.</div>
+
+<h2>2. Suivre l'état d'une signature</h2>
+<p>Dans l'onglet <strong>Historique</strong>, la colonne <em>Statut</em> indique l'état en temps réel :</p>
+<ul>
+  <li><span class="tag-status" style="background:#fef3c7;color:#d97706">En attente</span> — Email envoyé, le salarié n'a pas encore signé.</li>
+  <li><span class="tag-status" style="background:#dcfce7;color:#16a34a">Signé</span> — Contrat signé. La colonne "Signé le" affiche la date.</li>
+  <li><span class="tag-status" style="background:#fee2e2;color:#dc2626">Refusé</span> — Le salarié a refusé. Contactez-le pour comprendre la raison.</li>
+</ul>
+<p>Le Dashboard RH affiche également un indicateur "En attente de signature" cliquable.</p>
+
+<h2>3. Relancer un salarié</h2>
+<p>Si le salarié n'a pas signé après quelques jours :</p>
+<div class="step-block"><span class="step-num">1</span> Trouvez le contrat (statut <em>En attente</em>) dans l'Historique.</div>
+<div class="step-block"><span class="step-num">2</span> Cliquez <strong>Relancer</strong> <i class="fa-solid fa-rotate" style="color:#d97706"></i>.</div>
+<div class="step-block"><span class="step-num">3</span> Vérifiez l'adresse email — vous pouvez la corriger si nécessaire.</div>
+<div class="step-block"><span class="step-num">4</span> Un nouvel email est envoyé avec un nouveau lien de signature.</div>
+<div class="tip"><i class="fa-solid fa-lightbulb"></i>Toutes les relances sont enregistrées dans l'audit log du contrat.</div>
+
+<h2>4. Télécharger le contrat signé</h2>
+<p>Une fois signé, le bouton <strong>PDF signé</strong> apparaît dans l'historique. Cliquez-le pour générer un lien de téléchargement sécurisé (valable 15 minutes). Ce mécanisme garantit qu'aucun document n'est accessible sans authentification valide.</p>
+
+<h2>5. Ce qui se passe côté salarié</h2>
+<p>Le salarié reçoit un email avec un lien vers une page dédiée (sans connexion requise pour ce lien). Il peut :</p>
+<ul>
+  <li>Lire le contrat en PDF</li>
+  <li>Apposer sa signature manuscrite ou tapée</li>
+  <li>Refuser avec motif (optionnel)</li>
+</ul>
+<div class="warn"><i class="fa-solid fa-triangle-exclamation"></i>Le lien de signature est à usage unique et expire après 7 jours.</div>
+`
+  },
+
+  portail:{
+    title:'Portail salarié — Guide complet',
+    updated:'Juin 2025',
+    body:`
+<h2>Vue d'ensemble</h2>
+<p>Le portail salarié (<code>flowtym.com/salarie</code>) est un espace dédié à chaque collaborateur. Il permet de consulter ses documents, accéder au coffre-fort et soumettre des demandes, sans intervention du manager.</p>
+
+<h2>1. Accès du salarié</h2>
+<p>L'accès se fait par <strong>lien magique</strong> — aucun mot de passe n'est nécessaire :</p>
+<div class="step-block"><span class="step-num">1</span> Le salarié se rend sur <strong>flowtym.com/salarie</strong>.</div>
+<div class="step-block"><span class="step-num">2</span> Il saisit son adresse email professionnelle.</div>
+<div class="step-block"><span class="step-num">3</span> Il reçoit un email avec un lien de connexion (valable 24h).</div>
+<div class="step-block"><span class="step-num">4</span> Il clique le lien — il est connecté automatiquement.</div>
+<div class="tip"><i class="fa-solid fa-lightbulb"></i>Le lien magique est à usage unique. Si le salarié a besoin d'un nouveau lien, il suffit de refaire la procédure.</div>
+
+<h2>2. Ce que le salarié peut faire</h2>
+<ul>
+  <li><strong>Consulter ses contrats</strong> — accès aux contrats signés, avec téléchargement sécurisé.</li>
+  <li><strong>Coffre-fort documentaire</strong> — bulletins de paie, attestations, documents RH.</li>
+  <li><strong>Signer un contrat</strong> — directement depuis le portail ou via le lien reçu par email.</li>
+  <li><strong>Soumettre des demandes</strong> — congés, absences, informations à mettre à jour.</li>
+</ul>
+
+<h2>3. Gestion côté RH</h2>
+<p>Les demandes portail arrivent dans <strong>Contrats → Demandes portail</strong> (accessible depuis la sidebar). Vous pouvez y :</p>
+<ul>
+  <li>Consulter et traiter les demandes en attente</li>
+  <li>Approuver ou refuser une demande avec commentaire</li>
+  <li>Voir l'historique des échanges avec chaque salarié</li>
+</ul>
+
+<h2>4. Ajouter un document au coffre-fort</h2>
+<div class="step-block"><span class="step-num">1</span> Ouvrez la fiche du salarié dans <strong>Personnel</strong>.</div>
+<div class="step-block"><span class="step-num">2</span> Allez dans l'onglet <strong>Documents</strong>.</div>
+<div class="step-block"><span class="step-num">3</span> Cliquez <strong>Ajouter un document</strong>, choisissez le type et uploadez le fichier.</div>
+<div class="step-block"><span class="step-num">4</span> Le document est immédiatement disponible dans le portail du salarié.</div>
+
+<h2>5. Sécurité du portail</h2>
+<p>Chaque salarié n'accède qu'à ses propres documents. L'isolation est garantie par :</p>
+<ul>
+  <li>Row Level Security (RLS) — filtrage par <code>employee_id</code> côté base de données</li>
+  <li>Validation JWT à chaque requête côté serveur</li>
+  <li>URLs temporaires (15 min) pour les documents — aucun lien permanent</li>
+</ul>
+<div class="success"><i class="fa-solid fa-shield-check"></i>Un salarié ne peut jamais accéder aux documents d'un autre collaborateur, même en modifiant l'URL.</div>
+`
+  },
+
+  renouvellement:{
+    title:'Renouvellement CDD — Guide',
+    updated:'Juin 2025',
+    body:`
+<h2>Vue d'ensemble</h2>
+<p>Flowtym RH détecte automatiquement les CDD arrivant à échéance et vous propose de les renouveler en un clic, avec toutes les informations pré-remplies.</p>
+
+<h2>1. Détecter un CDD à renouveler</h2>
+<p>Deux endroits signalent les CDD proches de l'échéance :</p>
+<ul>
+  <li><strong>Dashboard RH</strong> → Widget Contrats → Indicateur "Échéance ≤30j"</li>
+  <li><strong>Alertes prioritaires</strong> du Dashboard → "N CDD expirant dans 60j"</li>
+  <li><strong>Historique contrats</strong> → Badge orange "J−N" sur la colonne Échéance</li>
+</ul>
+
+<h2>2. Lancer le renouvellement</h2>
+<div class="step-block"><span class="step-num">1</span> Depuis <strong>Historique contrats</strong>, repérez le CDD (badge échéance ≤60j).</div>
+<div class="step-block"><span class="step-num">2</span> Cliquez <strong>Renouveler</strong> <i class="fa-solid fa-rotate-right" style="color:#7c3aed"></i>.</div>
+<div class="step-block"><span class="step-num">3</span> Le wizard s'ouvre avec le salarié, poste, service, salaire et heures pré-remplis.</div>
+<div class="step-block"><span class="step-num">4</span> Renseignez les nouvelles dates de début et de fin.</div>
+<div class="step-block"><span class="step-num">5</span> Générez le contrat et envoyez-le à signer.</div>
+
+<h2>3. Traçabilité</h2>
+<p>Le nouveau contrat est automatiquement lié au contrat d'origine via le champ <code>source_contract_id</code>. Dans la fiche collaborateur (Parcours contractuel), le badge violet <em>Renouvellement de CTR-XXX</em> est affiché.</p>
+<div class="tip"><i class="fa-solid fa-lightbulb"></i>Le contrat source n'est pas modifié — vous conservez l'historique complet.</div>
+`
+  }
+};
+
+// ── Navigation ────────────────────────────────────────────────────────────────
+function scrollTo(id){
+  event && event.preventDefault();
+  const el=document.getElementById(id);
+  if(el) el.scrollIntoView({behavior:'smooth',block:'start'});
+  document.querySelectorAll('.sidenav a').forEach(a=>{
+    a.classList.toggle('active',a.getAttribute('href')==='#'+id);
+  });
+}
+
+function openGuide(id){
+  const art=ARTICLES[id];
+  if(!art) return;
+  const zone=document.getElementById('articleZone');
+  const grid=document.getElementById('guidesGrid');
+  zone.innerHTML=`
+    <div class="article-wrap">
+      <div class="article-breadcrumb">
+        <span onclick="closeGuide()"><i class="fa-solid fa-house" style="margin-right:4px"></i>Guides</span>
+        <i class="fa-solid fa-chevron-right" style="font-size:10px;color:var(--muted)"></i>
+        <span>${art.title}</span>
+      </div>
+      <div class="article">
+        <h1>${art.title}</h1>
+        <div class="article-meta">
+          <span><i class="fa-regular fa-calendar" style="margin-right:4px"></i>Mis à jour : ${art.updated}</span>
+        </div>
+        ${art.body}
+      </div>
+      <div style="margin-top:28px;padding-top:20px;border-top:1px solid var(--line);display:flex;gap:12px;align-items:center">
+        <button onclick="closeGuide()" style="display:flex;align-items:center;gap:7px;font-size:13px;font-weight:600;color:var(--ink2);background:none;border:1px solid var(--line);border-radius:8px;padding:9px 16px;cursor:pointer"><i class="fa-solid fa-arrow-left"></i> Retour aux guides</button>
+        <span style="font-size:12px;color:var(--muted)">Ce guide vous a-t-il aidé ? <a href="mailto:support@flowtym.com?subject=Feedback aide - ${encodeURIComponent(art.title)}" style="color:var(--violet)">Donnez votre avis</a></span>
+      </div>
+    </div>`;
+  zone.style.display='block';
+  grid.style.display='none';
+  zone.scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+function closeGuide(){
+  document.getElementById('articleZone').style.display='none';
+  document.getElementById('guidesGrid').style.display='';
+  document.getElementById('guides').scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+// ── FAQ ───────────────────────────────────────────────────────────────────────
+function toggleFaq(btn){
+  const ans=btn.nextElementSibling;
+  const isOpen=ans.classList.contains('open');
+  // close all
+  document.querySelectorAll('.faq-q').forEach(q=>q.classList.remove('open'));
+  document.querySelectorAll('.faq-a').forEach(a=>a.classList.remove('open'));
+  if(!isOpen){
+    btn.classList.add('open');
+    ans.classList.add('open');
+  }
+}
+
+// ── Search ────────────────────────────────────────────────────────────────────
+const searchInput=document.getElementById('searchInput');
+const searchResults=document.getElementById('searchResults');
+const searchResultsList=document.getElementById('searchResultsList');
+const searchClear=document.getElementById('searchClear');
+
+searchInput.addEventListener('input',()=>{
+  const q=searchInput.value.trim().toLowerCase();
+  searchClear.style.display=q?'block':'none';
+  if(!q){searchResults.style.display='none';return;}
+  const hits=SEARCH_INDEX.filter(item=>
+    item.title.toLowerCase().includes(q)||
+    item.excerpt.toLowerCase().includes(q)||
+    item.keywords.toLowerCase().includes(q)
+  );
+  if(hits.length===0){
+    searchResultsList.innerHTML='<div id="noResults"><i class="fa-solid fa-face-sad-tear" style="margin-right:6px"></i>Aucun résultat pour "<strong>'+q+'</strong>". Essayez un autre mot-clé ou <a href="mailto:support@flowtym.com">contactez le support</a>.</div>';
+  } else {
+    searchResultsList.innerHTML=hits.map(h=>`
+      <div class="sr-item" onclick="handleSearchClick('${h.id}')">
+        <div class="sr-title">${h.title}</div>
+        <div class="sr-excerpt">${h.excerpt}</div>
+      </div>`).join('');
+  }
+  document.getElementById('searchResultsLabel').textContent=hits.length+' résultat'+(hits.length!==1?'s':'');
+  searchResults.style.display='block';
+  // Also filter FAQ
+  filterFaq(q);
+});
+
+function filterFaq(q){
+  document.querySelectorAll('.faq-item').forEach(item=>{
+    const txt=(item.dataset.search||'')+' '+(item.querySelector('.faq-q span')?.textContent||'');
+    item.style.display=(!q||txt.toLowerCase().includes(q))?'':'none';
+  });
+}
+
+function clearSearch(){
+  searchInput.value='';
+  searchClear.style.display='none';
+  searchResults.style.display='none';
+  filterFaq('');
+}
+
+function handleSearchClick(id){
+  clearSearch();
+  // guides
+  if(ARTICLES[id]){openGuide(id);return;}
+  // faq items
+  if(id.startsWith('faq-')){
+    document.getElementById('faq').scrollIntoView({behavior:'smooth',block:'start'});
+  }
+}
+
+// ── Sidenav active on scroll ───────────────────────────────────────────────────
+const sections=['guides','faq','contact','changelog','securite'];
+const observer=new IntersectionObserver(entries=>{
+  entries.forEach(e=>{
+    if(e.isIntersecting){
+      document.querySelectorAll('.sidenav a').forEach(a=>{
+        a.classList.toggle('active',a.getAttribute('href')==='#'+e.target.id);
+      });
+    }
+  });
+},{threshold:0.3,rootMargin:'-60px 0px -60% 0px'});
+sections.forEach(id=>{const el=document.getElementById(id);if(el)observer.observe(el);});
+</script>
+</body>
+</html>

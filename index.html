@@ -1608,6 +1608,7 @@ const TABS=[
   ]],
   ['Réglages',[
     ['config','Paramètres','fa-solid fa-gear'],
+    ['help','Aide & support','fa-solid fa-circle-question'],
   ]],
 ];
 
@@ -1627,7 +1628,7 @@ function renderShell(){
         <div class="sbhead"><button class="sbtog" id="sbtog" title="Réduire la barre latérale"><i class="fa-solid fa-chevron-left"></i></button></div>
         <nav class="menu" id="nav">
           ${TABS.map(([grp,items])=>{
-            const vis=items.filter(([k])=>canSee(k));
+            const vis=items.filter(([k])=>k==='help'||canSee(k));
             if(!vis.length) return '';
             return `<div class="grp">${grp}</div>`
               + vis.map(([k,lab,ic,soon])=>`<button class="it ${k===view?'on':''}" data-v="${k}" title="${lab}">
@@ -1650,7 +1651,7 @@ function renderShell(){
   };
   const lo=$('logout'); if(lo) lo.onclick=async()=>{await BE.signOut();renderLogin();};
   wireNotifBell();
-  $('nav').onclick=e=>{const b=e.target.closest('.it');if(b)goView(b.dataset.v);};
+  $('nav').onclick=e=>{const b=e.target.closest('.it');if(!b)return;if(b.dataset.v==='help'){window.open('/aide','_blank');return;}goView(b.dataset.v);};
   $('sbtog').onclick=()=>{sidebarCollapsed=!sidebarCollapsed;$('sb').classList.toggle('collapsed',sidebarCollapsed);
     $('sbtog').title=sidebarCollapsed?'Étendre la barre latérale':'Réduire la barre latérale';
     LS.set('rh_sidebar',sidebarCollapsed?'1':'0');

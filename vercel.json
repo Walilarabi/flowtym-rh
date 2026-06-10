@@ -4,6 +4,8 @@
     { "source": "/salarie/(.*)",          "destination": "/portal.html" },
     { "source": "/salarie",               "destination": "/portal.html" },
     { "source": "/salarié",               "destination": "/portal.html" },
+    { "source": "/aide",                  "destination": "/aide.html" },
+    { "source": "/aide/(.*)",             "destination": "/aide.html" },
     { "source": "/auth/callback",         "destination": "/index.html" },
     { "source": "/sw.js",                 "destination": "/sw.js" },
     { "source": "/(.*)",                  "destination": "/index.html" }
