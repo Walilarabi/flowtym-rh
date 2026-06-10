@@ -12425,7 +12425,7 @@ async function renderPayroll(){
     <div id="pyKpis" class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))"></div>
     <div class="box" style="padding:0"><div id="pyTable">Chargement…</div></div>
     <div style="margin-top:12px;font-size:11px;color:var(--muted);padding:0 4px">
-      <i class="fa-solid fa-circle-info"></i> Les heures supplémentaires sont calculées à partir des pointages validés. Le seuil légal est de 35h/semaine (7h/j). Ce tableau est indicatif — vérifiez avec votre gestionnaire de paie.
+      <i class="fa-solid fa-circle-info"></i> Les heures supplémentaires sont calculées à partir des pointages validés. La ventilation HS 25 % / 50 % applique une règle simplifiée (jusqu'à 8h sup/mois → 25 %, au-delà → 50 %) : c'est une aide au calcul à valider impérativement par votre cabinet paie. Les salariés sortis dans le mois sont inclus.
     </div>
   </div>`;
   $('pyMonth').onchange=e=>{pyMonth=e.target.value;drawPayroll();};
@@ -12435,14 +12435,21 @@ async function renderPayroll(){
 async function drawPayroll(){
   const el=$('pyTable'); if(!el)return;
   el.innerHTML='<div style="padding:24px;text-align:center;color:var(--muted)">Chargement…</div>';
-  const [y,m]=pyMonth.split('-').map(Number);
+  const [y,m1]=pyMonth.split('-').map(Number);
+  const m=m1-1; // iso()/dim()/listMonthPlanning attendent un mois 0-based
   const from=iso(y,m,1), to=iso(y,m,dim(y,m));
   try{
     const [planRows, clockRows]=await Promise.all([
       BE.listMonthPlanning(hotelId,y,m),
       BE.listClockingsByRange(hotelId,from,to)
     ]);
-    const active=staff.filter(s=>s.active!==false);
+    // Actifs + sortis dont la date de sortie tombe dans le mois exporté
+    const active=staff.filter(s=>{
+      const isParti=s.active===false||s.status==='parti';
+      if(!isParti) return true;
+      const dep=s.departure_date||'';
+      return dep>=from&&dep<=to;
+    });
     const planMap=new Map(); planRows.forEach(r=>planMap.set(r.employee_id+'|'+r.day, r.status));
     const clockMap=new Map(); clockRows.forEach(c=>{if(!clockMap.has(c.employee_id))clockMap.set(c.employee_id,[]);clockMap.get(c.employee_id).push(c);});
     const nd=dim(y,m);
@@ -12473,7 +12480,11 @@ async function drawPayroll(){
       const hpd2=sc2?.hours_per_day??7;
       const plannedH=Math.round((P+PE)*hpd2*100)/100;
       const heuresSup=Math.max(0,Math.round((totalH-plannedH)*100)/100);
-      return {emp,P,PE,CP,RTT,MAL,MAT,CSS,AE,F,PAT,ABS,REC,FORM,repos,totalH,plannedH,heuresSup,hpd:hpd2,scheduleName:sc2?.name};
+      // Ventilation simplifiée : ≤8h sup/mois → 25 %, au-delà → 50 % (à valider par le cabinet paie)
+      const hs25=Math.min(heuresSup,8);
+      const hs50=Math.round(Math.max(0,heuresSup-8)*100)/100;
+      const isParti=emp.active===false||emp.status==='parti';
+      return {emp,P,PE,CP,RTT,MAL,MAT,CSS,AE,F,PAT,ABS,REC,FORM,repos,totalH,plannedH,heuresSup,hs25,hs50,isParti,hpd:hpd2,scheduleName:sc2?.name};
     });
     window._pyRows=rows;
     // KPIs
@@ -12503,11 +12514,13 @@ async function drawPayroll(){
         <th title="Fériés" style="text-align:center">F</th>
         <th style="text-align:right">Planifié (h)</th>
         <th style="text-align:right">Pointé (h)</th>
-        <th style="text-align:right;color:#f59e0b">H. Sup.</th>
+        <th style="text-align:right;color:#f59e0b" title="Total heures supplémentaires">H. Sup.</th>
+        <th style="text-align:right;color:#f59e0b" title="Majoration 25 % (≤8h sup/mois — règle simplifiée)">HS 25%</th>
+        <th style="text-align:right;color:#dc2626" title="Majoration 50 % (au-delà de 8h sup/mois — règle simplifiée)">HS 50%</th>
       </tr></thead>
       <tbody>
         ${rows.map(r=>`<tr>
-          <td><b>${r.emp.last_name} ${r.emp.first_name}</b></td>
+          <td><b>${r.emp.last_name} ${r.emp.first_name}</b>${r.isParti?` <span style="font-size:10px;background:#f3f4f6;color:var(--muted);padding:1px 5px;border-radius:4px" title="Sorti le ${r.emp.departure_date?new Date(r.emp.departure_date).toLocaleDateString('fr-FR'):'?'}">Sorti</span>`:''}</td>
           <td>${r.emp.department||'—'}</td>
           <td style="color:var(--muted)">${r.emp.contract_type||'—'}</td>
           <td style="text-align:center;font-weight:600">${r.P||'—'}</td>
@@ -12521,23 +12534,43 @@ async function drawPayroll(){
           <td style="text-align:right">${r.plannedH}h</td>
           <td style="text-align:right">${r.totalH>0?r.totalH+'h':'—'}</td>
           <td style="text-align:right;font-weight:600;color:${r.heuresSup>0?'#f59e0b':'var(--muted)'}">${r.heuresSup>0?'+'+r.heuresSup+'h':'—'}</td>
+          <td style="text-align:right;color:${r.hs25>0?'#f59e0b':'var(--muted)'}">${r.hs25>0?r.hs25+'h':'—'}</td>
+          <td style="text-align:right;color:${r.hs50>0?'#dc2626':'var(--muted)'}">${r.hs50>0?r.hs50+'h':'—'}</td>
         </tr>`).join('')}
       </tbody>
     </table>`;
   }catch(e){el.innerHTML=`<div style="padding:24px;color:#dc2626">${e.message}</div>`;}
 }
+/* Export CSV paie V2 — séparateur ;, UTF-8 BOM, absences détaillées,
+   heures décimales + HH:MM, ventilation HS 25/50, sortis du mois inclus.
+   Volontairement sans N° SS (donnée trop sensible pour ce flux). */
+function _hhmm(h){
+  if(!h||h<=0) return '0:00';
+  const hh=Math.floor(h), mm=Math.round((h-hh)*60);
+  return mm===60?`${hh+1}:00`:`${hh}:${String(mm).padStart(2,'0')}`;
+}
 function exportPayrollCSV(){
   const rows=window._pyRows||[];
-  const hdr='Nom,Prénom,Service,Contrat,P,PE,CP,RTT,MAL,MAT,Autres abs,Fériés,Planifié (h),Pointé (h),H.Sup\n';
-  const body=rows.map(r=>[
-    r.emp.last_name, r.emp.first_name, r.emp.department||'', r.emp.contract_type||'',
-    r.P, r.PE, r.CP, r.RTT, r.MAL, r.MAT,
-    r.CSS+r.AE+r.PAT+r.ABS+r.REC+r.FORM, r.F,
-    r.plannedH, r.totalH, r.heuresSup
-  ].join(',')).join('\n');
-  const blob=new Blob(['﻿'+hdr+body],{type:'text/csv;charset=utf-8'});
+  if(!rows.length){flash('Aucune ligne à exporter');return;}
+  const esc=v=>{v=v==null?'':String(v);return /[;"\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
+  const header=['Période','Référence interne','Nom','Prénom','Service','Contrat','Date de sortie',
+    'P','PE','CP','RTT','MAL','MAT','CSS','AE','PAT','ABS','REC','FORM','Fériés','Repos',
+    'Planifié (h déc)','Planifié (HH:MM)','Pointé (h déc)','Pointé (HH:MM)',
+    'HS total (h déc)','HS total (HH:MM)','HS 25% (h déc)','HS 50% (h déc)'];
+  const lines=[header].concat(rows.map(r=>[
+    pyMonth, r.emp.id, r.emp.last_name||'', r.emp.first_name||'', r.emp.department||'', r.emp.contract_type||'',
+    r.isParti?(r.emp.departure_date||''):'',
+    r.P, r.PE, r.CP, r.RTT, r.MAL, r.MAT, r.CSS, r.AE, r.PAT, r.ABS, r.REC, r.FORM, r.F, r.repos,
+    r.plannedH, _hhmm(r.plannedH), r.totalH, _hhmm(r.totalH),
+    r.heuresSup, _hhmm(r.heuresSup), r.hs25, r.hs50
+  ]));
+  const csv='\ufeff'+lines.map(l=>l.map(esc).join(';')).join('\r\n');
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
-  a.download=`elements_variables_paie_${pyMonth}.csv`; a.click();
+  a.download=`elements_variables_paie_${pyMonth}.csv`;
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+  flash('CSV paie exporté ('+rows.length+' ligne'+(rows.length>1?'s':'')+')');
 }
 
 /* ===================== STUBS (modules à venir) ===================== */
