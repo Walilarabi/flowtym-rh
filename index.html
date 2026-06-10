@@ -3743,6 +3743,12 @@ function renderDashboard(){
       }).join('')}
     </div>
 
+    <!-- Widget Contrats générés -->
+    <div id="dashContractsWidget" style="background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:var(--shadow);margin-bottom:22px">
+      <div style="font-size:15px;font-weight:700;margin-bottom:16px"><i class="fa-solid fa-file-contract" style="color:var(--violet);margin-right:8px"></i>Contrats générés <span id="dashContractsWidgetBody" style="font-weight:400;font-size:13px;color:var(--muted);margin-left:6px">Chargement…</span></div>
+      <div id="dashContractsKpis"></div>
+    </div>
+
     <!-- Conformité RH + Alertes prioritaires -->
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:22px">
       <!-- Conformité -->
@@ -3900,6 +3906,53 @@ function renderDashboard(){
 
   // Load async data
   drawDashboardAlerts();
+  _drawDashContractsWidget().catch(()=>{});
+}
+
+async function _drawDashContractsWidget(){
+  const kpisEl=$('dashContractsKpis');
+  const bodyEl=$('dashContractsWidgetBody');
+  if(!kpisEl) return;
+  const contracts=await BE.listGeneratedContracts(hotelId).catch(()=>[]);
+  if(bodyEl) bodyEl.textContent='';
+  const today=new Date().toISOString().slice(0,10);
+  const soon30=new Date(Date.now()+30*864e5).toISOString().slice(0,10);
+  const TERMINAL=['archived','cancelled','refused','error_signature'];
+  const now30Days=new Date(); now30Days.setDate(now30Days.getDate()-30);
+  const monthStart=new Date(); monthStart.setDate(1); monthStart.setHours(0,0,0,0);
+
+  let active=0, awaiting=0, expiring30=0, expired=0, signedThisMonth=0;
+  contracts.forEach(c=>{
+    const s=c.status||'';
+    const start=c.start_date||null;
+    const end=c.end_date||null;
+    // Contrats actifs : non terminal, dates cohérentes
+    if(!TERMINAL.includes(s)&&(!start||start<=today)&&(!end||end>=today)) active++;
+    // En attente de signature
+    if(['generated','preview_ok','sent_signature','pending_signature'].includes(s)) awaiting++;
+    // Échéance ≤30j : signé ou actif, end_date entre today et today+30j
+    if(end&&end>=today&&end<=soon30&&!TERMINAL.includes(s)) expiring30++;
+    // Expirés : end_date < today, non terminal
+    if(end&&end<today&&!TERMINAL.includes(s)) expired++;
+    // Signés ce mois
+    if(s==='signed'&&c.signed_at&&new Date(c.signed_at)>=monthStart) signedThisMonth++;
+  });
+
+  const nav=(statusVal)=>`_histFltStatus='${statusVal}';contractsSubTab='history';renderContracts();goView('contracts')`;
+  const kpis=[
+    {val:active,     lab:'Contrats actifs',      color:'#16a34a', bg:'#f0fdf4', status:'active',          icon:'fa-circle-check'},
+    {val:awaiting,   lab:'En attente signature',  color:'#d97706', bg:'#fffbeb', status:'awaiting',        icon:'fa-clock'},
+    {val:expiring30, lab:'Échéance ≤30j',         color:'#ea580c', bg:'#fff7ed', status:'expiring_soon',   icon:'fa-triangle-exclamation'},
+    {val:expired,    lab:'Expirés',               color:'#dc2626', bg:'#fef2f2', status:'expired',         icon:'fa-circle-xmark'},
+    {val:signedThisMonth,lab:'Signés ce mois',    color:'#7c3aed', bg:'#f5f3ff', status:'signed_this_month',icon:'fa-signature'},
+  ];
+  kpisEl.innerHTML='<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px">'
+    +kpis.map(k=>`<div onclick="${nav(k.status)}" style="background:${k.bg};border:1px solid ${k.color}33;border-radius:12px;padding:14px 10px;text-align:center;cursor:pointer;transition:box-shadow .15s" onmouseover="this.style.boxShadow='0 2px 12px ${k.color}33'" onmouseout="this.style.boxShadow=''">
+      <i class="fa-solid ${k.icon}" style="font-size:20px;color:${k.color};margin-bottom:6px"></i>
+      <div style="font-size:26px;font-weight:800;color:${k.color}">${k.val}</div>
+      <div style="font-size:11px;color:${k.color};font-weight:600;margin-top:2px">${k.lab}</div>
+    </div>`).join('')
+    +'</div>';
 }
 
 async function drawDashboardAlerts(){
@@ -6477,7 +6530,7 @@ async function renderContractsHistory(){
         const matchQ=!q||txt.includes(q);
         const matchDept=!_histFltDept||(r.dataset.dept||'')=== _histFltDept;
         const matchRole=!_histFltRole||(r.dataset.role||'')=== _histFltRole;
-        const matchStatus=!_histFltStatus||(r.dataset.status||'')=== _histFltStatus||(_histFltStatus==='expired'&&r.dataset.expired==='1');
+        const matchStatus=!_histFltStatus||(r.dataset.status||'')=== _histFltStatus||(_histFltStatus==='expired'&&r.dataset.expired==='1')||(_histFltStatus==='awaiting'&&['generated','preview_ok','sent_signature','pending_signature'].includes(r.dataset.status))||(_histFltStatus==='expiring_soon'&&r.dataset.expiring30==='1')||(_histFltStatus==='signed_this_month'&&r.dataset.signedThisMonth==='1')||(_histFltStatus==='active'&&r.dataset.active==='1');
         const show=matchQ&&matchDept&&matchRole&&matchStatus;
         r.style.display=show?'':'none';
         if(show)vis++;
@@ -6504,7 +6557,7 @@ async function renderContractsHistory(){
         {val:pending,lab:'En attente',color:'#d97706',status:'pending_signature'},
         {val:refused,lab:'Refusés',color:'#dc2626',status:'cancelled'},
         {val:sigRate+'%',lab:'Taux signature',color:'var(--violet)',status:''},
-      ].map(k=>'<div data-kpi-status="'+k.status+'" onclick="(function(){_histFltStatus=_histFltStatus===\''+k.status+'\'?\'\':\''+k.status+'\';document.querySelector(\'#csub\')&&(function(){const el=document.querySelector(\'#csub\');const q=_histSearch.toLowerCase();const rows=el.querySelectorAll(\'tbody tr[data-cid]\');let vis=0;rows.forEach(r=>{const txt=(r.dataset.search||\'\').toLowerCase();const matchQ=!q||txt.includes(q);const matchDept=!_histFltDept||(r.dataset.dept||\'\')=== _histFltDept;const matchRole=!_histFltRole||(r.dataset.role||\'\')=== _histFltRole;const matchStatus=!_histFltStatus||(r.dataset.status||\'\')=== _histFltStatus||(_histFltStatus===\'expired\'&&r.dataset.expired===\'1\');const show=matchQ&&matchDept&&matchRole&&matchStatus;r.style.display=show?\'\':\'none\';if(show)vis++;});const cnt=el.querySelector(\'#histCount\');if(cnt)cnt.textContent=vis+\' contrat\'+(vis!==1?\'s\':\'\');el.querySelectorAll(\'[data-kpi-status]\').forEach(k=>{k.style.outline=k.dataset.kpiStatus===_histFltStatus?\'2px solid var(--violet)\':\' none\';});})();})()" style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;text-align:center;box-shadow:var(--shadow);cursor:pointer;transition:outline .15s">'
+      ].map(k=>'<div data-kpi-status="'+k.status+'" onclick="(function(){_histFltStatus=_histFltStatus===\''+k.status+'\'?\'\':\''+k.status+'\';document.querySelector(\'#csub\')&&(function(){const el=document.querySelector(\'#csub\');const q=_histSearch.toLowerCase();const rows=el.querySelectorAll(\'tbody tr[data-cid]\');let vis=0;rows.forEach(r=>{const txt=(r.dataset.search||\'\').toLowerCase();const matchQ=!q||txt.includes(q);const matchDept=!_histFltDept||(r.dataset.dept||\'\')=== _histFltDept;const matchRole=!_histFltRole||(r.dataset.role||\'\')=== _histFltRole;const matchStatus=!_histFltStatus||(r.dataset.status||\'\')=== _histFltStatus||(_histFltStatus===\'expired\'&&r.dataset.expired===\'1\')||(_histFltStatus===\'awaiting\'&&[\'generated\',\'preview_ok\',\'sent_signature\',\'pending_signature\'].includes(r.dataset.status))||(_histFltStatus===\'expiring_soon\'&&r.dataset.expiring30===\'1\')||(_histFltStatus===\'signed_this_month\'&&r.dataset.signedThisMonth===\'1\')||(_histFltStatus===\'active\'&&r.dataset.active===\'1\');const show=matchQ&&matchDept&&matchRole&&matchStatus;r.style.display=show?\'\':\'none\';if(show)vis++;});const cnt=el.querySelector(\'#histCount\');if(cnt)cnt.textContent=vis+\' contrat\'+(vis!==1?\'s\':\'\');el.querySelectorAll(\'[data-kpi-status]\').forEach(k=>{k.style.outline=k.dataset.kpiStatus===_histFltStatus?\'2px solid var(--violet)\':\' none\';});})();})()" style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;text-align:center;box-shadow:var(--shadow);cursor:pointer;transition:outline .15s">'
         +'<div style="font-size:24px;font-weight:800;color:'+k.color+'">'+k.val+'</div>'
         +'<div style="font-size:11px;color:var(--ink2);margin-top:2px">'+k.lab+'</div>'
         +(k.sub?'<div style="font-size:10px;color:var(--muted)">'+k.sub+'</div>':'')
@@ -6518,7 +6571,7 @@ async function renderContractsHistory(){
         {val:ready,lab:'Prêts à envoyer',color:'#4338ca',status:'generated',bg:'#eef2ff'},
         {val:expired,lab:'Expirés',color:'#991b1b',status:'expired',bg:'#fee2e2'},
         {val:archived,lab:'Archivés',color:'#374151',status:'archived',bg:'#f3f4f6'},
-      ].map(k=>'<div data-kpi-status="'+k.status+'" onclick="(function(){_histFltStatus=_histFltStatus===\''+k.status+'\'?\'\':\''+k.status+'\';document.querySelector(\'#csub\')&&(function(){const el=document.querySelector(\'#csub\');const q=_histSearch.toLowerCase();const rows=el.querySelectorAll(\'tbody tr[data-cid]\');let vis=0;rows.forEach(r=>{const txt=(r.dataset.search||\'\').toLowerCase();const matchQ=!q||txt.includes(q);const matchDept=!_histFltDept||(r.dataset.dept||\'\')=== _histFltDept;const matchRole=!_histFltRole||(r.dataset.role||\'\')=== _histFltRole;const matchStatus=!_histFltStatus||(r.dataset.status||\'\')=== _histFltStatus||(_histFltStatus===\'expired\'&&r.dataset.expired===\'1\');const show=matchQ&&matchDept&&matchRole&&matchStatus;r.style.display=show?\'\':\'none\';if(show)vis++;});const cnt=el.querySelector(\'#histCount\');if(cnt)cnt.textContent=vis+\' contrat\'+(vis!==1?\'s\':\'\');el.querySelectorAll(\'[data-kpi-status]\').forEach(k=>{k.style.outline=k.dataset.kpiStatus===_histFltStatus?\'2px solid var(--violet)\':\' none\';});})();})()" style="background:'+k.bg+';border:1px solid var(--line);border-radius:10px;padding:10px 12px;text-align:center;cursor:pointer;transition:outline .15s">'
+      ].map(k=>'<div data-kpi-status="'+k.status+'" onclick="(function(){_histFltStatus=_histFltStatus===\''+k.status+'\'?\'\':\''+k.status+'\';document.querySelector(\'#csub\')&&(function(){const el=document.querySelector(\'#csub\');const q=_histSearch.toLowerCase();const rows=el.querySelectorAll(\'tbody tr[data-cid]\');let vis=0;rows.forEach(r=>{const txt=(r.dataset.search||\'\').toLowerCase();const matchQ=!q||txt.includes(q);const matchDept=!_histFltDept||(r.dataset.dept||\'\')=== _histFltDept;const matchRole=!_histFltRole||(r.dataset.role||\'\')=== _histFltRole;const matchStatus=!_histFltStatus||(r.dataset.status||\'\')=== _histFltStatus||(_histFltStatus===\'expired\'&&r.dataset.expired===\'1\')||(_histFltStatus===\'awaiting\'&&[\'generated\',\'preview_ok\',\'sent_signature\',\'pending_signature\'].includes(r.dataset.status))||(_histFltStatus===\'expiring_soon\'&&r.dataset.expiring30===\'1\')||(_histFltStatus===\'signed_this_month\'&&r.dataset.signedThisMonth===\'1\')||(_histFltStatus===\'active\'&&r.dataset.active===\'1\');const show=matchQ&&matchDept&&matchRole&&matchStatus;r.style.display=show?\'\':\'none\';if(show)vis++;});const cnt=el.querySelector(\'#histCount\');if(cnt)cnt.textContent=vis+\' contrat\'+(vis!==1?\'s\':\'\');el.querySelectorAll(\'[data-kpi-status]\').forEach(k=>{k.style.outline=k.dataset.kpiStatus===_histFltStatus?\'2px solid var(--violet)\':\' none\';});})();})()" style="background:'+k.bg+';border:1px solid var(--line);border-radius:10px;padding:10px 12px;text-align:center;cursor:pointer;transition:outline .15s">'
         +'<div style="font-size:22px;font-weight:800;color:'+k.color+'">'+k.val+'</div>'
         +'<div style="font-size:11px;color:'+k.color+';margin-top:2px;font-weight:600">'+k.lab+'</div>'
         +'</div>'
@@ -6564,8 +6617,15 @@ async function renderContractsHistory(){
         const searchStr=[c.contract_number,empName,c.department,c.job_title,c.contract_type,c.signer_email,c.signer_name].filter(Boolean).join(' ');
         const hasPdf=!!(c.signed_pdf_storage_path||c.signed_pdf_url);
         const isExpired=!!(c.end_date&&new Date(c.end_date)<now&&!['archived','cancelled'].includes(c.status));
+        const _d30=new Date(now.getTime()+30*864e5);
+        const isExpiring30=!!(c.end_date&&new Date(c.end_date)>=now&&new Date(c.end_date)<=_d30&&!['archived','cancelled','refused','error_signature'].includes(c.status));
+        const _mStart=new Date(now.getFullYear(),now.getMonth(),1);
+        const isSignedThisMonth=!!(c.status==='signed'&&c.signed_at&&new Date(c.signed_at)>=_mStart);
+        const _today2=now.toISOString().slice(0,10);
+        const _TERM=['archived','cancelled','refused','error_signature'];
+        const isActive=!_TERM.includes(c.status)&&(!c.start_date||c.start_date<=_today2)&&(!c.end_date||c.end_date>=_today2);
         const endDisplay=c.end_date?(fmt(c.end_date)+' '+expiryBadge(c)):'—';
-        return'<tr data-cid="'+c.id+'" data-search="'+searchStr.replace(/"/g,'&quot;')+'" data-dept="'+(c.department||'').replace(/"/g,'&quot;')+'" data-role="'+(c.job_title||'').replace(/"/g,'&quot;')+'" data-status="'+c.status+'" data-expired="'+(isExpired?'1':'0')+'">'
+        return'<tr data-cid="'+c.id+'" data-search="'+searchStr.replace(/"/g,'&quot;')+'" data-dept="'+(c.department||'').replace(/"/g,'&quot;')+'" data-role="'+(c.job_title||'').replace(/"/g,'&quot;')+'" data-status="'+c.status+'" data-expired="'+(isExpired?'1':'0')+'" data-expiring30="'+(isExpiring30?'1':'0')+'" data-signed-this-month="'+(isSignedThisMonth?'1':'0')+'" data-active="'+(isActive?'1':'0')+'">'
           +'<td style="font-weight:700;font-size:12px;white-space:nowrap">'+(c.contract_number||'—')+'</td>'
           +'<td style="font-weight:600">'+empName+'</td>'
           +'<td style="font-size:12px;color:var(--ink2)">'+(c.department||'—')+'</td>'
