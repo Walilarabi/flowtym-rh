@@ -1145,7 +1145,7 @@ function makeTestBE(){
     {id:'e3',hotel_id:'h1',first_name:'Katia',last_name:'Tripkovic',role:'Gouvernante',department:'Étage',contract_type:'CDI',hire_date:'2019-04-12',rest_days:[0,6],phone:'',email:'',address:'',emergency_contact:'',active:true},
     {id:'e4',hotel_id:'h1',first_name:'Fatma',last_name:'Tlidjane',role:'Femme de chambre',department:'Étage',contract_type:'CDD',hire_date:'2023-07-03',rest_days:[3,4],phone:'',email:'',address:'',emergency_contact:'',active:true},
     {id:'e5',hotel_id:'h2',first_name:'Marie',last_name:'Dubois',role:'Réceptionniste',department:'Réception',contract_type:'CDI',hire_date:'2020-05-01',rest_days:[0,6],phone:'',email:'',address:'',emergency_contact:'',active:true},
-    {id:'e6',hotel_id:'h1',first_name:'Ancien',last_name:'Bouchard',role:'Réceptionniste',department:'Réception',contract_type:'CDD',hire_date:'2019-01-01',rest_days:[],phone:'',email:'',address:'',emergency_contact:'',active:false,departure_date:(()=>{const d=new Date();return new Date(d.getFullYear(),d.getMonth()-2,15).toISOString().slice(0,10);})()},
+    {id:'e6',hotel_id:'h1',first_name:'Ancien',last_name:'Bouchard',role:'Réceptionniste',department:'Réception',contract_type:'CDD',hire_date:'2019-01-01',rest_days:[],phone:'',email:'',address:'',emergency_contact:'',active:false,status:'parti',departure_reason:'fin_cdd',last_worked_date:null,departure_date:(()=>{const d=new Date();return new Date(d.getFullYear(),d.getMonth()-2,15).toISOString().slice(0,10);})()},
   ];
   let planning=[]; let docs=[]; let clockings=[]; let templates=[];
   let absenceRequests=[]; let absenceBalances=[]; let absenceMovements=[]; let absenceHistory=[];
@@ -11568,6 +11568,9 @@ const MED_STATUS={planifiee:{label:'Planifiée',color:'#DBEAFE',fg:'#1D4ED8',ic:
   realisee:{label:'Réalisée',color:'#DCFCE7',fg:'#166534',ic:'fa-circle-check'},
   annulee:{label:'Annulée',color:'#F3F4F6',fg:'#6B7280',ic:'fa-ban'}};
 
+const DEP_REASONS={fin_cdd:'Fin de CDD',demission:'Démission',licenciement:'Licenciement',
+  rupture_conventionnelle:'Rupture conventionnelle',fin_periode_essai:'Fin de période d\'essai',autre:'Autre'};
+
 function _printMedicalConvocation(emp,visit,hotel){
   const typeInfo=MED_TYPES[visit?.visit_type]||{label:'Visite médicale'};
   const html=`<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"><title>Convocation visite médicale</title>
@@ -12209,6 +12212,146 @@ async function _loadFicheEquipment(s){
       if(i) printEquipmentReceipt(i);
     });
   }catch(e){el.innerHTML=`<div style="color:var(--red);font-size:12px">Erreur : ${e.message}</div>`;}
+}
+
+// Section Départ / Offboarding de la fiche collaborateur.
+async function _loadFicheOffboarding(s){
+  const el=$('ficheOffboardingSection'); if(!el)return;
+  const isParti=(s.status||'')==='parti'||s.active===false;
+  const STT={actif:{label:'Actif',color:'#DCFCE7',fg:'#166534'},pause:{label:'En pause',color:'#FEF3C7',fg:'#92400E'},parti:{label:'Sorti',color:'#FEE2E2',fg:'#991B1B'}};
+  const st=STT[s.status||(isParti?'parti':'actif')]||STT.actif;
+
+  if(!isParti){
+    el.innerHTML=`<div style="padding:14px;text-align:center;color:var(--muted);font-size:12.5px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px">
+      <i class="fa-solid fa-circle-check" style="color:#16a34a;margin-right:6px"></i>Aucun départ enregistré — collaborateur ${st.label.toLowerCase()}.
+    </div>`;
+    return;
+  }
+
+  el.innerHTML='<div style="color:var(--muted);font-size:12px">Chargement…</div>';
+  try{
+    const year=new Date().getFullYear();
+    const [contracts,equip,balances]=await Promise.all([
+      BE.listContractsByEmployee(s.id).catch(()=>[]),
+      BE.listEquipment(hotelId).catch(()=>[]),
+      BE.listAbsenceBalances(hotelId,year).catch(()=>[]),
+    ]);
+
+    // Contrats non terminaux
+    const TERMINAL=['cancelled','refused','archived','error_signature'];
+    const liveContracts=contracts.filter(c=>!TERMINAL.includes(c.status));
+    // Soldes CP/RTT du salarié
+    const bal=t=>{const b=balances.find(x=>x.employee_id===s.id&&x.type_code===t);return b?(Number(b.entitled||0)-Number(b.taken||0)+Number(b.adjusted||0)):null;};
+    const cp=bal('CP'), rtt=bal('RTT');
+    // Matériel non rendu
+    const unret=equip.filter(i=>i.employee_id===s.id&&!i.returned_date&&['remis','en_service','a_restituer'].includes(i.status||'remis'));
+
+    const fmt=d=>d?new Date(d+'T00:00').toLocaleDateString('fr-FR'):'—';
+    const balBadge=(lab,v)=>{
+      if(v===null) return `<div style="flex:1;min-width:110px;background:#fafafa;border:1px solid var(--line);border-radius:8px;padding:8px 10px"><div style="font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px">${lab}</div><div style="font-size:12px;color:var(--muted)">Non initialisé</div></div>`;
+      const col=v<0?'#991B1B':v<2?'#92400E':'#166534';
+      return `<div style="flex:1;min-width:110px;background:#fafafa;border:1px solid var(--line);border-radius:8px;padding:8px 10px"><div style="font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px">${lab} restant</div><div style="font-size:16px;font-weight:700;color:${col}">${v}</div></div>`;
+    };
+    const reasonOpts=Object.entries(DEP_REASONS).map(([k,l])=>`<option value="${k}" ${s.departure_reason===k?'selected':''}>${l}</option>`).join('');
+
+    // Checklist documents (informative, statique)
+    const DOCS=['Certificat de travail','Reçu pour solde de tout compte','Attestation France Travail','Dernière fiche de paie','Restitution du matériel'];
+    const docCheck=DOCS.map(d=>`<div style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:12px">
+      <i class="fa-regular fa-square" style="color:var(--muted)"></i><span>${d}</span></div>`).join('');
+
+    el.innerHTML=`
+      <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px">
+        <span style="background:${st.color};color:${st.fg};padding:3px 10px;border-radius:6px;font-size:11.5px;font-weight:700">${st.label}</span>
+        <span style="font-size:12px;color:var(--muted)">Date de sortie : <b style="color:var(--ink)">${fmt(s.departure_date)}</b></span>
+      </div>
+
+      <div class="row2" style="margin-bottom:12px">
+        <div class="fld"><label>Motif de départ</label><select id="ob_reason"><option value="">— non renseigné —</option>${reasonOpts}</select></div>
+        <div class="fld"><label>Dernier jour travaillé</label><input type="date" id="ob_lwd" value="${s.last_worked_date||''}"></div>
+      </div>
+      <button class="btn g" id="ob_save" style="width:100%;justify-content:center;font-size:12px;margin-bottom:16px"><i class="fa-solid fa-floppy-disk"></i> Enregistrer motif / dernier jour</button>
+
+      <div style="font-size:11px;font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">Soldes congés (indicatif)</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">${balBadge('CP',cp)}${balBadge('RTT',rtt)}</div>
+
+      <div style="font-size:11px;font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">Contrats actifs / non terminaux</div>
+      <div style="margin-bottom:16px">${liveContracts.length?liveContracts.map(c=>`<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--line);font-size:12px">
+        <span>${c.contract_type||'Contrat'}${c.contract_number?' · '+c.contract_number:''}</span>
+        <span style="color:var(--muted)">${c.end_date?'→ '+fmt(c.end_date):'sans terme'}</span></div>`).join(''):'<div style="color:var(--muted);font-size:12px">Aucun contrat actif.</div>'}</div>
+
+      <div style="font-size:11px;font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">Matériel non rendu ${unret.length?`<span style="color:#991B1B">(${unret.length})</span>`:''}
+        ${unret.length?`<span style="float:right;font-weight:normal;text-transform:none;letter-spacing:0;color:var(--violet);cursor:pointer" onclick="_eqFilter='';closeFiche();goView('equipment')">Module →</span>`:''}</div>
+      <div style="margin-bottom:16px">${unret.length?unret.map(i=>{const es=EQ_STATUSES[i.status||'remis']||EQ_STATUSES.remis;return `<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line);font-size:12px">
+        <span>${EQ_TYPES[i.item_type]||i.item_type}${i.item_code?' · '+i.item_code:''}</span>
+        <span style="background:${es.color};color:${es.fg};padding:1px 7px;border-radius:5px;font-size:10.5px;font-weight:600">${es.label}</span></div>`}).join(''):'<div style="color:#166534;font-size:12px"><i class="fa-solid fa-circle-check"></i> Aucun matériel en attente de restitution.</div>'}</div>
+
+      <div style="font-size:11px;font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">Documents de sortie</div>
+      <div style="margin-bottom:14px">${docCheck}</div>
+
+      <button class="btn p" id="ob_cert" style="width:100%;justify-content:center;font-size:12px;margin-bottom:12px"><i class="fa-solid fa-file-signature"></i> Générer certificat de travail</button>
+
+      <div style="font-size:11px;color:var(--muted);background:#fafafa;border:1px solid var(--line);border-radius:8px;padding:9px 11px;line-height:1.5">
+        <i class="fa-solid fa-circle-info" style="margin-right:5px"></i>Les éléments affichés sont indicatifs et doivent être validés par le cabinet paie ou le service RH avant remise des documents définitifs.
+      </div>`;
+
+    $('ob_save').onclick=async()=>{
+      const reason=$('ob_reason').value||null;
+      const lwd=$('ob_lwd').value||null;
+      try{
+        await BE.updateEmployee(s.id,{departure_reason:reason,last_worked_date:lwd});
+        s.departure_reason=reason; s.last_worked_date=lwd;
+        flash('Départ mis à jour');
+      }catch(e){flash('Erreur : '+(e.message||e));}
+    };
+    $('ob_cert').onclick=()=>_printCertificatTravail(s,hotels.find(h=>h.id===hotelId));
+  }catch(e){el.innerHTML=`<div style="color:var(--red);font-size:12px">Erreur : ${e.message}</div>`;}
+}
+
+// Certificat de travail imprimable — iframe natif, sans CDN, non stocké, sans calcul financier.
+function _printCertificatTravail(s,hotel){
+  const esc=v=>v==null?'':String(v).replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+  const fmt=d=>d?new Date(d+'T00:00').toLocaleDateString('fr-FR'):'…';
+  const fullName=[s.first_name,s.last_name].filter(Boolean).join(' ');
+  const poste=s.role||'…';
+  const service=s.department||'';
+  const ctype=s.contract_type||'';
+  const today=new Date().toLocaleDateString('fr-FR');
+  const ville=hotel?.city||hotel?.ville||'';
+  const html=`<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Certificat de travail</title>
+  <style>
+    @page{margin:22mm}
+    body{font-family:Arial,Helvetica,sans-serif;color:#111;font-size:13.5px;line-height:1.65;margin:0}
+    .emp{font-size:12px;color:#444;margin-bottom:30px}
+    h1{font-size:19px;text-align:center;letter-spacing:1px;margin:28px 0 30px}
+    .body p{margin:0 0 14px}
+    .sig{margin-top:60px;text-align:right}
+    .sig-line{display:inline-block;width:230px;border-bottom:1px solid #555;margin-top:42px}
+    .foot{margin-top:40px;font-size:10px;color:#999;text-align:center}
+  </style></head><body>
+    <div class="emp">
+      <strong>${esc(hotel?.name||'')}</strong>${hotel?.address?'<br>'+esc(hotel.address):''}${ville?'<br>'+esc(ville):''}
+    </div>
+    <h1>CERTIFICAT DE TRAVAIL</h1>
+    <div class="body">
+      <p>Je soussigné(e), représentant l'établissement <strong>${esc(hotel?.name||'')}</strong>, certifie que :</p>
+      <p style="text-align:center;font-size:15px"><strong>${esc(fullName)}</strong></p>
+      <p>a été employé(e) au sein de notre établissement en qualité de <strong>${esc(poste)}</strong>${service?` (service ${esc(service)})`:''}${ctype?`, dans le cadre d'un contrat <strong>${esc(ctype)}</strong>`:''}.</p>
+      <p>Période d'emploi : du <strong>${fmt(s.hire_date)}</strong> au <strong>${fmt(s.departure_date)}</strong>${s.last_worked_date?` (dernier jour travaillé : ${fmt(s.last_worked_date)})`:''}.</p>
+      <p>Le présent certificat est délivré à l'intéressé(e) pour faire valoir ce que de droit.</p>
+    </div>
+    <div class="sig">
+      <div>Fait${ville?' à '+esc(ville):''}, le ${today}.</div>
+      <div style="margin-top:6px">Signature et cachet de l'employeur</div>
+      <div class="sig-line"></div>
+    </div>
+    <div class="foot">Flowtym RH · Document établi le ${today} · ${esc(hotel?.name||'')}</div>
+  </body></html>`;
+  const ifr=document.createElement('iframe');
+  ifr.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0';
+  document.body.appendChild(ifr);
+  ifr.contentDocument.open();ifr.contentDocument.write(html);ifr.contentDocument.close();
+  setTimeout(()=>{try{ifr.contentWindow.focus();ifr.contentWindow.print();}catch(e){flash('Impression impossible : '+(e.message||e));}
+    setTimeout(()=>ifr.remove(),2000);},150);
 }
 
 /* =====================================================================
@@ -13396,6 +13539,8 @@ async function openFiche(eid){
       <div id="ficheContratsSignes"><div style="color:var(--muted);font-size:12px">Chargement…</div></div></div>`:''}
     ${full?`<div class="sec"><h4>Visites médicales <span style="float:right;font-size:10.5px;color:var(--muted);font-weight:normal;cursor:pointer" onclick="closeFiche();goView('medical')">Gérer →</span></h4>
       <div id="ficheMedicalSection"><div style="color:var(--muted);font-size:12px">Chargement…</div></div></div>`:''}
+    ${full?`<div class="sec"><h4>Départ / Offboarding</h4>
+      <div id="ficheOffboardingSection"><div style="color:var(--muted);font-size:12px">Chargement…</div></div></div>`:''}
     ${full?`<div class="sec"><h4>Matériel remis <span style="float:right;font-size:10.5px;color:var(--muted);font-weight:normal;cursor:pointer" onclick="_eqFilter='';closeFiche();goView('equipment')">Gérer →</span></h4>
       <div id="ficheEquipmentSection"><div style="color:var(--muted);font-size:12px">Chargement…</div></div></div>`:''}
     ${full?`<div class="sec" style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn g" data-edit style="flex:1;justify-content:center"><i class="fa-solid fa-pen"></i> Modifier</button>
@@ -13452,6 +13597,8 @@ async function openFiche(eid){
   if(full && $('ficheContratsSignes')) _renderPortalContractsCoffre(s.id, $('ficheContratsSignes'));
   // Section Visites médicales (RH uniquement — certificat non exposé au portail)
   if(full && $('ficheMedicalSection')) _loadFicheMedical(s);
+  // Section Départ / Offboarding
+  if(full && $('ficheOffboardingSection')) _loadFicheOffboarding(s);
   // Section Matériel remis
   if(full && $('ficheEquipmentSection')) _loadFicheEquipment(s);
 
