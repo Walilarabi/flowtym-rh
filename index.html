@@ -4247,12 +4247,21 @@ async function _drawDashPriorityAlerts(){
   if(vmPlanned.length) alerts.push({icon:'fa-stethoscope',color:'#3B82F6',label:`${vmPlanned.length} visite${vmPlanned.length>1?'s':''} médicale${vmPlanned.length>1?'s':''} planifiée${vmPlanned.length>1?'s':''} non réalisée${vmPlanned.length>1?'s':''}`,link:'medical'});
   if(vmNoVisit.length) alerts.push({icon:'fa-user-slash',color:'#F59E0B',label:`${vmNoVisit.length} collaborateur${vmNoVisit.length>1?'s':''} sans visite médicale`,link:'medical'});
 
+  // Matériel — restitution en attente, non rendu par salariés sortis, perdu/cassé
+  const equip=await BE.listEquipment(hotelId).catch(()=>[]);
+  const eqLate=equip.filter(_eqFilterPred('a_restituer_late'));
+  const eqExited=equip.filter(_eqFilterPred('sorti'));
+  const eqLost=equip.filter(_eqFilterPred('perdu_casse'));
+  if(eqLate.length) alerts.push({icon:'fa-box-open',color:'#EF4444',label:`${eqLate.length} matériel${eqLate.length>1?'s':''} à restituer depuis +7j`,link:'equipment',eqFilter:'a_restituer_late'});
+  if(eqExited.length) alerts.push({icon:'fa-person-walking-arrow-right',color:'#EF4444',label:`${eqExited.length} matériel${eqExited.length>1?'s':''} non rendu${eqExited.length>1?'s':''} (salarié sorti)`,link:'equipment',eqFilter:'sorti'});
+  if(eqLost.length) alerts.push({icon:'fa-triangle-exclamation',color:'#F59E0B',label:`${eqLost.length} matériel${eqLost.length>1?'s':''} perdu/cassé non facturé`,link:'equipment',eqFilter:'perdu_casse'});
+
   if(!alerts.length){
     el.innerHTML=`<div style="text-align:center;padding:28px 0;color:var(--muted);font-size:13px"><i class="fa-solid fa-circle-check" style="font-size:24px;color:#22C55E;display:block;margin-bottom:10px"></i>Aucune alerte active — tout est conforme !</div>`;
     return;
   }
   el.innerHTML=`<div style="display:flex;flex-direction:column;gap:8px">
-    ${alerts.slice(0,6).map(a=>`<div onclick="goView('${a.link}')" style="display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:10px;background:#FAFAFA;border:1px solid var(--line);cursor:pointer;transition:.15s" onmouseover="this.style.background='#F5F3FF'" onmouseout="this.style.background='#FAFAFA'">
+    ${alerts.slice(0,6).map(a=>`<div onclick="${a.eqFilter?`_eqFilter='${a.eqFilter}';`:a.link==='equipment'?`_eqFilter='';`:''}goView('${a.link}')" style="display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:10px;background:#FAFAFA;border:1px solid var(--line);cursor:pointer;transition:.15s" onmouseover="this.style.background='#F5F3FF'" onmouseout="this.style.background='#FAFAFA'">
       <div style="width:30px;height:30px;background:${a.color}18;border-radius:8px;display:grid;place-items:center;flex-shrink:0">
         <i class="fa-solid ${a.icon}" style="color:${a.color};font-size:12px"></i>
       </div>
@@ -11899,30 +11908,57 @@ const EQ_TYPES={badge:'Badge',cle:'Clé',uniforme:'Uniforme',telephone:'Téléph
 const EQ_COND={neuf:'Neuf',bon:'Bon état',usage:'Usagé',abime:'Abîmé',perdu:'Perdu'};
 const EQ_STATUSES={remis:{label:'Remis',color:'#DBEAFE',fg:'#1D4ED8'},en_service:{label:'En service',color:'#EDE9FE',fg:'#5B21B6'},a_restituer:{label:'À restituer',color:'#FEF3C7',fg:'#D97706'},restitue:{label:'Restitué',color:'#DCFCE7',fg:'#166534'},perdu:{label:'Perdu',color:'#FEE2E2',fg:'#991B1B'},casse:{label:'Cassé',color:'#FEE2E2',fg:'#7F1D1D'},facture:{label:'Facturé',color:'#FEF3C7',fg:'#92400E'},stock:{label:'En stock',color:'#F3F4F6',fg:'#374151'}};
 
+// Filtre actif du module Matériel (positionné par les alertes dashboard).
+let _eqFilter='';
+// Prédicat de filtre matériel — partagé avec les alertes dashboard.
+function _eqFilterPred(name){
+  const weekAgo=new Date(Date.now()-7*864e5).toISOString().slice(0,10);
+  const isExited=eid=>{const e=staff.find(s=>s.id===eid);return !!e&&(e.active===false||e.status==='parti');};
+  const sof=i=>i.status||'remis';
+  if(name==='a_restituer_late') return i=>sof(i)==='a_restituer'&&((i.updated_at||i.given_date||'').slice(0,10)<weekAgo);
+  if(name==='sorti') return i=>(sof(i)==='remis'||sof(i)==='en_service')&&!i.returned_date&&isExited(i.employee_id);
+  if(name==='perdu_casse') return i=>(sof(i)==='perdu'||sof(i)==='casse');
+  return null;
+}
+const _EQ_FILTER_LABELS={a_restituer_late:'À restituer depuis plus de 7 jours',sorti:'Matériel non rendu — salariés sortis',perdu_casse:'Matériel perdu ou cassé non facturé'};
+
 async function renderEquipment(){
   const hName=hotels.find(h=>h.id===hotelId)?.name||'';
   $('view').innerHTML=`<div class="page">
     <div class="phead">
       <div><h1>Matériel remis</h1><div class="sub">${hName}</div></div>
       <div class="actions">
+        <button class="btn g" id="eqCsv"><i class="fa-solid fa-file-csv"></i> Export CSV</button>
         <button class="btn p" id="eqNew"><i class="fa-solid fa-plus"></i> Remettre du matériel</button>
       </div></div>
     <div id="eqList">Chargement…</div>
   </div>`;
   $('eqNew').onclick=()=>openEquipmentForm(null);
+  $('eqCsv').onclick=()=>_eqCsvExport();
   await drawEquipmentList();
 }
 
 async function drawEquipmentList(){
   const el=$('eqList'); if(!el)return;
   try{
-    const items=await BE.listEquipment(hotelId);
+    let items=await BE.listEquipment(hotelId);
+    let fltBanner='';
+    if(_eqFilter){
+      const pred=_eqFilterPred(_eqFilter);
+      if(pred){
+        items=items.filter(pred);
+        fltBanner=`<div style="display:flex;align-items:center;gap:10px;background:#FEF3C7;border:1px solid #FCD34D;color:#92400E;border-radius:10px;padding:9px 12px;margin-bottom:14px;font-size:12.5px;font-weight:600">
+          <i class="fa-solid fa-filter"></i><span style="flex:1">Filtre : ${_EQ_FILTER_LABELS[_eqFilter]||_eqFilter} (${items.length})</span>
+          <button onclick="_eqFilter='';drawEquipmentList()" style="background:none;border:0;color:#92400E;cursor:pointer;font-weight:600"><i class="fa-solid fa-xmark"></i> Réinitialiser</button>
+        </div>`;
+      }
+    }
     const active=items.filter(i=>!i.returned_date&&(!i.status||i.status==='remis'||i.status==='a_restituer'));
     const returned=items.filter(i=>i.returned_date||i.status==='restitue');
     const lost=items.filter(i=>i.status==='perdu');
     const broken=items.filter(i=>i.status==='casse');
     const stock=items.filter(i=>i.status==='en_stock');
-    if(!items.length){el.innerHTML='<div style="padding:30px;text-align:center;color:var(--muted)">Aucun matériel enregistré.</div>';return;}
+    if(!items.length){el.innerHTML=fltBanner+'<div style="padding:30px;text-align:center;color:var(--muted)">'+(_eqFilter?'Aucun matériel pour ce filtre.':'Aucun matériel enregistré.')+'</div>';return;}
     const statusBadge=i=>{const s=EQ_STATUSES[i.status||'remis']||EQ_STATUSES.remis;return`<span style="background:${s.color};color:${s.fg};padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600">${s.label}</span>`;};
     const tblRow=i=>{const e=i.employees;return `<tr>
       <td><b>${e?e.first_name+' '+e.last_name:'—'}</b><br><span style="font-size:11px;color:var(--muted)">${e?.department||''}</span></td>
@@ -11936,10 +11972,11 @@ async function drawEquipmentList(){
         ${(!i.returned_date&&i.status!=='restitue'&&i.status!=='perdu'&&i.status!=='casse')?`<button data-ret="${i.id}" title="Restitution / changement statut" style="color:var(--green)"><i class="fa-solid fa-rotate-left"></i></button>`:''}
         <button data-edit="${i.id}" title="Modifier"><i class="fa-solid fa-pen"></i></button>
         <button data-del="${i.id}" title="Supprimer" style="color:var(--red)"><i class="fa-solid fa-trash"></i></button>
+        ${i.employee_id?`<button data-rec="${i.id}" title="Reçu de remise" style="color:#4338CA"><i class="fa-solid fa-receipt"></i></button>`:''}
         <button data-pdf="${i.id}" title="Décharge PDF"><i class="fa-regular fa-file-pdf"></i></button>
       </td>
     </tr>`;};
-    el.innerHTML=`
+    el.innerHTML=fltBanner+`
       <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr));margin-bottom:14px">
         <div class="kpi"><div class="val">${active.length}</div><div class="lab">Remis actifs</div></div>
         <div class="kpi"><div class="val">${returned.length}</div><div class="lab">Restitués</div></div>
@@ -11967,6 +12004,10 @@ async function drawEquipmentList(){
     el.querySelectorAll('[data-pdf]').forEach(b=>b.onclick=()=>{
       const item=items.find(i=>i.id===b.dataset.pdf);
       generateDischargePDF(item);
+    });
+    el.querySelectorAll('[data-rec]').forEach(b=>b.onclick=()=>{
+      const item=items.find(i=>i.id===b.dataset.rec);
+      printEquipmentReceipt(item);
     });
   }catch(e){el.innerHTML=`<div style="padding:20px;color:var(--red)">Erreur : ${e.message}</div>`;}
 }
@@ -12065,6 +12106,109 @@ async function generateDischargePDF(eq){
     a.download=`decharge_${eq.item_type}_${(emp?.last_name||'').toLowerCase()}_${eq.given_date}.pdf`;
     a.click();
   }catch(e){flash('Erreur PDF : '+e.message);}
+}
+
+// Reçu de remise imprimable — iframe natif, sans CDN, non stocké (V1).
+function printEquipmentReceipt(eq){
+  const emp=staff.find(e=>e.id===eq.employee_id);
+  const hotel=hotels.find(h=>h.id===hotelId);
+  const st=EQ_STATUSES[eq.status||'remis']||EQ_STATUSES.remis;
+  const esc=v=>v==null?'':String(v).replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+  const row=(lab,val)=>val?`<tr><td style="padding:6px 10px;font-weight:600;width:42%;border-bottom:1px solid #eee">${lab}</td><td style="padding:6px 10px;border-bottom:1px solid #eee">${esc(val)}</td></tr>`:'';
+  const html=`<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Reçu de remise de matériel</title>
+  <style>
+    @page{margin:18mm}
+    body{font-family:Arial,Helvetica,sans-serif;color:#111;font-size:13px;line-height:1.5;margin:0}
+    h1{font-size:18px;margin:0 0 2px;text-align:center}
+    .sub{text-align:center;color:#666;margin-bottom:24px}
+    table{width:100%;border-collapse:collapse;margin-bottom:20px}
+    .mention{background:#f7f7f9;border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;font-size:12.5px;margin:18px 0}
+    .sig-row{display:flex;gap:30px;margin-top:48px}
+    .sig-box{flex:1}
+    .sig-line{height:46px;border-bottom:1px solid #555;margin:6px 0 4px}
+    .foot{margin-top:30px;font-size:10px;color:#999;text-align:center}
+  </style></head><body>
+    <h1>REÇU DE REMISE DE MATÉRIEL</h1>
+    <div class="sub">${esc(hotel?.name||'')}</div>
+    <table>
+      ${row('Collaborateur', emp?emp.first_name+' '+emp.last_name:'')}
+      ${row('Service / Poste', [emp?.department,emp?.role].filter(Boolean).join(' — '))}
+      ${row('Type de matériel', EQ_TYPES[eq.item_type]||eq.item_type)}
+      ${row('Libellé', eq.description||eq.item_code)}
+      ${row('État du matériel', EQ_COND[eq.condition_given]||eq.condition_given)}
+      ${row('Statut', st.label)}
+      ${row('Date de remise', eq.given_date)}
+      ${row('Notes', eq.notes)}
+    </table>
+    <div class="mention">Je reconnais avoir reçu le matériel décrit ci-dessus et m'engage à le restituer à la demande de l'employeur ou lors de mon départ.</div>
+    <div class="sig-row">
+      <div class="sig-box"><strong style="font-size:11.5px">Signature du salarié</strong><div class="sig-line"></div><span style="font-size:11px;color:#666">Lu et approuvé</span></div>
+      <div class="sig-box"><strong style="font-size:11.5px">Signature du manager</strong><div class="sig-line"></div><span style="font-size:11px;color:#666">Pour l'employeur</span></div>
+    </div>
+    <div class="foot">Flowtym RH · Document établi le ${new Date().toLocaleDateString('fr-FR')} · ${esc(hotel?.name||'')}</div>
+  </body></html>`;
+  const ifr=document.createElement('iframe');
+  ifr.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0';
+  document.body.appendChild(ifr);
+  ifr.contentDocument.open();ifr.contentDocument.write(html);ifr.contentDocument.close();
+  setTimeout(()=>{try{ifr.contentWindow.focus();ifr.contentWindow.print();}catch(e){flash('Impression impossible : '+(e.message||e));}
+    setTimeout(()=>ifr.remove(),2000);},150);
+}
+
+// Export CSV inventaire matériel — natif, séparateur ;, UTF-8 BOM.
+async function _eqCsvExport(){
+  let items;
+  try{ items=await BE.listEquipment(hotelId); }
+  catch(e){ flash('Erreur : '+e.message); return; }
+  if(!items.length){flash('Aucun matériel à exporter');return;}
+  const esc=v=>{v=v==null?'':String(v);return /[;"\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
+  const stLabel=i=>(EQ_STATUSES[i.status||'remis']||EQ_STATUSES.remis).label;
+  const header=['Hôtel','Salarié','Service','Type','Libellé','État','Statut','Date remise','Date restitution','Notes'];
+  const hName=hotels.find(h=>h.id===hotelId)?.name||'';
+  const lines=[header].concat(items.map(i=>{
+    const e=i.employees||staff.find(s=>s.id===i.employee_id);
+    return [hName, e?(e.first_name+' '+e.last_name):'', e?.department||'',
+      EQ_TYPES[i.item_type]||i.item_type, i.description||i.item_code||'',
+      EQ_COND[i.condition_given]||i.condition_given||'', stLabel(i),
+      i.given_date||'', i.returned_date||'', i.notes||''];
+  }));
+  const csv='\ufeff'+lines.map(l=>l.map(esc).join(';')).join('\r\n');
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=`inventaire_materiel_hotel-${hotelId}_${new Date().toISOString().slice(0,10)}.csv`;
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+  flash('CSV exporté ('+items.length+' ligne'+(items.length>1?'s':'')+')');
+}
+
+// Section Matériel de la fiche collaborateur.
+async function _loadFicheEquipment(s){
+  const el=$('ficheEquipmentSection'); if(!el)return;
+  try{
+    const all=await BE.listEquipment(hotelId);
+    const items=all.filter(i=>i.employee_id===s.id)
+      .sort((a,b)=>(b.given_date||'').localeCompare(a.given_date||''));
+    if(!items.length){el.innerHTML='<div style="color:var(--muted);font-size:12px">Aucun matériel remis.</div>';return;}
+    el.innerHTML=items.map(i=>{
+      const st=EQ_STATUSES[i.status||'remis']||EQ_STATUSES.remis;
+      return `<div style="padding:8px 0;border-bottom:1px solid var(--line)">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+          <span style="font-size:12.5px;font-weight:600">${EQ_TYPES[i.item_type]||i.item_type}${i.item_code?' · '+i.item_code:''}</span>
+          <span style="background:${st.color};color:${st.fg};padding:1px 7px;border-radius:5px;font-size:10.5px;font-weight:600">${st.label}</span>
+          <button data-feq-rec="${i.id}" title="Reçu de remise" style="color:#4338CA;background:none;border:0;cursor:pointer;font-size:13px"><i class="fa-solid fa-receipt"></i></button>
+        </div>
+        <div style="font-size:11.5px;color:var(--muted);margin-top:2px">
+          ${i.description?i.description+' · ':''}${EQ_COND[i.condition_given]||i.condition_given||'—'}
+          · remis le ${i.given_date||'—'}${i.returned_date?' · restitué le '+i.returned_date:''}
+        </div>
+      </div>`;
+    }).join('');
+    el.querySelectorAll('[data-feq-rec]').forEach(b=>b.onclick=()=>{
+      const i=items.find(x=>x.id===b.dataset.feqRec);
+      if(i) printEquipmentReceipt(i);
+    });
+  }catch(e){el.innerHTML=`<div style="color:var(--red);font-size:12px">Erreur : ${e.message}</div>`;}
 }
 
 /* =====================================================================
@@ -13252,6 +13396,8 @@ async function openFiche(eid){
       <div id="ficheContratsSignes"><div style="color:var(--muted);font-size:12px">Chargement…</div></div></div>`:''}
     ${full?`<div class="sec"><h4>Visites médicales <span style="float:right;font-size:10.5px;color:var(--muted);font-weight:normal;cursor:pointer" onclick="closeFiche();goView('medical')">Gérer →</span></h4>
       <div id="ficheMedicalSection"><div style="color:var(--muted);font-size:12px">Chargement…</div></div></div>`:''}
+    ${full?`<div class="sec"><h4>Matériel remis <span style="float:right;font-size:10.5px;color:var(--muted);font-weight:normal;cursor:pointer" onclick="_eqFilter='';closeFiche();goView('equipment')">Gérer →</span></h4>
+      <div id="ficheEquipmentSection"><div style="color:var(--muted);font-size:12px">Chargement…</div></div></div>`:''}
     ${full?`<div class="sec" style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn g" data-edit style="flex:1;justify-content:center"><i class="fa-solid fa-pen"></i> Modifier</button>
       ${(s.status||'')==='actif'
         ? '<button class="btn" data-pause style="flex:1;justify-content:center;background:#FEF3C7;color:#92400E;border:1px solid #FCD34D"><i class="fa-solid fa-pause"></i> Mettre en pause</button><button class="btn d" data-del style="flex:1;justify-content:center"><i class="fa-solid fa-right-from-bracket"></i> Marquer comme parti</button>'
@@ -13306,6 +13452,8 @@ async function openFiche(eid){
   if(full && $('ficheContratsSignes')) _renderPortalContractsCoffre(s.id, $('ficheContratsSignes'));
   // Section Visites médicales (RH uniquement — certificat non exposé au portail)
   if(full && $('ficheMedicalSection')) _loadFicheMedical(s);
+  // Section Matériel remis
+  if(full && $('ficheEquipmentSection')) _loadFicheEquipment(s);
 
   const ed=$('drawer').querySelector('[data-edit]');
   if(ed) ed.onclick=()=>{closeFiche();openEmpForm(s);};
