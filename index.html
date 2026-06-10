@@ -634,6 +634,10 @@ async function makeRealBE(){
       const {data,error}=await sb.from('staff_planning').select('employee_id,day,status,duration,shift_label,shift_start,shift_end,break_minutes').eq('hotel_id',h).gte('day',s).lte('day',e);
       must(error,"Lecture du planning"); return data||[];
     },
+    async listYearPlanning(h,year){
+      const {data,error}=await sb.from('staff_planning').select('employee_id,day,status').eq('hotel_id',h).gte('day',`${year}-01-01`).lte('day',`${year}-12-31`);
+      must(error,"Lecture du planning annuel"); return data||[];
+    },
     async savePlanning(h,upserts,deletes){
       if(upserts.length){
         // Strip shift columns from payload — silently omitted if migration 24 not yet applied
@@ -1286,6 +1290,9 @@ function makeTestBE(){
         action:status==='approved'?'approve':status==='rejected'?'reject':'cancel',
         actor_user_id:actorUserId,actor_email:actorEmail,comment:comment||null,created_at:new Date().toISOString()});
       return r;
+    },
+    async listYearPlanning(h,year){
+      return planningRows.filter(r=>r.hotel_id===h&&r.day>=`${year}-01-01`&&r.day<=`${year}-12-31`);
     },
     async listAbsenceBalances(h,year){
       return absenceBalances.filter(b=>b.hotel_id===h && b.year===year);
@@ -10329,8 +10336,10 @@ async function renderAbsBalances() {
   $('absActions').innerHTML = `
     <select id="absYearSel" style="font-size:13px;padding:7px 10px;border:1px solid var(--line);border-radius:8px">
       ${[yearNow-1, yearNow, yearNow+1].map(y=>`<option value="${y}" ${y===absBalYear?'selected':''}>${y}</option>`).join('')}
-    </select>`;
+    </select>
+    ${canApproveAbsences() ? `<button id="absRecalcBtn" class="btn g" style="font-size:13px"><i class="fa-solid fa-rotate"></i> Recalculer les CP/RTT pris depuis le planning</button>` : ''}`;
   $('absYearSel').onchange = e => { absBalYear = parseInt(e.target.value); renderAbsBalances(); };
+  if(canApproveAbsences() && $('absRecalcBtn')) $('absRecalcBtn').onclick = () => openRecalcSimulModal();
 
   sub.innerHTML = `<div id="absBalTable">Chargement…</div>`;
   try {
@@ -10419,6 +10428,133 @@ function openBalanceEditModal(empId) {
       closeModal(); flash('Soldes mis à jour'); renderAbsBalances();
     } catch(e) { flash('Erreur : '+(e.message||e)); }
   };
+}
+
+async function openRecalcSimulModal() {
+  $('modal').innerHTML = `<div class="mh"><i class="fa-solid fa-rotate" style="color:var(--violet);margin-right:8px"></i>Simulation — Recalcul CP/RTT pris depuis le planning ${absBalYear}</div>
+    <div class="mb"><div style="padding:20px;text-align:center;color:var(--muted)">Calcul en cours…</div></div>`;
+  $('modalbg').classList.add('on');
+  try {
+    const [planRows, balances] = await Promise.all([
+      BE.listYearPlanning(hotelId, absBalYear),
+      BE.listAbsenceBalances(hotelId, absBalYear)
+    ]);
+    // Count CP/RTT from planning per employee
+    const fromPlan = {};
+    planRows.forEach(r => {
+      if(r.status !== 'CP' && r.status !== 'RTT') return;
+      if(!fromPlan[r.employee_id]) fromPlan[r.employee_id] = {CP:0, RTT:0};
+      fromPlan[r.employee_id][r.status]++;
+    });
+    const balMap = {};
+    balances.forEach(b => {
+      if(!balMap[b.employee_id]) balMap[b.employee_id] = {};
+      balMap[b.employee_id][b.type_code] = b;
+    });
+    const activeStaff = staff.filter(s => s.active).sort((a,b) => a.last_name.localeCompare(b.last_name));
+    const simData = activeStaff.map(s => {
+      const plan = fromPlan[s.id] || {CP:0, RTT:0};
+      const cpCur = balMap[s.id]?.CP?.taken ?? null;
+      const rttCur = balMap[s.id]?.RTT?.taken ?? null;
+      return {
+        empId: s.id,
+        empName: `${s.first_name} ${s.last_name}`,
+        cpCur, rttCur,
+        cpPlan: plan.CP, rttPlan: plan.RTT,
+        cpDelta: plan.CP - (cpCur ?? 0),
+        rttDelta: plan.RTT - (rttCur ?? 0)
+      };
+    }).filter(r => r.cpPlan > 0 || r.rttPlan > 0 || r.cpDelta !== 0 || r.rttDelta !== 0);
+
+    const rowsHtml = simData.length === 0
+      ? `<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--muted)">Aucun écart détecté — les soldes "Pris" correspondent déjà au planning.</td></tr>`
+      : simData.map(r => {
+          const cpColor = r.cpDelta !== 0 ? (r.cpCur === null ? 'var(--violet)' : '#d97706') : 'var(--green)';
+          const rttColor = r.rttDelta !== 0 ? (r.rttCur === null ? 'var(--violet)' : '#d97706') : 'var(--green)';
+          const cpNew = `<b style="color:${cpColor}">${r.cpPlan}</b>`;
+          const rttNew = `<b style="color:${rttColor}">${r.rttPlan}</b>`;
+          const cpCurDisplay = r.cpCur === null ? '<span style="color:var(--muted)">—</span>' : r.cpCur;
+          const rttCurDisplay = r.rttCur === null ? '<span style="color:var(--muted)">—</span>' : r.rttCur;
+          return `<tr>
+            <td><b>${r.empName}</b></td>
+            <td style="text-align:center">${cpCurDisplay}</td>
+            <td style="text-align:center">${cpNew}</td>
+            <td style="text-align:center;color:${cpColor}">${r.cpDelta >= 0 ? '+' : ''}${r.cpDelta}</td>
+            <td style="text-align:center">${rttCurDisplay}</td>
+            <td style="text-align:center">${rttNew}</td>
+            <td style="text-align:center;color:${rttColor}">${r.rttDelta >= 0 ? '+' : ''}${r.rttDelta}</td>
+          </tr>`;
+        }).join('');
+
+    $('modal').innerHTML = `
+      <div class="mh"><i class="fa-solid fa-rotate" style="color:var(--violet);margin-right:8px"></i>Simulation — Recalcul CP/RTT pris depuis le planning ${absBalYear}</div>
+      <div class="mb">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:12px">
+          Seul le champ <b>Pris</b> sera mis à jour. Les champs <b>Acquis</b> et <b>Ajustement</b> sont inchangés.
+          Basé sur <b>${planRows.length}</b> ligne(s) de planning.
+        </div>
+        <div style="overflow-x:auto">
+          <table class="tbl"><thead><tr>
+            <th>Collaborateur</th>
+            <th style="text-align:center" colspan="3">CP ${absBalYear}</th>
+            <th style="text-align:center" colspan="3">RTT ${absBalYear}</th>
+          </tr><tr>
+            <th></th>
+            <th style="text-align:center;font-size:10px">Pris actuel</th>
+            <th style="text-align:center;font-size:10px">Pris planning</th>
+            <th style="text-align:center;font-size:10px">Écart</th>
+            <th style="text-align:center;font-size:10px">Pris actuel</th>
+            <th style="text-align:center;font-size:10px">Pris planning</th>
+            <th style="text-align:center;font-size:10px">Écart</th>
+          </tr></thead><tbody>${rowsHtml}</tbody></table>
+        </div>
+        ${simData.length > 0 ? `
+        <div style="margin-top:14px;padding:12px;background:var(--bg2);border-radius:8px;font-size:12px">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="recalcConfirmChk">
+            J'ai vérifié les données de simulation et je confirme la mise à jour des soldes "Pris".
+          </label>
+        </div>` : ''}
+        <div id="recalcDisclaimer" style="margin-top:10px;font-size:11px;color:var(--muted)">
+          <i class="fa-solid fa-circle-info"></i> Compteurs calculés depuis le planning. À valider avec votre cabinet paie avant toute utilisation officielle.
+        </div>
+      </div>
+      <div class="mact">
+        <button class="btn g" id="recalcCancel">Annuler</button>
+        ${simData.length > 0 ? `<button class="btn p" id="recalcApply" disabled><i class="fa-solid fa-check"></i> Confirmer et appliquer</button>` : ''}
+      </div>`;
+    $('recalcCancel').onclick = closeModal;
+    if(simData.length > 0) {
+      $('recalcConfirmChk').onchange = () => { $('recalcApply').disabled = !$('recalcConfirmChk').checked; };
+      $('recalcApply').onclick = () => _applyRecalcBalances(simData);
+    }
+  } catch(e) {
+    $('modal').innerHTML = `<div class="mh">Erreur</div><div class="mb" style="color:var(--red)">${e.message||e}</div>
+      <div class="mact"><button class="btn g" onclick="closeModal()">Fermer</button></div>`;
+  }
+}
+
+async function _applyRecalcBalances(simData) {
+  const btn = $('recalcApply');
+  if(btn) { btn.disabled = true; btn.textContent = 'Application…'; }
+  try {
+    for(const r of simData) {
+      if(r.cpPlan > 0 || (r.cpCur !== null && r.cpDelta !== 0)) {
+        await BE.upsertAbsenceBalance(hotelId, r.empId, absBalYear, 'CP', {taken: r.cpPlan});
+        await BE.addBalanceMovement(hotelId, r.empId, 'CP', absBalYear, r.cpDelta, 'Initialisation depuis le planning', null, userEmail||null);
+      }
+      if(r.rttPlan > 0 || (r.rttCur !== null && r.rttDelta !== 0)) {
+        await BE.upsertAbsenceBalance(hotelId, r.empId, absBalYear, 'RTT', {taken: r.rttPlan});
+        await BE.addBalanceMovement(hotelId, r.empId, 'RTT', absBalYear, r.rttDelta, 'Initialisation depuis le planning', null, userEmail||null);
+      }
+    }
+    closeModal();
+    flash(`Soldes mis à jour pour ${simData.length} collaborateur(s)`);
+    renderAbsBalances();
+  } catch(e) {
+    flash('Erreur : ' + (e.message || e));
+    if(btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-check"></i> Confirmer et appliquer'; }
+  }
 }
 
 function openAbsenceRequestForm(existingReq) {
