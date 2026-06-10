@@ -278,19 +278,55 @@ html,body{height:100%;background:var(--bg);font-family:-apple-system,BlinkMacSys
 const SUPABASE_URL  = "https://hzrzkvdebaadditvbqis.supabase.co";
 const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh6cnprdmRlYmFhZGRpdHZicWlzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxMjEwMTQsImV4cCI6MjA5MjY5NzAxNH0.IDFFWHNNIeBReWRTeVj8RlRpyz5J4XaStFhGVEYEBU8";
 const FUNCTIONS_URL = "https://hzrzkvdebaadditvbqis.supabase.co/functions/v1";
+const isTest = location.search.includes('test');
 
-let sbModule;
-try{
-  sbModule = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm');
-}catch(e){
-  // CDN inaccessible (env offline, proxy…)
-  document.getElementById('authSend').disabled = false;
-  document.getElementById('authSend').innerHTML = '<i class="fa-solid fa-wifi-slash"></i> Réseau indisponible — réessayez';
-  console.error('[portal] CDN Supabase inaccessible :', e.message);
-  throw e; // Stoppe le module — l'écran statique reste visible
+let sb;
+if(isTest){
+  // Mode test : stub Supabase, pas de CDN, pas d'auth réelle
+  function _mkChain(tbl){
+    const q={};let _count=false;
+    const c={
+      select(col,opts){if(opts?.count)_count=true;return c;},
+      eq(k,v){q[k]=v;return c;},neq(){return c;},gte(){return c;},lte(){return c;},
+      ilike(){return c;},in(){return c;},order(){return c;},limit(){return c;},range(){return c;},
+      single:     ()=>Promise.resolve(window.__sb?.[tbl]?.(q,'single')     ||{data:null,error:null}),
+      maybeSingle:()=>Promise.resolve(window.__sb?.[tbl]?.(q,'maybeSingle')||{data:null,error:null}),
+      insert: (r) =>Promise.resolve(window.__sbIns?.(tbl,r)||{data:null,error:null}),
+      update: ()  =>Promise.resolve({data:null,error:null}),
+      delete: ()  =>Promise.resolve({data:null,error:null}),
+      then(res,rej){
+        const d=window.__sb?.[tbl]?.(q,'select');
+        return (d?Promise.resolve(d):Promise.resolve(_count?{data:[],count:0,error:null}:{data:[],error:null})).then(res,rej);
+      },
+    };return c;
+  }
+  sb={
+    auth:{
+      getSession:       async()=>({data:{session:window.__session||null},error:null}),
+      onAuthStateChange:(cb)=>{setTimeout(()=>cb('SIGNED_IN',window.__session||null),0);return {data:{subscription:{unsubscribe:()=>{}}}};},
+      updateUser:       async()=>({data:{user:{}},error:null}),
+      signInWithPassword:async()=>({data:{},error:null}),
+      signOut:          async()=>({error:null}),
+    },
+    from:_mkChain,
+    storage:{from:()=>({upload:async()=>({data:{},error:null}),getPublicUrl:()=>({data:{publicUrl:'#'}}),createSignedUrl:async()=>({data:{signedUrl:'#'},error:null})})},
+    functions:{invoke:async()=>({data:null,error:null})},
+    channel:()=>({on:()=>({subscribe:()=>{}}),subscribe:()=>{}}),
+    removeChannel:()=>{},
+  };
+}else{
+  let sbModule;
+  try{
+    sbModule = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm');
+  }catch(e){
+    // CDN inaccessible (env offline, proxy…)
+    document.getElementById('authSend').disabled = false;
+    document.getElementById('authSend').innerHTML = '<i class="fa-solid fa-wifi-slash"></i> Réseau indisponible — réessayez';
+    console.error('[portal] CDN Supabase inaccessible :', e.message);
+    throw e; // Stoppe le module — l'écran statique reste visible
+  }
+  sb = sbModule.createClient(SUPABASE_URL, SUPABASE_ANON, {auth:{persistSession:true}});
 }
-const {createClient} = sbModule;
-const sb = createClient(SUPABASE_URL, SUPABASE_ANON, {auth:{persistSession:true}});
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
@@ -1638,12 +1674,90 @@ async function renderProfile(){
 
   const initials=((employee.first_name||'?')[0]+(employee.last_name||'?')[0]).toUpperCase();
 
-  // Soldes CP (best-effort — table peut ne pas exister)
   const year=new Date().getFullYear();
-  const {data:bal}=await sb.from('portal_leave_balances').select('*')
-    .eq('employee_id',employee.id)
-    .eq('year_start',`${year}-01-01`)
-    .maybeSingle();
+
+  // Soldes v2 — security_invoker, RLS appliquée côté DB
+  const [{data:balRows},{data:movRows}]=await Promise.all([
+    sb.from('portal_leave_balances_v2').select('*')
+      .eq('employee_id',employee.id).eq('year',year).order('type_code'),
+    sb.from('portal_leave_movements_v2').select('*')
+      .eq('employee_id',employee.id).eq('year',year).order('created_at',{ascending:false}).limit(30)
+  ]);
+
+  const cp  = (balRows||[]).find(b=>b.type_code==='CP');
+  const rtt = (balRows||[]).find(b=>b.type_code==='RTT');
+  const hasBalances = !!(cp||rtt);
+
+  function remColor(r){
+    if(r==null) return 'var(--ink2)';
+    if(r<0)  return 'var(--red)';
+    if(r<2)  return 'var(--amber)';
+    return 'var(--green)';
+  }
+  function remBadge(r){
+    if(r==null) return '';
+    const c=remColor(r);
+    return `<span style="display:inline-block;padding:1px 7px;border-radius:20px;font-size:11px;font-weight:700;color:${c};background:${r<0?'var(--red-bg)':r<2?'var(--amber-bg)':'var(--green-bg)'}">${r>0?'+':''}${r}</span>`;
+  }
+  function balRow(label, b){
+    if(!b) return '';
+    const r=Number(b.remaining);
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)">
+      <span style="font-size:13px;font-weight:600">${esc(label)}</span>
+      <div style="display:flex;gap:16px;align-items:center;font-size:13px;color:var(--ink2)">
+        <span title="Acquis"><span style="font-size:10px;text-transform:uppercase;letter-spacing:.04em">Acquis</span> <b style="color:var(--ink)">${Number(b.entitled)}</b></span>
+        <span title="Pris"><span style="font-size:10px;text-transform:uppercase;letter-spacing:.04em">Pris</span> <b style="color:var(--ink)">${Number(b.taken)}</b></span>
+        ${Number(b.adjusted)!==0?`<span title="Ajusté"><span style="font-size:10px;text-transform:uppercase;letter-spacing:.04em">Ajusté</span> <b style="color:var(--ink)">${Number(b.adjusted)>0?'+':''}${Number(b.adjusted)}</b></span>`:''}
+        <span title="Restant">${remBadge(r)}</span>
+      </div>
+    </div>`;
+  }
+
+  function balSection(){
+    if(!hasBalances) return `
+      <div class="card" id="soldesCard">
+        <div class="card-title"><i class="fa-solid fa-umbrella-beach"></i>Mes soldes congés ${year}</div>
+        <div style="padding:20px 0;text-align:center;color:var(--ink2);font-size:13px">
+          <i class="fa-solid fa-hourglass-half" style="font-size:24px;margin-bottom:8px;display:block;color:var(--line)"></i>
+          Vos soldes n'ont pas encore été initialisés par votre service RH.
+        </div>
+        <div style="font-size:11px;color:var(--ink2);margin-top:8px;padding:8px;background:var(--bg);border-radius:8px">
+          <i class="fa-solid fa-circle-info"></i> Soldes indicatifs calculés par votre service RH. À confirmer avec votre employeur.
+        </div>
+      </div>`;
+    return `
+      <div class="card" id="soldesCard">
+        <div class="card-title"><i class="fa-solid fa-umbrella-beach"></i>Mes soldes congés ${year}</div>
+        ${balRow('Congés payés (CP)', cp)}
+        ${balRow('RTT', rtt)}
+        <div style="font-size:11px;color:var(--ink2);margin-top:10px;padding:8px;background:var(--bg);border-radius:8px">
+          <i class="fa-solid fa-circle-info"></i> Soldes indicatifs calculés par votre service RH. À confirmer avec votre employeur.
+        </div>
+      </div>`;
+  }
+
+  function movSection(){
+    const movs=movRows||[];
+    const rows=movs.map(m=>{
+      const sign=Number(m.delta)>0?'+':'';
+      const col=Number(m.delta)>0?'var(--green)':'var(--red)';
+      const dt=new Date(m.created_at).toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'});
+      return `<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:9px 0;border-bottom:1px solid var(--line);gap:8px">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12px;font-weight:600;color:var(--ink2);text-transform:uppercase;letter-spacing:.04em">${esc(m.type_code)} · ${esc(dt)}</div>
+          <div style="font-size:13px;color:var(--ink);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(m.reason||'—')}</div>
+        </div>
+        <span style="font-weight:700;font-size:14px;color:${col};flex-shrink:0">${sign}${Number(m.delta)}</span>
+      </div>`;
+    }).join('');
+    return `
+      <div class="card" id="mouvCard">
+        <div class="card-title"><i class="fa-solid fa-clock-rotate-left"></i>Historique des mouvements ${year}</div>
+        ${movs.length===0
+          ? `<div style="padding:16px 0;text-align:center;color:var(--ink2);font-size:13px">Aucun mouvement enregistré.</div>`
+          : `<div>${rows}</div><div style="font-size:11px;color:var(--ink2);margin-top:8px">30 mouvements les plus récents affichés.</div>`}
+      </div>`;
+  }
 
   v.innerHTML=`<div class="page">
     <div class="profile-hero">
@@ -1651,10 +1765,9 @@ async function renderProfile(){
       <div class="profile-name">${esc(employee.first_name)} ${esc(employee.last_name)}</div>
       <div class="profile-role">${esc(employee.role||'')} · ${esc(employee.department||'')}</div>
     </div>
-    <div class="kpi-row" style="margin-top:-24px">
-      <div class="kpi"><div class="val">${bal?.cp_taken||0}</div><div class="lbl">CP pris (${year})</div></div>
-      <div class="kpi"><div class="val">${bal?.rtt_taken||0}</div><div class="lbl">RTT pris (${year})</div></div>
-    </div>
+
+    ${balSection()}
+    ${hasBalances?movSection():''}
 
     <div class="card">
       <div class="card-title"><i class="fa-solid fa-id-card"></i>Mes informations</div>
@@ -1803,6 +1916,11 @@ window.renderSetPassword = renderSetPassword;
 window.submitQrCode = submitQrCode;
 window.renderActivation = renderActivation;
 window.renderError = renderError;
+
+// Mode test uniquement — permet à Playwright d'injecter employee/hotel et d'appeler renderProfile
+if(isTest){
+  window._testSetProfile = async (emp, htl) => { employee=emp; hotel=htl; await renderProfile(); };
+}
 
 // ── Démarrage ─────────────────────────────────────────────────────────────────
 // Service Worker PWA
