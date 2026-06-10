@@ -1756,6 +1756,10 @@ function renderPlanning(){
       <div class="legend" id="legend"></div>
       <div class="hint" id="hint"></div>
       <div class="gridwrap"><table id="grid"></table></div>
+      <div id="planLegalNote" style="margin-top:8px;padding:8px 12px;background:#f8f8fc;border:1px solid #e0def8;border-radius:8px;font-size:11px;color:var(--muted);display:flex;align-items:flex-start;gap:8px">
+        <i class="fa-solid fa-circle-info" style="color:var(--violet);margin-top:1px;flex-shrink:0"></i>
+        <span><b style="color:var(--ink2)">Compteurs légaux indicatifs</b> — Calculés sur le planning affiché (estimations en heures : jours travaillés × barème horaire du service, fallback 7h/j). <b>Limités au mois affiché</b>, sans continuité avec le mois précédent/suivant. Seuils : Code du travail — votre convention collective (HCR), vos accords d'entreprise et les situations particulières peuvent prévoir des règles différentes. <b>À valider avec votre conseil ou cabinet paie.</b></span>
+      </div>
     </div>`;
   $('legend').innerHTML=CODES.map(c=>`<span class="lc"><b style="background:${c[2]}"></b>${c[0]} · ${c[1]}</span>`).join('')
     +`<span class="lc"><b style="background:#fff;border-style:dashed"></b>Vide · Repos</span>`;
@@ -2136,6 +2140,13 @@ function render(){
   h+='</tr><tr>';
   for(let d=1;d<=nd;d++){const wd=new Date(y,m,d).getDay();const tod=isThisMonth&&d===toDay;h+=`<th class="wd dcol ${wd===0||wd===6?'we':''}${tod?' tod':''}">${WD[wd]}</th>`;}
   h+='</tr></thead><tbody>';
+  // Précalcul map eid → hpd (une fois, hors boucle)
+  const _hpdMap=new Map();
+  visibleRows.forEach(s=>{
+    const sc=schedules.find(sc2=>sc2.id===s.schedule_id);
+    _hpdMap.set(s.id, sc?.hours_per_day??7);
+  });
+
   let lastDept=null;
   visibleRows.forEach((s,ri)=>{
     // Dept header separator row
@@ -2144,10 +2155,12 @@ function render(){
       lastDept=deptName;
       h+=`<tr class="dept-sep"><td colspan="${nd+7}" style="background:#f1f0fb;font-size:11px;font-weight:700;color:var(--violet-d);padding:4px 10px;letter-spacing:.05em;text-transform:uppercase">${deptName||'Sans service'}</td></tr>`;
     }
+    const _empAlerts=_planLegalAlerts(s.id,y,m,nd,_hpdMap.get(s.id));
+    const _alertBadge=_planAlertBadge(_empAlerts);
     h+=`<tr data-emprow="${s.id}"${!s.active?' style="opacity:.55"':''}>`
       +`<td class="stickL cDrag dh" title="Réordonner"><i class="fa-solid fa-grip-vertical" style="color:var(--muted);font-size:11px;cursor:grab"></i></td>`
       +`<td class="stickL cEmp"><div class="emp" data-emp="${s.id}"><div class="av" style="background:${avBg(s)}">${avInner(s)}</div>`
-      +`<div><div class="nm">${s.first_name} ${s.last_name}${(s.status||'')==='parti'?' <span style="font-size:9.5px;color:var(--red);font-weight:700;background:var(--red-bg);padding:1px 5px;border-radius:5px;margin-left:4px">PARTI</span>':(s.status||'')==='pause'?' <span style="font-size:9.5px;color:#92400E;font-weight:700;background:#FEF3C7;padding:1px 5px;border-radius:5px;margin-left:4px">EN PAUSE</span>':''}</div><div class="sub">${s.department||'—'} · ${s.contract_type||'CDI'}</div></div></div></td>`
+      +`<div><div class="nm">${s.first_name} ${s.last_name}${(s.status||'')==='parti'?' <span style="font-size:9.5px;color:var(--red);font-weight:700;background:var(--red-bg);padding:1px 5px;border-radius:5px;margin-left:4px">PARTI</span>':(s.status||'')==='pause'?' <span style="font-size:9.5px;color:#92400E;font-weight:700;background:#FEF3C7;padding:1px 5px;border-radius:5px;margin-left:4px">EN PAUSE</span>':''}${_alertBadge}</div><div class="sub">${s.department||'—'} · ${s.contract_type||'CDI'}</div></div></div></td>`
       +`<td class="stickL cRole">${s.role||'—'}</td>`;
     let trav=0,cp=0,abs=0,rep=0;
     for(let d=1;d<=nd;d++){const k=s.id+'|'+iso(y,m,d);const code=effective(k);const c=code?CMAP[code]:null;
@@ -2187,9 +2200,84 @@ function applyStickyWidths(){
 }
 window.addEventListener('resize',applyStickyWidths);
 
-/* ═══════════════════════════════════════════════════════════
-   REMPLACEMENT INTER-HÔTELS
-═══════════════════════════════════════════════════════════ */
+/* ── Compteurs légaux planning (V1) ─────────────────────────────────────
+   Calcul 100 % client, basé sur effective() (pending inclus), zéro réseau.
+   Limitations V1 : estimations en heures (jours × hpd), mois affiché seul,
+   pas de repos quotidien, pas de chevauchement inter-mois. */
+
+function _planLegalAlerts(empId, y, m, nd, hpd){
+  const alerts=[];
+
+  // ── Semaines ISO contenues ou chevauchant le mois ──
+  // On calcule du 1er au dernier jour du mois, par semaine lundi-dimanche
+  // Semaine : lundi = wd 1, dimanche = wd 0 (mod 7)
+  const isoDay=(d)=>iso(y,m,d); // 'YYYY-MM-DD'
+  const weekKey=(d)=>{
+    // numéro de semaine ISO simplifié : on regroupe par lundi de la semaine
+    const date=new Date(y,m,d);
+    const day=date.getDay()||7; // 1=lun … 7=dim
+    const mon=new Date(date); mon.setDate(date.getDate()-day+1);
+    return mon.toISOString().slice(0,10);
+  };
+
+  // Grouper les jours travaillés par semaine
+  const weekMap=new Map(); // 'YYYY-MM-DD (lundi)' → {days, hours}
+  for(let d=1;d<=nd;d++){
+    const code=effective(empId+'|'+isoDay(d));
+    const cat=code?CMAP[code]?.cat:'';
+    if(cat!=='worked') continue;
+    const wk=weekKey(d);
+    if(!weekMap.has(wk)) weekMap.set(wk,{days:0,hours:0,wk});
+    const e=weekMap.get(wk);
+    e.days++; e.hours=Math.round((e.hours+hpd)*100)/100;
+  }
+
+  // Alertes hebdomadaires
+  weekMap.forEach(({days,hours,wk})=>{
+    const weekLabel='sem. du '+new Date(wk).toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'});
+    if(hours>48)    alerts.push({sev:'critical',type:'h48',  label:`${weekLabel} — ${hours}h planifiées (seuil légal 48h)`});
+    else if(hours>39) alerts.push({sev:'warning',type:'h39', label:`${weekLabel} — ${hours}h planifiées (>39h)`});
+    else if(hours>35) alerts.push({sev:'info',type:'h35',    label:`${weekLabel} — ${hours}h planifiées (>35h)`});
+    if(days>=7)     alerts.push({sev:'critical',type:'d7',   label:`${weekLabel} — 7 jours travaillés sur la semaine`});
+  });
+
+  // Jours consécutifs travaillés (dans le mois affiché seulement)
+  let streak=0, streakStart=0;
+  for(let d=1;d<=nd+1;d++){
+    const code=d<=nd?effective(empId+'|'+isoDay(d)):'';
+    const cat=code?CMAP[code]?.cat:'';
+    if(cat==='worked'){
+      if(streak===0) streakStart=d;
+      streak++;
+    } else {
+      if(streak>=6){
+        const from=new Date(y,m,streakStart).toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'});
+        const to=new Date(y,m,streakStart+streak-1).toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'});
+        const sev=streak>=7?'critical':'warning';
+        alerts.push({sev,type:'consec',label:`${streak} jours consécutifs (${from}→${to})`});
+      }
+      streak=0;
+    }
+  }
+
+  return alerts;
+}
+
+// Badge HTML pour la cellule .nm du salarié — retourne '' si aucune alerte
+function _planAlertBadge(alerts){
+  if(!alerts.length) return '';
+  const hasCrit=alerts.some(a=>a.sev==='critical');
+  const hasWarn=!hasCrit&&alerts.some(a=>a.sev==='warning');
+  const color=hasCrit?'#dc2626':hasWarn?'#d97706':'#2563eb';
+  const bg   =hasCrit?'#fef2f2':hasWarn?'#fffbeb':'#eff6ff';
+  const icon =hasCrit?'fa-triangle-exclamation':hasWarn?'fa-circle-exclamation':'fa-circle-info';
+  const tip  =alerts.map(a=>a.label).join('\n');
+  // title avec escaping minimal (guillemets)
+  const safeTitle=tip.replace(/"/g,'&quot;');
+  return `<span class="plan-alert-badge" title="${safeTitle}" style="display:inline-flex;align-items:center;gap:3px;background:${bg};color:${color};font-size:10px;font-weight:700;padding:1px 5px;border-radius:5px;margin-left:5px;cursor:help;vertical-align:middle"><i class="fa-solid ${icon}" style="font-size:9px"></i>${alerts.length}</span>`;
+}
+
+
 
 // Codes d'absence qui déclenchent la suggestion de remplaçants
 const ABSENCE_CODES_REPL=new Set(['MAL','CP','RTT','MAT','PAT','CSS','AE','ABS','REC','FORM']);
