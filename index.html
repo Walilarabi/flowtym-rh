@@ -4241,19 +4241,51 @@ async function _drawDashPmsForecast(){
 }
 
 /* ===================== VUE CONFORMITÉ RH ===================== */
+let conformiteSubTab='overview'; // overview | registre
+let _regFltKpi=''; // '' | complete | incomplete | residency_risk | no_contract
+let _regSearch='', _regFltDept='', _regFltContract='', _regFltStatus='actif';
+
 function renderConformite(){
+  const hName=hotels.find(h=>h.id===hotelId)?.name||'';
   $('view').innerHTML=`<div class="page">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
+    <div class="phead">
       <div>
-        <h1 style="font-size:22px;font-weight:800;margin-bottom:4px"><i class="fa-solid fa-shield-check" style="color:var(--violet);margin-right:10px"></i>Centre de Conformité RH</h1>
-        <div style="font-size:13px;color:var(--muted)">Vue d'ensemble de la conformité réglementaire de l'hôtel</div>
+        <h1><i class="fa-solid fa-shield-check" style="color:var(--violet);margin-right:10px"></i>Conformité RH</h1>
+        <div class="sub">${hName}</div>
       </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="ctab ${conformiteSubTab==='overview'?'on':''}" data-csub="overview"><i class="fa-solid fa-gauge-high"></i> Vue d'ensemble</button>
+        <button class="ctab ${conformiteSubTab==='registre'?'on':''}" data-csub="registre"><i class="fa-solid fa-list-check"></i> Registre du personnel</button>
+      </div>
+    </div>
+    <div id="confSubContent"></div>
+  </div>`;
+  $('view').querySelector('.phead').addEventListener('click',e=>{
+    const b=e.target.closest('[data-csub]');
+    if(b){conformiteSubTab=b.dataset.csub;_renderConformiteSub();}
+  });
+  _renderConformiteSub();
+}
+
+function _renderConformiteSub(){
+  // Update tab active state
+  $('view').querySelectorAll('[data-csub]').forEach(b=>b.classList.toggle('on',b.dataset.csub===conformiteSubTab));
+  const el=$('confSubContent'); if(!el) return;
+  if(conformiteSubTab==='registre'){
+    _renderRegistreShell(el);
+  } else {
+    _renderOverviewShell(el);
+  }
+}
+
+function _renderOverviewShell(el){
+  el.innerHTML=`
+    <div style="display:flex;align-items:center;justify-content:flex-end;margin-bottom:18px">
       <div id="confScoreBadge" style="background:#f1f5f9;border-radius:20px;padding:12px 20px;text-align:center">
         <div style="font-size:11px;color:var(--muted);margin-bottom:2px">Score global</div>
         <div style="font-size:28px;font-weight:800" id="confScoreVal">…</div>
       </div>
     </div>
-    <!-- Résumé 4 indicateurs -->
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:24px" id="confKpiRow">
       <div style="background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px;box-shadow:var(--shadow);text-align:center">
         <div style="font-size:26px;font-weight:800;margin-bottom:4px" id="confDocOk">…</div>
@@ -4280,8 +4312,7 @@ function renderConformite(){
     <div style="background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:var(--shadow)">
       <div style="font-size:15px;font-weight:700;margin-bottom:16px">Alertes par salarié</div>
       <div id="confAlertList"><div style="color:var(--muted);font-size:13px;text-align:center;padding:40px 0">Chargement…</div></div>
-    </div>
-  </div>`;
+    </div>`;
   _renderConformiteData().catch(e=>console.warn('Conformité error:',e));
 }
 
@@ -4394,6 +4425,326 @@ async function _renderConformiteData(){
         </div>`).join('')}
       </div>
     </div>`;
+  }).join('');
+}
+
+/* ===================== REGISTRE DU PERSONNEL ===================== */
+
+// Nationalités UE/EEE/Suisse — pas de titre de séjour requis
+const _UE_EEE_CH=new Set(['française','france','fr','allemande','allemagne','de','autrichienne','autriche','at','belge','belgique','be','bulgare','bulgarie','bg','chypriote','chypre','cy','croate','croatie','hr','danoise','danemark','dk','espagnole','espagne','es','estonienne','estonie','ee','finlandaise','finlande','fi','grecque','grèce','gr','hongroise','hongrie','hu','irlandaise','irlande','ie','italienne','italie','it','lettonne','lettonie','lv','lituanienne','lituanie','lt','luxembourgeoise','luxembourg','lu','maltaise','malte','mt','néerlandaise','pays-bas','nl','polonaise','pologne','pl','portugaise','portugal','pt','roumaine','roumanie','ro','slovaque','slovaquie','sk','slovène','slovénie','si','suédoise','suède','se','tchèque','tchéquie','cz','islandaise','islande','is','liechtensteinoise','liechtenstein','li','norvégienne','norvège','no','suisse','suisse','ch','britannique','royaume-uni','gb','uk']);
+
+function _isUeNat(nat){
+  if(!nat) return false;
+  return _UE_EEE_CH.has(nat.toLowerCase().trim());
+}
+
+function _computeScore(emp, contracts, docAlerts, today){
+  const isParti=emp.status==='parti'||emp.active===false;
+  const items=[];
+  const miss=[];
+
+  const chk=(ok,label)=>{items.push(ok);if(!ok)miss.push(label);};
+
+  chk(!!emp.hire_date,'Date d\'entrée');
+  chk(!!emp.birth_date,'Date de naissance');
+  chk(!!emp.birth_place,'Lieu de naissance');
+  chk(!!emp.nationality,'Nationalité');
+  chk(!!emp.social_security_number,'N° sécurité sociale');
+
+  const TERMINAL=['archived','cancelled','refused','error_signature'];
+  const hasContract=contracts.some(c=>c.employee_id===emp.id&&!TERMINAL.includes(c.status));
+  chk(hasContract,'Contrat');
+
+  // Titre de séjour — seulement si nationalité hors UE/EEE/CH
+  const needsPermit=emp.nationality&&!_isUeNat(emp.nationality);
+  if(needsPermit){
+    const hasPermit=!!emp.residency_permit_number&&!!emp.residency_permit_expires&&emp.residency_permit_expires>=today;
+    chk(hasPermit, emp.residency_permit_expires&&emp.residency_permit_expires<today ? 'Titre de séjour expiré le '+emp.residency_permit_expires : 'Titre de séjour');
+  }
+
+  // Documents obligatoires
+  const empDocAlerts=docAlerts.filter(a=>a.employee_id===emp.id&&(a.alert_kind==='missing'||a.alert_kind==='expired'));
+  chk(empDocAlerts.length===0, empDocAlerts.length+' document'+(empDocAlerts.length>1?'s':'')+ ' manquant'+(empDocAlerts.length>1?'s':'')+'/expiré'+(empDocAlerts.length>1?'s':''));
+
+  // Date de sortie — seulement si parti
+  if(isParti) chk(!!emp.departure_date,'Date de sortie');
+
+  const score=items.length?Math.round(items.filter(Boolean).length/items.length*100):100;
+  return {score, miss, total:items.length, ok:items.filter(Boolean).length};
+}
+
+function _renderRegistreShell(el){
+  const today=new Date().toISOString().slice(0,10);
+  const soon60=new Date(Date.now()+60*864e5).toISOString().slice(0,10);
+
+  // Déterminer population selon filtre statut
+  const _pop=()=>{
+    if(_regFltStatus==='actif') return staff.filter(s=>s.active!==false&&s.status!=='parti');
+    if(_regFltStatus==='sorti') return staff.filter(s=>s.active===false||s.status==='parti');
+    return staff;
+  };
+
+  const depts=[...new Set(staff.map(s=>s.department).filter(Boolean))].sort();
+  const contracts_types=[...new Set(staff.map(s=>s.contract_type).filter(Boolean))].sort();
+
+  el.innerHTML=`
+    <div id="regKpiRow" style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:18px">
+      ${[
+        {id:'kpi-total',    val:'…', lab:'Total salariés',         color:'var(--ink)',  bg:'#fff',     icon:'fa-users',           flt:''},
+        {id:'kpi-complete', val:'…', lab:'Dossiers complets',      color:'#16a34a',     bg:'#f0fdf4',  icon:'fa-circle-check',    flt:'complete'},
+        {id:'kpi-incomplete',val:'…',lab:'Dossiers incomplets',    color:'#d97706',     bg:'#fffbeb',  icon:'fa-circle-exclamation',flt:'incomplete'},
+        {id:'kpi-residency',val:'…', lab:'Titres de séjour à risque',color:'#dc2626',   bg:'#fef2f2',  icon:'fa-id-card',         flt:'residency_risk'},
+        {id:'kpi-nocontract',val:'…',lab:'Contrats manquants',     color:'#7c3aed',     bg:'#f5f3ff',  icon:'fa-file-circle-xmark',flt:'no_contract'},
+      ].map(k=>`<div id="${k.id}" onclick="_regKpiClick('${k.flt}')" style="background:${k.bg};border:1px solid ${k.color}22;border-radius:12px;padding:14px 10px;text-align:center;cursor:pointer;transition:outline .15s">
+        <i class="fa-solid ${k.icon}" style="font-size:20px;color:${k.color};margin-bottom:6px"></i>
+        <div style="font-size:26px;font-weight:800;color:${k.color}">${k.val}</div>
+        <div style="font-size:11px;color:${k.color};font-weight:600;margin-top:2px">${k.lab}</div>
+      </div>`).join('')}
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+      <div style="flex:1;min-width:220px;position:relative">
+        <i class="fa-solid fa-magnifying-glass" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:13px"></i>
+        <input id="regSearch" type="text" class="input" placeholder="Rechercher nom, nationalité, N° SS…" value="${_regSearch.replace(/"/g,'&quot;')}" style="padding-left:36px;width:100%">
+      </div>
+      <select id="regFltDept" style="font-size:12px;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);min-width:140px">
+        <option value="">Tous les services</option>
+        ${depts.map(d=>`<option value="${d}" ${_regFltDept===d?'selected':''}>${d}</option>`).join('')}
+      </select>
+      <select id="regFltContract" style="font-size:12px;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);min-width:120px">
+        <option value="">Tous contrats</option>
+        ${contracts_types.map(c=>`<option value="${c}" ${_regFltContract===c?'selected':''}>${c}</option>`).join('')}
+      </select>
+      <select id="regFltStatus" style="font-size:12px;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink)">
+        <option value="actif"  ${_regFltStatus==='actif'?'selected':''}>Actifs</option>
+        <option value="sorti"  ${_regFltStatus==='sorti'?'selected':''}>Sortis</option>
+        <option value="tous"   ${_regFltStatus==='tous'?'selected':''}>Tous</option>
+      </select>
+      ${_regFltKpi?`<button onclick="_regKpiClick(_regFltKpi)" style="font-size:11px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer;color:var(--ink2);white-space:nowrap"><i class="fa-solid fa-xmark" style="margin-right:4px"></i>Effacer filtre</button>`:''}
+      <span id="regCount" style="font-size:13px;color:var(--muted);white-space:nowrap">…</span>
+    </div>
+    <div class="box" style="padding:0;overflow:auto">
+      <table class="tbl" style="min-width:1100px">
+        <thead><tr>
+          <th style="width:32px"></th>
+          <th>Salarié</th>
+          <th>Né(e) le / à</th>
+          <th>Nationalité</th>
+          <th>N° SS</th>
+          <th>Emploi / Service</th>
+          <th>Contrat</th>
+          <th>Entrée / Sortie</th>
+          <th>Titre de séjour</th>
+          <th style="text-align:center">Complétude</th>
+        </tr></thead>
+        <tbody id="regTbody"><tr><td colspan="10" style="text-align:center;padding:40px;color:var(--muted)">Chargement…</td></tr></tbody>
+      </table>
+    </div>`;
+
+  // Wire filters
+  $('regSearch').oninput=e=>{_regSearch=e.target.value;_regApplyFilter();};
+  $('regFltDept').onchange=e=>{_regFltDept=e.target.value;_regApplyFilter();};
+  $('regFltContract').onchange=e=>{_regFltContract=e.target.value;_regApplyFilter();};
+  $('regFltStatus').onchange=e=>{_regFltStatus=e.target.value;_regLoadData();};
+
+  _regLoadData();
+}
+
+function _regKpiClick(flt){
+  _regFltKpi=_regFltKpi===flt?'':flt;
+  _regApplyFilter();
+  // Update KPI outlines
+  document.querySelectorAll('#regKpiRow [id^="kpi-"]').forEach(k=>{
+    const kflt=k.getAttribute('onclick').match(/'([^']*)'\)/)?.[1]||'';
+    k.style.outline=kflt===_regFltKpi&&_regFltKpi?'2px solid var(--violet)':'none';
+  });
+  // Refresh clear button
+  const bar=document.querySelector('#regCount')?.closest('div[style*="flex"]');
+  if(bar){
+    const old=document.getElementById('regClearKpi');
+    if(old) old.remove();
+    if(_regFltKpi){
+      const btn=document.createElement('button');
+      btn.id='regClearKpi';
+      btn.innerHTML='<i class="fa-solid fa-xmark" style="margin-right:4px"></i>Effacer filtre';
+      btn.style.cssText='font-size:11px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer;color:var(--ink2);white-space:nowrap';
+      btn.onclick=()=>_regKpiClick(_regFltKpi);
+      bar.insertBefore(btn, $('regCount'));
+    }
+  }
+}
+
+async function _regLoadData(){
+  const today=new Date().toISOString().slice(0,10);
+  const soon60=new Date(Date.now()+60*864e5).toISOString().slice(0,10);
+  const tbody=$('regTbody'); if(!tbody) return;
+
+  let pop;
+  if(_regFltStatus==='actif') pop=staff.filter(s=>s.active!==false&&s.status!=='parti');
+  else if(_regFltStatus==='sorti') pop=staff.filter(s=>s.active===false||s.status==='parti');
+  else pop=[...staff];
+
+  const [contracts, docAlerts]=await Promise.all([
+    BE.listGeneratedContracts(hotelId).catch(()=>[]),
+    BE.listDocumentAlerts(hotelId).catch(()=>[]),
+  ]);
+
+  // Score & flags per employee
+  const rows=pop.map(emp=>{
+    const sc=_computeScore(emp, contracts, docAlerts, today);
+    const isParti=emp.active===false||emp.status==='parti';
+    const TERMINAL=['archived','cancelled','refused','error_signature'];
+    const noContract=!contracts.some(c=>c.employee_id===emp.id&&!TERMINAL.includes(c.status));
+    const rsExpired=!isParti&&emp.residency_permit_expires&&emp.residency_permit_expires<today&&!_isUeNat(emp.nationality||'');
+    const rsExpiring=!isParti&&emp.residency_permit_expires&&emp.residency_permit_expires>=today&&emp.residency_permit_expires<=soon60&&!_isUeNat(emp.nationality||'');
+    const sev=sc.score<100&&(noContract||rsExpired)?'critical':(sc.score<100?'warning':'ok');
+    const searchStr=[emp.first_name,emp.last_name,emp.nationality,emp.social_security_number,emp.department,emp.role,emp.email].filter(Boolean).join(' ').toLowerCase();
+    return {emp,sc,noContract,rsExpired,rsExpiring,sev,searchStr,isParti};
+  }).sort((a,b)=>{
+    // critiques d'abord, puis attention, puis ok ; à égalité alphabétique
+    const sorder={critical:0,warning:1,ok:2};
+    const d=sorder[a.sev]-sorder[b.sev];
+    if(d!==0) return d;
+    return (a.emp.last_name+a.emp.first_name).localeCompare(b.emp.last_name+b.emp.first_name,'fr');
+  });
+
+  // KPIs
+  const kpiTotal=rows.length;
+  const kpiComplete=rows.filter(r=>r.sc.score===100).length;
+  const kpiIncomplete=rows.filter(r=>r.sc.score<100).length;
+  const kpiResidency=rows.filter(r=>r.rsExpired||r.rsExpiring).length;
+  const kpiNoContract=rows.filter(r=>r.noContract).length;
+  {
+    const kpiData=[['kpi-total',kpiTotal],['kpi-complete',kpiComplete],['kpi-incomplete',kpiIncomplete],
+                   ['kpi-residency',kpiResidency],['kpi-nocontract',kpiNoContract]];
+    kpiData.forEach(([id,val])=>{
+      const el=document.getElementById(id);
+      if(el){const num=el.querySelectorAll('div')[1];if(num)num.textContent=val;}
+    });
+  }
+
+  // Store rows for filter
+  window._regRows=rows;
+  _regRenderRows(rows, today, soon60);
+}
+
+function _regApplyFilter(){
+  const rows=window._regRows||[];
+  const q=_regSearch.toLowerCase();
+  const visible=rows.filter(r=>{
+    if(q&&!r.searchStr.includes(q)) return false;
+    if(_regFltDept&&(r.emp.department||'')!==_regFltDept) return false;
+    if(_regFltContract&&(r.emp.contract_type||'')!==_regFltContract) return false;
+    if(_regFltKpi==='complete'&&r.sc.score!==100) return false;
+    if(_regFltKpi==='incomplete'&&r.sc.score===100) return false;
+    if(_regFltKpi==='residency_risk'&&!r.rsExpired&&!r.rsExpiring) return false;
+    if(_regFltKpi==='no_contract'&&!r.noContract) return false;
+    return true;
+  });
+  const tbody=$('regTbody'); if(!tbody) return;
+  const today=new Date().toISOString().slice(0,10);
+  const soon60=new Date(Date.now()+60*864e5).toISOString().slice(0,10);
+  _regRenderRows(visible, today, soon60);
+}
+
+function _regRenderRows(rows, today, soon60){
+  const tbody=$('regTbody'); if(!tbody) return;
+  const cnt=$('regCount');
+  if(cnt) cnt.textContent=rows.length+' salarié'+(rows.length!==1?'s':'');
+
+  if(!rows.length){
+    tbody.innerHTML=`<tr><td colspan="10" style="text-align:center;padding:40px;color:var(--muted)"><i class="fa-solid fa-magnifying-glass" style="font-size:20px;display:block;margin-bottom:8px"></i>Aucun salarié ne correspond aux filtres</td></tr>`;
+    return;
+  }
+
+  const canFull=canFicheFull();
+  const fmt=d=>d?new Date(d).toLocaleDateString('fr-FR'):'—';
+
+  const sevDot={
+    critical:`<span title="Dossier incomplet — alerte critique" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#dc2626;margin-right:6px;flex-shrink:0"></span>`,
+    warning:`<span title="Dossier incomplet — attention" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#d97706;margin-right:6px;flex-shrink:0"></span>`,
+    ok:`<span title="Dossier complet" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#16a34a;margin-right:6px;flex-shrink:0"></span>`,
+  };
+
+  tbody.innerHTML=rows.map(({emp,sc,noContract,rsExpired,rsExpiring})=>{
+    // Pastille sévérité
+    const isParti=emp.active===false||emp.status==='parti';
+    const sev=sc.score<100&&(noContract||rsExpired)?'critical':(sc.score<100?'warning':'ok');
+
+    // N° SS masqué
+    const ss=emp.social_security_number;
+    const ssDisplay=ss
+      ? (canFull
+          ? `<span style="font-family:monospace;font-size:11px;cursor:help" title="${ss}">${ss.slice(0,1)} ${ss.slice(1,3)} ${ss.slice(3,5)} ●●●●● ${ss.slice(-2)}</span>`
+          : `<span style="font-family:monospace;font-size:11px;color:var(--muted)">●●●●●●●●●●●</span>`)
+      : `<span style="color:#dc2626;font-size:11px">Manquant</span>`;
+
+    // Titre de séjour
+    const needsPermit=emp.nationality&&!_isUeNat(emp.nationality);
+    let rsCell='<span style="color:var(--muted);font-size:11px">N/A</span>';
+    if(needsPermit){
+      if(!emp.residency_permit_expires){
+        rsCell=`<span style="color:#dc2626;font-size:11px;font-weight:700"><i class="fa-solid fa-triangle-exclamation"></i> Manquant</span>`;
+      } else if(rsExpired){
+        rsCell=`<span style="background:#fee2e2;color:#dc2626;padding:2px 7px;border-radius:5px;font-size:11px;font-weight:700"><i class="fa-solid fa-circle-xmark"></i> Expiré ${fmt(emp.residency_permit_expires)}</span>`;
+      } else if(rsExpiring){
+        const d=Math.ceil((new Date(emp.residency_permit_expires)-new Date())/(864e5));
+        rsCell=`<span style="background:#fef3c7;color:#d97706;padding:2px 7px;border-radius:5px;font-size:11px;font-weight:700"><i class="fa-solid fa-clock"></i> J−${d} · ${fmt(emp.residency_permit_expires)}</span>`;
+      } else {
+        rsCell=`<span style="background:#dcfce7;color:#16a34a;padding:2px 7px;border-radius:5px;font-size:11px;font-weight:700"><i class="fa-solid fa-check"></i> ${fmt(emp.residency_permit_expires)}</span>`;
+      }
+    }
+
+    // Contrat cell
+    const ctrCell=noContract
+      ? `<span style="background:#fee2e2;color:#dc2626;padding:2px 7px;border-radius:5px;font-size:11px;font-weight:700"><i class="fa-solid fa-triangle-exclamation"></i> Manquant</span>`
+      : `<span style="background:#EEF2FF;color:#4338CA;padding:2px 7px;border-radius:5px;font-size:11px;font-weight:600">${emp.contract_type||'—'}</span>`;
+
+    // Jauge complétude SVG circulaire
+    const pct=sc.score;
+    const c=pct===100?'#16a34a':pct>=50?'#d97706':'#dc2626';
+    const r=14, circ=2*Math.PI*r;
+    const dash=circ*pct/100;
+    const tooltip=sc.miss.length?`title="Manquant : ${sc.miss.join(' · ')}"`:sc.score===100?'title="Dossier complet ✓"':'';
+    const gauge=`<div ${tooltip} style="display:inline-flex;align-items:center;gap:6px;cursor:help">
+      <svg width="36" height="36" style="transform:rotate(-90deg)">
+        <circle cx="18" cy="18" r="${r}" fill="none" stroke="#e5e7eb" stroke-width="3"/>
+        <circle cx="18" cy="18" r="${r}" fill="none" stroke="${c}" stroke-width="3" stroke-dasharray="${dash.toFixed(1)} ${circ.toFixed(1)}" stroke-linecap="round"/>
+      </svg>
+      <span style="font-size:12px;font-weight:700;color:${c}">${pct}%</span>
+    </div>`;
+
+    return `<tr style="cursor:pointer" onclick="openFiche('${emp.id}')">
+      <td style="text-align:center;padding:8px 6px">${sevDot[sev]}</td>
+      <td style="font-weight:600">
+        <div style="display:flex;align-items:center;gap:8px">
+          <div class="av" style="background:${avBg(emp)};width:28px;height:28px;border-radius:7px;font-size:10px;flex-shrink:0">${avInner(emp)}</div>
+          <div>
+            <div style="font-size:13px">${emp.last_name} ${emp.first_name}</div>
+            ${isParti?`<span style="font-size:10px;background:#f3f4f6;color:var(--muted);padding:1px 5px;border-radius:4px">Sorti</span>`:''}
+          </div>
+        </div>
+      </td>
+      <td style="font-size:12px">
+        <div>${fmt(emp.birth_date)||'<span style="color:#dc2626">Manquant</span>'}</div>
+        <div style="color:var(--muted);font-size:11px">${emp.birth_place||'<span style="color:#d97706">Lieu manquant</span>'}</div>
+      </td>
+      <td style="font-size:12px">
+        ${emp.nationality||`<span style="color:#dc2626;font-weight:700">Manquant</span>`}
+        ${needsPermit?`<span title="Titre de séjour requis" style="font-size:10px;margin-left:4px">🛂</span>`:''}
+      </td>
+      <td>${ssDisplay}</td>
+      <td style="font-size:12px">
+        <div style="font-weight:600">${emp.role||'—'}</div>
+        <div style="color:var(--muted);font-size:11px">${emp.department||'—'}</div>
+      </td>
+      <td>${ctrCell}</td>
+      <td style="font-size:12px">
+        <div>${fmt(emp.hire_date)||'<span style="color:#dc2626;font-weight:700">Manquant</span>'}</div>
+        ${isParti?`<div style="color:var(--muted)">${fmt(emp.departure_date)||'<span style="color:#d97706">Sortie manquante</span>'}</div>`:''}
+      </td>
+      <td>${rsCell}</td>
+      <td style="text-align:center">${gauge}</td>
+    </tr>`;
   }).join('');
 }
 
