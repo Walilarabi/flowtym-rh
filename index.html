@@ -4521,6 +4521,15 @@ function _renderRegistreShell(el){
       </select>
       ${_regFltKpi?`<button onclick="_regKpiClick(_regFltKpi)" style="font-size:11px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer;color:var(--ink2);white-space:nowrap"><i class="fa-solid fa-xmark" style="margin-right:4px"></i>Effacer filtre</button>`:''}
       <span id="regCount" style="font-size:13px;color:var(--muted);white-space:nowrap">…</span>
+      <div style="position:relative">
+        <button id="regExportBtn" class="btn g" style="font-size:12px;white-space:nowrap"><i class="fa-solid fa-download" style="margin-right:5px"></i>Exporter <i class="fa-solid fa-chevron-down" style="font-size:9px;margin-left:4px"></i></button>
+        <div id="regExportMenu" style="display:none;position:absolute;right:0;top:calc(100% + 4px);background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.12);padding:6px;z-index:50;min-width:230px">
+          <button data-exp="csv-sel"   style="display:block;width:100%;text-align:left;padding:8px 10px;border:0;background:none;border-radius:7px;cursor:pointer;font-size:12.5px"><i class="fa-solid fa-file-csv" style="color:#16a34a;width:18px"></i> CSV — sélection filtrée</button>
+          <button data-exp="csv-all"   style="display:block;width:100%;text-align:left;padding:8px 10px;border:0;background:none;border-radius:7px;cursor:pointer;font-size:12.5px"><i class="fa-solid fa-file-csv" style="color:#16a34a;width:18px"></i> CSV — tout (statut courant)</button>
+          <button data-exp="print-sel" style="display:block;width:100%;text-align:left;padding:8px 10px;border:0;background:none;border-radius:7px;cursor:pointer;font-size:12.5px"><i class="fa-solid fa-print" style="color:#4338CA;width:18px"></i> PDF imprimable — sélection</button>
+          <button data-exp="print-all" style="display:block;width:100%;text-align:left;padding:8px 10px;border:0;background:none;border-radius:7px;cursor:pointer;font-size:12.5px"><i class="fa-solid fa-print" style="color:#4338CA;width:18px"></i> PDF imprimable — tout</button>
+        </div>
+      </div>
     </div>
     <div class="box" style="padding:0;overflow:auto">
       <table class="tbl" style="min-width:1100px">
@@ -4545,6 +4554,17 @@ function _renderRegistreShell(el){
   $('regFltDept').onchange=e=>{_regFltDept=e.target.value;_regApplyFilter();};
   $('regFltContract').onchange=e=>{_regFltContract=e.target.value;_regApplyFilter();};
   $('regFltStatus').onchange=e=>{_regFltStatus=e.target.value;_regLoadData();};
+
+  // Wire export menu
+  $('regExportBtn').onclick=e=>{e.stopPropagation();const m=$('regExportMenu');m.style.display=m.style.display==='none'?'block':'none';};
+  document.addEventListener('click',()=>{const m=document.getElementById('regExportMenu');if(m)m.style.display='none';});
+  $('regExportMenu').onclick=e=>{
+    const b=e.target.closest('[data-exp]'); if(!b) return;
+    $('regExportMenu').style.display='none';
+    const [kind,scope]=b.dataset.exp.split('-');
+    if(kind==='csv') _regCsvExport(scope==='all'?'all':'sel');
+    else _regPrintExport(scope==='all'?'all':'sel');
+  };
 
   _regLoadData();
 }
@@ -4627,19 +4647,21 @@ async function _regLoadData(){
   _regRenderRows(rows, today, soon60);
 }
 
+function _regFilterPred(r){
+  const q=_regSearch.toLowerCase();
+  if(q&&!r.searchStr.includes(q)) return false;
+  if(_regFltDept&&(r.emp.department||'')!==_regFltDept) return false;
+  if(_regFltContract&&(r.emp.contract_type||'')!==_regFltContract) return false;
+  if(_regFltKpi==='complete'&&r.sc.score!==100) return false;
+  if(_regFltKpi==='incomplete'&&r.sc.score===100) return false;
+  if(_regFltKpi==='residency_risk'&&!r.rsExpired&&!r.rsExpiring) return false;
+  if(_regFltKpi==='no_contract'&&!r.noContract) return false;
+  return true;
+}
+
 function _regApplyFilter(){
   const rows=window._regRows||[];
-  const q=_regSearch.toLowerCase();
-  const visible=rows.filter(r=>{
-    if(q&&!r.searchStr.includes(q)) return false;
-    if(_regFltDept&&(r.emp.department||'')!==_regFltDept) return false;
-    if(_regFltContract&&(r.emp.contract_type||'')!==_regFltContract) return false;
-    if(_regFltKpi==='complete'&&r.sc.score!==100) return false;
-    if(_regFltKpi==='incomplete'&&r.sc.score===100) return false;
-    if(_regFltKpi==='residency_risk'&&!r.rsExpired&&!r.rsExpiring) return false;
-    if(_regFltKpi==='no_contract'&&!r.noContract) return false;
-    return true;
-  });
+  const visible=rows.filter(_regFilterPred);
   const tbody=$('regTbody'); if(!tbody) return;
   const today=new Date().toISOString().slice(0,10);
   const soon60=new Date(Date.now()+60*864e5).toISOString().slice(0,10);
@@ -4746,6 +4768,93 @@ function _regRenderRows(rows, today, soon60){
       <td style="text-align:center">${gauge}</td>
     </tr>`;
   }).join('');
+}
+
+/* ── Exports Registre (100% client, aucune lib externe) ──
+   - scope 'sel' : respecte recherche + service + contrat + KPI (+ statut, déjà appliqué par _regLoadData)
+   - scope 'all' : ignore recherche/service/contrat/KPI mais respecte le statut Actifs/Sortis/Tous
+   - N° SS et n° de titre de séjour masqués si !canFicheFull() */
+function _regExportRows(scope){
+  const rows=window._regRows||[];
+  return scope==='all'?rows.slice():rows.filter(_regFilterPred);
+}
+
+function _regSevLabel(r){
+  return r.sc.score<100&&(r.noContract||r.rsExpired)?'Critique':(r.sc.score<100?'Incomplet':'Complet');
+}
+
+function _regCsvExport(scope){
+  const rows=_regExportRows(scope);
+  if(!rows.length){flash('Aucune ligne à exporter');return;}
+  const canFull=canFicheFull();
+  const maskSS=ss=>!ss?'':(canFull?ss:'●●●●●●●●●●●●●');
+  const maskTS=n=>!n?'':(canFull?n:'●●●●●');
+  const esc=v=>{v=v==null?'':String(v);return /[;"\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
+  const header=['Nom','Prénom','Service','Poste','Type contrat','Statut','Nationalité','Date de naissance','Lieu de naissance','N° SS','Titre de séjour n°','Titre de séjour expiration','Date d\'embauche','Date de sortie','Statut dossier','Complétude (%)','Éléments manquants','Référence interne'];
+  const lines=[header].concat(rows.map(r=>{
+    const e=r.emp;
+    return [e.last_name||'',e.first_name||'',e.department||'',e.role||'',e.contract_type||'',r.isParti?'Sorti':'Actif',e.nationality||'',e.birth_date||'',e.birth_place||'',maskSS(e.social_security_number),maskTS(e.residency_permit_number),e.residency_permit_expires||'',e.hire_date||'',e.departure_date||'',_regSevLabel(r),r.sc.score,r.sc.miss.join(' · '),e.id];
+  }));
+  const csv='\ufeff'+lines.map(l=>l.map(esc).join(';')).join('\r\n');
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=`registre_hotel-${hotelId}_${new Date().toISOString().slice(0,10)}${scope==='all'?'':'_filtre'}.csv`;
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+  flash('CSV exporté ('+rows.length+' ligne'+(rows.length>1?'s':'')+')');
+}
+
+function _regPrintExport(scope){
+  const rows=_regExportRows(scope);
+  if(!rows.length){flash('Aucune ligne à exporter');return;}
+  const canFull=canFicheFull();
+  const fmt=d=>d?new Date(d).toLocaleDateString('fr-FR'):'—';
+  const escH=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const maskSS=ss=>!ss?'—':(canFull?escH(ss):'●●●●●●●●●●●●●');
+  const maskTS=n=>!n?'—':(canFull?escH(n):'●●●●●');
+  const hotelName=hotels.find(h=>h.id===hotelId)?.name||'';
+  const today=new Date().toLocaleDateString('fr-FR');
+  const sevColor={Critique:'#dc2626',Incomplet:'#d97706',Complet:'#16a34a'};
+  const body=rows.map(r=>{
+    const e=r.emp, sev=_regSevLabel(r);
+    return `<tr>
+      <td><b>${escH(e.last_name)} ${escH(e.first_name)}</b>${r.isParti?' <span style="font-size:9px;color:#6b7280">(sorti)</span>':''}</td>
+      <td>${escH(e.department||'—')}<br><span style="color:#6b7280">${escH(e.role||'—')}</span></td>
+      <td>${escH(e.contract_type||'—')}</td>
+      <td>${escH(e.nationality||'—')}</td>
+      <td>${fmt(e.birth_date)}<br><span style="color:#6b7280">${escH(e.birth_place||'—')}</span></td>
+      <td style="font-family:monospace;font-size:9px">${maskSS(e.social_security_number)}</td>
+      <td>${maskTS(e.residency_permit_number)}${e.residency_permit_expires?'<br><span style="color:#6b7280">exp. '+fmt(e.residency_permit_expires)+'</span>':''}</td>
+      <td>${fmt(e.hire_date)}${r.isParti?'<br><span style="color:#6b7280">→ '+fmt(e.departure_date)+'</span>':''}</td>
+      <td style="color:${sevColor[sev]};font-weight:700">${sev} (${r.sc.score}%)</td>
+    </tr>`;
+  }).join('');
+  const html=`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Registre du personnel — ${escH(hotelName)}</title><style>
+    @page{size:A4 landscape;margin:12mm}
+    body{font-family:Arial,Helvetica,sans-serif;font-size:10px;color:#111}
+    .banner{background:#fef2f2;border:1px solid #dc2626;color:#dc2626;font-weight:700;text-align:center;padding:6px;border-radius:6px;margin-bottom:10px;font-size:11px}
+    h1{font-size:16px;margin:0 0 2px}
+    .meta{color:#6b7280;font-size:10px;margin-bottom:10px}
+    table{width:100%;border-collapse:collapse}
+    th{background:#f3f4f6;text-align:left;padding:5px 6px;border:1px solid #d1d5db;font-size:9.5px}
+    td{padding:4px 6px;border:1px solid #e5e7eb;vertical-align:top}
+    tr:nth-child(even) td{background:#fafafa}
+    .foot{margin-top:10px;color:#6b7280;font-size:9px;text-align:right}
+  </style></head><body>
+    <div class="banner">CONFIDENTIEL — Registre unique du personnel — Usage interne uniquement</div>
+    <h1>Registre du personnel — ${escH(hotelName)}</h1>
+    <div class="meta">Généré le ${today} par ${escH(userEmail)} · ${rows.length} salarié${rows.length>1?'s':''} · ${scope==='all'?'Export complet (statut : '+escH(_regFltStatus)+')':'Sélection filtrée'}</div>
+    <table><thead><tr><th>Salarié</th><th>Service / Poste</th><th>Contrat</th><th>Nationalité</th><th>Naissance</th><th>N° SS</th><th>Titre de séjour</th><th>Entrée / Sortie</th><th>Dossier</th></tr></thead>
+    <tbody>${body}</tbody></table>
+    <div class="foot">Flowtym RH · Document généré localement, aucune donnée transmise</div>
+  </body></html>`;
+  const ifr=document.createElement('iframe');
+  ifr.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0';
+  document.body.appendChild(ifr);
+  ifr.contentDocument.open();ifr.contentDocument.write(html);ifr.contentDocument.close();
+  setTimeout(()=>{try{ifr.contentWindow.focus();ifr.contentWindow.print();}catch(e){flash('Impression impossible : '+(e.message||e));}
+    setTimeout(()=>ifr.remove(),2000);},150);
 }
 
 /* ===================== VUE ONBOARDING / OFFBOARDING ===================== */
