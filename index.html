@@ -4035,7 +4035,7 @@ async function _drawDashContractsWidget(){
     // Contrats actifs : non terminal, dates cohérentes
     if(!TERMINAL.includes(s)&&(!start||start<=today)&&(!end||end>=today)) active++;
     // En attente de signature
-    if(['generated','preview_ok','sent_signature','pending_signature'].includes(s)) awaiting++;
+    if(['generated','preview_ok','sent','sent_signature','pending_signature'].includes(s)) awaiting++;
     // Échéance ≤30j : signé ou actif, end_date entre today et today+30j
     if(end&&end>=today&&end<=soon30&&!TERMINAL.includes(s)) expiring30++;
     // Expirés : end_date < today, non terminal
@@ -5735,15 +5735,12 @@ async function renderContractsDpae(){
         {icon:'fa-user-group',     label:'Sélection du collaborateur',    sub:'Choisissez le collaborateur concerné.'},
         {icon:'fa-layer-group',    label:'Remplissage des informations',   sub:'Complétez les détails du contrat.'},
         {icon:'fa-file-circle-check',label:'Aperçu du contrat',           sub:'Vérifiez et validez le contrat généré.'},
-        {icon:'__yousign__',       label:'Envoi pour signature',           sub:'Envoi automatique via Yousign par email ou portail salarié.'},
+        {icon:'fa-envelope',       label:'Envoi pour signature',           sub:'Email OTP envoyé au salarié — signature électronique native Flowtym.'},
         {icon:'fa-pen-nib',        label:'Signature électronique',         sub:'Le collaborateur signe en ligne en toute sécurité.'},
         {icon:'fa-cloud-arrow-up', label:'Archivage',                      sub:'Le contrat signé est archivé dans la fiche salarié.'},
       ].map((s,i,arr)=>`<div style="flex:1;min-width:130px;text-align:center;padding:0 6px;position:relative;display:flex;flex-direction:column;align-items:center">
         <div style="width:72px;height:72px;border-radius:14px;border:1.5px solid var(--line);background:#fff;display:flex;align-items:center;justify-content:center;margin-bottom:12px;flex-direction:column;gap:3px">
-          ${s.icon==='__yousign__'
-            ? `<span style="font-size:13px;font-weight:800;color:#6c3fc5;font-family:sans-serif;letter-spacing:-.5px">Y/</span><span style="font-size:9px;font-weight:700;color:#7c3aed;letter-spacing:.5px">YOUSIGN</span><div style="width:6px;height:6px;border-radius:50%;background:var(--violet);margin-top:1px"></div>`
-            : `<i class="fa-solid ${s.icon}" style="font-size:22px;color:var(--violet)"></i>`
-          }
+          <i class="fa-solid ${s.icon}" style="font-size:22px;color:var(--violet)"></i>
         </div>
         <div style="font-size:11.5px;font-weight:700;color:var(--ink);margin-bottom:4px">${s.label}</div>
         <div style="font-size:11px;color:var(--muted);line-height:1.4">${s.sub}</div>
@@ -5752,7 +5749,7 @@ async function renderContractsDpae(){
     </div>
     <div style="margin-top:18px;background:#faf9ff;border:1px solid #ede9fe;border-radius:10px;padding:12px 20px;font-size:12.5px;color:var(--violet-d)">
       <i class="fa-solid fa-star" style="color:var(--violet)"></i> <b>Fonctionnalités Premium :</b>
-      &nbsp;✓ Génération automatique de contrats &nbsp;✓ Intégration Yousign &nbsp;✓ Portail salarié dédié &nbsp;✓ Archivage sécurisé &nbsp;✓ DPAE intégrée
+      &nbsp;✓ Génération automatique de contrats &nbsp;✓ Signature électronique native Flowtym (eIDAS) &nbsp;✓ Portail salarié dédié &nbsp;✓ Archivage sécurisé &nbsp;✓ DPAE intégrée
     </div>
   </div>`;
 }
@@ -7046,8 +7043,8 @@ async function renderContractsHistory(){
   el.innerHTML='<div style="padding:20px;text-align:center;color:var(--muted)"><i class="fa-solid fa-spinner fa-spin"></i> Chargement…</div>';
   try{
     const contracts=await BE.listGeneratedContracts(hotelId);
-    const STATUS_LABELS={draft:'Brouillon',generated:'Généré',preview_ok:'Aperçu OK',sent_signature:'Envoyé',pending_signature:'En attente',signed:'Signé',archived:'Archivé',cancelled:'Annulé',error_signature:'Erreur signature'};
-    const STATUS_COLORS={draft:'#fef3c7|#92400e',generated:'#EEF2FF|#4338CA',preview_ok:'#EEF2FF|#4338CA',sent_signature:'#DBEAFE|#1D4ED8',pending_signature:'#FEF3C7|#92400E',signed:'#DCFCE7|#166534',archived:'#F3F4F6|#374151',cancelled:'#FEE2E2|#991B1B',error_signature:'#FEE2E2|#991B1B'};
+    const STATUS_LABELS={draft:'Brouillon',generated:'Généré',preview_ok:'Aperçu OK',sent:'Envoyé',sent_signature:'Envoyé',pending_signature:'En attente',signed:'Signé',archived:'Archivé',cancelled:'Annulé',refused:'Refusé',error_signature:'Erreur signature'};
+    const STATUS_COLORS={draft:'#fef3c7|#92400e',generated:'#EEF2FF|#4338CA',preview_ok:'#EEF2FF|#4338CA',sent:'#DBEAFE|#1D4ED8',sent_signature:'#DBEAFE|#1D4ED8',pending_signature:'#FEF3C7|#92400E',signed:'#DCFCE7|#166534',archived:'#F3F4F6|#374151',cancelled:'#FEE2E2|#991B1B',refused:'#FEE2E2|#991B1B',error_signature:'#FEE2E2|#991B1B'};
     const badge=s=>{const[bg,fg]=(STATUS_COLORS[s]||'#F3F4F6|#374151').split('|');return`<span style="background:${bg};color:${fg};padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600">${STATUS_LABELS[s]||s}</span>`;};
     const fmt=d=>d?new Date(d).toLocaleDateString('fr-FR'):'—';
 
@@ -7097,7 +7094,7 @@ async function renderContractsHistory(){
       // Priorité 4 : statut métier
       if(c.status==='draft') return btnOff('fa-pen','Finaliser','Reprise de brouillon à venir');
       if(c.status==='generated'||c.status==='preview_ok') return btnOn('fa-paper-plane','Envoyer',"_sendFromHistory('"+c.id+"')",'#2563eb');
-      if(c.status==='sent_signature'||c.status==='pending_signature') return btnOn('fa-rotate','Relancer',"_relancerFromHistory('"+c.id+"')",'#d97706');
+      if(['sent','sent_signature','pending_signature'].includes(c.status)) return btnOn('fa-rotate','Relancer',"_relancerFromHistory('"+c.id+"')",'#d97706');
       if(c.status==='cancelled'||c.status==='refused'||c.status==='error_signature') return btnOff('fa-rotate-left','Régénérer','Régénération à venir');
       return'<span style="font-size:11px;color:var(--muted)">—</span>';
     };
@@ -7391,22 +7388,19 @@ async function _submitSignatureModal(contractId, mode, employeeId, firstName, la
   btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Envoi en cours…';
   try{
     const isSend=mode==='send';
-    const patch=isSend
-      ?{status:'sent_signature',sent_at:new Date().toISOString(),signer_email:email,signer_name:lastName}
-      :{sent_at:new Date().toISOString(),signer_email:email};
-    await BE.updateGeneratedContract(contractId,patch);
     const {data:{session}}=await BE.sb.auth.getSession();
-    const resp=await fetch(`${SUPABASE_FUNCTIONS_URL}/contract-send-signature`,{
+    const resp=await fetch(`${SUPABASE_FUNCTIONS_URL}/sig-send`,{
       method:'POST',
       headers:{'Authorization':`Bearer ${session?.access_token}`,'Content-Type':'application/json'},
-      body:JSON.stringify({contract_id:contractId,employee_id:employeeId,hotel_id:hotelId,signer_first_name:firstName,signer_name:lastName,signer_email:email}),
+      body:JSON.stringify({contract_id:contractId,employee_id:employeeId,hotel_id:hotelId,signer_name:(firstName+' '+lastName).trim(),signer_email:email}),
     });
     const result=await resp.json();
     if(!resp.ok||result.error) throw new Error(result.error||'Erreur envoi signature');
     closeModal();
-    flash((isSend?`Contrat n°${contractRef} envoyé pour signature`:`Relance envoyée pour le contrat n°${contractRef}`)+(result.email_sent?'':' ⚠️ Email non envoyé — vérifiez RESEND_API_KEY'));
+    const emailWarn=result.email_warning?' ⚠️ '+result.email_warning:'';
+    flash((isSend?`Contrat n°${contractRef} envoyé pour signature`:`Relance envoyée pour le contrat n°${contractRef}`)+emailWarn);
     const actorEmail=(await BE.sb.auth.getSession()).data?.session?.user?.email||null;
-    BE.logContractAudit(hotelId,contractId,employeeId,isSend?'sent_signature':'resent_signature',actorEmail,{signer_email:email}).catch(()=>{});
+    BE.logContractAudit(hotelId,contractId,employeeId,isSend?'sent_signature':'resent_signature',actorEmail,{signer_email:email,request_id:result.request_id}).catch(()=>{});
     renderContractsHistory();
   }catch(e){
     btn.disabled=false;
@@ -7490,8 +7484,8 @@ async function renderContractsSignes(){
   el.innerHTML='<div style="padding:20px;text-align:center;color:var(--muted)"><i class="fa-solid fa-spinner fa-spin"></i> Chargement…</div>';
   try{
     const allContracts=await BE.listGeneratedContracts(hotelId);
-    const STATUS_LABELS={draft:'Brouillon',generated:'Généré',preview_ok:'Aperçu OK',sent_signature:'Envoyé',pending_signature:'En attente',signed:'Signé',archived:'Archivé',cancelled:'Annulé',error_signature:'Erreur signature'};
-    const STATUS_COLORS={draft:'#fef3c7|#92400e',generated:'#EEF2FF|#4338CA',preview_ok:'#EEF2FF|#4338CA',sent_signature:'#DBEAFE|#1D4ED8',pending_signature:'#FEF3C7|#92400E',signed:'#DCFCE7|#166534',archived:'#F3F4F6|#374151',cancelled:'#FEE2E2|#991B1B',error_signature:'#FEE2E2|#991B1B'};
+    const STATUS_LABELS={draft:'Brouillon',generated:'Généré',preview_ok:'Aperçu OK',sent:'Envoyé',sent_signature:'Envoyé',pending_signature:'En attente',signed:'Signé',archived:'Archivé',cancelled:'Annulé',refused:'Refusé',error_signature:'Erreur signature'};
+    const STATUS_COLORS={draft:'#fef3c7|#92400e',generated:'#EEF2FF|#4338CA',preview_ok:'#EEF2FF|#4338CA',sent:'#DBEAFE|#1D4ED8',sent_signature:'#DBEAFE|#1D4ED8',pending_signature:'#FEF3C7|#92400E',signed:'#DCFCE7|#166534',archived:'#F3F4F6|#374151',cancelled:'#FEE2E2|#991B1B',refused:'#FEE2E2|#991B1B',error_signature:'#FEE2E2|#991B1B'};
     const badge=s=>{const[bg,fg]=(STATUS_COLORS[s]||'#F3F4F6|#374151').split('|');return`<span style="background:${bg};color:${fg};padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600">${STATUS_LABELS[s]||s}</span>`;};
     const fmt=d=>d?new Date(d).toLocaleDateString('fr-FR'):'—';
 
@@ -9373,12 +9367,12 @@ function _cfgContrats(){
         <span class="tag gray" style="font-size:10.5px">Configuré</span>
       </div>
       <div style="font-size:13px;color:var(--ink2);line-height:1.6;margin-bottom:14px">
-        La signature électronique est activée via <b>YouSign</b>. Les contrats envoyés depuis Flowtym RH sont signés légalement en quelques clics.
+        La signature électronique native Flowtym est intégrée directement. OTP email, signature canvas, PDF archivé — conforme au règlement eIDAS (UE) n°910/2014.
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
         <div style="padding:12px;border:1px solid var(--line);border-radius:10px">
-          <div style="font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:600;margin-bottom:4px">Prestataire</div>
-          <div style="font-size:13px;font-weight:600">YouSign</div>
+          <div style="font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:600;margin-bottom:4px">Moteur</div>
+          <div style="font-size:13px;font-weight:600">Flowtym natif</div>
         </div>
         <div style="padding:12px;border:1px solid var(--line);border-radius:10px">
           <div style="font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:600;margin-bottom:4px">Statut</div>
@@ -13862,7 +13856,7 @@ function openSignatureModal(s,doc){
   const name=`${s.first_name||''} ${s.last_name||''}`.trim();
   showModal(`<div style="padding:24px;max-width:500px">
     <div style="font-size:17px;font-weight:700;margin-bottom:6px"><i class="fa-solid fa-pen-nib" style="color:#7c3aed;margin-right:8px"></i>Envoyer pour signature électronique</div>
-    <p style="font-size:13px;color:var(--ink2);margin-bottom:18px">Le document sera envoyé à <b>${esc(name)}</b> via le portail salarié. La signature se fait en ligne — valeur légale avancée (eIDAS).</p>
+    <p style="font-size:13px;color:var(--ink2);margin-bottom:18px">Le document sera envoyé à <b>${esc(name)}</b> par email. Le salarié recevra un code OTP pour signer en ligne — signature électronique simple conforme eIDAS.</p>
     <div style="background:var(--bg2);padding:12px 16px;border-radius:10px;margin-bottom:16px;font-size:13px">
       <div><i class="fa-regular fa-file-lines" style="margin-right:6px;color:var(--violet)"></i><b>${esc(doc.label||doc.doc_type)}</b></div>
     </div>
@@ -13871,10 +13865,8 @@ function openSignatureModal(s,doc){
         <input class="input" id="sig_fn" value="${esc(s.first_name||'')}"></div>
       <div class="fld"><label style="font-size:12px;color:var(--ink2);display:block;margin-bottom:4px">Nom *</label>
         <input class="input" id="sig_ln" value="${esc(s.last_name||'')}"></div>
-      <div class="fld"><label style="font-size:12px;color:var(--ink2);display:block;margin-bottom:4px">Email *</label>
+      <div class="fld" style="grid-column:1/-1"><label style="font-size:12px;color:var(--ink2);display:block;margin-bottom:4px">Email * <span style="font-size:11px;color:var(--muted)">(code OTP envoyé ici)</span></label>
         <input class="input" id="sig_email" type="email" value="${esc(s.email||'')}"></div>
-      <div class="fld"><label style="font-size:12px;color:var(--ink2);display:block;margin-bottom:4px">Téléphone (OTP)</label>
-        <input class="input" id="sig_phone" placeholder="+33612345678" value="${esc(s.phone||'')}"></div>
     </div>
     <div style="display:flex;gap:10px">
       <button class="btn p" id="sigSendBtn" onclick="submitSignatureRequest('${s.id}','${doc.id}')">
@@ -13895,13 +13887,12 @@ async function submitSignatureRequest(employeeId, documentId){
   const prog=$('sigProgress'); if(prog){prog.style.display='';prog.textContent='Envoi en cours…';}
   try{
     const {data:{session}}=await BE.sb.auth.getSession();
-    const resp=await fetch(`${SUPABASE_FUNCTIONS_URL}/yousign-create`,{
+    const resp=await fetch(`${SUPABASE_FUNCTIONS_URL}/sig-send`,{
       method:'POST',
       headers:{'Authorization':`Bearer ${session?.access_token}`,'Content-Type':'application/json'},
       body:JSON.stringify({
         document_id:documentId, employee_id:employeeId, hotel_id:hotelId,
-        signer_first_name:fn, signer_name:ln, signer_email:email,
-        signer_phone:phone||null,
+        signer_name:(fn+' '+ln).trim(), signer_email:email,
       }),
     });
     const result=await resp.json();
