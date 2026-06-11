@@ -629,16 +629,25 @@ function renderActivation(){
       <div class="auth-card">
         <div class="auth-logo">
           <div class="mk">🏨</div>
-          <div class="name">Flowtym<small>Activation du compte</small></div>
+          <div class="name">Flowtym<small>Mon espace salarié</small></div>
         </div>
-        <div class="info-box"><i class="fa-solid fa-envelope"></i>
-          Votre compte est en attente d'activation. Votre responsable RH doit d'abord vous inviter via l'application Flowtym.
+        <div class="info-box" style="background:#fffbeb;border-color:#fbbf24;color:#92400e">
+          <i class="fa-solid fa-circle-info" style="color:#d97706"></i>
+          Votre compte est connecté, mais aucun profil salarié n'y est associé.<br>
+          <span style="font-size:12px;margin-top:6px;display:block">Contactez votre responsable RH pour vérifier votre accès. Si vous venez de créer votre mot de passe, patientez quelques minutes et réessayez.</span>
         </div>
-        <button class="btn btn-g btn-full" onclick="sb.auth.signOut().then(()=>location.reload())">
+        <button class="btn btn-g btn-full" id="btnActivationSignout" style="margin-top:16px">
           <i class="fa-solid fa-arrow-right-from-bracket"></i> Se déconnecter
         </button>
       </div>
     </div>`;
+  $('btnActivationSignout')?.addEventListener('click', async()=>{
+    const btn=$('btnActivationSignout');
+    if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Déconnexion…';}
+    try{ await sb.auth.signOut(); }catch(_){}
+    session=null;
+    renderAuth();
+  });
 }
 
 function renderError(msg){

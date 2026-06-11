@@ -3313,7 +3313,6 @@ async function _cfgReplacements(){
         Notifier le salarié via le portail
       </label>
     </div>
-    <button class="btn p" style="margin-top:14px" onclick="_saveReplSettings()"><i class="fa-solid fa-floppy-disk"></i> Enregistrer</button>
   </div>
 
   <!-- HÔTELS AUTORISÉS -->
@@ -3351,7 +3350,6 @@ async function _cfgReplacements(){
         <button class="btn d" style="padding:6px 10px" onclick="this.closest('[id^=rsPair_]').remove()"><i class="fa-solid fa-trash"></i></button>
       </div>`).join('')}</div>
     <button class="btn g" onclick="_addCompatPair()" style="margin-top:6px"><i class="fa-solid fa-plus"></i> Ajouter une paire</button>
-    <button class="btn p" onclick="_saveReplSettings()" style="margin-left:8px"><i class="fa-solid fa-floppy-disk"></i> Enregistrer</button>
   </div>
 
   <!-- RÈGLES AVANCÉES -->
@@ -3383,7 +3381,6 @@ async function _cfgReplacements(){
         Managers : proposer uniquement (pas d'affectation directe)
       </label>
     </div>
-    <button class="btn p" style="margin-top:14px" onclick="_saveReplSettings()"><i class="fa-solid fa-floppy-disk"></i> Enregistrer les règles</button>
   </div>
 
   <!-- PERSONNEL ÉLIGIBLE AUX REMPLACEMENTS -->
@@ -3422,6 +3419,13 @@ async function _cfgReplacements(){
     </div>
   </div>
 
+  <!-- BOUTON UNIQUE D'ENREGISTREMENT -->
+  <div style="grid-column:1/-1;display:flex;justify-content:flex-end;padding-top:4px">
+    <button class="btn p" id="btnSaveReplSettings" style="padding:11px 28px;font-size:14px;font-weight:700" onclick="_saveReplSettings()">
+      <i class="fa-solid fa-floppy-disk"></i> Enregistrer les paramètres de remplacement
+    </button>
+  </div>
+
   </div>`;
 }
 
@@ -3438,36 +3442,46 @@ function _addCompatPair(){
 }
 
 async function _saveReplSettings(){
-  const w={
-    same_role:parseInt($('rsW_same_role')?.value||40),
-    same_dept:parseInt($('rsW_same_dept')?.value||20),
-    no_overtime:parseInt($('rsW_no_overtime')?.value||15),
-    proximity:parseInt($('rsW_proximity')?.value||10),
-    history:parseInt($('rsW_history')?.value||15)
-  };
-  const authIds=Array.from(document.querySelectorAll('.rsCfgHotel:checked')).map(c=>c.value);
-  const pairs=[];
-  document.querySelectorAll('#rsCompatList [id^=rsPair_]').forEach(row=>{
-    const a=row.querySelector('.rsCompA')?.value?.trim();
-    const b=row.querySelector('.rsCompB')?.value?.trim();
-    if(a&&b)pairs.push({role_a:a,role_b:b});
-  });
-  const patch={
-    enabled:!!$('rsCfgEnabled')?.checked,
-    auto_suggest:!!$('rsCfgAutoSuggest')?.checked,
-    allow_direct_assignment:!!$('rsCfgDirectAssign')?.checked,
-    notify_employee:!!$('rsCfgNotify')?.checked,
-    overtime_rule:$('rsCfgOT')?.value||'allowed',
-    priority_rule:$('rsCfgPriority')?.value||'internal_first',
-    show_external_extras:!!$('rsCfgShowExternal')?.checked,
-    manager_propose_only:!!$('rsCfgManagerOnly')?.checked,
-    authorized_hotel_ids:authIds,
-    compatible_roles:pairs,
-    scoring_weights:w
-  };
-  await BE.saveReplacementSettings(hotelId,patch);
-  _replSettings=null; // invalider le cache
-  flash('Paramètres de remplacement enregistrés.');
+  const btn=$('btnSaveReplSettings');
+  if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Enregistrement…';}
+  try{
+    const w={
+      same_role:parseInt($('rsW_same_role')?.value||40),
+      same_dept:parseInt($('rsW_same_dept')?.value||20),
+      no_overtime:parseInt($('rsW_no_overtime')?.value||15),
+      proximity:parseInt($('rsW_proximity')?.value||10),
+      history:parseInt($('rsW_history')?.value||15)
+    };
+    const authIds=Array.from(document.querySelectorAll('.rsCfgHotel:checked')).map(c=>c.value);
+    const pairs=[];
+    document.querySelectorAll('#rsCompatList [id^=rsPair_]').forEach(row=>{
+      const a=row.querySelector('.rsCompA')?.value?.trim();
+      const b=row.querySelector('.rsCompB')?.value?.trim();
+      if(a&&b)pairs.push({role_a:a,role_b:b});
+    });
+    const patch={
+      enabled:!!$('rsCfgEnabled')?.checked,
+      auto_suggest:!!$('rsCfgAutoSuggest')?.checked,
+      allow_direct_assignment:!!$('rsCfgDirectAssign')?.checked,
+      notify_employee:!!$('rsCfgNotify')?.checked,
+      overtime_rule:$('rsCfgOT')?.value||'allowed',
+      priority_rule:$('rsCfgPriority')?.value||'internal_first',
+      show_external_extras:!!$('rsCfgShowExternal')?.checked,
+      manager_propose_only:!!$('rsCfgManagerOnly')?.checked,
+      authorized_hotel_ids:authIds,
+      compatible_roles:pairs,
+      scoring_weights:w
+    };
+    await BE.saveReplacementSettings(hotelId,patch);
+    _replSettings=null;
+    flash('Paramètres de remplacement enregistrés.');
+    if(btn){btn.innerHTML='<i class="fa-solid fa-check"></i> Enregistré';setTimeout(()=>{if(btn)btn.innerHTML='<i class="fa-solid fa-floppy-disk"></i> Enregistrer les paramètres de remplacement';},2000);}
+  }catch(e){
+    flash('Erreur lors de l\'enregistrement : '+(e?.message||e),'error');
+    if(btn){btn.innerHTML='<i class="fa-solid fa-floppy-disk"></i> Enregistrer les paramètres de remplacement';}
+  }finally{
+    if(btn)btn.disabled=false;
+  }
 }
 
 function _openAddHotelAssignment(){
@@ -4551,7 +4565,73 @@ async function _renderConformiteData(){
 /* ===================== REGISTRE DU PERSONNEL ===================== */
 
 // Nationalités UE/EEE/Suisse — pas de titre de séjour requis
-const _UE_EEE_CH=new Set(['française','france','fr','allemande','allemagne','de','autrichienne','autriche','at','belge','belgique','be','bulgare','bulgarie','bg','chypriote','chypre','cy','croate','croatie','hr','danoise','danemark','dk','espagnole','espagne','es','estonienne','estonie','ee','finlandaise','finlande','fi','grecque','grèce','gr','hongroise','hongrie','hu','irlandaise','irlande','ie','italienne','italie','it','lettonne','lettonie','lv','lituanienne','lituanie','lt','luxembourgeoise','luxembourg','lu','maltaise','malte','mt','néerlandaise','pays-bas','nl','polonaise','pologne','pl','portugaise','portugal','pt','roumaine','roumanie','ro','slovaque','slovaquie','sk','slovène','slovénie','si','suédoise','suède','se','tchèque','tchéquie','cz','islandaise','islande','is','liechtensteinoise','liechtenstein','li','norvégienne','norvège','no','suisse','suisse','ch','britannique','royaume-uni','gb','uk']);
+// Formes féminines, masculines, codes ISO, noms de pays
+const _UE_EEE_CH=new Set([
+  // France
+  'française','français','france','fr',
+  // Allemagne
+  'allemande','allemand','allemagne','de',
+  // Autriche
+  'autrichienne','autrichien','autriche','at',
+  // Belgique
+  'belge','belgique','be',
+  // Bulgarie
+  'bulgare','bulgarie','bg',
+  // Chypre
+  'chypriote','chypre','cy',
+  // Croatie
+  'croate','croatie','hr',
+  // Danemark
+  'danoise','danois','danemark','dk',
+  // Espagne
+  'espagnole','espagnol','espagne','es',
+  // Estonie
+  'estonienne','estonien','estonie','ee',
+  // Finlande
+  'finlandaise','finlandais','finlande','fi',
+  // Grèce
+  'grecque','grec','grèce','grece','gr',
+  // Hongrie
+  'hongroise','hongrois','hongrie','hu',
+  // Irlande
+  'irlandaise','irlandais','irlande','ie',
+  // Italie
+  'italienne','italien','italie','it',
+  // Lettonie
+  'lettonne','letton','lettonie','lv',
+  // Lituanie
+  'lituanienne','lituanien','lituanie','lt',
+  // Luxembourg
+  'luxembourgeoise','luxembourgeois','luxembourg','lu',
+  // Malte
+  'maltaise','maltais','malte','mt',
+  // Pays-Bas
+  'néerlandaise','néerlandais','neerlandaise','neerlandais','pays-bas','pays bas','netherlands','nl',
+  // Pologne
+  'polonaise','polonais','pologne','pl',
+  // Portugal
+  'portugaise','portugais','portugal','pt',
+  // Roumanie
+  'roumaine','roumain','roumanie','ro',
+  // Slovaquie
+  'slovaque','slovaquie','sk',
+  // Slovénie
+  'slovène','slovene','slovénie','slovenie','si',
+  // Suède
+  'suédoise','suédois','suede','suédois','suède','se',
+  // Tchéquie
+  'tchèque','tcheque','tchéquie','tchequeie','tchéquie','republique tcheque','république tchèque','czech','cz',
+  // Islande (EEE)
+  'islandaise','islandais','islande','is',
+  // Liechtenstein (EEE)
+  'liechtensteinoise','liechtensteinois','liechtenstein','li',
+  // Norvège (EEE)
+  'norvégienne','norvégien','norvege','norvège','no',
+  // Suisse
+  'suisse','switzerland','ch',
+  // Royaume-Uni (historique)
+  'britannique','royaume-uni','royaume uni','united kingdom','gb','uk',
+]);
 
 function _isUeNat(nat){
   if(!nat) return false;
@@ -4568,7 +4648,7 @@ function _computeScore(emp, contracts, docAlerts, today){
   chk(!!emp.hire_date,'Date d\'entrée');
   chk(!!emp.birth_date,'Date de naissance');
   chk(!!emp.birth_place,'Lieu de naissance');
-  chk(!!emp.nationality,'Nationalité');
+  chk(!!emp.nationality,'Nationalité à vérifier');
   chk(!!emp.social_security_number,'N° sécurité sociale');
 
   const TERMINAL=['archived','cancelled','refused','error_signature'];
