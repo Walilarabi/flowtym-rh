@@ -1127,10 +1127,17 @@ async function loadDocs(){
   const prefix=`${employee.hotel_id}/${employee.id}/`;
   const {data:files,error} = await sb.storage.from('portal-documents').list(prefix,{limit:200,sortBy:{column:'created_at',order:'desc'}});
 
-  // Charger employee_documents + portal_signature_requests
+  // Charger employee_documents + portal_signature_requests (Yousign historique)
   const {data:empDocs} = await sb.from('employee_documents')
     .select('*,psr:portal_signature_requests(id,status,yousign_sr_id,signed_document_path)')
     .eq('employee_id',employee.id).order('created_at',{ascending:false});
+
+  // Charger les demandes de signature natives Flowtym en attente
+  const {data:flowtymSigReqs} = await sb.from('signature_requests')
+    .select('id,status,contract_id,signer_name,signer_email,created_at,signed_pdf_storage_path')
+    .eq('employee_id',employee.id)
+    .in('status',['otp_sent','otp_verified','pending'])
+    .order('created_at',{ascending:false});
 
   // Charger les demandes de documents RH (portal_document_requests)
   const {data:docReqs} = await sb.from('portal_document_requests')
@@ -1162,12 +1169,21 @@ async function loadDocs(){
 
   let h='';
 
-  // Séparer docs à signer des autres
+  // Séparer docs à signer des autres (Yousign historique)
   const toSign=byDir.employer.filter(d=>d.signature_status==='pending');
-  if(toSign.length){
+
+  // Demandes Flowtym natives en attente (injectées en synthétique)
+  const flowtymPending=(flowtymSigReqs||[]).map(r=>({
+    id:r.id, name:'Contrat à signer', type:'flowtym_sig',
+    signature_status:'pending_flowtym', flowtym_request_id:r.id,
+    contract_id:r.contract_id, created_at:r.created_at,
+  }));
+
+  const allToSign=[...flowtymPending,...toSign];
+  if(allToSign.length){
     h+=`<div class="card" style="border-color:#7c3aed;background:#faf5ff">
-      <div class="card-title" style="color:#7c3aed"><i class="fa-solid fa-pen-nib"></i>À signer (${toSign.length})</div>`;
-    h+=toSign.map(d=>docRow(d)).join('');
+      <div class="card-title" style="color:#7c3aed"><i class="fa-solid fa-pen-nib"></i>À signer (${allToSign.length})</div>`;
+    h+=allToSign.map(d=>docRow(d)).join('');
     h+=`</div>`;
   }
   // Documents demandés par RH
@@ -1233,13 +1249,19 @@ function docRow(d){
   const label=d.name||(d.doc_type?(DOC_TYPES[d.doc_type]?.label||d.doc_type):'Document');
   const sigBadge={
     pending:`<span style="font-size:11px;font-weight:600;color:#d97706;background:#fffbeb;padding:2px 8px;border-radius:12px">⏳ À signer</span>`,
+    pending_flowtym:`<span style="font-size:11px;font-weight:600;color:#7c3aed;background:#faf5ff;padding:2px 8px;border-radius:12px">✍️ Signature requise</span>`,
     signed:`<span style="font-size:11px;font-weight:600;color:#16a34a;background:#f0fdf4;padding:2px 8px;border-radius:12px">✅ Signé</span>`,
     refused:`<span style="font-size:11px;font-weight:600;color:#dc2626;background:#fef2f2;padding:2px 8px;border-radius:12px">❌ Refusé</span>`,
     expired:`<span style="font-size:11px;font-weight:600;color:#9ca3af;background:#f3f4f6;padding:2px 8px;border-radius:12px">⌛ Expiré</span>`,
   }[d.signature_status]||'';
-  const signBtn=d.signature_status==='pending'
-    ?`<button class="btn btn-p btn-full" style="margin-top:10px;font-size:13px" onclick="openSignatureIframe('${esc(d.yousign_sr_id||'')}','${esc(d.id||'')}')">
+  // Bouton signature : Flowtym natif (nouvelle URL sig-sign) ou Yousign historique
+  const signBtn=d.signature_status==='pending_flowtym'
+    ?`<a href="${FUNCTIONS_URL}/sig-sign?request_id=${esc(d.flowtym_request_id||'')}" target="_blank" class="btn btn-p btn-full" style="margin-top:10px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:8px;text-decoration:none">
         <i class="fa-solid fa-pen-nib"></i> Signer maintenant
+      </a>`
+    :d.signature_status==='pending'
+    ?`<button class="btn btn-p btn-full" style="margin-top:10px;font-size:13px" onclick="openSignatureIframe('${esc(d.yousign_sr_id||'')}','${esc(d.id||'')}')">
+        <i class="fa-solid fa-pen-nib"></i> Signer maintenant (archivé Yousign)
       </button>`:'';
   const downloadSigned=d.signature_status==='signed'&&d.signed_document_path
     ?`<button class="doc-btn" onclick="downloadSignedDoc('${esc(d.signed_document_path)}')" title="Télécharger le document signé"><i class="fa-solid fa-certificate"></i></button>`:'';
