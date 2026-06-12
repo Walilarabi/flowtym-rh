@@ -2669,7 +2669,7 @@ async function openReplPanel(absentEmpId,date,absCode){
 
 // Confirmer directement (créer ou passer confirmed)
 async function _confirmReplacement(existingId,absentEmpId,date,candidateId,originHotelName){
-  const actorEmail=(await sb.auth.getUser()).data?.user?.email||'';
+  const actorEmail=(await BE.sb.auth.getUser()).data?.user?.email||'';
   const emp=staff.find(s=>s.id===candidateId)||{};
   const absent=staff.find(s=>s.id===absentEmpId)||{};
 
@@ -2731,7 +2731,7 @@ async function _confirmReplacement(existingId,absentEmpId,date,candidateId,origi
 
 // Ignorer une absence (persisté en base, statut 'ignored')
 async function _ignoreReplacement(absentEmpId, date){
-  const actorEmail=(await sb.auth.getUser()).data?.user?.email||'';
+  const actorEmail=(await BE.sb.auth.getUser()).data?.user?.email||'';
   try{
     const existing=await BE.findReplacementAssignment(hotelId,absentEmpId,date);
     if(existing){
@@ -2763,7 +2763,7 @@ async function _restoreReplacement(assignId){
 
 // Proposer (envoyer une proposition, attendre réponse)
 async function _proposeReplacement(candidateId,candidateName,absentEmpId,date){
-  const actorEmail=(await sb.auth.getUser()).data?.user?.email||'';
+  const actorEmail=(await BE.sb.auth.getUser()).data?.user?.email||'';
   const emp=staff.find(s=>s.id===candidateId)||{};
   const absent=staff.find(s=>s.id===absentEmpId)||{};
 
@@ -2812,7 +2812,7 @@ async function _proposeReplacement(candidateId,candidateName,absentEmpId,date){
 async function _refuseReplacement(assignId,absentEmpId,date){
   const reason=prompt('Motif du refus (optionnel) :','');
   if(reason===null)return; // annulé
-  const actorEmail=(await sb.auth.getUser()).data?.user?.email||'';
+  const actorEmail=(await BE.sb.auth.getUser()).data?.user?.email||'';
   try{
     const row=await BE.updateReplacementAssignment(assignId,{
       status:'refused',responded_at:new Date().toISOString(),refused_reason:reason||null
@@ -2840,7 +2840,7 @@ function _markReplacementInGrid(empId,date){
 
 async function _cancelAssignment(id,absentEmpId,date){
   if(!confirm('Annuler cette affectation ?'))return;
-  const actorEmail=(await sb.auth.getUser()).data?.user?.email||'';
+  const actorEmail=(await BE.sb.auth.getUser()).data?.user?.email||'';
   try{
     // Charger l'affectation pour notifier le remplaçant
     const assign=await BE.getReplacementAssignment(id);
@@ -3256,7 +3256,7 @@ async function _deleteExternalExtra(id){
 
 // Confirmer un extra externe comme remplaçant
 async function _confirmExternalExtraReplacement(extraId, extraName, absentEmpId, date){
-  const actorEmail=(await sb.auth.getUser()).data?.user?.email||'';
+  const actorEmail=(await BE.sb.auth.getUser()).data?.user?.email||'';
   const absent=staff.find(s=>s.id===absentEmpId)||{};
   try{
     await BE.createReplacementAssignment(hotelId,{
@@ -3502,7 +3502,7 @@ async function _confirmAddHotelAssign(){
   const empId=$('aaEmp').value;
   const targetId=$('aaTarget').value;
   const notes=$('aaNotes').value.trim();
-  const actorEmail=(await sb.auth.getUser()).data?.user?.email||'';
+  const actorEmail=(await BE.sb.auth.getUser()).data?.user?.email||'';
   await BE.addHotelAssignment(empId,hotelId,targetId,notes,actorEmail);
   closeModal();
   _cfgReplacements();
@@ -5126,7 +5126,7 @@ async function _loadOnboardingTasks(empList){
     ],
   };
   const tasks=DEFAULT_TASKS[flow]||[];
-  const userEmail=(await sb.auth.getUser().catch(()=>({data:{user:{email:''}}})))?.data?.user?.email||'';
+  const userEmail=(await BE.sb.auth.getUser().catch(()=>({data:{user:{email:''}}})))?.data?.user?.email||'';
 
   for(const s of empList){
     const existing=await BE.listOnboardingTasks(hotelId,s.id,flow).catch(()=>[]);
