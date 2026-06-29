@@ -14933,55 +14933,111 @@ async function exportPDF(){
     doc.setFontSize(8); doc.setFont(undefined,'normal');
     doc.text(`${visibleRows.length} collaborateur(s) · exporté le ${new Date().toLocaleString('fr-FR')}`, margin, 11);
 
+    // Largeurs de colonnes — toutes les colonnes "jour" strictement égales
+    const nameW=32, roleW=22, sumW=8;
+    const tableWidth=pageW-2*margin;
+    const dayW=(tableWidth-nameW-roleW-3*sumW)/nd;
+    const totalCols=2+nd+3;
+
+    // Métadonnées des colonnes jour : numéro, lettre, week-end, aujourd'hui
+    const today=new Date();
+    const isThisMonth=today.getFullYear()===y && today.getMonth()===m;
+    const dayMeta={}; // index colonne -> {d, letter, weekend, today}
+    for(let d=1;d<=nd;d++){
+      const wd=new Date(y,m,d).getDay();
+      dayMeta[2+(d-1)]={d, letter:WD[wd], weekend:(wd===0||wd===6), today:isThisMonth&&d===today.getDate()};
+    }
+
     const head=[['Collaborateur','Rôle']];
-    for(let d=1;d<=nd;d++){const wd=new Date(y,m,d).getDay();head[0].push(`${d}\n${WD[wd]}`);}
+    for(let d=1;d<=nd;d++) head[0].push(''); // en-têtes de date dessinés manuellement
     head[0].push('Trav.','CP','Abs.');
 
-    const body=visibleRows.map(s=>{
-      const r=[`${s.first_name} ${s.last_name}`,s.role||''];
+    // Corps avec séparateurs de service (lignes minces comme dans l'app)
+    const body=[];
+    let lastDept=null;
+    visibleRows.forEach(s=>{
+      const dept=s.department||'';
+      if(dept!==lastDept){
+        lastDept=dept;
+        body.push([{content:(dept||'Sans service').toUpperCase(), colSpan:totalCols, styles:{
+          fillColor:[241,240,251], textColor:[124,58,237], fontStyle:'bold', halign:'left',
+          fontSize:6, cellPadding:{top:0.7,bottom:0.7,left:2,right:1}, minCellHeight:3.2,
+          lineWidth:0.1, lineColor:[236,238,243]
+        }}]);
+      }
+      const r=[`${s.first_name} ${s.last_name}`, s.role||''];
       let trav=0,cp=0,abs=0;
       for(let d=1;d<=nd;d++){const k=s.id+'|'+iso(y,m,d);const code=effective(k);r.push(code||'');
         const c=code?CMAP[code]:null;
         if(c){if(c.cat==='worked')trav+=1;else if(c.cat==='paid')cp+=1;else if(c.cat==='abs')abs+=1;}}
       r.push(trav||'',cp||'',abs||'');
-      return r;
+      body.push(r);
     });
 
     // Hauteur de cellule calculée pour remplir la page
     const titleZone=14;
     const avail=pageH-margin-titleZone;
-    const targetRows=Math.max(visibleRows.length+1, 24);
-    const minH=Math.min(Math.max(avail/targetRows, 4.5), 12);
+    const targetRows=Math.max(body.length+1, 24);
+    const minH=Math.min(Math.max(avail/targetRows, 4.2), 11);
+    const headH=Math.max(minH, 7.5);
 
     const hex2rgb=h=>{const v=h.replace('#','');return [parseInt(v.substr(0,2),16),parseInt(v.substr(2,2),16),parseInt(v.substr(4,2),16)];};
-    const we=(d)=>{const wd=new Date(y,m,d).getDay();return wd===0||wd===6;};
+
+    const columnStyles={
+      0:{halign:'left', cellWidth:nameW, fontStyle:'bold', fontSize:6.5},
+      1:{halign:'left', cellWidth:roleW, fontSize:6, textColor:[91,97,114]}
+    };
+    for(let i=0;i<nd;i++) columnStyles[2+i]={cellWidth:dayW};
+    for(let i=0;i<3;i++) columnStyles[2+nd+i]={cellWidth:sumW, fontStyle:'bold'};
 
     doc.autoTable({
       head, body,
       startY: titleZone,
       margin: {left:margin, right:margin, top:titleZone, bottom:margin},
-      tableWidth: pageW - 2*margin,
-      styles: {fontSize:6.5, cellPadding:0.8, lineWidth:0.1, lineColor:[220,220,225], halign:'center', valign:'middle', minCellHeight:minH, overflow:'linebreak'},
-      headStyles: {fillColor:[139,92,246], textColor:255, fontStyle:'bold', fontSize:6.5, minCellHeight:minH*0.9},
-      columnStyles: {
-        0: {halign:'left', cellWidth:30, fontStyle:'bold', fontSize:7},
-        1: {halign:'left', cellWidth:22, fontSize:6.5}
-      },
+      tableWidth,
+      styles: {fontSize:6, cellPadding:0.6, lineWidth:0.1, lineColor:[236,238,243], halign:'center', valign:'middle', minCellHeight:minH, overflow:'linebreak'},
+      headStyles: {fillColor:[250,250,254], textColor:[91,97,114], fontStyle:'bold', fontSize:6.5, minCellHeight:headH, valign:'middle', lineColor:[236,238,243]},
+      columnStyles,
       didParseCell: (data)=>{
-        if(data.section==='body' && data.column.index>=2 && data.column.index<2+nd){
-          const dayNum=data.column.index-1;
-          const code=data.cell.raw;
-          const c=code?CMAP[code]:null;
-          if(c){data.cell.styles.fillColor=hex2rgb(c.bg);data.cell.styles.textColor=hex2rgb(c.fg);data.cell.styles.fontStyle='bold';}
-          else if(we(dayNum)) data.cell.styles.fillColor=[247,249,253];
+        if(data.section==='head'){
+          const meta=dayMeta[data.column.index];
+          if(meta){ // colonne jour : vider le texte (dessin manuel) + fond we/today
+            data.cell.text=[''];
+            data.cell.styles.fillColor = meta.today?[237,233,254] : (meta.weekend?[238,242,251]:[250,250,254]);
+          } else if(data.column.index>=2+nd){
+            data.cell.styles.textColor=[124,58,237]; // Trav./CP/Abs. en violet
+          }
+          return;
         }
-        if(data.section==='head' && data.column.index>=2 && data.column.index<2+nd){
-          const dayNum=data.column.index-1;
-          if(we(dayNum)) data.cell.styles.fillColor=[100,80,200];
+        if(data.section==='body'){
+          if(data.cell.colSpan && data.cell.colSpan>1) return; // séparateur de service
+          if(data.column.index>=2 && data.column.index<2+nd){
+            const meta=dayMeta[data.column.index];
+            const code=data.cell.raw;
+            const c=code?CMAP[code]:null;
+            if(c){data.cell.styles.fillColor=hex2rgb(c.bg);data.cell.styles.textColor=hex2rgb(c.fg);data.cell.styles.fontStyle='bold';}
+            else if(meta&&meta.weekend) data.cell.styles.fillColor=[247,249,253];
+          } else if(data.column.index>=2+nd){
+            data.cell.styles.fillColor=[252,252,255];
+            data.cell.styles.fontStyle='bold';
+          }
         }
-        if(data.section==='body' && data.column.index>=2+nd){
-          data.cell.styles.fillColor=[252,252,255];
-          data.cell.styles.fontStyle='bold';
+      },
+      didDrawCell: (data)=>{
+        // En-têtes de date : numéro (gras) + lettre du jour (gris), style identique au planning
+        if(data.section==='head'){
+          const meta=dayMeta[data.column.index];
+          if(meta){
+            const cx=data.cell.x+data.cell.width/2;
+            const numY=data.cell.y+data.cell.height*0.42;
+            const letY=data.cell.y+data.cell.height*0.80;
+            doc.setFont(undefined,'bold'); doc.setFontSize(7.5);
+            doc.setTextColor(...(meta.today?[124,58,237]:[91,97,114]));
+            doc.text(String(meta.d), cx, numY, {align:'center', baseline:'middle'});
+            doc.setFont(undefined,'normal'); doc.setFontSize(5);
+            doc.setTextColor(154,160,173);
+            doc.text(meta.letter, cx, letY, {align:'center', baseline:'middle'});
+          }
         }
       },
       didDrawPage: (data)=>{
