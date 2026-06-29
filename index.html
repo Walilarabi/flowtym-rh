@@ -267,6 +267,8 @@ td.day{width:44px;min-width:44px;text-align:center;font-weight:700;font-size:11p
 td.day.we{background:#f7f9fd}
 td.day.sel{box-shadow:inset 0 0 0 2px var(--violet);background:var(--violet-bg)!important}
 td.day.pend::after{content:"";position:absolute;top:2px;right:2px;width:6px;height:6px;border-radius:50%;background:var(--violet);box-shadow:0 0 0 1.5px #fff}
+td.day.has-note{cursor:help}
+td.day .ntick{position:absolute;bottom:0;right:0;width:0;height:0;border-left:7px solid transparent;border-bottom:7px solid #f59e0b;pointer-events:none}
 td.sum{text-align:center;background:#fcfcff;font-weight:600;font-variant-numeric:tabular-nums;min-width:38px}
 th.sumh{background:#f3f1fb;color:var(--violet-d)}
 tr.totals td{background:#f6f4fd;font-weight:700;border-top:2px solid var(--violet-bg);position:sticky;bottom:0;z-index:3}
@@ -421,6 +423,11 @@ tr.dept-sep td{pointer-events:none}
 .pop .pg{display:grid;grid-template-columns:1fr 1fr;gap:6px}
 .pop .pc{display:flex;align-items:center;gap:7px;padding:7px 9px;border-radius:9px;cursor:pointer;font-size:12px;font-weight:700}
 .pop .pc b{width:12px;height:12px;border-radius:4px;border:1px solid rgba(0,0,0,.08)}
+.pop .pop-note{margin-top:8px;border-top:1px solid var(--line);padding-top:8px}
+.pop .pop-note-lbl{font-size:11px;font-weight:700;color:var(--violet-d);margin-bottom:5px;display:flex;align-items:center;gap:5px}
+.pop .pop-note textarea{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:6px 8px;font-size:12px;font-family:inherit;resize:vertical;min-height:42px}
+.pop .pop-note .pn-save{margin-top:6px;width:100%;border:none;background:var(--violet);color:#fff;border-radius:8px;padding:7px;font-size:12px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px}
+.pop .pop-note .pn-save:hover{background:var(--violet-d)}
 .toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#15233b;color:#fff;padding:10px 16px;border-radius:10px;font-size:13px;font-weight:600;z-index:90;opacity:0;transition:.25s;pointer-events:none}
 .toast.on{opacity:1}
 /* ── Planning — sélecteur de vue ─────────────────────────────────────────── */
@@ -507,6 +514,7 @@ const CODES=[
   ['ABS','Abs. injust.',  '#FFD9D9','#7B0000','abs'],
   ['REC','Récupération',  '#D4F0FC','#0C4A6E','abs'],
   ['FORM','Formation',    '#FEF3C7','#92400E','abs'],
+  ['MAD','Mise à dispo',  '#CFFAFE','#155E75','ext'],
 ];
 const SHIFT_CODES=[
   ['M',  'Matin',          '#DBEAFE','#1e40af'],
@@ -631,7 +639,7 @@ async function makeRealBE(){
     async deleteEmployee(id){const {error}=await sb.from('employees').update({active:false}).eq('id',id);must(error,"Suppression collaborateur");},
     async listMonthPlanning(h,y,m){
       const s=iso(y,m,1), e=iso(y,m,dim(y,m));
-      const {data,error}=await sb.from('staff_planning').select('employee_id,day,status,duration,shift_label,shift_start,shift_end,break_minutes').eq('hotel_id',h).gte('day',s).lte('day',e);
+      const {data,error}=await sb.from('staff_planning').select('employee_id,day,status,duration,shift_label,shift_start,shift_end,break_minutes,note').eq('hotel_id',h).gte('day',s).lte('day',e);
       must(error,"Lecture du planning"); return data||[];
     },
     async listYearPlanning(h,year){
@@ -1386,6 +1394,7 @@ let absSubTab='requests'; // requests | calendar | balances
 let committed=new Map();        // 'eid|YYYY-MM-DD' -> {status, duration}
 const pending=new Map();        // 'eid|YYYY-MM-DD' -> code  ('' = repos/supprimer)
 const pendingShifts=new Map(); // 'eid|YYYY-MM-DD' -> shift_label ('' = effacer shift)
+const pendingNotes=new Map();  // 'eid|YYYY-MM-DD' -> note ('' = effacer commentaire)
 let editMode=false, fSearch='', fRole='', fDept='', fStatus='actif';
 const selection=new Set();
 let dragging=false, anchor=null, baseSel=new Set(), lastAnchor=null;
@@ -1398,6 +1407,9 @@ let curDayDate=null;    // Date : journée affichée en vue journalière
 
 const effective=k=>pending.has(k)?pending.get(k):(committed.get(k)?.status||'');
 const committedCode=k=>committed.get(k)?.status||'';
+const committedNote=k=>committed.get(k)?.note||'';
+const effectiveNote=k=>pendingNotes.has(k)?pendingNotes.get(k):committedNote(k);
+function setPendingNote(k,v){ v=(v||'').trim(); if(v===committedNote(k)) pendingNotes.delete(k); else pendingNotes.set(k,v); }
 
 /* ===================== LOGIN ===================== */
 function renderLogin(err){
@@ -2099,10 +2111,10 @@ async function loadRolePermissions(){
 }
 async function loadMonth(){
   closeReplPanel();
-  pending.clear(); selection.clear();
+  pending.clear(); pendingNotes.clear(); selection.clear();
   const rows=await BE.listMonthPlanning(hotelId,cur.getFullYear(),cur.getMonth());
   planningRows=rows;
-  committed=new Map(rows.map(r=>[r.employee_id+'|'+r.day,{status:r.status,duration:Number(r.duration)}]));
+  committed=new Map(rows.map(r=>[r.employee_id+'|'+r.day,{status:r.status,duration:Number(r.duration),note:r.note||'',shift_label:r.shift_label||''}]));
   renderCurrentPlanView();
 }
 
@@ -2187,12 +2199,16 @@ function render(){
       const st=c?`background:${c.bg};color:${c.fg}`:'';
       const effShift=pendingShifts.has(k)?pendingShifts.get(k):(planningRows.find(r=>r.employee_id===s.id&&r.day===iso(y,m,d))?.shift_label||'');
       const shBadge=effShift?`<span class="sbadge">${effShift}</span>`:'';
-      h+=`<td class="${cls}" data-k="${k}" data-r="${ri}" data-d="${d}" style="${st}">${code||''}${shBadge}</td>`;
+      const note=effectiveNote(k);
+      const noteMark=note?`<span class="ntick"></span>`:'';
+      const noteTitle=note?` title="${esc(note)}"`:'';
+      const cls2=cls+(note?' has-note':'')+((pendingNotes.has(k)&&pendingNotes.get(k)!==committedNote(k))?' pend':'');
+      h+=`<td class="${cls2}" data-k="${k}" data-r="${ri}" data-d="${d}" style="${st}"${noteTitle}>${code||''}${shBadge}${noteMark}</td>`;
       if(c){if(c.cat==='worked')trav++;else if(c.cat==='paid')cp++;else if(c.cat==='abs')abs++;} else rep++;}
     h+=`<td class="sum">${trav}</td><td class="sum">${cp}</td><td class="sum">${abs}</td><td class="sum">${rep}</td></tr>`;
   });
   const rows=[['Présents',k=>CMAP[effective(k)]?.cat==='worked'],
-              ['Absents', k=>{const c=CMAP[effective(k)];return c&&c.cat!=='worked'&&c.cat!=='holiday';}],
+              ['Absents', k=>{const c=CMAP[effective(k)];return c&&c.cat!=='worked'&&c.cat!=='holiday'&&c.cat!=='ext';}],
               ['CP',      k=>CMAP[effective(k)]?.cat==='paid']];
   rows.forEach(([lab,test])=>{h+=`<tr class="totals"><td class="stickL cDrag" style="background:#f6f4fd"></td><td class="stickL cEmp lab" style="left:0">${lab} / jour</td><td class="stickL cRole" style="background:#f6f4fd"></td>`;
     for(let d=1;d<=nd;d++){let n=0;visibleRows.forEach(s=>{if(test(s.id+'|'+iso(y,m,d)))n++;});h+=`<td>${n||''}</td>`;}
@@ -3650,7 +3666,11 @@ function applyShiftToSelection(shift){
 function setPending(k,code){ if(code===committedCode(k)) pending.delete(k); else pending.set(k,code); }
 
 function updateSaveBar(){
-  const n=[...pending.keys()].filter(k=>pending.get(k)!==committedCode(k)).length+pendingShifts.size;
+  const keys=new Set();
+  pending.forEach((v,k)=>{ if(v!==committedCode(k)) keys.add(k); });
+  pendingShifts.forEach((v,k)=>keys.add(k));
+  pendingNotes.forEach((v,k)=>{ if(v!==committedNote(k)) keys.add(k); });
+  const n=keys.size;
   $('pendCount').textContent=n; $('savebar').classList.toggle('on',n>0);
   $('pendCount').dataset.count=n;
 }
@@ -3665,6 +3685,8 @@ async function saveChanges(){
         const row={hotel_id:hotelId,employee_id:eid,day,status:v,duration:1.0};
         // porter le shift en attente si présent sur cette cellule
         if(pendingShifts.has(k)) row.shift_label=pendingShifts.get(k)||null;
+        // porter le commentaire en attente si présent sur cette cellule
+        if(pendingNotes.has(k)) row.note=pendingNotes.get(k)||null;
         ups.push(row);
       }
     }
@@ -3674,18 +3696,29 @@ async function saveChanges(){
       const [eid,day]=k.split('|');
       const cur=committed.get(k);
       if(!cur) continue;
-      ups.push({hotel_id:hotelId,employee_id:eid,day,status:cur.status,duration:cur.duration||1.0,shift_label:sh||null});
+      const row={hotel_id:hotelId,employee_id:eid,day,status:cur.status,duration:cur.duration||1.0,shift_label:sh||null};
+      if(pendingNotes.has(k)) row.note=pendingNotes.get(k)||null;
+      ups.push(row);
+    }
+    // commentaires sur cellules déjà committées (status & shift non modifiés)
+    for(const [k,note] of pendingNotes){
+      if(pending.has(k)||pendingShifts.has(k)) continue; // déjà traité ci-dessus
+      const [eid,day]=k.split('|');
+      const cur=committed.get(k);
+      if(!cur) continue; // un commentaire nécessite une case avec un statut
+      ups.push({hotel_id:hotelId,employee_id:eid,day,status:cur.status,duration:cur.duration||1.0,note:note||null});
     }
     await BE.savePlanning(hotelId,ups,dels);
     // Sauvegarde DB réussie — mettre à jour committed en mémoire
     try{
-      pending.forEach((v,k)=>{ if(v==='')committed.delete(k); else committed.set(k,{status:v,duration:1}); });
+      pending.forEach((v,k)=>{ if(v===''){committed.delete(k);} else { const c=committed.get(k)||{}; committed.set(k,{status:v,duration:1,note:c.note||'',shift_label:c.shift_label||''}); } });
       pendingShifts.forEach((sh,k)=>{ const c=committed.get(k); if(c) c.shift_label=sh||null; });
-      pending.clear(); pendingShifts.clear(); renderCurrentPlanView(); flash('Modifications enregistrées');
+      pendingNotes.forEach((note,k)=>{ const c=committed.get(k); if(c) c.note=note||''; });
+      pending.clear(); pendingShifts.clear(); pendingNotes.clear(); renderCurrentPlanView(); flash('Modifications enregistrées');
     }catch(e){
       // Mise à jour mémoire échouée après sauvegarde DB — recharger depuis la DB pour éviter la désync
       console.error('[saveChanges] sync post-save échouée, rechargement depuis DB',e);
-      pending.clear(); pendingShifts.clear();
+      pending.clear(); pendingShifts.clear(); pendingNotes.clear();
       await loadMonth();
       renderCurrentPlanView();
       flash('Sauvegardé — données rechargées depuis la base','w');
@@ -3697,7 +3730,7 @@ async function saveChanges(){
   }
   finally{$('saveBtn').disabled=false;}
 }
-function cancelChanges(){pending.clear(); pendingShifts.clear(); renderCurrentPlanView(); flash('Modifications annulées');}
+function cancelChanges(){pending.clear(); pendingShifts.clear(); pendingNotes.clear(); renderCurrentPlanView(); flash('Modifications annulées');}
 
 /* ===================== VUE TABLEAU DE BORD ===================== */
 const DAY_NAMES_FR=['dimanche','lundi','mardi','mercredi','jeudi','vendredi','samedi'];
@@ -13328,12 +13361,26 @@ function renderStub(title, icon, desc, bullets){
 /* ===================== POPOVER (édition simple) ===================== */
 const pop=$('pop'); let popK=null;
 function openPop(td){ popK=td.dataset.k;
+  const curNote=effectiveNote(popK);
   pop.innerHTML='<div class="pg">'+CODES.map(c=>`<div class="pc" data-code="${c[0]}" style="background:${c[2]};color:${c[3]}"><b style="background:${c[2]}"></b>${c[0]}</div>`).join('')
-    +`<div class="pc" data-code="" style="grid-column:span 2;justify-content:center;background:#f4f4f6;color:#5b6172"><i class="fa-solid fa-eraser"></i> Vide / Repos</div></div>`;
-  pop.querySelectorAll('.pc').forEach(el=>el.onclick=()=>{setPending(popK,el.dataset.code);closePop();render();});
+    +`<div class="pc" data-code="" style="grid-column:span 2;justify-content:center;background:#f4f4f6;color:#5b6172"><i class="fa-solid fa-eraser"></i> Vide / Repos</div></div>`
+    +`<div class="pop-note">
+        <div class="pop-note-lbl"><i class="fa-solid fa-comment-dots"></i> Commentaire</div>
+        <textarea id="popNote" rows="2" placeholder="Ex : Mise à dispo hôtel B — payée par hôtel A">${esc(curNote)}</textarea>
+        <button class="pn-save" id="popNoteSave"><i class="fa-solid fa-check"></i> Enregistrer le commentaire</button>
+      </div>`;
+  pop.querySelectorAll('.pc').forEach(el=>el.onclick=()=>{
+    const nv=$('popNote')?.value; if(nv!==undefined) setPendingNote(popK,nv);
+    setPending(popK,el.dataset.code); closePop(); render();
+  });
+  $('popNoteSave').onclick=()=>{
+    const v=$('popNote').value;
+    if(v.trim() && !effective(popK)){ flash('Ajoutez d\'abord un statut sur la case pour y attacher un commentaire.','w'); return; }
+    setPendingNote(popK,v); closePop(); render();
+  };
   const r=td.getBoundingClientRect();
-  pop.style.left=Math.min(r.left,innerWidth-232)+'px';
-  pop.style.top=Math.min(r.bottom+6,innerHeight-250)+'px'; pop.classList.add('on');
+  pop.style.left=Math.min(r.left,innerWidth-244)+'px';
+  pop.style.top=Math.min(r.bottom+6,innerHeight-380)+'px'; pop.classList.add('on');
 }
 function closePop(){pop.classList.remove('on');popK=null;}
 document.addEventListener('mousedown',e=>{if(!pop.contains(e.target)&&!e.target.closest('td.day'))closePop();});
@@ -14835,7 +14882,7 @@ async function exportExcel(){
 
     // 3 lignes de totaux par jour
     const totaux=[['Présents / jour',k=>CMAP[effective(k)]?.cat==='worked'],
-                  ['Absents / jour', k=>{const c=CMAP[effective(k)];return c&&c.cat!=='worked'&&c.cat!=='holiday';}],
+                  ['Absents / jour', k=>{const c=CMAP[effective(k)];return c&&c.cat!=='worked'&&c.cat!=='holiday'&&c.cat!=='ext';}],
                   ['CP / jour',      k=>CMAP[effective(k)]?.cat==='paid']];
     totaux.forEach(([lab,test])=>{const row=[lab,'',''];
       for(let d=1;d<=nd;d++){let n=0;visibleRows.forEach(s=>{if(test(s.id+'|'+iso(y,m,d)))n+=1;});row.push(n||'');}
