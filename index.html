@@ -15047,6 +15047,33 @@ async function exportPDF(){
       }
     });
 
+    // ── Légende des statuts (mêmes couleurs que le planning) ──
+    let ly=(doc.lastAutoTable?.finalY||titleZone)+6;
+    if(ly>pageH-margin-8){ doc.addPage(); ly=titleZone; }
+    doc.setFontSize(7); doc.setFont(undefined,'bold'); doc.setTextColor(91,97,114);
+    doc.text('Légende', margin, ly); ly+=3;
+    const swW=6, swH=4, gap=5, lineGap=6;
+    let lx=margin;
+    doc.setFont(undefined,'normal');
+    CODES.forEach(c=>{
+      doc.setFontSize(5.5); doc.setFont(undefined,'bold');
+      const label=': '+c[1];
+      doc.setFontSize(6.5); doc.setFont(undefined,'normal');
+      const labW=doc.getTextWidth(label);
+      const itemW=swW+1.2+labW+gap;
+      if(lx+itemW>pageW-margin){ lx=margin; ly+=lineGap; }
+      // pastille colorée
+      doc.setFillColor(...hex2rgb(c[2]));
+      doc.setDrawColor(236,238,243); doc.setLineWidth(0.1);
+      doc.roundedRect(lx, ly-swH+0.6, swW, swH, 0.8, 0.8, 'FD');
+      doc.setFontSize(5.2); doc.setFont(undefined,'bold'); doc.setTextColor(...hex2rgb(c[3]));
+      doc.text(c[0], lx+swW/2, ly-swH/2+0.6, {align:'center', baseline:'middle'});
+      // libellé
+      doc.setFontSize(6.5); doc.setFont(undefined,'normal'); doc.setTextColor(91,97,114);
+      doc.text(label, lx+swW+1.2, ly-1, {baseline:'alphabetic'});
+      lx+=itemW;
+    });
+
     doc.save(`planning_${safe(hotelName)}_${MONTHS[m]}_${y}.pdf`);
     flash('PDF exporté');
   }catch(e){flash('Erreur export PDF : '+(e.message||e));console.error(e);}
