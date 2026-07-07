@@ -14973,7 +14973,10 @@ async function exportPDF(){
       const r=[`${s.first_name} ${s.last_name}`, s.role||''];
       let trav=0,extra=0,cp=0,abs=0;
       const isCDI=(s.contract_type||'CDI')==='CDI';
-      for(let d=1;d<=nd;d++){const k=s.id+'|'+iso(y,m,d);const code=effective(k);r.push(code||'');
+      for(let d=1;d<=nd;d++){const k=s.id+'|'+iso(y,m,d);const code=effective(k);
+        // shift effectif (identique à la grille : pending puis valeur enregistrée)
+        const sh=pendingShifts.has(k)?pendingShifts.get(k):(planningRows.find(pr=>pr.employee_id===s.id&&pr.day===iso(y,m,d))?.shift_label||'');
+        r.push(sh?{content:code||'', _shift:sh}:(code||''));
         if(code==='PE')extra+=1;
         const c=code?CMAP[code]:null;
         if(c){if(c.cat==='worked')trav+=1;else if(c.cat==='paid')cp+=1;else if(c.cat==='abs')abs+=1;}}
@@ -15020,7 +15023,8 @@ async function exportPDF(){
           if(data.cell.colSpan && data.cell.colSpan>1) return; // séparateur de service
           if(data.column.index>=2 && data.column.index<2+nd){
             const meta=dayMeta[data.column.index];
-            const code=data.cell.raw;
+            const raw=data.cell.raw;
+            const code=(raw&&typeof raw==='object')?raw.content:raw;
             const c=code?CMAP[code]:null;
             if(c){data.cell.styles.fillColor=hex2rgb(c.bg);data.cell.styles.textColor=hex2rgb(c.fg);data.cell.styles.fontStyle='bold';}
             else if(meta&&meta.weekend) data.cell.styles.fillColor=[247,249,253];
@@ -15044,6 +15048,26 @@ async function exportPDF(){
             doc.setFont(undefined,'normal'); doc.setFontSize(5);
             doc.setTextColor(154,160,173);
             doc.text(meta.letter, cx, letY, {align:'center', baseline:'middle'});
+          }
+          return;
+        }
+        // Badge de shift (J, N, S…) dans le coin bas-droit de la case, style planning
+        if(data.section==='body'){
+          const raw=data.cell.raw;
+          if(raw && typeof raw==='object' && raw._shift){
+            const sc=SHIFT_CODES.find(x=>x[0]===raw._shift);
+            const bg=sc?hex2rgb(sc[2]):[230,230,235];
+            const fg=sc?hex2rgb(sc[3]):[60,60,60];
+            const lbl=String(raw._shift).slice(0,3);
+            doc.setFont(undefined,'bold'); doc.setFontSize(3.7);
+            const tw=doc.getTextWidth(lbl);
+            const bw=tw+1.1, bh=2.2;
+            const bx=data.cell.x+data.cell.width-bw-0.4;
+            const by=data.cell.y+data.cell.height-bh-0.4;
+            doc.setFillColor(...bg);
+            doc.roundedRect(bx, by, bw, bh, 0.4, 0.4, 'F');
+            doc.setTextColor(...fg);
+            doc.text(lbl, bx+bw/2, by+bh/2+0.15, {align:'center', baseline:'middle'});
           }
         }
       },
