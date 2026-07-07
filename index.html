@@ -2160,7 +2160,7 @@ function render(){
     updateSaveBar(); applyStickyWidths(); return;
   } else { const e=$('grid').parentElement.querySelector('.empty'); if(e)e.remove(); }
 
-  const sums=['Trav.','CP','Abs.','Repos'];
+  const sums=['Trav.','Extra','CP','Abs.','Repos'];
   let h='<thead><tr><th class="stickL cDrag" rowspan="2" style="width:24px;padding:0"></th>'
        +'<th class="stickL cEmp" rowspan="2" style="text-align:left">Collaborateur</th>'
        +'<th class="stickL cRole" rowspan="2" style="text-align:left">Rôle</th>';
@@ -2182,7 +2182,7 @@ function render(){
     const deptName=s.department||'';
     if(deptName!==lastDept){
       lastDept=deptName;
-      h+=`<tr class="dept-sep"><td colspan="${nd+7}" style="background:#f1f0fb;font-size:11px;font-weight:700;color:var(--violet-d);padding:4px 10px;letter-spacing:.05em;text-transform:uppercase">${deptName||'Sans service'}</td></tr>`;
+      h+=`<tr class="dept-sep"><td colspan="${nd+8}" style="background:#f1f0fb;font-size:11px;font-weight:700;color:var(--violet-d);padding:4px 10px;letter-spacing:.05em;text-transform:uppercase">${deptName||'Sans service'}</td></tr>`;
     }
     const _empAlerts=_planLegalAlerts(s.id,y,m,nd,_hpdMap.get(s.id));
     const _alertBadge=_planAlertBadge(_empAlerts);
@@ -2191,7 +2191,8 @@ function render(){
       +`<td class="stickL cEmp"><div class="emp" data-emp="${s.id}"><div class="av" style="background:${avBg(s)}">${avInner(s)}</div>`
       +`<div><div class="nm">${s.first_name} ${s.last_name}${(s.status||'')==='parti'?' <span style="font-size:9.5px;color:var(--red);font-weight:700;background:var(--red-bg);padding:1px 5px;border-radius:5px;margin-left:4px">PARTI</span>':(s.status||'')==='pause'?' <span style="font-size:9.5px;color:#92400E;font-weight:700;background:#FEF3C7;padding:1px 5px;border-radius:5px;margin-left:4px">EN PAUSE</span>':''}${_alertBadge}</div><div class="sub">${s.department||'—'} · ${s.contract_type||'CDI'}</div></div></div></td>`
       +`<td class="stickL cRole">${s.role||'—'}</td>`;
-    let trav=0,cp=0,abs=0,rep=0;
+    let trav=0,extra=0,cp=0,abs=0,rep=0;
+    const _isCDI=(s.contract_type||'CDI')==='CDI';
     for(let d=1;d<=nd;d++){const k=s.id+'|'+iso(y,m,d);const code=effective(k);const c=code?CMAP[code]:null;
       const wd=new Date(y,m,d).getDay(),we=wd===0||wd===6;
       const tod=isThisMonth&&d===toDay;
@@ -2204,15 +2205,16 @@ function render(){
       const noteTitle=note?` title="${esc(note)}"`:'';
       const cls2=cls+(note?' has-note':'')+((pendingNotes.has(k)&&pendingNotes.get(k)!==committedNote(k))?' pend':'');
       h+=`<td class="${cls2}" data-k="${k}" data-r="${ri}" data-d="${d}" style="${st}"${noteTitle}>${code||''}${shBadge}${noteMark}</td>`;
+      if(code==='PE')extra++;
       if(c){if(c.cat==='worked')trav++;else if(c.cat==='paid')cp++;else if(c.cat==='abs')abs++;} else rep++;}
-    h+=`<td class="sum">${trav}</td><td class="sum">${cp}</td><td class="sum">${abs}</td><td class="sum">${rep}</td></tr>`;
+    h+=`<td class="sum">${trav}</td><td class="sum">${_isCDI?extra:''}</td><td class="sum">${cp}</td><td class="sum">${abs}</td><td class="sum">${rep}</td></tr>`;
   });
   const rows=[['Présents',k=>CMAP[effective(k)]?.cat==='worked'],
               ['Absents', k=>{const c=CMAP[effective(k)];return c&&c.cat!=='worked'&&c.cat!=='holiday'&&c.cat!=='ext';}],
               ['CP',      k=>CMAP[effective(k)]?.cat==='paid']];
   rows.forEach(([lab,test])=>{h+=`<tr class="totals"><td class="stickL cDrag" style="background:#f6f4fd"></td><td class="stickL cEmp lab" style="left:0">${lab} / jour</td><td class="stickL cRole" style="background:#f6f4fd"></td>`;
     for(let d=1;d<=nd;d++){let n=0;visibleRows.forEach(s=>{if(test(s.id+'|'+iso(y,m,d)))n++;});h+=`<td>${n||''}</td>`;}
-    h+=`<td colspan="4"></td></tr>`;});
+    h+=`<td colspan="5"></td></tr>`;});
   h+='</tbody>';
   const gw=$('grid').parentElement,sl=gw.scrollLeft,stp=gw.scrollTop;
   $('grid').innerHTML=h; gw.scrollLeft=sl; gw.scrollTop=stp;
@@ -14865,18 +14867,20 @@ async function exportExcel(){
     // En-tête : Collaborateur, Rôle, Service, jours, puis totaux
     const header=['Collaborateur','Rôle','Service'];
     for(let d=1;d<=nd;d++){const wd=new Date(y,m,d).getDay();header.push(`${d} ${WD[wd]}`);}
-    header.push('Travaillés','CP','Absences','Repos');
+    header.push('Travaillés','Extra','CP','Absences','Repos');
 
     const rows=[header];
     visibleRows.forEach(s=>{
       const row=[`${s.first_name} ${s.last_name}`,s.role||'',s.department||''];
-      let trav=0,cp=0,abs=0,rep=0;
+      let trav=0,extra=0,cp=0,abs=0,rep=0;
+      const isCDI=(s.contract_type||'CDI')==='CDI';
       for(let d=1;d<=nd;d++){
         const k=s.id+'|'+iso(y,m,d);const code=effective(k);row.push(code||'');
+        if(code==='PE')extra+=1;
         const c=code?CMAP[code]:null;
         if(c){if(c.cat==='worked')trav+=1;else if(c.cat==='paid')cp+=1;else if(c.cat==='abs')abs+=1;} else rep+=1;
       }
-      row.push(trav,cp,abs,rep);
+      row.push(trav, isCDI?extra:'', cp,abs,rep);
       rows.push(row);
     });
 
@@ -14886,10 +14890,10 @@ async function exportExcel(){
                   ['CP / jour',      k=>CMAP[effective(k)]?.cat==='paid']];
     totaux.forEach(([lab,test])=>{const row=[lab,'',''];
       for(let d=1;d<=nd;d++){let n=0;visibleRows.forEach(s=>{if(test(s.id+'|'+iso(y,m,d)))n+=1;});row.push(n||'');}
-      row.push('','','','');rows.push(row);});
+      row.push('','','','','');rows.push(row);});
 
     const ws=XLSX.utils.aoa_to_sheet(rows);
-    ws['!cols']=[{wch:24},{wch:18},{wch:14}].concat(Array(nd).fill({wch:6}),[{wch:11},{wch:6},{wch:10},{wch:7}]);
+    ws['!cols']=[{wch:24},{wch:18},{wch:14}].concat(Array(nd).fill({wch:6}),[{wch:11},{wch:7},{wch:6},{wch:10},{wch:7}]);
     ws['!freeze']={xSplit:3,ySplit:1}; // figer la première ligne et les 3 colonnes de gauche (Excel/Calc)
 
     const wb=XLSX.utils.book_new();
@@ -14935,9 +14939,10 @@ async function exportPDF(){
 
     // Largeurs de colonnes — toutes les colonnes "jour" strictement égales
     const nameW=32, roleW=22, sumW=8;
+    const nSum=4; // Trav. · Extra · CP · Abs.
     const tableWidth=pageW-2*margin;
-    const dayW=(tableWidth-nameW-roleW-3*sumW)/nd;
-    const totalCols=2+nd+3;
+    const dayW=(tableWidth-nameW-roleW-nSum*sumW)/nd;
+    const totalCols=2+nd+nSum;
 
     // Métadonnées des colonnes jour : numéro, lettre, week-end, aujourd'hui
     const today=new Date();
@@ -14950,7 +14955,7 @@ async function exportPDF(){
 
     const head=[['Collaborateur','Rôle']];
     for(let d=1;d<=nd;d++) head[0].push(''); // en-têtes de date dessinés manuellement
-    head[0].push('Trav.','CP','Abs.');
+    head[0].push('Trav.','Extra','CP','Abs.');
 
     // Corps avec séparateurs de service (lignes minces comme dans l'app)
     const body=[];
@@ -14966,11 +14971,13 @@ async function exportPDF(){
         }}]);
       }
       const r=[`${s.first_name} ${s.last_name}`, s.role||''];
-      let trav=0,cp=0,abs=0;
+      let trav=0,extra=0,cp=0,abs=0;
+      const isCDI=(s.contract_type||'CDI')==='CDI';
       for(let d=1;d<=nd;d++){const k=s.id+'|'+iso(y,m,d);const code=effective(k);r.push(code||'');
+        if(code==='PE')extra+=1;
         const c=code?CMAP[code]:null;
         if(c){if(c.cat==='worked')trav+=1;else if(c.cat==='paid')cp+=1;else if(c.cat==='abs')abs+=1;}}
-      r.push(trav||'',cp||'',abs||'');
+      r.push(trav||'', isCDI?(extra||''):'', cp||'', abs||'');
       body.push(r);
     });
 
@@ -14988,7 +14995,7 @@ async function exportPDF(){
       1:{halign:'left', cellWidth:roleW, fontSize:6, textColor:[91,97,114]}
     };
     for(let i=0;i<nd;i++) columnStyles[2+i]={cellWidth:dayW};
-    for(let i=0;i<3;i++) columnStyles[2+nd+i]={cellWidth:sumW, fontStyle:'bold'};
+    for(let i=0;i<nSum;i++) columnStyles[2+nd+i]={cellWidth:sumW, fontStyle:'bold'};
 
     doc.autoTable({
       head, body,
