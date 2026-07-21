@@ -127,6 +127,30 @@ html,body{height:100%;background:var(--bg);font-family:-apple-system,BlinkMacSys
 .cal-legend{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px}
 .cal-legend span{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--ink2)}
 .cal-legend b{width:12px;height:12px;border-radius:3px;display:inline-block}
+/* ── Multi-établissements ── */
+.cal-day.clickable{cursor:pointer}
+.cal-day .hb{font-size:8px;font-weight:800;line-height:13px;border-radius:4px;padding:0 4px;margin-top:1px;letter-spacing:.3px}
+.cal-day .cst{font-size:8.5px;font-weight:800;margin-top:1px}
+.plan-filter{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:12px;padding:7px 10px;font-size:12.5px;background:var(--white);color:var(--ink);box-shadow:var(--shadow);max-width:100%}
+.plan-filter i{color:var(--ink2);font-size:12px}
+.plan-filter select{border:none;background:none;font:inherit;color:inherit;outline:none;min-width:0;max-width:210px}
+.hotel-legend{display:flex;flex-direction:column;gap:9px;margin-bottom:16px}
+.hotel-legend .row{display:flex;align-items:center;gap:10px}
+.hotel-legend .pill{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;font-size:11px;font-weight:800;color:#fff;flex-shrink:0}
+.hotel-legend .nm{font-size:13px;font-weight:700;line-height:1.25}
+.hotel-legend .sub{font-size:11px;color:var(--ink2)}
+.hsum .hsum-h{display:flex;align-items:center;gap:8px;margin:16px 0 8px}
+.hsum .hsum-h:first-child{margin-top:2px}
+.hsum .hsum-h .pill{width:24px;height:24px;border-radius:7px;display:grid;place-items:center;font-size:10px;font-weight:800;color:#fff;flex-shrink:0}
+.hsum .hsum-h .nm{font-size:13.5px;font-weight:800}
+.plan-note{display:flex;gap:8px;align-items:center;background:var(--vi-l);color:var(--vi-d);border-radius:12px;padding:10px 12px;font-size:12.5px;margin-top:14px}
+.dtl-row{display:flex;gap:12px;padding:11px 0;border-bottom:1px solid var(--line)}
+.dtl-row:last-child{border-bottom:none}
+.dtl-row .k{font-size:11px;color:var(--ink2);text-transform:uppercase;letter-spacing:.03em;width:88px;flex-shrink:0;padding-top:2px}
+.dtl-row .val{font-size:14px;font-weight:600;flex:1}
+.mission-badge{display:inline-flex;align-items:center;gap:4px;background:var(--amber-bg);color:var(--amber);font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;margin-left:6px}
+.cal-tip{position:fixed;z-index:250;background:#111827;color:#fff;border-radius:10px;padding:8px 10px;font-size:11.5px;line-height:1.55;pointer-events:none;box-shadow:0 8px 24px rgba(0,0,0,.25);max-width:210px;display:none}
+.cal-tip b{font-weight:800}
 
 /* ── Pointage ────────────────────────────────────────────────────────────── */
 .clock-card{text-align:center;padding:28px 16px}
@@ -292,8 +316,8 @@ if(isTest){
       single:     ()=>Promise.resolve(window.__sb?.[tbl]?.(q,'single')     ||{data:null,error:null}),
       maybeSingle:()=>Promise.resolve(window.__sb?.[tbl]?.(q,'maybeSingle')||{data:null,error:null}),
       insert: (r) =>Promise.resolve(window.__sbIns?.(tbl,r)||{data:null,error:null}),
-      update: ()  =>Promise.resolve({data:null,error:null}),
-      delete: ()  =>Promise.resolve({data:null,error:null}),
+      update: ()  =>c,  // chaînable : .update(...).eq(...).then(...)
+      delete: ()  =>c,
       then(res,rej){
         const d=window.__sb?.[tbl]?.(q,'select');
         return (d?Promise.resolve(d):Promise.resolve(_count?{data:[],count:0,error:null}:{data:[],error:null})).then(res,rej);
@@ -309,6 +333,7 @@ if(isTest){
       signOut:          async()=>({error:null}),
     },
     from:_mkChain,
+    rpc:(fn,args)=>Promise.resolve(window.__rpc?.(fn,args)||{data:[],error:null}),
     storage:{from:()=>({upload:async()=>({data:{},error:null}),getPublicUrl:()=>({data:{publicUrl:'#'}}),createSignedUrl:async()=>({data:{signedUrl:'#'},error:null})})},
     functions:{invoke:async()=>({data:null,error:null})},
     channel:()=>({on:()=>({subscribe:()=>{}}),subscribe:()=>{}}),
@@ -352,6 +377,53 @@ let session=null, employee=null, hotel=null;
 let recoveryMode=false;
 let currentTab='planning';
 let planMonth=new Date();
+
+// ── Multi-établissements ──────────────────────────────────────────────────────
+let _portalHotels=null;              // liste brute renvoyée par pl_portal_hotels()
+let _hotelMeta=new Map();            // hotel_id -> {id,name,city,address,principal,code,fg,bg}
+let _planFilter='';                  // '' = tous les établissements, sinon hotel_id
+let _monthRows=[];                   // lignes de planning du mois affiché (tous hôtels)
+
+// Palette : le principal est vert ; les secondaires prennent des couleurs stables et distinctes.
+const HOTEL_PRINCIPAL_COLOR={fg:'#16a34a',bg:'#f0fdf4'};
+const HOTEL_PALETTE=[
+  {fg:'#7c3aed',bg:'#f5f3ff'}, // violet
+  {fg:'#2563eb',bg:'#eff6ff'}, // bleu
+  {fg:'#ea580c',bg:'#fff7ed'}, // orange
+  {fg:'#0d9488',bg:'#f0fdfa'}, // teal
+  {fg:'#db2777',bg:'#fdf2f8'}, // rose
+  {fg:'#ca8a04',bg:'#fefce8'}, // ambre
+  {fg:'#4f46e5',bg:'#eef2ff'}, // indigo
+];
+// Code établissement dérivé du nom (aucune colonne dédiée en base) : initiales des mots significatifs.
+function hotelCode(name){
+  const stop=new Set(['du','de','des','la','le','les','et','à','au','aux','l','d','the','of']);
+  const words=String(name||'').split(/[\s'’-]+/).filter(w=>w && !stop.has(w.normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase()));
+  if(words.length>=2) return (words[0][0]+words[1][0]).toUpperCase();
+  if(words.length===1) return words[0].slice(0,2).toUpperCase();
+  return '??';
+}
+// Charge (une seule fois) les établissements du salarié et construit la table de métadonnées.
+async function loadPortalHotels(){
+  if(_portalHotels) return _portalHotels;
+  const {data,error}=await sb.rpc('pl_portal_hotels');
+  if(error){ console.warn('[portal] pl_portal_hotels:', error.message); _portalHotels=[]; return _portalHotels; }
+  _portalHotels=data||[];
+  // Assignation de couleurs stable : principal en vert, secondaires triés par nom
+  const secondaries=_portalHotels.filter(h=>!h.is_principal).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  _hotelMeta=new Map();
+  _portalHotels.forEach(h=>{
+    let col;
+    if(h.is_principal) col=HOTEL_PRINCIPAL_COLOR;
+    else { const i=secondaries.findIndex(x=>x.id===h.id); col=HOTEL_PALETTE[i % HOTEL_PALETTE.length]; }
+    _hotelMeta.set(h.id,{id:h.id,name:h.name,city:h.city,address:h.address,principal:!!h.is_principal,code:hotelCode(h.name),fg:col.fg,bg:col.bg});
+  });
+  return _portalHotels;
+}
+// Métadonnées d'un hôtel, avec repli si l'hôtel n'est pas encore connu (couleur neutre).
+function hmeta(hid){
+  return _hotelMeta.get(hid) || {id:hid,name:'Établissement',city:'',address:'',principal:false,code:'—',fg:'#6b7280',bg:'#f3f4f6'};
+}
 
 const CMAP={
   P:{bg:'#E8F5E9',fg:'#1b5e20',lbl:'Présent'},
@@ -475,9 +547,10 @@ async function loadEmployee(){
     // must_change_password. Ce formulaire n'est présenté qu'en mode récupération (recoveryMode),
     // c.-à-d. uniquement à l'ouverture d'un lien d'invitation/récupération valide.
 
-    // Charger l'hôtel
-    const {data:h} = await sb.from('hotels').select('id,name,city').eq('id',employee.hotel_id).single();
-    hotel = h;
+    // Charger les établissements du salarié (principal + secondaires) via la fonction sécurisée.
+    // Un salarié portail ne peut pas lire la table hotels directement (RLS manager) → RPC dédiée.
+    await loadPortalHotels();
+    hotel = _hotelMeta.get(employee.hotel_id) || _portalHotels.find(x=>x.is_principal) || null;
 
     // Mettre à jour last_login_at + journal d'audit
     sb.from('employees').update({last_login_at: new Date().toISOString()}).eq('id',employee.id).then(null,()=>{});
@@ -763,22 +836,42 @@ async function refreshBadges(){
 }
 
 // ── Planning ──────────────────────────────────────────────────────────────────
+const PL_WORKED=['P','PE'];
+const PL_ABS=['MAL','ABS','CSS','AE','MAT','PAT'];
+const fmtHM=t=> t ? String(t).slice(0,5).replace(':','h') : '';
+// Présence en heures : 3 -> "3H", 2.5 -> "2,5H" (aligné sur le format du planning manager)
+const fmtHours=h=> !h ? '' : (Math.round(Number(h)*100)/100).toString().replace('.',',')+'H';
+
 async function renderPlanning(){
   const v=$('view');
+  await loadPortalHotels(); // établissements (principal + secondaires) — mis en cache
+  // Options du filtre : principal d'abord, puis secondaires par nom
+  const ordered=[..._portalHotels].sort((a,b)=> (b.is_principal?1:0)-(a.is_principal?1:0) || (a.name||'').localeCompare(b.name||''));
+  const filterOpts=`<option value="">Tous les établissements</option>`+
+    ordered.map(h=>`<option value="${h.id}" ${_planFilter===h.id?'selected':''}>${esc(h.name)}</option>`).join('');
   v.innerHTML=`<div class="page">
-    <div class="page-title">Mon planning</div>
-    <div class="page-sub">${esc(employee.first_name)} · ${esc(hotel?.name||'')}</div>
-    <div class="month-nav">
-      <button onclick="prevMonth()"><i class="fa-solid fa-chevron-left"></i></button>
-      <span class="lbl" id="monthLbl"></span>
-      <button onclick="nextMonth()"><i class="fa-solid fa-chevron-right"></i></button>
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap">
+      <div>
+        <div class="page-title">Mon planning</div>
+        <div class="page-sub" style="margin-bottom:0">Retrouvez ici l'ensemble de vos plannings sur vos différents établissements.</div>
+      </div>
+      ${ordered.length>1?`<label class="plan-filter"><i class="fa-solid fa-filter"></i>
+        <select id="planFilter">${filterOpts}</select></label>`:''}
     </div>
-    <div class="cal-grid" id="calGrid">
-      <div class="loading"><div class="spinner"></div></div>
+    <div class="card" style="margin-top:16px">
+      <div class="month-nav" style="margin-bottom:14px">
+        <button onclick="prevMonth()"><i class="fa-solid fa-chevron-left"></i></button>
+        <span class="lbl" id="monthLbl"></span>
+        <button onclick="nextMonth()"><i class="fa-solid fa-chevron-right"></i></button>
+      </div>
+      <div class="cal-grid" id="calGrid"><div class="loading"><div class="spinner"></div></div></div>
+      <div class="hotel-legend" id="calLegend" style="margin-bottom:0"></div>
     </div>
-    <div class="cal-legend" id="calLegend"></div>
-    <div class="card" id="monthStats"></div>
+    <div class="card hsum" id="monthStats"></div>
+    <div id="planNote"></div>
   </div>`;
+  const fsel=$('planFilter');
+  if(fsel) fsel.onchange=()=>{ _planFilter=fsel.value; loadMonthCal(); };
   await loadMonthCal();
 }
 
@@ -786,80 +879,153 @@ async function loadMonthCal(){
   const y=planMonth.getFullYear(), m=planMonth.getMonth();
   const lbl=$('monthLbl');
   if(lbl) lbl.textContent = planMonth.toLocaleDateString('fr-FR',{month:'long',year:'numeric'});
+  await loadPortalHotels();
 
   const from=iso(y,m,1), to=iso(y,m,dim(y,m));
+  // Une seule requête pour le mois affiché — la RLS portail renvoie les lignes de TOUS les hôtels du salarié
   const {data:rows} = await sb.from('staff_planning')
-    .select('day,status,shift_label')
+    .select('day,status,shift_label,shift_start,shift_end,hotel_id,note,hours')
     .eq('employee_id', employee.id)
     .gte('day',from).lte('day',to);
+  _monthRows = rows||[];
 
-  const dayMap = new Map((rows||[]).map(r=>[r.day,r]));
+  // Regrouper par jour (un même jour peut avoir des lignes dans des hôtels différents)
+  const dayMap=new Map();
+  _monthRows.forEach(r=>{ if(!dayMap.has(r.day)) dayMap.set(r.day,[]); dayMap.get(r.day).push(r); });
+
   const grid=$('calGrid'); if(!grid) return;
-  const todayStr = new Date().toISOString().slice(0,10);
-
+  const todayStr=new Date().toISOString().slice(0,10);
   const DAYS=['L','M','M','J','V','S','D'];
-  let h = DAYS.map(d=>`<div class="cal-head">${d}</div>`).join('');
-
-  // Padding début
-  const firstWd = (new Date(y,m,1).getDay()+6)%7; // 0=lun
+  let h=DAYS.map(d=>`<div class="cal-head">${d}</div>`).join('');
+  const firstWd=(new Date(y,m,1).getDay()+6)%7;
   for(let i=0;i<firstWd;i++) h+=`<div class="cal-day other-month"></div>`;
 
   const nd=dim(y,m);
-  const usedCodes=new Set();
+  const usedHotels=new Set();
   for(let d=1;d<=nd;d++){
     const ds=iso(y,m,d);
-    const row=dayMap.get(ds);
-    const status=row?.status||'';
-    const shift=row?.shift_label||'';
-    const c=CMAP[status];
-    const wd=(new Date(y,m,d).getDay()+6)%7;
-    const we=wd>=5;
-    const isToday=ds===todayStr;
-    const st=c?`background:${c.bg};color:${c.fg}`:'background:#f9fafb;color:#9ca3af';
-    if(c) usedCodes.add(status);
-    const shiftBadge=shift?`<span class="sb" style="background:${SHIFT_BG[shift]||'#eee'};color:${SHIFT_FG[shift]||'#333'}">${shift}</span>`:'';
-    h+=`<div class="cal-day ${we?'weekend':''} ${isToday?'today':''}" style="${st}">
-      <span class="dn">${d}</span>
-      ${status?`<span style="font-size:8px;font-weight:800">${esc(status)}</span>`:''}
-      ${shiftBadge}
+    let dayRows=dayMap.get(ds)||[];
+    if(_planFilter) dayRows=dayRows.filter(r=>r.hotel_id===_planFilter);
+    // Ligne principale du jour : priorité au travail (P/PE), sinon la première
+    const row=dayRows.find(r=>PL_WORKED.includes(r.status))||dayRows[0];
+    const wd=(new Date(y,m,d).getDay()+6)%7, we=wd>=5, isToday=ds===todayStr;
+
+    let bg='#f9fafb', fg='#9ca3af', pill='', stLbl='';
+    if(row){
+      const hm=hmeta(row.hotel_id); usedHotels.add(row.hotel_id);
+      pill=`<span class="hb" style="background:${hm.fg}">${hm.code}</span>`;
+      if(PL_WORKED.includes(row.status)){ bg=hm.bg; fg='#374151'; }
+      else { const c=CMAP[row.status]; if(c){ bg=c.bg; fg=c.fg; } }
+      const showVal=(row.hours>0)?fmtHours(row.hours):esc(row.status);
+      stLbl=`<span class="cst">${showVal}</span>`;
+    }
+    h+=`<div class="cal-day ${we?'weekend':''} ${isToday?'today':''} ${row?'clickable':''}"
+          style="background:${bg};color:${fg}" ${row?`data-day="${ds}"`:''}>
+      <span class="dn">${d}</span>${pill}${stLbl}
     </div>`;
   }
   grid.innerHTML=h;
+  grid.querySelectorAll('.cal-day.clickable').forEach(el=>{
+    el.addEventListener('click',()=>openDayDetail(el.dataset.day));
+    el.addEventListener('mouseenter',e=>showDayTip(e,el.dataset.day));
+    el.addEventListener('mousemove',moveDayTip);
+    el.addEventListener('mouseleave',hideDayTip);
+  });
 
-  // Légende
+  // ── Légende par établissement (mêmes couleurs que le calendrier) ──
   const leg=$('calLegend');
-  if(leg) leg.innerHTML=[...usedCodes].map(code=>{const c=CMAP[code];return c?
-    `<span><b style="background:${c.bg};border:1px solid rgba(0,0,0,.08)"></b>${c.lbl}</span>`:''
-  }).join('');
+  const legendHotels=[..._portalHotels]
+    .filter(x=> usedHotels.has(x.id) || (!_planFilter && x.is_principal))
+    .sort((a,b)=>(b.is_principal?1:0)-(a.is_principal?1:0)||(a.name||'').localeCompare(b.name||''));
+  if(leg) leg.innerHTML=legendHotels.map(x=>{const hm=hmeta(x.id);
+    return `<div class="row"><div class="pill" style="background:${hm.fg}">${hm.code}</div>
+      <div><div class="nm">${esc(hm.name)}</div><div class="sub">${hm.principal?'Votre établissement principal':'Établissement secondaire'}</div></div></div>`;
+  }).join('')||`<div class="sub" style="color:var(--ink2);font-size:12px">Aucun planning ce mois-ci.</div>`;
 
-  // Stats du mois
+  // ── Résumé du mois, découpé par établissement ──
   const stats=$('monthStats'); if(!stats) return;
-  const rowArr=rows||[];
-  const trav=rowArr.filter(r=>['P','PE'].includes(r.status)).length;
-  const cp=rowArr.filter(r=>r.status==='CP').length;
-  const abs=rowArr.filter(r=>['MAL','ABS','CSS','AE','MAT'].includes(r.status)).length;
-  const rep=nd-(rowArr.length);
-  stats.innerHTML=`
-    <div class="card-title"><i class="fa-solid fa-chart-pie"></i>Résumé du mois</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-      <div style="background:#f0fdf4;border-radius:10px;padding:10px;text-align:center">
-        <div style="font-size:22px;font-weight:800;color:#16a34a">${trav}</div>
-        <div style="font-size:11px;color:#6b7280">Jours travaillés</div>
-      </div>
-      <div style="background:#eff6ff;border-radius:10px;padding:10px;text-align:center">
-        <div style="font-size:22px;font-weight:800;color:#1d4ed8">${cp}</div>
-        <div style="font-size:11px;color:#6b7280">Congés payés</div>
-      </div>
-      <div style="background:#fef2f2;border-radius:10px;padding:10px;text-align:center">
-        <div style="font-size:22px;font-weight:800;color:#dc2626">${abs}</div>
-        <div style="font-size:11px;color:#6b7280">Absences</div>
-      </div>
-      <div style="background:#f9fafb;border-radius:10px;padding:10px;text-align:center">
-        <div style="font-size:22px;font-weight:800;color:#9ca3af">${rep}</div>
-        <div style="font-size:11px;color:#6b7280">Repos</div>
-      </div>
-    </div>`;
+  const occupiedDays=new Set(_monthRows.filter(r=>!_planFilter||r.hotel_id===_planFilter).map(r=>r.day)).size;
+  const sumHotels=legendHotels.length?legendHotels:_portalHotels.filter(x=>x.is_principal);
+  let statsHtml=`<div class="card-title"><i class="fa-solid fa-chart-pie"></i>Résumé du mois</div>`;
+  sumHotels.forEach(x=>{
+    const hm=hmeta(x.id);
+    const hr=_monthRows.filter(r=>r.hotel_id===x.id);
+    const trav=hr.filter(r=>PL_WORKED.includes(r.status)).length;
+    const cp=hr.filter(r=>r.status==='CP').length;
+    const abs=hr.filter(r=>PL_ABS.includes(r.status)).length;
+    const rep=hm.principal?Math.max(0,nd-occupiedDays):0; // le repos n'a de sens qu'au niveau principal
+    statsHtml+=`
+      <div class="hsum-h"><div class="pill" style="background:${hm.fg}">${hm.code}</div><div class="nm">${esc(hm.name)}</div></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div style="background:var(--green-bg);border-radius:10px;padding:10px;text-align:center"><div style="font-size:22px;font-weight:800;color:var(--green)">${trav}</div><div style="font-size:11px;color:#6b7280">Jours planifiés</div></div>
+        <div style="background:#eff6ff;border-radius:10px;padding:10px;text-align:center"><div style="font-size:22px;font-weight:800;color:#1d4ed8">${cp}</div><div style="font-size:11px;color:#6b7280">Congés payés</div></div>
+        <div style="background:var(--red-bg);border-radius:10px;padding:10px;text-align:center"><div style="font-size:22px;font-weight:800;color:var(--red)">${abs}</div><div style="font-size:11px;color:#6b7280">Absences</div></div>
+        <div style="background:#f9fafb;border-radius:10px;padding:10px;text-align:center"><div style="font-size:22px;font-weight:800;color:#9ca3af">${rep}</div><div style="font-size:11px;color:#6b7280">Repos</div></div>
+      </div>`;
+  });
+  stats.innerHTML=statsHtml;
+
+  // ── Notification : nombre d'établissements secondaires programmés ce mois-ci ──
+  const noteEl=$('planNote');
+  if(noteEl){
+    // Fait mensuel indépendant du filtre : nb d'établissements secondaires réellement programmés ce mois
+    const others=new Set(_monthRows.map(r=>r.hotel_id).filter(id=>!hmeta(id).principal)).size;
+    noteEl.innerHTML = others>0
+      ? `<div class="plan-note"><i class="fa-solid fa-circle-info"></i> Vous êtes programmé dans ${others} autre établissement${others>1?'s':''} ce mois-ci.</div>`
+      : '';
+  }
 }
+
+// Panneau latéral (bottom-sheet) — détail d'une journée
+function openDayDetail(ds){
+  const rows=_monthRows.filter(r=>r.day===ds && (!_planFilter||r.hotel_id===_planFilter));
+  if(!rows.length) return;
+  const dateLbl=new Date(ds+'T00:00').toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  const blocks=rows.map(row=>{
+    const hm=hmeta(row.hotel_id);
+    const worked=PL_WORKED.includes(row.status);
+    const horaire=(row.shift_start||row.shift_end)?`${fmtHM(row.shift_start)||'—'} - ${fmtHM(row.shift_end)||'—'}`:(row.shift_label||'—');
+    const statut=(CMAP[row.status]?.lbl)||row.status||'—';
+    const service=(hm.principal?(employee.role||employee.department):'')||'';
+    const mission=hm.principal?'':`<span class="mission-badge"><i class="fa-solid fa-briefcase"></i> Affectation</span>`;
+    const dtl=(k,val)=> val?`<div class="dtl-row"><div class="k">${k}</div><div class="val">${val}</div></div>`:'';
+    return `<div style="margin-bottom:6px">
+      <div class="dtl-row"><div class="k">Établissement</div><div class="val" style="display:flex;align-items:center;gap:8px">
+        <span class="hb" style="background:${hm.fg};color:#fff;font-size:10px;padding:1px 6px;border-radius:5px">${hm.code}</span>${esc(hm.name)}${mission}</div></div>
+      ${dtl('Service', service?esc(service):'')}
+      ${dtl('Horaire', esc(horaire))}
+      ${dtl('Statut', worked?`<span style="color:var(--green)">${esc(statut)}</span>`:esc(statut))}
+      ${row.hours>0?dtl('Heures', fmtHours(row.hours)):''}
+      ${dtl('Lieu', hm.city?esc(hm.city):'')}
+      ${dtl('Consigne', row.note?esc(row.note):'')}
+    </div>`;
+  }).join('<hr style="border:none;border-top:1px solid var(--line);margin:10px 0">');
+  openModal(`<div class="modal-handle"></div>
+    <div class="modal-title"><i class="fa-solid fa-calendar-day" style="color:var(--vi)"></i> ${dateLbl.charAt(0).toUpperCase()+dateLbl.slice(1)}</div>
+    ${blocks}`);
+}
+
+// Tooltip au survol (appareils avec pointeur) — n'interfère pas avec le tap mobile
+function _tipEl(){ let t=$('calTip'); if(!t){ t=document.createElement('div'); t.id='calTip'; t.className='cal-tip'; document.body.appendChild(t); } return t; }
+function showDayTip(e,ds){
+  const rows=_monthRows.filter(r=>r.day===ds && (!_planFilter||r.hotel_id===_planFilter));
+  if(!rows.length) return;
+  const t=_tipEl();
+  t.innerHTML=rows.map(row=>{const hm=hmeta(row.hotel_id);
+    const horaire=(row.shift_start||row.shift_end)?`${fmtHM(row.shift_start)} - ${fmtHM(row.shift_end)}`:(row.shift_label||'');
+    const statut=(CMAP[row.status]?.lbl)||row.status;
+    return `<b>${esc(hm.name)}</b>${horaire?`<br>${esc(horaire)}`:''}${hm.principal?'':`<br>Affectation`}<br>${esc(statut)}`;
+  }).join('<br>—<br>');
+  t.style.display='block'; moveDayTip(e);
+}
+function moveDayTip(e){ const t=$('calTip'); if(!t||t.style.display==='none')return;
+  const pad=12; let x=e.clientX+pad, y=e.clientY+pad;
+  const r=t.getBoundingClientRect();
+  if(x+r.width>innerWidth-6) x=e.clientX-r.width-pad;
+  if(y+r.height>innerHeight-6) y=e.clientY-r.height-pad;
+  t.style.left=Math.max(6,x)+'px'; t.style.top=Math.max(6,y)+'px';
+}
+function hideDayTip(){ const t=$('calTip'); if(t) t.style.display='none'; }
 
 window.prevMonth=()=>{planMonth=new Date(planMonth.getFullYear(),planMonth.getMonth()-1,1);loadMonthCal();};
 window.nextMonth=()=>{planMonth=new Date(planMonth.getFullYear(),planMonth.getMonth()+1,1);loadMonthCal();};
