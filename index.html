@@ -1425,6 +1425,8 @@ let editMode=false, fSearch='', fRole='', fDept='', fStatus='actif';
 const selection=new Set();
 let dragging=false, anchor=null, baseSel=new Set(), lastAnchor=null;
 let cellMap={}, visibleRows=[];
+let monthExtras=[];   // extras d'autres hôtels activés pour le mois affiché (Phase 2 multi-hôtel)
+const _extraEmpCache=new Map();   // cache des fiches extras (id -> employee) pour openFiche/rendu
 let planView='month';   // 'month' | 'week' | 'day' | 'service'
 let planningRows=[];    // lignes brutes listMonthPlanning (avec shift_label etc.)
 let coverageCache=[];   // règles de couverture mises en cache pour l'hôtel courant
@@ -2151,7 +2153,24 @@ async function loadMonth(){
   const rows=await BE.listMonthPlanning(hotelId,cur.getFullYear(),cur.getMonth());
   planningRows=rows;
   committed=new Map(rows.map(r=>[r.employee_id+'|'+r.day,{status:r.status,duration:Number(r.duration),note:r.note||'',shift_label:r.shift_label||'',hours:(r.hours==null?0:Number(r.hours))}]));
+  await loadMonthExtras();
   renderCurrentPlanView();
+}
+// Extras activés pour le mois affiché : collaborateurs d'un autre hôtel visibles UNIQUEMENT
+// s'ils sont autorisés ici ET activés pour ce mois précis. Sinon totalement invisibles.
+async function loadMonthExtras(){
+  monthExtras=[];
+  try{
+    const [actv, auth]=await Promise.all([
+      BE.listHotelExtraActivations(hotelId, cur.getFullYear(), cur.getMonth()+1),
+      BE.listAuthorizedExtras(hotelId)
+    ]);
+    const activeIds=new Set(actv.map(r=>r.employee_id));
+    const byId=new Map();
+    auth.forEach(a=>{ const e=a.employee; if(e && e.hotel_id!==hotelId && activeIds.has(e.id) && !byId.has(e.id)) byId.set(e.id,{...e,_extra:true,active:true}); });
+    monthExtras=[...byId.values()];
+    monthExtras.forEach(e=>_extraEmpCache.set(e.id,e));
+  }catch(e){ monthExtras=[]; console.warn('loadMonthExtras:',e.message||e); }
 }
 
 /* ===================== RENDU GRILLE ===================== */
@@ -2186,6 +2205,14 @@ function render(){
     if(sa!==sb) return sa-sb;
     return a.last_name.localeCompare(b.last_name);
   });
+  // Extras activés ce mois : ajoutés en fin, dans une section « Extras » dédiée
+  const _extrasVisible=monthExtras.filter(s=>{
+    if(fRole&&s.role!==fRole)return false;
+    if(fDept&&s.department!==fDept)return false;
+    if(fSearch&&!(`${s.first_name} ${s.last_name} ${s.role||''} ${s.department||''}`.toLowerCase().includes(fSearch)))return false;
+    return true;
+  }).sort((a,b)=>a.last_name.localeCompare(b.last_name));
+  visibleRows=visibleRows.concat(_extrasVisible);
   if(!visibleRows.length){
     $('grid').innerHTML='';
     const wrap=$('grid').parentElement;
@@ -2212,18 +2239,26 @@ function render(){
     _hpdMap.set(s.id, sc?.hours_per_day??7);
   });
 
-  let lastDept=null;
+  let lastDept=null, _extrasHeaderShown=false;
   visibleRows.forEach((s,ri)=>{
-    // Dept header separator row
-    const deptName=s.department||'';
-    if(deptName!==lastDept){
-      lastDept=deptName;
-      h+=`<tr class="dept-sep"><td colspan="${nd+8}" style="background:#f1f0fb;font-size:11px;font-weight:700;color:var(--violet-d);padding:4px 10px;letter-spacing:.05em;text-transform:uppercase">${deptName||'Sans service'}</td></tr>`;
+    // Séparateur : section « Extras » dédiée (une seule fois), sinon en-tête de service
+    if(s._extra){
+      if(!_extrasHeaderShown){
+        _extrasHeaderShown=true; lastDept='__EXTRAS__';
+        h+=`<tr class="dept-sep"><td colspan="${nd+8}" style="background:#fff7ed;font-size:11px;font-weight:700;color:#c2410c;padding:4px 10px;letter-spacing:.05em;text-transform:uppercase"><i class="fa-solid fa-people-arrows" style="margin-right:5px"></i>Extras — autres établissements</td></tr>`;
+      }
+    } else {
+      const deptName=s.department||'';
+      if(deptName!==lastDept){
+        lastDept=deptName;
+        h+=`<tr class="dept-sep"><td colspan="${nd+8}" style="background:#f1f0fb;font-size:11px;font-weight:700;color:var(--violet-d);padding:4px 10px;letter-spacing:.05em;text-transform:uppercase">${deptName||'Sans service'}</td></tr>`;
+      }
     }
-    const _empAlerts=_planLegalAlerts(s.id,y,m,nd,_hpdMap.get(s.id));
+    const _empAlerts=s._extra?[]:_planLegalAlerts(s.id,y,m,nd,_hpdMap.get(s.id));
     const _alertBadge=_planAlertBadge(_empAlerts);
     h+=`<tr data-emprow="${s.id}"${!s.active?' style="opacity:.55"':''}>`
-      +`<td class="stickL cDrag dh" title="Réordonner"><i class="fa-solid fa-grip-vertical" style="color:var(--muted);font-size:11px;cursor:grab"></i></td>`
+      +(s._extra?`<td class="stickL cDrag" style="opacity:.35"><i class="fa-solid fa-star" style="color:#f59e0b;font-size:10px" title="Extra d'un autre établissement"></i></td>`
+                :`<td class="stickL cDrag dh" title="Réordonner"><i class="fa-solid fa-grip-vertical" style="color:var(--muted);font-size:11px;cursor:grab"></i></td>`)
       +`<td class="stickL cEmp"><div class="emp" data-emp="${s.id}"><div class="av" style="background:${avBg(s)}">${avInner(s)}</div>`
       +`<div><div class="nm">${s.first_name} ${s.last_name}${(s.status||'')==='parti'?' <span style="font-size:9.5px;color:var(--red);font-weight:700;background:var(--red-bg);padding:1px 5px;border-radius:5px;margin-left:4px">PARTI</span>':(s.status||'')==='pause'?' <span style="font-size:9.5px;color:#92400E;font-weight:700;background:#FEF3C7;padding:1px 5px;border-radius:5px;margin-left:4px">EN PAUSE</span>':''}${_alertBadge}</div><div class="sub">${s.department||'—'} · ${s.contract_type||'CDI'}</div></div></div></td>`
       +`<td class="stickL cRole">${s.role||'—'}</td>`;
@@ -3628,7 +3663,7 @@ function wirePlanningRowDrag(){
     const byDept=new Map();
     visibleRows.forEach(s=>{ const d=s.department||''; if(!byDept.has(d))byDept.set(d,[]); byDept.get(d).push(s); });
     const updates=[];
-    byDept.forEach(rows=>rows.forEach((s,pos)=>{ if(s.planning_sort_order!==pos){s.planning_sort_order=pos;updates.push(s);} }));
+    byDept.forEach(rows=>rows.forEach((s,pos)=>{ if(!s._extra && s.planning_sort_order!==pos){s.planning_sort_order=pos;updates.push(s);} }));
     _rowDragId=null; _rowDragOver=null;
     render();
     savePlanningOrder(updates);
@@ -5620,7 +5655,7 @@ async function _drawMultiHotelExtras(){
   try{ auth=await BE.listAuthorizedExtras(hotelId); }
   catch(e){ el.innerHTML=`<div style="padding:40px;text-align:center;color:var(--red);grid-column:1/-1">Erreur : ${esc(e.message||e)}</div>`; return; }
   const seen=new Set(), emps=[];
-  auth.forEach(a=>{ const e=a.employee; if(!e||e.hotel_id===hotelId||seen.has(e.id))return; seen.add(e.id); emps.push(e); });
+  auth.forEach(a=>{ const e=a.employee; if(!e||e.hotel_id===hotelId||seen.has(e.id))return; seen.add(e.id); emps.push(e); _extraEmpCache.set(e.id,e); });
   const now=new Date(), y=now.getFullYear(), m=now.getMonth()+1;
   let activeThisMonth=new Set();
   try{ activeThisMonth=new Set((await BE.listHotelExtraActivations(hotelId,y,m)).map(r=>r.employee_id)); }catch(e){}
@@ -13825,10 +13860,11 @@ async function disablePortal(eid){
 }
 
 async function openFiche(eid){
-  const s=staff.find(x=>x.id===eid); if(!s)return;
+  const s=staff.find(x=>x.id===eid)||_extraEmpCache.get(eid); if(!s)return;
+  const _isExtraFiche=!staff.find(x=>x.id===eid); // fiche d'un extra d'un autre hôtel (consultation)
   const badge=s.contract_type==='CDI'?'cdi':s.contract_type==='CDD'?'cdd':'ext';
   const restNames=(s.rest_days||[]).map(d=>['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'][d]).join(', ')||'—';
-  const full=canFicheFull();
+  const full=canFicheFull() && !_isExtraFiche; // extra d'un autre hôtel : consultation seule
   $('drawer').innerHTML=`
     <div class="dh"><button class="close" data-x><i class="fa-solid fa-xmark"></i></button>
       <div class="av photo-drop" id="ficheAv" data-eid="${s.id}" style="background:${avBg(s)};cursor:pointer;position:relative" title="Glissez une photo ou cliquez pour changer">${avInner(s)}<div class="photo-overlay"><i class="fa-solid fa-camera"></i></div></div>
@@ -15168,11 +15204,13 @@ async function exportPDF(){
     const body=[];
     let lastDept=null;
     visibleRows.forEach(s=>{
-      const dept=s.department||'';
+      // Les extras sont regroupés dans une section dédiée (reflet exact de l'écran)
+      const dept=s._extra ? 'EXTRAS — AUTRES ÉTABLISSEMENTS' : (s.department||'');
       if(dept!==lastDept){
         lastDept=dept;
+        const isExtraSep=!!s._extra;
         body.push([{content:(dept||'Sans service').toUpperCase(), colSpan:totalCols, styles:{
-          fillColor:[241,240,251], textColor:[124,58,237], fontStyle:'bold', halign:'left',
+          fillColor:isExtraSep?[255,247,237]:[241,240,251], textColor:isExtraSep?[194,65,12]:[124,58,237], fontStyle:'bold', halign:'left',
           fontSize:6, cellPadding:{top:0.7,bottom:0.7,left:2,right:1}, minCellHeight:3.2,
           lineWidth:0.1, lineColor:[236,238,243]
         }}]);
