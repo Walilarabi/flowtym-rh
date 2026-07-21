@@ -966,6 +966,15 @@ async function makeRealBE(){
     async listHotelAssignments(h){const {data,error}=await sb.from('employee_hotel_assignments').select('*,employee:employee_id(first_name,last_name,role),target_hotel:target_hotel_id(name)').eq('source_hotel_id',h).eq('active',true).order('created_at',{ascending:false});if(error&&error.code==='42P01'){return[];}must(error,'Autorisations multi-hôtel');return data||[];},
     async addHotelAssignment(empId,sourceHotelId,targetHotelId,notes,authorizedBy){const {error}=await sb.from('employee_hotel_assignments').upsert({employee_id:empId,source_hotel_id:sourceHotelId,target_hotel_id:targetHotelId,notes:notes||null,authorized_by:authorizedBy||null,active:true},{onConflict:'employee_id,target_hotel_id'});must(error,'Autorisation multi-hôtel');},
     async removeHotelAssignment(id){const {error}=await sb.from('employee_hotel_assignments').update({active:false}).eq('id',id);must(error,'Révocation autorisation');},
+    // Établissements secondaires d'un collaborateur (par employee_id)
+    async listEmployeeHotels(empId){const {data,error}=await sb.from('employee_hotel_assignments').select('id,target_hotel_id,active').eq('employee_id',empId);if(error&&error.code==='42P01'){return[];}must(error,'Établissements du collaborateur');return data||[];},
+    async setEmployeeHotelLink(empId,sourceHotelId,targetHotelId,active,authorizedBy){const {error}=await sb.from('employee_hotel_assignments').upsert({employee_id:empId,source_hotel_id:sourceHotelId,target_hotel_id:targetHotelId,active:!!active,authorized_by:authorizedBy||null},{onConflict:'employee_id,target_hotel_id'});must(error,'Liaison établissement');},
+    // Extras : collaborateurs autorisés dans un hôtel (fiche lisible via RLS employees_secondary_read)
+    async listAuthorizedExtras(h){const {data,error}=await sb.from('employee_hotel_assignments').select('employee_id,active,employee:employee_id(id,first_name,last_name,role,department,hotel_id,contract_type,photo_url,status,active)').eq('target_hotel_id',h).eq('active',true);if(error&&error.code==='42P01'){return[];}must(error,'Extras autorisés');return data||[];},
+    // Activations mensuelles d'un extra dans un hôtel
+    async listExtraActivations(h,empId){const {data,error}=await sb.from('employee_extra_activations').select('id,year,month,active').eq('hotel_id',h).eq('employee_id',empId);if(error&&error.code==='42P01'){return[];}must(error,'Activations extra');return data||[];},
+    async listHotelExtraActivations(h,year,month){const {data,error}=await sb.from('employee_extra_activations').select('employee_id').eq('hotel_id',h).eq('year',year).eq('month',month).eq('active',true);if(error&&error.code==='42P01'){return[];}must(error,'Activations extra du mois');return data||[];},
+    async setExtraActivation(h,empId,year,month,active){const {error}=await sb.from('employee_extra_activations').upsert({hotel_id:h,employee_id:empId,year,month,active:!!active,updated_at:new Date().toISOString()},{onConflict:'employee_id,hotel_id,year,month'});must(error,'Activation extra');},
 
     /* --- AUDIT --- */
     async logAudit(action,entity_type,entity_id,employee_id,details){
@@ -5529,17 +5538,23 @@ function renderPersonnel(){
         <i class="fa-solid fa-star"></i> Personnel en extra
         <span style="background:${_personnelTab==='extra'?'#f59e0b':'#e5e7eb'};color:${_personnelTab==='extra'?'#fff':'var(--muted)'};border-radius:99px;padding:1px 8px;font-size:11px;margin-left:6px">${extras.filter(s=>s.active).length}</span>
       </button>
+      <button class="ptab-btn ${_personnelTab==='multihotel'?'active':''}" onclick="_personnelTab='multihotel';_drawPersonnelCards()" style="padding:10px 18px;border:0;background:transparent;font-size:13px;font-weight:600;color:${_personnelTab==='multihotel'?'var(--violet-d)':'var(--muted)'};border-bottom:2px solid ${_personnelTab==='multihotel'?'var(--violet-d)':'transparent'};margin-bottom:-2px;cursor:pointer" title="Collaborateurs d'un autre hôtel autorisés à intervenir ici">
+        <i class="fa-solid fa-people-arrows"></i> Extras multi-hôtel
+      </button>
     </div>
     <div class="cards" id="pcards"></div>
   </div>`;
 
   function _drawPersonnelCards(){
     // re-render tab headers
+    const _tabs=['contractual','extra','multihotel'];
     document.querySelectorAll('.ptab-btn').forEach((b,i)=>{
-      const t=i===0?'contractual':'extra';
+      const t=_tabs[i];
       b.style.color=_personnelTab===t?'var(--violet-d)':'var(--muted)';
       b.style.borderBottom=`2px solid ${_personnelTab===t?'var(--violet-d)':'transparent'}`;
     });
+
+    if(_personnelTab==='multihotel'){ _drawMultiHotelExtras(); return; }
 
     const baseList=_personnelTab==='contractual'
       ?staff.filter(s=>!EXTRA_CONTRACT_TYPES.has(s.contract_type))
@@ -5595,6 +5610,93 @@ function renderPersonnel(){
   $('pAdd').onclick=()=>openEmpForm(null);
   $('pImportCSV').onclick=()=>openPersonnelImport();
   _drawPersonnelCards();
+}
+
+/* Extras multi-hôtel : collaborateurs d'un autre établissement autorisés ici */
+async function _drawMultiHotelExtras(){
+  const el=$('pcards'); if(!el)return;
+  el.innerHTML=`<div style="padding:40px;text-align:center;color:var(--muted);grid-column:1/-1"><i class="fa-solid fa-spinner fa-spin fa-2x"></i></div>`;
+  let auth=[];
+  try{ auth=await BE.listAuthorizedExtras(hotelId); }
+  catch(e){ el.innerHTML=`<div style="padding:40px;text-align:center;color:var(--red);grid-column:1/-1">Erreur : ${esc(e.message||e)}</div>`; return; }
+  const seen=new Set(), emps=[];
+  auth.forEach(a=>{ const e=a.employee; if(!e||e.hotel_id===hotelId||seen.has(e.id))return; seen.add(e.id); emps.push(e); });
+  const now=new Date(), y=now.getFullYear(), m=now.getMonth()+1;
+  let activeThisMonth=new Set();
+  try{ activeThisMonth=new Set((await BE.listHotelExtraActivations(hotelId,y,m)).map(r=>r.employee_id)); }catch(e){}
+  if(!emps.length){
+    el.innerHTML=`<div style="padding:60px;text-align:center;color:var(--muted);grid-column:1/-1">
+      <i class="fa-solid fa-people-arrows" style="font-size:36px;color:var(--violet);display:block;margin-bottom:12px"></i>
+      Aucun collaborateur d'un autre établissement autorisé ici.<br>
+      <small>Autorisez-le depuis sa fiche (section « Établissements »), dans son hôtel principal.</small>
+    </div>`;
+    return;
+  }
+  const curMonthLbl=now.toLocaleDateString('fr-FR',{month:'long',year:'numeric'});
+  el.innerHTML=emps.map(e=>{
+    const on=activeThisMonth.has(e.id);
+    const principalName=hotels.find(h=>h.id===e.hotel_id)?.name||'Autre établissement';
+    return `<div class="card">
+      <div class="head"><div class="av" style="background:${avBg(e)}">${avInner(e)}</div>
+        <div><div class="nm">${e.first_name} ${e.last_name}</div>
+        <div class="role">${e.role||'—'} · ${e.department||'—'}</div></div></div>
+      <div class="meta">
+        <span class="tag gray"><i class="fa-solid fa-building" style="font-size:9px"></i> ${esc(principalName)}</span>
+        <span class="tag" style="background:${on?'#dcfce7':'#f3f4f6'};color:${on?'#166534':'#6b7280'};border:1px solid ${on?'#86efac':'#e5e7eb'}">${on?'Activé · '+curMonthLbl:'Inactif ce mois'}</span>
+      </div>
+      <div style="padding:8px 16px 14px;display:flex;justify-content:flex-end;gap:6px">
+        <button class="btn g" style="font-size:11px;padding:4px 8px" onclick="openFiche('${e.id}')" title="Voir la fiche"><i class="fa-solid fa-id-card"></i> Fiche</button>
+        <button class="btn p" style="font-size:11px;padding:4px 8px" onclick="_openExtraActivation('${e.id}')"><i class="fa-solid fa-toggle-on"></i> Activation</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function _openExtraActivation(empId){
+  const auth=await BE.listAuthorizedExtras(hotelId).catch(()=>[]);
+  const e=auth.map(a=>a.employee).find(x=>x&&x.id===empId);
+  if(!e){ flash('Collaborateur introuvable'); return; }
+  const hotelName=hotels.find(h=>h.id===hotelId)?.name||'';
+  let acts=[]; try{ acts=await BE.listExtraActivations(hotelId,empId); }catch(_){}
+  const activeKeys=new Set(acts.filter(a=>a.active).map(a=>a.year+'-'+a.month));
+  const now=new Date(), months=[];
+  for(let i=0;i<12;i++){ const d=new Date(now.getFullYear(),now.getMonth()+i,1); months.push({y:d.getFullYear(),m:d.getMonth()+1,lbl:d.toLocaleDateString('fr-FR',{month:'long',year:'numeric'})}); }
+  const anyOn=activeKeys.size>0;
+  $('modal').innerHTML=`
+    ${mhHTML('fa-solid fa-people-arrows','Activation extra',esc(e.first_name+' '+e.last_name)+' — '+esc(hotelName))}
+    <div class="mb">
+      <label style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:#faf9ff;border:1px solid var(--line);border-radius:10px;margin-bottom:14px;cursor:pointer">
+        <input type="checkbox" id="eaMaster" ${anyOn?'checked':''} style="width:18px;height:18px;accent-color:var(--violet);flex-shrink:0">
+        <div><div style="font-weight:700;font-size:13.5px">Activer ce collaborateur dans cet établissement</div>
+        <div style="font-size:11px;color:var(--muted)">Cochez les mois durant lesquels il pourra être planifié ici. En dehors, il est totalement invisible.</div></div>
+      </label>
+      <div id="eaMonths" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;${anyOn?'':'opacity:.5;pointer-events:none'}">
+        ${months.map(mo=>{const k=mo.y+'-'+mo.m;return `
+          <label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:9px;cursor:pointer;text-transform:capitalize">
+            <input type="checkbox" data-y="${mo.y}" data-m="${mo.m}" ${activeKeys.has(k)?'checked':''} style="width:16px;height:16px;accent-color:var(--violet);flex-shrink:0">
+            <span style="font-size:12.5px">${mo.lbl}</span>
+          </label>`;}).join('')}
+      </div>
+    </div>
+    <div class="mact"><div class="spacer"></div><button class="btn p" id="eaClose">Terminé</button></div>`;
+  $('modalbg').classList.add('on');
+  const master=$('eaMaster'), monthsBox=$('eaMonths');
+  master.onchange=async()=>{
+    if(master.checked){ monthsBox.style.opacity=''; monthsBox.style.pointerEvents=''; }
+    else{
+      const checked=[...monthsBox.querySelectorAll('input:checked')];
+      if(checked.length && !confirm('Désactiver tous les mois pour ce collaborateur ?')){ master.checked=true; return; }
+      for(const cb of checked){ cb.checked=false; await BE.setExtraActivation(hotelId,empId,+cb.dataset.y,+cb.dataset.m,false).catch(()=>{}); }
+      monthsBox.style.opacity='.5'; monthsBox.style.pointerEvents='none';
+    }
+  };
+  monthsBox.querySelectorAll('input[data-m]').forEach(cb=>cb.onchange=async()=>{
+    cb.disabled=true;
+    try{ await BE.setExtraActivation(hotelId,empId,+cb.dataset.y,+cb.dataset.m,cb.checked); }
+    catch(err){ flash('Erreur : '+(err.message||err),'e'); cb.checked=!cb.checked; }
+    finally{ cb.disabled=false; }
+  });
+  $('eaClose').onclick=()=>{ closeModal(); _drawPersonnelCards(); };
 }
 
 /* Formulaire profil extra (salarié interne) */
@@ -13615,6 +13717,35 @@ async function loadMissionsSection(s){
   }
 }
 
+async function _loadFicheEstablishments(s){
+  const el=$('ficheEstablishments'); if(!el)return;
+  const actorEmail=(await BE.sb.auth.getUser()).data?.user?.email||'';
+  let links=[]; try{ links=await BE.listEmployeeHotels(s.id); }catch(e){ el.innerHTML='<div style="color:var(--muted);font-size:12px">Indisponible.</div>'; return; }
+  const active=new Set(links.filter(l=>l.active).map(l=>l.target_hotel_id));
+  const principal=hotels.find(h=>h.id===s.hotel_id);
+  const others=hotels.filter(h=>h.id!==s.hotel_id);
+  el.innerHTML=`
+    <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--green-bg);border:1px solid #bbf7d0;border-radius:9px;margin-bottom:10px">
+      <i class="fa-solid fa-building" style="color:var(--green)"></i>
+      <div><div style="font-weight:700;font-size:13px">${esc(principal?.name||'Autre établissement')}</div>
+      <div style="font-size:11px;color:var(--muted)">Établissement principal · contrat ${esc(s.contract_type||'CDI')}</div></div>
+    </div>
+    ${others.length?`<div style="font-size:11.5px;color:var(--muted);margin-bottom:4px">Établissements secondaires autorisés (missions extra) :</div>
+    <div>${others.map(h=>`
+      <label style="display:flex;align-items:center;gap:9px;padding:7px 4px;cursor:pointer">
+        <input type="checkbox" data-estab="${h.id}" ${active.has(h.id)?'checked':''} style="width:16px;height:16px;accent-color:var(--violet);flex-shrink:0">
+        <span style="font-size:13px">${esc(h.name)}</span>
+      </label>`).join('')}</div>
+    <div style="font-size:10.5px;color:var(--muted);margin-top:6px"><i class="fa-solid fa-circle-info"></i> Autorisation de périmètre uniquement. Le collaborateur n'apparaît dans le planning d'un hôtel secondaire qu'une fois activé (Personnel → Extras) pour le mois concerné.</div>`
+    :`<div style="font-size:12px;color:var(--muted)">Aucun autre établissement accessible.</div>`}`;
+  el.querySelectorAll('input[data-estab]').forEach(cb=>cb.onchange=async()=>{
+    cb.disabled=true;
+    try{ await BE.setEmployeeHotelLink(s.id, s.hotel_id, cb.dataset.estab, cb.checked, actorEmail); flash(cb.checked?'Établissement autorisé':'Autorisation retirée'); }
+    catch(e){ flash('Erreur : '+(e.message||e),'e'); cb.checked=!cb.checked; }
+    finally{ cb.disabled=false; }
+  });
+}
+
 async function loadPortalSection(s){
   const el=$('portalSection'), badge=$('portalStatusBadge');
   if(!el) return;
@@ -13727,6 +13858,8 @@ async function openFiche(eid){
       <div id="missionsSection"><div style="color:var(--muted);font-size:12px">Chargement…</div></div></div>`:''}
     ${full?`<div class="sec"><h4>Portail salarié <span id="portalStatusBadge" style="float:right"></span></h4>
       <div id="portalSection">Chargement…</div></div>`:''}
+    ${full?`<div class="sec"><h4>Établissements</h4>
+      <div id="ficheEstablishments"><div style="color:var(--muted);font-size:12px">Chargement…</div></div></div>`:''}
     ${full?`<div class="sec"><h4>Coffre-fort contrats <span style="float:right;font-size:10.5px;color:var(--muted);font-weight:normal;cursor:pointer" onclick="contractsSubTab='signed';closeFiche();goView('contracts')">Tous les contrats →</span></h4>
       <div id="ficheContratsSignes"><div style="color:var(--muted);font-size:12px">Chargement…</div></div></div>`:''}
     ${full?`<div class="sec"><h4>Visites médicales <span style="float:right;font-size:10.5px;color:var(--muted);font-weight:normal;cursor:pointer" onclick="closeFiche();goView('medical')">Gérer →</span></h4>
@@ -13785,6 +13918,8 @@ async function openFiche(eid){
   if(full && $('missionsSection')) loadMissionsSection(s);
   // Section Portail salarié
   if(full && $('portalSection')) loadPortalSection(s);
+  // Section Établissements (principal + secondaires autorisés)
+  if(full && $('ficheEstablishments')) _loadFicheEstablishments(s);
   // Coffre-fort contrats signés
   if(full && $('ficheContratsSignes')) _renderPortalContractsCoffre(s.id, $('ficheContratsSignes'));
   // Section Visites médicales (RH uniquement — certificat non exposé au portail)
