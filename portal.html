@@ -420,7 +420,7 @@ async function loadPortalHotels(){
     let col;
     if(h.is_principal) col=HOTEL_PRINCIPAL_COLOR;
     else { const i=secondaries.findIndex(x=>x.id===h.id); col=HOTEL_PALETTE[i % HOTEL_PALETTE.length]; }
-    _hotelMeta.set(h.id,{id:h.id,name:h.name,city:h.city,address:h.address,principal:!!h.is_principal,code:hotelCode(h.name),fg:col.fg,bg:col.bg});
+    _hotelMeta.set(h.id,{id:h.id,name:h.name,city:h.city,address:h.address,principal:!!h.is_principal,code:hotelCode(h.name),fg:col.fg,bg:col.bg,colors:h.status_colors||null});
   });
   return _portalHotels;
 }
@@ -436,13 +436,23 @@ const CMAP={
   RTT:{bg:'#BDD7EE',fg:'#1F4E78',lbl:'RTT'},
   MAL:{bg:'#FFC7CE',fg:'#9C0006',lbl:'Maladie'},
   MAT:{bg:'#E1D5F0',fg:'#5B2A86',lbl:'Mat.'},
+  PAT:{bg:'#E8E0F5',fg:'#4A2080',lbl:'Pat.'},
   ABS:{bg:'#FFD9D9',fg:'#7B0000',lbl:'Absence'},
   F:{bg:'#EDEDED',fg:'#6b7280',lbl:'Férié'},
   CSS:{bg:'#D9D9D9',fg:'#3F3F3F',lbl:'SS'},
   AE:{bg:'#FFE699',fg:'#7F6000',lbl:'Except.'},
   REC:{bg:'#D4F0FC',fg:'#0C4A6E',lbl:'Récup.'},
   FORM:{bg:'#FEF3C7',fg:'#92400E',lbl:'Form.'},
+  MAD:{bg:'#CFFAFE',fg:'#155E75',lbl:'Mise à dispo'},
 };
+// Couleur d'un statut pour un hôtel donné : couleurs personnalisées des paramètres RH de
+// l'établissement (hotel_settings.status_colors) en priorité, sinon les couleurs par défaut.
+function statusColor(hotelId, status){
+  const custom=_hotelMeta.get(hotelId)?.colors;
+  const cc=custom&&custom[status];
+  const def=CMAP[status]||{bg:'#E8F5E9',fg:'#1b5e20'};
+  return { bg:(cc&&cc.bg)||def.bg, fg:(cc&&cc.fg)||def.fg };
+}
 const SHIFT_BG={'M':'#E3F2FD','S':'#FFF3E0','N':'#EDE7F6','J':'#F1F8E9','PD':'#FFF8E1','C':'#FCE4EC'};
 const SHIFT_FG={'M':'#1565C0','S':'#BF360C','N':'#4527A0','J':'#558B2F','PD':'#F57F17','C':'#880E4F'};
 
@@ -917,9 +927,9 @@ async function loadMonthCal(){
     let bg='#f9fafb', fg='#9ca3af', codeEl='', stLbl='';
     if(row){
       const hm=hmeta(row.hotel_id); usedHotels.add(row.hotel_id);
-      // Couleur de la cellule pilotée UNIQUEMENT par le statut (comme dans Flowtym RH)
-      const c=CMAP[row.status];
-      if(c){ bg=c.bg; fg=c.fg; } else { bg='#E8F5E9'; fg='#1b5e20'; }
+      // Couleur de la cellule pilotée par le statut, selon les paramètres RH DE CET hôtel
+      const sc=statusColor(row.hotel_id, row.status);
+      bg=sc.bg; fg=sc.fg;
       const showVal=(row.hours>0)?fmtHours(row.hours):esc(row.status);
       stLbl=`<span class="cst">${showVal}</span>`;
       // Code établissement : texte seul (aucun fond/pastille), couleur propre à l'hôtel
@@ -993,6 +1003,7 @@ function openDayDetail(ds){
     const worked=PL_WORKED.includes(row.status);
     const horaire=(row.shift_start||row.shift_end)?`${fmtHM(row.shift_start)||'—'} - ${fmtHM(row.shift_end)||'—'}`:(row.shift_label||'—');
     const statut=(CMAP[row.status]?.lbl)||row.status||'—';
+    const statFg=statusColor(row.hotel_id,row.status).fg;
     const service=(hm.principal?(employee.role||employee.department):'')||'';
     const mission=hm.principal?'':`<span class="mission-badge"><i class="fa-solid fa-briefcase"></i> Affectation</span>`;
     const dtl=(k,val)=> val?`<div class="dtl-row"><div class="k">${k}</div><div class="val">${val}</div></div>`:'';
@@ -1001,7 +1012,7 @@ function openDayDetail(ds){
         <span class="hb" style="background:${hm.fg};color:#fff;font-size:10px;padding:1px 6px;border-radius:5px">${hm.code}</span>${esc(hm.name)}${mission}</div></div>
       ${dtl('Service', service?esc(service):'')}
       ${dtl('Horaire', esc(horaire))}
-      ${dtl('Statut', worked?`<span style="color:var(--green)">${esc(statut)}</span>`:esc(statut))}
+      ${dtl('Statut', `<span style="color:${statFg}">${esc(statut)}</span>`)}
       ${row.hours>0?dtl('Heures', fmtHours(row.hours)):''}
       ${dtl('Lieu', hm.city?esc(hm.city):'')}
       ${dtl('Consigne', row.note?esc(row.note):'')}
