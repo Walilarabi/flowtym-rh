@@ -831,6 +831,12 @@ async function makeRealBE(){
 
     async getHotelSettings(h){const {data}=await sb.from('hotel_settings').select('*').eq('hotel_id',h).maybeSingle();return data||null;},
     async saveHotelSettings(h,patch){const {error}=await sb.from('hotel_settings').upsert({hotel_id:h,...patch,updated_at:new Date().toISOString()},{onConflict:'hotel_id'});must(error,'Paramètres hôtel');},
+    // ── Groupe hôtelier ──
+    async hotelGroupGet(h){const {data,error}=await sb.rpc('hotel_group_get',{p_hotel:h});if(error)throw error;return data||{group_id:null,group_name:null,members:[]};},
+    async hotelGroupEnable(h,name){const {data,error}=await sb.rpc('hotel_group_enable',{p_hotel:h,p_name:name||null});if(error)throw error;return data;},
+    async hotelGroupJoin(h,code){const {data,error}=await sb.rpc('hotel_group_join',{p_hotel:h,p_code:code});if(error)throw error;return data;},
+    async hotelGroupLeave(h){const {data,error}=await sb.rpc('hotel_group_leave',{p_hotel:h});if(error)throw error;return data;},
+    async setHotelCode(h,code){const {error}=await sb.from('hotels').update({hotel_code:(code||'').trim()||null}).eq('id',h);must(error,'Identifiant établissement');},
 
     async listDocumentSettings(h){const {data}=await sb.from('hotel_document_settings').select('*').eq('hotel_id',h);return data||[];},
     async saveDocumentSetting(h,doc_type,patch){const {error}=await sb.from('hotel_document_settings').upsert({hotel_id:h,doc_type,...patch,updated_at:new Date().toISOString()},{onConflict:'hotel_id,doc_type'});must(error,'Config document');},
@@ -9079,6 +9085,15 @@ async function _cfgGeneral(hotel, isAdmin){
       </table>
     </div>
 
+    <!-- GROUPE HÔTELIER -->
+    <div class="box" id="cfgGroupBox" style="margin-bottom:16px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+        <h3 style="margin:0"><i class="fa-solid fa-sitemap"></i> Groupe hôtelier</h3>
+      </div>
+      <div style="font-size:11.5px;color:var(--muted);margin-bottom:12px">Reliez plusieurs établissements pour partager les fonctionnalités groupe (planning groupe, extras inter-hôtels, reporting consolidé…). Chaque hôtel reste indépendant.</div>
+      <div id="cfgGroupBody"><div style="color:var(--muted);font-size:12px">Chargement…</div></div>
+    </div>
+
     <!-- IMPORT / EXPORT -->
     <div class="box" style="margin-bottom:16px">
       <h3><i class="fa-solid fa-right-left"></i> Import / Export</h3>
@@ -9161,6 +9176,80 @@ async function _cfgGeneral(hotel, isAdmin){
   };
   // Import Excel
   $('importXlsxSettings').onclick=()=>$('xlsxFile').click();
+  // Section Groupe hôtelier (chargée après le rendu)
+  if($('cfgGroupBody')) _loadCfgGroup(hotel, isAdmin);
+}
+
+// ── Section « Groupe hôtelier » de Paramètres > Informations établissement ──
+const GROUP_JOIN_ERR={HOTEL_INTROUVABLE:'Aucun établissement ne correspond à cet identifiant.',MEME_HOTEL:'Il s\'agit de l\'établissement courant.',DEJA_MEMBRE:'Cet établissement est déjà dans le groupe.',DEJA_AUTRE_GROUPE:'Cet établissement appartient déjà à un autre groupe.',CODE_VIDE:'Saisissez un identifiant.',NON_AUTORISE:'Action non autorisée.'};
+function _grpErr(e){const m=(e&&e.message)||String(e||'');for(const k in GROUP_JOIN_ERR){if(m.includes(k))return GROUP_JOIN_ERR[k];}return 'Erreur : '+m;}
+function _hotelCodeColor(i){return ['#15803d','#6d28d9','#1d4ed8','#c2410c','#0f766e','#be185d','#a16207','#4338ca'][i%8];}
+async function _loadCfgGroup(hotel, isAdmin){
+  const el=$('cfgGroupBody'); if(!el)return;
+  let info; try{ info=await BE.hotelGroupGet(hotelId); }catch(e){ el.innerHTML=`<div style="color:var(--muted);font-size:12px">Indisponible : ${esc(_grpErr(e))}</div>`; return; }
+  const inGroup=!!info.group_id;
+  const selfCode=(info.members||[]).find(m=>m.is_self)?.hotel_code || hotel.hotel_code || '';
+  el.innerHTML=`
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;border:1px solid var(--line);border-radius:10px;padding:10px 14px">
+        <div><div style="font-weight:700;font-size:13.5px">Cet établissement appartient à un groupe</div>
+        <div style="font-size:11px;color:var(--muted)">Active le partage des fonctionnalités groupe.</div></div>
+        <label class="tog-wrap"><input type="checkbox" id="grpToggle" ${inGroup?'checked':''} ${isAdmin?'':'disabled'}><span class="tog-sw"></span></label>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div class="fld"><label>Identifiant de l'établissement (5 caractères)</label>
+          <input id="grpSelfCode" maxlength="5" value="${esc(selfCode)}" placeholder="ex : FO001" style="text-transform:uppercase" ${isAdmin?'':'disabled'}></div>
+        <div class="fld"><label>Nom du groupe</label>
+          <input id="grpName" value="${esc(info.group_name||'')}" placeholder="ex : Opéra Collection" ${inGroup&&isAdmin?'':'disabled'}></div>
+      </div>
+      <div id="grpMembersBox" style="${inGroup?'':'display:none'}">
+        <div style="font-size:11.5px;color:var(--muted);margin-bottom:6px">Établissements du groupe (${(info.members||[]).length}) :</div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          ${(info.members||[]).map((m,i)=>`<div style="display:flex;align-items:center;gap:10px;padding:7px 10px;border:1px solid var(--line);border-radius:9px">
+            <span style="font-weight:800;font-size:11px;color:${_hotelCodeColor(i)};min-width:44px">${esc(m.hotel_code||'—')}</span>
+            <span style="flex:1;font-size:13px;font-weight:600">${esc(m.name)}${m.is_self?' <span style="font-size:10px;color:var(--muted);font-weight:500">(cet établissement)</span>':''}</span>
+          </div>`).join('')}
+        </div>
+        ${isAdmin?`<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+          <input id="grpJoinCode" maxlength="5" placeholder="Identifiant à rattacher (ex : VO001)" style="flex:1;min-width:180px;text-transform:uppercase;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px">
+          <button class="btn p" id="grpJoinBtn"><i class="fa-solid fa-plus"></i> Ajouter un établissement au groupe</button>
+          <button class="btn d" id="grpLeaveBtn" style="font-size:12px"><i class="fa-solid fa-link-slash"></i> Quitter le groupe</button>
+        </div>`:''}
+      </div>
+    </div>`;
+  if(!isAdmin) return;
+  const reload=()=>_loadCfgGroup(hotel,isAdmin);
+  // Identifiant de l'hôtel — enregistré à la sortie du champ
+  $('grpSelfCode').onchange=async()=>{
+    const code=($('grpSelfCode').value||'').trim().toUpperCase();
+    try{ await BE.setHotelCode(hotelId,code); hotel.hotel_code=code; const hh=hotels.find(h=>h.id===hotelId); if(hh)hh.hotel_code=code; flash('Identifiant enregistré'); }
+    catch(e){ flash(/duplicate|unique/i.test(e.message||'')?'Cet identifiant est déjà utilisé par un autre établissement.':'Erreur : '+e.message,'e'); reload(); }
+  };
+  // Interrupteur groupe
+  $('grpToggle').onchange=async()=>{
+    if($('grpToggle').checked){
+      try{ await BE.hotelGroupEnable(hotelId, $('grpName')?.value||''); flash('Groupe activé'); reload(); }
+      catch(e){ flash(_grpErr(e),'e'); $('grpToggle').checked=false; }
+    } else {
+      if(!confirm('Retirer cet établissement du groupe ?')){ $('grpToggle').checked=true; return; }
+      try{ await BE.hotelGroupLeave(hotelId); flash('Établissement retiré du groupe'); reload(); }
+      catch(e){ flash(_grpErr(e),'e'); $('grpToggle').checked=true; }
+    }
+  };
+  // Nom du groupe
+  const gn=$('grpName'); if(gn) gn.onchange=async()=>{ if(!inGroup)return; try{ await BE.hotelGroupEnable(hotelId, gn.value||''); flash('Nom du groupe enregistré'); }catch(e){ flash(_grpErr(e),'e'); } };
+  // Ajouter un établissement
+  const jb=$('grpJoinBtn'); if(jb) jb.onclick=async()=>{
+    const code=($('grpJoinCode').value||'').trim().toUpperCase();
+    if(!code){ flash('Saisissez un identifiant','w'); return; }
+    jb.disabled=true; const _o=jb.innerHTML; jb.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Ajout…';
+    try{ await BE.hotelGroupJoin(hotelId, code); flash('Établissement rattaché au groupe'); reload(); }
+    catch(e){ flash(_grpErr(e),'e'); jb.disabled=false; jb.innerHTML=_o; }
+  };
+  const lb=$('grpLeaveBtn'); if(lb) lb.onclick=async()=>{
+    if(!confirm('Retirer cet établissement du groupe ?'))return;
+    try{ await BE.hotelGroupLeave(hotelId); flash('Établissement retiré du groupe'); reload(); }catch(e){ flash(_grpErr(e),'e'); }
+  };
 }
 
 /* ──────────────────────────────────────────────
