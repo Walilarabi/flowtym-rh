@@ -325,7 +325,10 @@ if(isTest){
     console.error('[portal] CDN Supabase inaccessible :', e.message);
     throw e; // Stoppe le module — l'écran statique reste visible
   }
-  sb = sbModule.createClient(SUPABASE_URL, SUPABASE_ANON, {auth:{persistSession:true}});
+  sb = sbModule.createClient(SUPABASE_URL, SUPABASE_ANON, {auth:{persistSession:true, detectSessionInUrl:true}});
+  // Supabase émet PASSWORD_RECOVERY quand un lien de récupération est traité (flux implicite/hash).
+  // On mémorise l'état TEMPORAIREMENT (jamais persisté) : il ne survivra pas à un rechargement.
+  sb.auth.onAuthStateChange((event)=>{ if(event==='PASSWORD_RECOVERY'){ recoveryMode=true; } });
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -344,6 +347,9 @@ function flash(msg, dur=2800){
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let session=null, employee=null, hotel=null;
+// Mode récupération : état TEMPORAIRE, uniquement en mémoire (jamais persisté).
+// Vrai seulement quand un lien d'invitation/récupération valide vient d'être ouvert.
+let recoveryMode=false;
 let currentTab='planning';
 let planMonth=new Date();
 
@@ -377,56 +383,87 @@ const REQ_TYPES={
 async function boot(){
   $('view').innerHTML='<div class="loading"><div class="spinner"></div><div>Chargement…</div></div>';
 
-  // PKCE auth code (invitation / recovery / magic link) — Supabase JS v2
   const search = window.location.search;
+  const hash   = window.location.hash;
+  const qp     = new URLSearchParams(search);
+  const hp     = new URLSearchParams(hash.replace(/^#/,''));
+  const linkType = qp.get('type') || hp.get('type'); // 'recovery' | 'invite' | null
+  // Token d'authentification présent dans l'URL (lien email d'invitation ou de récupération)
+  const hasAuthToken = search.includes('code=') || hash.includes('access_token') || search.includes('access_token');
+  // Le pointage QR utilise un paramètre distinct (action=clock&token=…), ce n'est PAS un token d'auth
+  const isQrClock = qp.get('action')==='clock' && !!qp.get('token');
+
+  // 1) Consommer le code PKCE si présent (lien d'invitation / récupération).
+  //    Avec detectSessionInUrl, le client peut déjà l'avoir consommé → l'échec n'est pas bloquant :
+  //    ce qui compte est de savoir si une session valide en résulte (vérifié après getSession).
   if(search.includes('code=')){
-    const code = new URLSearchParams(search).get('code');
-    await sb.auth.exchangeCodeForSession(code);
+    try{ await sb.auth.exchangeCodeForSession(qp.get('code')); }
+    catch(e){ console.warn('[portal] Échange de code :', e.message); }
+  }
+
+  // 2) Conserver le token QR (pointage) pour après connexion
+  if(isQrClock){ sessionStorage.setItem('pending_clock_token', qp.get('token')); }
+
+  // 3) Nettoyer SYSTÉMATIQUEMENT l'URL de tout paramètre d'authentification (token, code, type, hash)
+  if(hasAuthToken || linkType || hash || search){
     window.history.replaceState(null,'','/salarie');
   }
 
   const {data:{session:s}} = await sb.auth.getSession();
   session = s;
 
+  // Un lien d'auth (invitation/récupération) a été ouvert ET une session valide en résulte
+  // → session TEMPORAIRE de récupération. Un lien expiré/déjà utilisé ne crée pas de session.
+  if(hasAuthToken && !isQrClock && session){ recoveryMode = true; }
+
+  // Aucune session (ou lien expiré/déjà utilisé) → page de connexion standard
   if(!session){
-    // Si l'URL contient un token QR (scan via appareil photo), mémoriser pour après connexion
-    const qp=new URLSearchParams(window.location.search);
-    if(qp.get('action')==='clock'&&qp.get('token')){
-      sessionStorage.setItem('pending_clock_token', qp.get('token'));
-      window.history.replaceState(null,'','/salarie');
-    }
+    recoveryMode=false;
     renderAuth(); return;
   }
+
+  // Session temporaire de récupération → UNIQUEMENT le formulaire de définition du mot de passe
+  if(recoveryMode){
+    employee = await resolveEmployee(); // peut être null : on affiche quand même le set-password (compte auth valide)
+    renderSetPassword();
+    return;
+  }
+
+  // Session normale → portail
   await loadEmployee();
+}
+
+// Résout la fiche salarié liée à la session (par portal_auth_id, sinon email + auto-link).
+// Ne fait AUCUN routing — retourne l'enregistrement ou null.
+async function resolveEmployee(){
+  if(!session?.user) return null;
+  let {data} = await sb
+    .from('employees')
+    .select('*')
+    .eq('portal_auth_id', session.user.id)
+    .eq('portal_enabled', true)
+    .maybeSingle();
+
+  if(!data && session.user.email){
+    const {data: byEmail} = await sb
+      .from('employees')
+      .select('*')
+      .eq('email', session.user.email)
+      .eq('portal_enabled', true)
+      .maybeSingle();
+    if(byEmail){
+      await sb.from('employees')
+        .update({portal_auth_id: session.user.id})
+        .eq('id', byEmail.id);
+      data = {...byEmail, portal_auth_id: session.user.id};
+    }
+  }
+  return data || null;
 }
 
 async function loadEmployee(){
   try{
-    // Cherche d'abord par portal_auth_id (cas normal)
-    let {data} = await sb
-      .from('employees')
-      .select('*')
-      .eq('portal_auth_id', session.user.id)
-      .eq('portal_enabled', true)
-      .maybeSingle();
-
-    // Fallback : cherche par email et auto-link (première connexion après invitation)
-    if(!data && session.user.email){
-      const {data: byEmail} = await sb
-        .from('employees')
-        .select('*')
-        .eq('email', session.user.email)
-        .eq('portal_enabled', true)
-        .maybeSingle();
-      if(byEmail){
-        // Lier l'Auth ID à la fiche salarié (idempotent)
-        await sb.from('employees')
-          .update({portal_auth_id: session.user.id})
-          .eq('id', byEmail.id);
-        data = {...byEmail, portal_auth_id: session.user.id};
-      }
-    }
-
+    const data = await resolveEmployee();
     if(!data){
       // Salarié connecté mais pas encore activé → écran activation
       renderActivation();
@@ -434,11 +471,9 @@ async function loadEmployee(){
     }
     employee = data;
 
-    // Forcer le changement de mot de passe à la première connexion
-    if(employee.must_change_password){
-      renderSetPassword();
-      return;
-    }
+    // NB : on ne force PLUS l'écran de définition du mot de passe ici sur la base de
+    // must_change_password. Ce formulaire n'est présenté qu'en mode récupération (recoveryMode),
+    // c.-à-d. uniquement à l'ouverture d'un lien d'invitation/récupération valide.
 
     // Charger l'hôtel
     const {data:h} = await sb.from('hotels').select('id,name,city').eq('id',employee.hotel_id).single();
@@ -561,7 +596,7 @@ function renderForgotPassword(){
     $('authSend').disabled=true;
     $('authSend').innerHTML='<div class="spinner" style="width:18px;height:18px;border-width:2px"></div> Envoi…';
     const {error} = await sb.auth.resetPasswordForEmail(email, {
-      redirectTo: window.location.origin+'/salarie/auth/callback'
+      redirectTo: window.location.origin+'/salarie/auth/callback?type=recovery'
     });
     if(error){ flash('Erreur : '+error.message); $('authSend').disabled=false; $('authSend').innerHTML='<i class="fa-solid fa-paper-plane"></i> Envoyer le lien'; return; }
     $('authStep').innerHTML=`
@@ -607,15 +642,17 @@ function renderSetPassword(){
     btn.innerHTML='<div class="spinner" style="width:18px;height:18px;border-width:2px"></div> Enregistrement…';
     const {error} = await sb.auth.updateUser({password: pwd});
     if(error){ showErr('Erreur : '+error.message); return; }
+    // Récupération terminée : consommer l'état temporaire + nettoyer l'URL de tout paramètre d'auth.
+    // Une future visite sur /salarie ne réactivera donc jamais le parcours de réinitialisation.
+    recoveryMode=false;
+    window.history.replaceState(null,'','/salarie');
     if(employee?.id){
       await sb.from('employees').update({must_change_password:false, last_login_at: new Date().toISOString()}).eq('id', employee.id).then(null,()=>{});
+      employee = {...employee, must_change_password:false};
     }
-    employee = {...employee, must_change_password:false};
-    const {data:h} = await sb.from('hotels').select('id,name,city').eq('id',employee.hotel_id).single();
-    hotel = h;
     auditLog('password_set').catch(()=>{});
-    renderShell();
-    goTo('planning');
+    // Routing normal : résout la fiche (auto-link), charge l'hôtel puis affiche le portail.
+    await loadEmployee();
   });
   $('newPwd').addEventListener('keydown', e=>{ if(e.key==='Enter') $('confirmPwd')?.focus(); });
   $('confirmPwd').addEventListener('keydown', e=>{ if(e.key==='Enter') btn?.click(); });
@@ -644,8 +681,10 @@ function renderActivation(){
   $('btnActivationSignout')?.addEventListener('click', async()=>{
     const btn=$('btnActivationSignout');
     if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Déconnexion…';}
+    recoveryMode=false;
     try{ await sb.auth.signOut(); }catch(_){}
-    session=null;
+    session=null; employee=null; hotel=null;
+    window.history.replaceState(null,'','/salarie');
     renderAuth();
   });
 }
@@ -1922,8 +1961,10 @@ window.requestErasure=async()=>{
 
 window.signOut=async()=>{
   clearInterval(clockTick);
-  await sb.auth.signOut();
+  recoveryMode=false;                 // détruire l'état temporaire de récupération
+  try{ await sb.auth.signOut(); }catch(_){}   // supprime la session persistée (localStorage)
   session=null; employee=null; hotel=null;
+  window.history.replaceState(null,'','/salarie'); // purge tout paramètre résiduel dans l'URL
   renderAuth();
 };
 
