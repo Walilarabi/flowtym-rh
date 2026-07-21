@@ -129,8 +129,10 @@ html,body{height:100%;background:var(--bg);font-family:-apple-system,BlinkMacSys
 .cal-legend b{width:12px;height:12px;border-radius:3px;display:inline-block}
 /* ── Multi-établissements ── */
 .cal-day.clickable{cursor:pointer}
+.cal-day .dn{color:var(--ink)}                     /* numéro du jour toujours en noir */
 .cal-day .hb{font-size:8px;font-weight:800;line-height:13px;border-radius:4px;padding:0 4px;margin-top:1px;letter-spacing:.3px}
-.cal-day .cst{font-size:8.5px;font-weight:800;margin-top:1px}
+.cal-day .cst{font-size:10px;font-weight:800;margin-top:1px}   /* statut : information dominante */
+.cal-day .hcode{font-size:8px;font-weight:700;line-height:11px;margin-top:1px;letter-spacing:.3px}  /* code établissement : texte seul */
 .plan-filter{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:12px;padding:7px 10px;font-size:12.5px;background:var(--white);color:var(--ink);box-shadow:var(--shadow);max-width:100%}
 .plan-filter i{color:var(--ink2);font-size:12px}
 .plan-filter select{border:none;background:none;font:inherit;color:inherit;outline:none;min-width:0;max-width:210px}
@@ -385,15 +387,17 @@ let _planFilter='';                  // '' = tous les établissements, sinon hot
 let _monthRows=[];                   // lignes de planning du mois affiché (tous hôtels)
 
 // Palette : le principal est vert ; les secondaires prennent des couleurs stables et distinctes.
-const HOTEL_PRINCIPAL_COLOR={fg:'#16a34a',bg:'#f0fdf4'};
+// fg = couleur de police du code établissement (texte seul, teintes foncées pour la lisibilité)
+// bg = teinte claire réservée aux pastilles de la légende et du panneau de détail
+const HOTEL_PRINCIPAL_COLOR={fg:'#15803d',bg:'#f0fdf4'};
 const HOTEL_PALETTE=[
-  {fg:'#7c3aed',bg:'#f5f3ff'}, // violet
-  {fg:'#2563eb',bg:'#eff6ff'}, // bleu
-  {fg:'#ea580c',bg:'#fff7ed'}, // orange
-  {fg:'#0d9488',bg:'#f0fdfa'}, // teal
-  {fg:'#db2777',bg:'#fdf2f8'}, // rose
-  {fg:'#ca8a04',bg:'#fefce8'}, // ambre
-  {fg:'#4f46e5',bg:'#eef2ff'}, // indigo
+  {fg:'#6d28d9',bg:'#f5f3ff'}, // violet foncé
+  {fg:'#1d4ed8',bg:'#eff6ff'}, // bleu foncé
+  {fg:'#c2410c',bg:'#fff7ed'}, // orange foncé
+  {fg:'#0f766e',bg:'#f0fdfa'}, // teal foncé
+  {fg:'#be185d',bg:'#fdf2f8'}, // rose foncé
+  {fg:'#a16207',bg:'#fefce8'}, // ambre foncé
+  {fg:'#4338ca',bg:'#eef2ff'}, // indigo foncé
 ];
 // Code établissement dérivé du nom (aucune colonne dédiée en base) : initiales des mots significatifs.
 function hotelCode(name){
@@ -910,18 +914,21 @@ async function loadMonthCal(){
     const row=dayRows.find(r=>PL_WORKED.includes(r.status))||dayRows[0];
     const wd=(new Date(y,m,d).getDay()+6)%7, we=wd>=5, isToday=ds===todayStr;
 
-    let bg='#f9fafb', fg='#9ca3af', pill='', stLbl='';
+    let bg='#f9fafb', fg='#9ca3af', codeEl='', stLbl='';
     if(row){
       const hm=hmeta(row.hotel_id); usedHotels.add(row.hotel_id);
-      pill=`<span class="hb" style="background:${hm.fg}">${hm.code}</span>`;
-      if(PL_WORKED.includes(row.status)){ bg=hm.bg; fg='#374151'; }
-      else { const c=CMAP[row.status]; if(c){ bg=c.bg; fg=c.fg; } }
+      // Couleur de la cellule pilotée UNIQUEMENT par le statut (comme dans Flowtym RH)
+      const c=CMAP[row.status];
+      if(c){ bg=c.bg; fg=c.fg; } else { bg='#E8F5E9'; fg='#1b5e20'; }
       const showVal=(row.hours>0)?fmtHours(row.hours):esc(row.status);
       stLbl=`<span class="cst">${showVal}</span>`;
+      // Code établissement : texte seul (aucun fond/pastille), couleur propre à l'hôtel
+      codeEl=`<span class="hcode" style="color:${hm.fg}">${hm.code}</span>`;
     }
+    // Ordre : numéro du jour, statut (dominant), puis code établissement
     h+=`<div class="cal-day ${we?'weekend':''} ${isToday?'today':''} ${row?'clickable':''}"
           style="background:${bg};color:${fg}" ${row?`data-day="${ds}"`:''}>
-      <span class="dn">${d}</span>${pill}${stLbl}
+      <span class="dn">${d}</span>${stLbl}${codeEl}
     </div>`;
   }
   grid.innerHTML=h;
