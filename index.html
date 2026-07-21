@@ -837,6 +837,14 @@ async function makeRealBE(){
     async hotelGroupJoin(h,code){const {data,error}=await sb.rpc('hotel_group_join',{p_hotel:h,p_code:code});if(error)throw error;return data;},
     async hotelGroupLeave(h){const {data,error}=await sb.rpc('hotel_group_leave',{p_hotel:h});if(error)throw error;return data;},
     async setHotelCode(h,code){const {error}=await sb.from('hotels').update({hotel_code:(code||'').trim()||null}).eq('id',h);must(error,'Identifiant établissement');},
+    // ── Organisation (moteur groupe) ──
+    async orgProvision(){const {data,error}=await sb.rpc('org_provision');if(error)throw error;return data;},
+    async orgGet(){const {data,error}=await sb.rpc('org_get');if(error)throw error;return data||{group_id:null};},
+    async orgCreateHotel(payload){const {data,error}=await sb.rpc('org_create_hotel',{p:payload});if(error)throw error;return data;},
+    async orgUpdateHotel(hid,payload){const {data,error}=await sb.rpc('org_update_hotel',{p_hotel:hid,p:payload});if(error)throw error;return data;},
+    async orgSetHotelStatus(hid,status){const {data,error}=await sb.rpc('org_set_hotel_status',{p_hotel:hid,p_status:status});if(error)throw error;return data;},
+    async orgDetachHotel(hid){const {data,error}=await sb.rpc('org_detach_hotel',{p_hotel:hid});if(error)throw error;return data;},
+    async orgUpdateGroup(gid,patch){const {error}=await sb.from('hotel_groups').update(patch).eq('id',gid);must(error,'Groupe');},
 
     async listDocumentSettings(h){const {data}=await sb.from('hotel_document_settings').select('*').eq('hotel_id',h);return data||[];},
     async saveDocumentSetting(h,doc_type,patch){const {error}=await sb.from('hotel_document_settings').upsert({hotel_id:h,doc_type,...patch,updated_at:new Date().toISOString()},{onConflict:'hotel_id,doc_type'});must(error,'Config document');},
@@ -1676,6 +1684,7 @@ const TABS=[
     ['portal_inbox','Demandes portail','fa-solid fa-inbox'],
   ]],
   ['Réglages',[
+    ['organisation','Organisation','fa-solid fa-sitemap'],
     ['config','Paramètres','fa-solid fa-gear'],
     ['help','Aide & support','fa-solid fa-circle-question'],
   ]],
@@ -1697,7 +1706,7 @@ function renderShell(){
         <div class="sbhead"><button class="sbtog" id="sbtog" title="Réduire la barre latérale"><i class="fa-solid fa-chevron-left"></i></button></div>
         <nav class="menu" id="nav">
           ${TABS.map(([grp,items])=>{
-            const vis=items.filter(([k])=>k==='help'||canSee(k));
+            const vis=items.filter(([k])=>k==='help'?true:(k==='organisation'?canManageUsers():canSee(k)));
             if(!vis.length) return '';
             return `<div class="grp">${grp}</div>`
               + vis.map(([k,lab,ic,soon])=>`<button class="it ${k===view?'on':''}" data-v="${k}" title="${lab}">
@@ -1715,7 +1724,7 @@ function renderShell(){
     hotelId=e.target.value; pending.clear(); selection.clear();
     await loadHotel();
     // rôle potentiellement différent dans l'autre hôtel -> refresh complet de la shell
-    if(!canSee(view)) view='dashboard';
+    if(!(view==='organisation'?canManageUsers():canSee(view))) view='dashboard';
     renderShell();
   };
   const lo=$('logout'); if(lo) lo.onclick=async()=>{await BE.signOut();renderLogin();};
@@ -1771,7 +1780,10 @@ function renderAccessDenied(v){
 }
 
 function goView(v){
-  if(!canSee(v)){
+  if(v==='organisation' && !canManageUsers()){
+    view=v; $('nav').querySelectorAll('.it').forEach(b=>b.classList.toggle('on',b.dataset.v===v)); renderAccessDenied(v); return;
+  }
+  if(v!=='organisation' && !canSee(v)){
     // Afficher une page "Accès refusé" propre plutôt que rediriger silencieusement
     view=v;
     $('nav').querySelectorAll('.it').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
@@ -1788,7 +1800,8 @@ function goView(v){
            reviews:renderReviews,
            medical:renderMedical, equipment:renderEquipment, orgchart:renderOrgChart,
            tracking:renderTracking, payroll:renderPayroll, portal_inbox:renderPortalInbox,
-           conformite:renderConformite, onboarding:renderOnboardingView};
+           conformite:renderConformite, onboarding:renderOnboardingView,
+           organisation:renderOrganisation};
   (r[v]||r.dashboard)();
 }
 /* ===================== VUE PLANNING ===================== */
@@ -9066,32 +9079,11 @@ async function _cfgGeneral(hotel, isAdmin){
       </div>
     </div>
 
-    <!-- MULTI-HÔTEL -->
-    <div class="box" style="margin-bottom:16px">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-        <h3 style="margin:0"><i class="fa-solid fa-hotel"></i> Multi-hôtel</h3>
-        <button class="btn g" style="font-size:11.5px;padding:5px 12px" onclick="navTo('config')"><i class="fa-solid fa-pen"></i> Modifier</button>
-      </div>
-      <table class="tbl" style="font-size:12.5px">
-        <thead><tr><th>Établissement</th><th>Code</th><th>Adresse</th><th>Statut</th></tr></thead>
-        <tbody>
-          ${allHotels.map(h=>`<tr>
-            <td><b>${esc(h.name||'—')}</b></td>
-            <td>${esc(h.code||h.city?.slice(0,3).toUpperCase()||'—')}</td>
-            <td style="color:var(--muted)">${esc(h.address||h.city||'—')}</td>
-            <td><span class="tag ${h.active===false?'gray':'ok'}">${h.active===false?'Inactif':'Actif'}</span></td>
-          </tr>`).join('')}
-        </tbody>
-      </table>
-    </div>
-
-    <!-- GROUPE HÔTELIER -->
-    <div class="box" id="cfgGroupBox" style="margin-bottom:16px">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-        <h3 style="margin:0"><i class="fa-solid fa-sitemap"></i> Groupe hôtelier</h3>
-      </div>
-      <div style="font-size:11.5px;color:var(--muted);margin-bottom:12px">Reliez plusieurs établissements pour partager les fonctionnalités groupe (planning groupe, extras inter-hôtels, reporting consolidé…). Chaque hôtel reste indépendant.</div>
-      <div id="cfgGroupBody"><div style="color:var(--muted);font-size:12px">Chargement…</div></div>
+    <!-- Gestion des établissements : voir la page « Organisation » -->
+    <div class="box" style="margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;gap:12px">
+      <div><div style="font-weight:700;font-size:14px"><i class="fa-solid fa-sitemap" style="margin-right:6px;color:var(--violet)"></i> Organisation multi-hôtels</div>
+      <div style="font-size:11.5px;color:var(--muted);margin-top:2px">Gérez le groupe, les établissements, les identifiants et les fonctionnalités groupe depuis la page dédiée.</div></div>
+      <button class="btn p" style="font-size:12.5px;white-space:nowrap" onclick="goView('organisation')"><i class="fa-solid fa-arrow-right"></i> Ouvrir l'Organisation</button>
     </div>
 
     <!-- IMPORT / EXPORT -->
@@ -9176,79 +9168,159 @@ async function _cfgGeneral(hotel, isAdmin){
   };
   // Import Excel
   $('importXlsxSettings').onclick=()=>$('xlsxFile').click();
-  // Section Groupe hôtelier (chargée après le rendu)
-  if($('cfgGroupBody')) _loadCfgGroup(hotel, isAdmin);
 }
 
-// ── Section « Groupe hôtelier » de Paramètres > Informations établissement ──
-const GROUP_JOIN_ERR={HOTEL_INTROUVABLE:'Aucun établissement ne correspond à cet identifiant.',MEME_HOTEL:'Il s\'agit de l\'établissement courant.',DEJA_MEMBRE:'Cet établissement est déjà dans le groupe.',DEJA_AUTRE_GROUPE:'Cet établissement appartient déjà à un autre groupe.',CODE_VIDE:'Saisissez un identifiant.',NON_AUTORISE:'Action non autorisée.'};
-function _grpErr(e){const m=(e&&e.message)||String(e||'');for(const k in GROUP_JOIN_ERR){if(m.includes(k))return GROUP_JOIN_ERR[k];}return 'Erreur : '+m;}
+// ── Helpers organisation / groupe ──
 function _hotelCodeColor(i){return ['#15803d','#6d28d9','#1d4ed8','#c2410c','#0f766e','#be185d','#a16207','#4338ca'][i%8];}
-async function _loadCfgGroup(hotel, isAdmin){
-  const el=$('cfgGroupBody'); if(!el)return;
-  let info; try{ info=await BE.hotelGroupGet(hotelId); }catch(e){ el.innerHTML=`<div style="color:var(--muted);font-size:12px">Indisponible : ${esc(_grpErr(e))}</div>`; return; }
-  const inGroup=!!info.group_id;
-  const selfCode=(info.members||[]).find(m=>m.is_self)?.hotel_code || hotel.hotel_code || '';
+const ORG_ERR={CODE_VIDE:'Saisissez un identifiant.',CODE_EXISTANT:'Cet identifiant est déjà utilisé par un autre établissement.',NOM_VIDE:'Le nom de l\'établissement est requis.',AUCUN_GROUPE:'Aucun groupe défini.',NON_AUTORISE:'Action non autorisée.',HOTEL_CODE_IMMUTABLE:'L\'identifiant unique ne peut pas être modifié.',STATUT_INVALIDE:'Statut invalide.'};
+function _orgErr(e){const m=(e&&e.message)||String(e||'');for(const k in ORG_ERR){if(m.includes(k))return ORG_ERR[k];}return 'Erreur : '+m;}
+const ORG_FEATURES=[
+  ['planning_group','Planning Groupe','fa-calendar'],
+  ['extras','Extras inter-hôtels','fa-people-arrows'],
+  ['portal_multi','Portail salarié multi-hôtels','fa-mobile-screen'],
+  ['reporting','Reporting consolidé','fa-chart-line'],
+  ['revenue','Revenue Groupe','fa-arrow-trend-up'],
+  ['finance','Finance Groupe','fa-coins'],
+  ['documents','Documents Groupe','fa-folder-open'],
+  ['dashboard','Dashboard Groupe','fa-gauge-high'],
+];
+const HOTEL_STATUS_META={active:{lbl:'Actif',bg:'#dcfce7',fg:'#166534'},suspended:{lbl:'Suspendu',bg:'#fee2e2',fg:'#991b1b'},maintenance:{lbl:'En maintenance',bg:'#fef3c7',fg:'#92400e'}};
+let _orgInfo=null;
+
+async function renderOrganisation(){
+  $('view').innerHTML=`<div class="page">
+    <div class="phead"><div><h1>Organisation</h1><div class="sub">Centre de pilotage multi-hôtels du groupe</div></div></div>
+    <div id="orgBody"><div style="padding:40px;text-align:center;color:var(--muted)"><i class="fa-solid fa-spinner fa-spin fa-2x"></i></div></div>
+  </div>`;
+  await _loadOrg();
+}
+async function _loadOrg(){
+  const el=$('orgBody'); if(!el)return;
+  let info;
+  try{
+    info=await BE.orgGet();
+    if(!info||!info.group_id){ await BE.orgProvision(); info=await BE.orgGet(); } // migration automatique
+  }catch(e){ el.innerHTML=`<div class="box" style="color:var(--red)">${esc(_orgErr(e))}</div>`; return; }
+  _orgInfo=info;
+  const c=info.counts||{}, feats=info.features||{};
+  const created=info.created_at?new Date(info.created_at).toLocaleDateString('fr-FR'):'—';
+  const grpStatus=info.status||'active';
   el.innerHTML=`
-    <div style="display:flex;flex-direction:column;gap:14px">
-      <div style="display:flex;justify-content:space-between;align-items:center;border:1px solid var(--line);border-radius:10px;padding:10px 14px">
-        <div><div style="font-weight:700;font-size:13.5px">Cet établissement appartient à un groupe</div>
-        <div style="font-size:11px;color:var(--muted)">Active le partage des fonctionnalités groupe.</div></div>
-        <label class="tog-wrap"><input type="checkbox" id="grpToggle" ${inGroup?'checked':''} ${isAdmin?'':'disabled'}><span class="tog-sw"></span></label>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-        <div class="fld"><label>Identifiant de l'établissement (5 caractères)</label>
-          <input id="grpSelfCode" maxlength="5" value="${esc(selfCode)}" placeholder="ex : FO001" style="text-transform:uppercase" ${isAdmin?'':'disabled'}></div>
-        <div class="fld"><label>Nom du groupe</label>
-          <input id="grpName" value="${esc(info.group_name||'')}" placeholder="ex : Opéra Collection" ${inGroup&&isAdmin?'':'disabled'}></div>
-      </div>
-      <div id="grpMembersBox" style="${inGroup?'':'display:none'}">
-        <div style="font-size:11.5px;color:var(--muted);margin-bottom:6px">Établissements du groupe (${(info.members||[]).length}) :</div>
-        <div style="display:flex;flex-direction:column;gap:6px">
-          ${(info.members||[]).map((m,i)=>`<div style="display:flex;align-items:center;gap:10px;padding:7px 10px;border:1px solid var(--line);border-radius:9px">
-            <span style="font-weight:800;font-size:11px;color:${_hotelCodeColor(i)};min-width:44px">${esc(m.hotel_code||'—')}</span>
-            <span style="flex:1;font-size:13px;font-weight:600">${esc(m.name)}${m.is_self?' <span style="font-size:10px;color:var(--muted);font-weight:500">(cet établissement)</span>':''}</span>
-          </div>`).join('')}
+    <div class="box" style="margin-bottom:16px">
+      <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+        <div style="width:56px;height:56px;border-radius:14px;background:var(--violet-bg);display:grid;place-items:center;color:var(--violet-d);font-size:24px;flex-shrink:0;overflow:hidden">
+          ${info.logo_url?`<img src="${esc(info.logo_url)}" style="width:100%;height:100%;object-fit:cover">`:'<i class="fa-solid fa-sitemap"></i>'}</div>
+        <div style="flex:1;min-width:200px">
+          <input id="orgName" value="${esc(info.name||'')}" placeholder="Nom du groupe" style="font-size:18px;font-weight:800;border:1px solid transparent;border-radius:8px;padding:4px 8px;width:100%;max-width:380px;background:transparent" onfocus="this.style.borderColor='var(--line)'" onblur="this.style.borderColor='transparent'">
+          <div style="font-size:12px;color:var(--muted);margin-top:2px;padding-left:8px">Créé le ${created}</div>
         </div>
-        ${isAdmin?`<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
-          <input id="grpJoinCode" maxlength="5" placeholder="Identifiant à rattacher (ex : VO001)" style="flex:1;min-width:180px;text-transform:uppercase;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px">
-          <button class="btn p" id="grpJoinBtn"><i class="fa-solid fa-plus"></i> Ajouter un établissement au groupe</button>
-          <button class="btn d" id="grpLeaveBtn" style="font-size:12px"><i class="fa-solid fa-link-slash"></i> Quitter le groupe</button>
-        </div>`:''}
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:12px;color:var(--muted)">Statut</span>
+          <select id="orgStatus" style="font-size:12.5px;padding:6px 10px;border:1px solid var(--line);border-radius:8px">
+            <option value="active" ${grpStatus==='active'?'selected':''}>Actif</option>
+            <option value="suspended" ${grpStatus==='suspended'?'selected':''}>Suspendu</option>
+          </select>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-top:16px">
+        ${[['Établissements',c.hotels||0,'fa-hotel'],['Collaborateurs',c.employees||0,'fa-users'],['Utilisateurs',c.users||0,'fa-user-shield']].map(([lb,v,ic])=>`
+          <div style="background:#faf9ff;border:1px solid var(--line);border-radius:10px;padding:12px;text-align:center">
+            <div style="font-size:22px;font-weight:800;color:var(--violet-d)">${v}</div>
+            <div style="font-size:11px;color:var(--muted)"><i class="fa-solid ${ic}"></i> ${lb}</div></div>`).join('')}
+      </div>
+    </div>
+
+    <div class="box" style="margin-bottom:16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <h3 style="margin:0"><i class="fa-solid fa-hotel"></i> Établissements du groupe</h3>
+        <button class="btn p" id="orgAddBtn"><i class="fa-solid fa-plus"></i> Ajouter un établissement</button>
+      </div>
+      <table class="tbl" style="font-size:12.5px">
+        <thead><tr><th>Établissement</th><th>Code</th><th>Identifiant</th><th>Ville</th><th>Statut</th><th></th></tr></thead>
+        <tbody>
+          ${(info.members||[]).map((m,i)=>{const st=HOTEL_STATUS_META[m.status||'active']||HOTEL_STATUS_META.active;return `<tr>
+            <td><b>${esc(m.name)}</b></td>
+            <td><span style="font-weight:800;color:${_hotelCodeColor(i)}">${esc((m.hotel_code||'').replace(/[0-9]/g,'')||'—')}</span></td>
+            <td style="font-family:'SFMono-Regular',monospace">${esc(m.hotel_code||'—')}</td>
+            <td style="color:var(--muted)">${esc(m.city||'—')}</td>
+            <td><span class="tag" style="background:${st.bg};color:${st.fg}">${st.lbl}</span></td>
+            <td style="text-align:right;white-space:nowrap">
+              <button class="btn g" style="padding:4px 8px;font-size:11px" data-edit="${m.id}" title="Modifier"><i class="fa-solid fa-pen"></i></button>
+              <select data-status="${m.id}" style="font-size:11px;padding:3px 6px;border:1px solid var(--line);border-radius:6px;margin:0 4px">
+                <option value="active" ${(m.status||'active')==='active'?'selected':''}>Actif</option>
+                <option value="suspended" ${m.status==='suspended'?'selected':''}>Suspendu</option>
+                <option value="maintenance" ${m.status==='maintenance'?'selected':''}>Maintenance</option>
+              </select>
+              <button class="btn d" style="padding:4px 8px;font-size:11px" data-detach="${m.id}" title="Retirer du groupe"><i class="fa-solid fa-link-slash"></i></button>
+            </td></tr>`;}).join('')||`<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:16px">Aucun établissement.</td></tr>`}
+        </tbody>
+      </table>
+      <div style="font-size:10.5px;color:var(--muted);margin-top:8px"><i class="fa-solid fa-circle-info"></i> L'identifiant unique est défini à la création et ne peut plus être modifié. « Retirer » détache l'établissement du groupe sans supprimer aucune donnée.</div>
+    </div>
+
+    <div class="box">
+      <h3 style="margin:0 0 12px"><i class="fa-solid fa-toggle-on"></i> Fonctionnalités Groupe</h3>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:10px">
+        ${ORG_FEATURES.map(([k,lb,ic])=>`
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px">
+            <span style="font-size:13px"><i class="fa-solid ${ic}" style="color:var(--violet);width:18px;text-align:center"></i> ${lb}</span>
+            <label class="tog-wrap"><input type="checkbox" data-feat="${k}" ${feats[k]?'checked':''}><span class="tog-sw"></span></label>
+          </div>`).join('')}
+      </div>
+      <div style="font-size:10.5px;color:var(--muted);margin-top:10px">Ces fonctionnalités seront activées progressivement.</div>
+    </div>`;
+  $('orgName').onchange=async()=>{ try{ await BE.orgUpdateGroup(info.group_id,{name:$('orgName').value.trim()||null}); flash('Nom du groupe enregistré'); }catch(e){ flash(_orgErr(e),'e'); } };
+  $('orgStatus').onchange=async()=>{ try{ await BE.orgUpdateGroup(info.group_id,{status:$('orgStatus').value}); flash('Statut du groupe mis à jour'); }catch(e){ flash(_orgErr(e),'e'); } };
+  $('orgAddBtn').onclick=()=>_openOrgHotelDrawer(null);
+  el.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>{ const m=(_orgInfo.members||[]).find(x=>x.id===b.dataset.edit); _openOrgHotelDrawer(m); });
+  el.querySelectorAll('[data-status]').forEach(sel=>sel.onchange=async()=>{ try{ await BE.orgSetHotelStatus(sel.dataset.status,sel.value); flash('Statut de l\'établissement mis à jour'); _loadOrg(); }catch(e){ flash(_orgErr(e),'e'); _loadOrg(); } });
+  el.querySelectorAll('[data-detach]').forEach(b=>b.onclick=async()=>{ if(!confirm('Retirer cet établissement du groupe ?\nAucune donnée ne sera supprimée.'))return; try{ await BE.orgDetachHotel(b.dataset.detach); flash('Établissement retiré du groupe'); _loadOrg(); }catch(e){ flash(_orgErr(e),'e'); } });
+  el.querySelectorAll('[data-feat]').forEach(cb=>cb.onchange=async()=>{ const f={...(_orgInfo.features||{})}; f[cb.dataset.feat]=cb.checked; try{ await BE.orgUpdateGroup(info.group_id,{features:f}); _orgInfo.features=f; flash('Fonctionnalité '+(cb.checked?'activée':'désactivée')); }catch(e){ flash(_orgErr(e),'e'); cb.checked=!cb.checked; } });
+}
+
+function _openOrgHotelDrawer(member){
+  const isEdit=!!member;
+  const v=member||{};
+  $('drawer').innerHTML=`
+    <div class="dh"><button class="close" data-x><i class="fa-solid fa-xmark"></i></button>
+      <h2>${isEdit?'Modifier l\'établissement':'Ajouter un établissement'}</h2>
+      <div class="role">${isEdit?esc(v.name||''):'Nouvel établissement rattaché au groupe'}</div></div>
+    <div class="sec">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="fld" style="grid-column:1/-1"><label>Nom de l'établissement *</label><input id="oh_name" value="${esc(v.name||'')}"></div>
+        <div class="fld"><label>Identifiant unique (5 car.)${isEdit?' — non modifiable':''}</label><input id="oh_code" maxlength="5" value="${esc(v.hotel_code||'')}" style="text-transform:uppercase;${isEdit?'background:#f4f4f7;color:var(--muted)':''}" ${isEdit?'disabled':''} placeholder="ex : FO001"></div>
+        <div class="fld"><label>Ville</label><input id="oh_city" value="${esc(v.city||'')}"></div>
+        <div class="fld" style="grid-column:1/-1"><label>Adresse</label><input id="oh_address" value="${esc(v.address||'')}"></div>
+        <div class="fld"><label>Pays</label><input id="oh_country" value="${esc(v.country||'')}" placeholder="France"></div>
+        <div class="fld"><label>Téléphone</label><input id="oh_phone" value="${esc(v.phone||'')}"></div>
+        <div class="fld"><label>Email</label><input id="oh_email" type="email" value="${esc(v.email||'')}"></div>
+        <div class="fld"><label>Devise</label><input id="oh_currency" value="${esc(v.currency||'EUR')}"></div>
+        <div class="fld" style="grid-column:1/-1"><label>Fuseau horaire</label><input id="oh_tz" value="${esc(v.timezone||'Europe/Paris')}"></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:16px">
+        <button class="btn p" id="oh_save" style="flex:1;justify-content:center"><i class="fa-solid fa-check"></i> ${isEdit?'Enregistrer':'Créer l\'établissement'}</button>
+        <button class="btn g" id="oh_cancel">Annuler</button>
       </div>
     </div>`;
-  if(!isAdmin) return;
-  const reload=()=>_loadCfgGroup(hotel,isAdmin);
-  // Identifiant de l'hôtel — enregistré à la sortie du champ
-  $('grpSelfCode').onchange=async()=>{
-    const code=($('grpSelfCode').value||'').trim().toUpperCase();
-    try{ await BE.setHotelCode(hotelId,code); hotel.hotel_code=code; const hh=hotels.find(h=>h.id===hotelId); if(hh)hh.hotel_code=code; flash('Identifiant enregistré'); }
-    catch(e){ flash(/duplicate|unique/i.test(e.message||'')?'Cet identifiant est déjà utilisé par un autre établissement.':'Erreur : '+e.message,'e'); reload(); }
-  };
-  // Interrupteur groupe
-  $('grpToggle').onchange=async()=>{
-    if($('grpToggle').checked){
-      try{ await BE.hotelGroupEnable(hotelId, $('grpName')?.value||''); flash('Groupe activé'); reload(); }
-      catch(e){ flash(_grpErr(e),'e'); $('grpToggle').checked=false; }
-    } else {
-      if(!confirm('Retirer cet établissement du groupe ?')){ $('grpToggle').checked=true; return; }
-      try{ await BE.hotelGroupLeave(hotelId); flash('Établissement retiré du groupe'); reload(); }
-      catch(e){ flash(_grpErr(e),'e'); $('grpToggle').checked=true; }
-    }
-  };
-  // Nom du groupe
-  const gn=$('grpName'); if(gn) gn.onchange=async()=>{ if(!inGroup)return; try{ await BE.hotelGroupEnable(hotelId, gn.value||''); flash('Nom du groupe enregistré'); }catch(e){ flash(_grpErr(e),'e'); } };
-  // Ajouter un établissement
-  const jb=$('grpJoinBtn'); if(jb) jb.onclick=async()=>{
-    const code=($('grpJoinCode').value||'').trim().toUpperCase();
-    if(!code){ flash('Saisissez un identifiant','w'); return; }
-    jb.disabled=true; const _o=jb.innerHTML; jb.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Ajout…';
-    try{ await BE.hotelGroupJoin(hotelId, code); flash('Établissement rattaché au groupe'); reload(); }
-    catch(e){ flash(_grpErr(e),'e'); jb.disabled=false; jb.innerHTML=_o; }
-  };
-  const lb=$('grpLeaveBtn'); if(lb) lb.onclick=async()=>{
-    if(!confirm('Retirer cet établissement du groupe ?'))return;
-    try{ await BE.hotelGroupLeave(hotelId); flash('Établissement retiré du groupe'); reload(); }catch(e){ flash(_grpErr(e),'e'); }
+  $('dbg').classList.add('on'); $('drawer').classList.add('on');
+  $('drawer').querySelector('[data-x]').onclick=closeFiche;
+  $('oh_cancel').onclick=closeFiche;
+  $('oh_save').onclick=async()=>{
+    const payload={name:$('oh_name').value.trim(),city:$('oh_city').value.trim(),address:$('oh_address').value.trim(),
+      country:$('oh_country').value.trim(),phone:$('oh_phone').value.trim(),email:$('oh_email').value.trim(),
+      currency:$('oh_currency').value.trim(),timezone:$('oh_tz').value.trim()};
+    if(!payload.name){ flash('Le nom est requis','w'); return; }
+    const btn=$('oh_save'); btn.disabled=true; const _o=btn.innerHTML; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Enregistrement…';
+    try{
+      if(isEdit){ await BE.orgUpdateHotel(member.id,payload); }
+      else{
+        payload.hotel_code=($('oh_code').value||'').trim().toUpperCase();
+        await BE.orgCreateHotel(payload);
+        // Visibilité immédiate dans toute l'app : rafraîchir la liste des hôtels + le sélecteur d'en-tête
+        try{ hotels=await BE.listHotels(); const sel=$('hotelSel'); if(sel) sel.innerHTML=hotels.map(h=>`<option value="${h.id}" ${h.id===hotelId?'selected':''}>${esc(h.name)}${h.city?' · '+esc(h.city):''}</option>`).join(''); }catch(_){}
+      }
+      closeFiche(); flash(isEdit?'Établissement mis à jour':'Établissement créé et rattaché au groupe'); _loadOrg();
+    }catch(e){ flash(_orgErr(e),'e'); btn.disabled=false; btn.innerHTML=_o; }
   };
 }
 
