@@ -830,12 +830,9 @@ function goTo(tab){
 }
 
 async function refreshBadges(){
-  // Demandes en attente côté salarié (confirmations attendues)
-  const {count} = await sb.from('portal_requests')
-    .select('id',{count:'exact',head:true})
-    .eq('employee_id', employee.id)
-    .in('status',['approved','rejected'])
-    .gte('updated_at', new Date(Date.now()-7*86400000).toISOString());
+  // Réponses non lues du responsable (nouvelles réponses dans les fils de discussion)
+  let count=0;
+  try{ const {count:c}=await sb.from('portal_request_messages').select('id',{count:'exact',head:true}).eq('author_type','manager').is('read_at',null); count=c||0; }catch(_){}
   $('reqBadge').style.display = count>0 ? 'grid' : 'none';
   if(count>0) $('reqBadge').textContent = count;
 
@@ -1821,26 +1818,58 @@ window.submitRequest=async()=>{
   finally{if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-paper-plane"></i> Envoyer la demande';}}
 };
 
+const REQ_ST_LABELS={pending:'En attente',approved:'Acceptée',rejected:'Refusée',cancelled:'Annulée',change_proposed:'Modification proposée',info_requested:'Informations demandées',employee_replied:'Réponse envoyée',proposal_rejected:'Proposition refusée',expired:'Expirée'};
 window.openRequestDetail=async(id)=>{
   const {data:r}=await sb.from('portal_requests').select('*').eq('id',id).single();
   if(!r) return;
   const t=REQ_TYPES[r.type]||REQ_TYPES.autre;
   const period=r.date_end&&r.date_end!==r.date_start?`${fmtDate(r.date_start)} → ${fmtDate(r.date_end)}`:fmtDate(r.date_start);
+  const closed=r.conversation_status==='closed';
+  let msgs=[]; try{ const {data}=await sb.from('portal_request_messages').select('*').eq('request_id',id).order('created_at'); msgs=data||[]; }catch(_){}
+  sb.rpc('portal_messages_mark_read',{p_request:id}).then(()=>{ if(typeof refreshBadges==='function') refreshBadges().catch(()=>{}); }).catch(()=>{});
+  const fmtDT=d=>new Date(d).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+  const thread=msgs.length?msgs.map(m=>{
+    const mine=m.author_type==='employee'; // le salarié voit ses messages à droite
+    return `<div style="display:flex;margin:7px 0;${mine?'justify-content:flex-end':''}">
+      <div style="max-width:80%;background:${mine?'var(--vi)':'#f1f2f4'};color:${mine?'#fff':'var(--ink)'};border-radius:14px;padding:8px 11px">
+        <div style="font-size:10px;opacity:.8;margin-bottom:2px">${esc(m.author_name||(mine?'Vous':'Responsable'))} · ${mine?'Vous':'Responsable'} · ${fmtDT(m.created_at)}</div>
+        <div style="font-size:13px;white-space:pre-wrap">${esc(m.message)}</div>
+        ${m.attachment_name?`<div style="font-size:11px;margin-top:4px"><i class="fa-solid fa-paperclip"></i> ${esc(m.attachment_name)}</div>`:''}
+      </div></div>`;
+  }).join(''):'<div style="color:var(--ink2);font-size:12px;padding:6px 0">Aucun échange pour le moment.</div>';
   openModal(`
+    <div class="modal-handle"></div>
     <div class="modal-title"><i class="fa-solid ${t.icon}" style="color:${t.color}"></i>${t.label}</div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-      <span class="tag tag-${r.status}">${{pending:'En attente',approved:'Acceptée',rejected:'Refusée',cancelled:'Annulée'}[r.status]}</span>
+      <span class="tag tag-${r.status}">${REQ_ST_LABELS[r.status]||r.status}</span>
       <span style="font-size:12px;color:var(--ink2)">${fmtDate(r.created_at)}</span>
     </div>
     <div class="card-title" style="margin-bottom:6px"><i class="fa-regular fa-calendar"></i>Période</div>
-    <p style="font-size:14px;font-weight:600;margin-bottom:14px">${period}</p>
-    ${r.message?`<div class="card-title" style="margin-bottom:6px"><i class="fa-regular fa-comment"></i>Votre message</div>
+    <p style="font-size:14px;font-weight:600;margin-bottom:6px">${period}</p>
+    ${r.proposed_start?`<div style="font-size:13px;color:#6d28d9;margin-bottom:12px"><i class="fa-solid fa-arrows-left-right"></i> Nouvelle période proposée : <b>${fmtDate(r.proposed_start)}${r.proposed_end&&r.proposed_end!==r.proposed_start?' → '+fmtDate(r.proposed_end):''}</b></div>`:''}
+    ${r.message?`<div class="card-title" style="margin-bottom:6px"><i class="fa-regular fa-comment"></i>Votre message initial</div>
       <p style="font-size:13px;color:var(--ink2);margin-bottom:14px;font-style:italic">"${esc(r.message)}"</p>`:''}
-    ${r.manager_comment?`<div class="card-title" style="margin-bottom:6px"><i class="fa-solid fa-comment-dots"></i>Réponse du responsable</div>
-      <div style="background:var(--vi-l);border-radius:10px;padding:12px;font-size:13px;color:var(--vi-d);margin-bottom:14px">"${esc(r.manager_comment)}"</div>`:''}
-    ${r.attachment_path?`<button class="btn btn-g btn-full" style="margin-bottom:8px" onclick="downloadPortalDoc('${esc(r.attachment_path.split('/').pop())}')"><i class="fa-solid fa-paperclip"></i> Voir la pièce jointe</button>`:''}
-    ${r.status==='pending'?`<button class="btn btn-red btn-full" onclick="cancelRequest('${r.id}')"><i class="fa-solid fa-xmark"></i> Annuler la demande</button>`:''}
+    ${r.attachment_path?`<button class="btn btn-g btn-full" style="margin-bottom:12px" onclick="downloadPortalDoc('${esc(r.attachment_path.split('/').pop())}')"><i class="fa-solid fa-paperclip"></i> Voir la pièce jointe</button>`:''}
+    <div class="card-title" style="margin:6px 0"><i class="fa-regular fa-comments"></i>Échanges avec le responsable</div>
+    <div id="reqThread" style="max-height:260px;overflow-y:auto;margin-bottom:10px">${thread}</div>
+    ${closed
+      ? `<div style="background:#f1f2f4;border-radius:10px;padding:12px;font-size:12.5px;color:var(--ink2)"><i class="fa-solid fa-lock" style="margin-right:5px"></i>Cette demande a été clôturée par votre responsable. Vous ne pouvez plus répondre dans cette conversation.${r.closure_message?`<div style="margin-top:6px;font-style:italic">"${esc(r.closure_message)}"</div>`:''}</div>`
+      : `<label style="font-size:11px;color:var(--ink2);display:flex;justify-content:space-between"><span>Écrire un message</span><span id="reqMsgCount" style="color:var(--ink2)">0/2000</span></label>
+         <textarea id="reqMsgInput" maxlength="2000" rows="2" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:10px;padding:8px;font-size:13px;font-family:inherit;resize:vertical" placeholder="Précision, réponse au responsable…"></textarea>
+         <button class="btn btn-p btn-full" id="reqMsgSend" style="margin-top:8px" disabled><i class="fa-solid fa-paper-plane"></i> Envoyer</button>`}
+    ${r.status==='pending'?`<button class="btn btn-red btn-full" style="margin-top:10px" onclick="cancelRequest('${r.id}')"><i class="fa-solid fa-xmark"></i> Annuler la demande</button>`:''}
   `);
+  if(!closed){
+    const ta=$('reqMsgInput'), cnt=$('reqMsgCount'), send=$('reqMsgSend');
+    if(ta&&send){ const u=()=>{cnt.textContent=`${ta.value.length}/2000`; send.disabled=!ta.value.trim();}; ta.oninput=u; u(); }
+    if(send) send.onclick=async()=>{
+      const v=(ta.value||'').trim(); if(!v)return;
+      send.disabled=true; send.innerHTML='<div class="spinner" style="width:16px;height:16px;border-width:2px"></div> Envoi…';
+      try{ const {error}=await sb.rpc('portal_message_send',{p_request:id,p_message:v}); if(error)throw error;
+        auditLog('portal_message',{request_id:id}); openRequestDetail(id); }
+      catch(e){ flash(e.message&&e.message.includes('CONVERSATION_CLOSEE')?'Demande clôturée : réponse impossible.':'Erreur : '+e.message); send.disabled=false; send.innerHTML='<i class="fa-solid fa-paper-plane"></i> Envoyer'; }
+    };
+  }
 };
 
 window.cancelRequest=async(id)=>{

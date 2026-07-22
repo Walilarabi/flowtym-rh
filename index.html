@@ -852,6 +852,11 @@ async function makeRealBE(){
     // ── Workflow demandes portail ──
     async portalDecide(id,action,comment,start,end,shift){const {data,error}=await sb.rpc('portal_request_decide',{p_request:id,p_action:action,p_comment:comment||null,p_start:start||null,p_end:end||null,p_shift:shift||null});if(error)throw error;return data;},
     async listPortalHistory(id){const {data,error}=await sb.from('portal_request_history').select('*').eq('request_id',id).order('created_at');if(error){if(error.code==='42P01')return[];must(error,'Historique demande');}return data||[];},
+    async listPortalMessages(id){const {data,error}=await sb.from('portal_request_messages').select('*').eq('request_id',id).order('created_at');if(error){if(error.code==='42P01')return[];must(error,'Messages');}return data||[];},
+    async portalSendMessage(id,msg,path,name){const {data,error}=await sb.rpc('portal_message_send',{p_request:id,p_message:msg,p_attachment_path:path||null,p_attachment_name:name||null});if(error)throw error;return data;},
+    async portalMarkRead(id){const {error}=await sb.rpc('portal_messages_mark_read',{p_request:id});if(error)console.warn('markRead:',error.message);},
+    async portalClose(id,msg){const {error}=await sb.rpc('portal_conversation_close',{p_request:id,p_message:msg});if(error)throw error;},
+    async portalReopen(id,justif){const {error}=await sb.rpc('portal_conversation_reopen',{p_request:id,p_justification:justif});if(error)throw error;},
 
     async listDocumentSettings(h){const {data}=await sb.from('hotel_document_settings').select('*').eq('hotel_id',h);return data||[];},
     async saveDocumentSetting(h,doc_type,patch){const {error}=await sb.from('hotel_document_settings').upsert({hotel_id:h,doc_type,...patch,updated_at:new Date().toISOString()},{onConflict:'hotel_id,doc_type'});must(error,'Config document');},
@@ -5471,11 +5476,15 @@ let _docAlertCount=0, _portalChannel=null;
 async function refreshPortalBadges(){
   if(!hotelId||!BE?.db) return;
   try{
-    const [pRes,uRes]=await Promise.all([
-      BE.db.from('portal_requests').select('id',{count:'exact',head:true}).eq('hotel_id',hotelId).in('status',REQ_ACTIONABLE),
-      BE.db.from('portal_requests').select('id',{count:'exact',head:true}).eq('hotel_id',hotelId).in('status',REQ_ACTIONABLE).is('seen_by_manager_at',null),
+    // « À traiter » = demandes au statut actionnable OU avec des messages salarié non lus
+    const [aRes,uRes,mRes]=await Promise.all([
+      BE.db.from('portal_requests').select('id').eq('hotel_id',hotelId).in('status',REQ_ACTIONABLE),
+      BE.db.from('portal_requests').select('id').eq('hotel_id',hotelId).in('status',REQ_ACTIONABLE).is('seen_by_manager_at',null),
+      BE.db.from('portal_request_messages').select('request_id').eq('hotel_id',hotelId).eq('author_type','employee').is('read_at',null),
     ]);
-    const pending=pRes.count||0, unseen=uRes.count||0;
+    const msgIds=new Set((mRes.data||[]).map(x=>x.request_id));
+    const pending=new Set([...(aRes.data||[]).map(x=>x.id),...msgIds]).size;
+    const unseen=new Set([...(uRes.data||[]).map(x=>x.id),...msgIds]).size;
     const nb=$('navBadgePortal');
     if(nb){ if(pending>0){nb.textContent=pending>99?'99+':pending;nb.style.display='';} else nb.style.display='none'; }
     const bell=$('notifBadge');
@@ -13886,7 +13895,7 @@ async function quickPortalAccept(id){
   try{ await BE.portalDecide(id,'accept',null); flash('Demande acceptée ✓'); await loadPortalInbox($('piFilterStatus')?.value||'',$('piFilterType')?.value||''); refreshPortalBadges(); }
   catch(e){ flash(_portalDecideErr(e),'e'); }
 }
-const PORTAL_DECIDE_ERR={DEJA_TRAITEE:'Cette demande a déjà été traitée par un autre responsable.',COMMENTAIRE_REQUIS:'Un commentaire est obligatoire.',DATE_REQUISE:'La date de début proposée est requise.',NON_AUTORISE:'Vous n\'avez pas les droits pour cette action.',INTROUVABLE:'Demande introuvable.',ACTION_INVALIDE:'Action invalide.'};
+const PORTAL_DECIDE_ERR={DEJA_TRAITEE:'Cette demande a déjà été traitée par un autre responsable.',COMMENTAIRE_REQUIS:'Un commentaire est obligatoire.',DATE_REQUISE:'La date de début proposée est requise.',NON_AUTORISE:'Vous n\'avez pas les droits pour cette action.',INTROUVABLE:'Demande introuvable.',ACTION_INVALIDE:'Action invalide.',CONVERSATION_CLOSEE:'Cette demande est clôturée : plus aucune réponse possible.',MESSAGE_VIDE:'Le message est vide.',MESSAGE_REQUIS:'Le message final est obligatoire.',JUSTIFICATION_REQUISE:'Une justification est obligatoire.'};
 function _portalDecideErr(e){const m=(e&&e.message)||String(e||'');for(const k in PORTAL_DECIDE_ERR){if(m.includes(k))return PORTAL_DECIDE_ERR[k];}return 'Erreur : '+m;}
 
 function fmtDate(d){if(!d)return'—';return new Date(d+'T00:00:00').toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric'});}
@@ -13915,6 +13924,20 @@ async function openPortalRequest(id){
   let hist=[]; try{ hist=await BE.listPortalHistory(id); }catch(_){}
   const timeline=[{created_at:r.created_at,action:'submit',actor_name:name},...hist];
   const fmtDT=d=>new Date(d).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+  // Fil de discussion + marquage lu
+  let msgs=[]; try{ msgs=await BE.listPortalMessages(id); }catch(_){}
+  BE.portalMarkRead(id).then(()=>refreshPortalBadges()).catch(()=>{});
+  const convClosed=r.conversation_status==='closed';
+  const canReply=canPortalDecide(), canReopen=canDo('portal_inbox','delete');
+  const threadHtml=msgs.length?msgs.map(m=>{
+    const mine=m.author_type==='manager'; // responsable à droite
+    return `<div style="display:flex;margin:8px 0;${mine?'justify-content:flex-end':''}">
+      <div style="max-width:78%;background:${mine?'var(--violet-bg)':'#f3f4f6'};color:${mine?'var(--violet-d)':'var(--ink)'};border-radius:12px;padding:8px 11px">
+        <div style="font-size:10.5px;color:var(--muted);margin-bottom:2px">${esc(m.author_name||(mine?'Responsable':'Salarié'))} · ${mine?'Responsable':'Salarié'} · ${fmtDT(m.created_at)}</div>
+        <div style="font-size:13px;white-space:pre-wrap">${esc(m.message)}</div>
+        ${m.attachment_name?`<div style="font-size:11px;margin-top:4px"><i class="fa-solid fa-paperclip"></i> ${esc(m.attachment_name)}</div>`:''}
+      </div></div>`;
+  }).join(''):'<div style="color:var(--muted);font-size:12px;padding:6px 0">Aucun message.</div>';
   const histHtml=timeline.map(h=>`<div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)">
       <div style="width:8px;height:8px;border-radius:50%;background:var(--violet);margin-top:5px;flex-shrink:0"></div>
       <div style="flex:1"><div style="font-size:12.5px;font-weight:600">${HIST_ACTION[h.action]||h.action}${h.actor_name?` — ${esc(h.actor_name)}`:''}</div>
@@ -13939,6 +13962,24 @@ async function openPortalRequest(id){
       ${r.manager_comment?`<div style="margin-top:10px"><div class="k" style="margin-bottom:4px">Commentaire du responsable</div><div style="background:var(--violet-bg);color:var(--violet-d);padding:10px;border-radius:8px;font-size:13px;white-space:pre-wrap">${esc(r.manager_comment)}</div></div>`:''}
     </div>
     <div class="sec"><h4>Historique de traitement</h4>${histHtml||'<div style="color:var(--muted);font-size:12px">—</div>'}</div>
+    <div class="sec"><h4>Échanges avec le salarié ${convClosed?'<span class="badge" style="background:#f3f4f6;color:#6b7280;margin-left:4px">Clôturée</span>':''}</h4>
+      <div id="ppThread" style="max-height:280px;overflow-y:auto">${threadHtml}</div>
+      ${convClosed?`<div style="margin-top:10px;font-size:12px;color:var(--ink2);background:var(--bg2);padding:10px;border-radius:8px"><i class="fa-solid fa-lock" style="margin-right:5px"></i>Conversation clôturée${r.closure_message?` : ${esc(r.closure_message)}`:''}.
+        ${canReopen?`<button class="btn g" style="font-size:11px;padding:4px 9px;margin-top:8px;display:block" id="ppReopenBtn"><i class="fa-solid fa-lock-open"></i> Rouvrir la demande</button>`:''}</div>`
+      :`${canReply?`<div style="margin-top:10px">
+        <label style="font-size:11px;color:var(--ink2);display:flex;justify-content:space-between"><span>Répondre au salarié</span><span id="ppMsgCount" style="color:var(--muted)">0/2000</span></label>
+        <textarea id="ppMsg" maxlength="2000" style="width:100%;height:64px;resize:vertical;border:1px solid var(--line);border-radius:8px;padding:8px;font-family:inherit;font-size:13px" placeholder="Écrire un message…"></textarea>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="btn p" id="ppSendBtn" style="font-size:12px"><i class="fa-solid fa-paper-plane"></i> Envoyer</button>
+          <div style="flex:1"></div>
+          ${canReply?`<button class="btn g" id="ppCloseBtn" style="font-size:12px" title="Clôturer définitivement la conversation"><i class="fa-solid fa-lock"></i> Clôturer</button>`:''}
+        </div>
+        <div id="ppCloseBox" style="display:none;margin-top:10px;padding:10px;border:1px solid #fca5a5;border-radius:8px;background:#fef2f2">
+          <label style="font-size:11px;color:#991b1b;font-weight:600">Message final du responsable (obligatoire)</label>
+          <textarea id="ppCloseMsg" maxlength="1000" style="width:100%;height:60px;resize:vertical;border:1px solid var(--line);border-radius:8px;padding:8px;font-family:inherit;font-size:13px;margin-top:4px" placeholder="Décision définitive communiquée au salarié…"></textarea>
+          <button class="btn d" id="ppCloseConfirm" style="font-size:12px;margin-top:8px"><i class="fa-solid fa-check"></i> Confirmer la clôture</button>
+        </div>`:'<div style="font-size:12px;color:var(--muted);margin-top:8px">Consultation seule.</div>'}`}
+    </div>
     ${canAct?`<div class="sec"><h4>Traiter la demande</h4>
       <div id="ppProposeBox" style="display:none;margin-bottom:10px;padding:10px;border:1px dashed var(--violet);border-radius:8px">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
@@ -13962,6 +14003,32 @@ async function openPortalRequest(id){
     const ta=$('piComment'), cnt=$('ppCount'); if(ta&&cnt){ const upd=()=>cnt.textContent=`${ta.value.length}/1000`; ta.oninput=upd; upd(); }
     const pb=$('ppProposeBtn'); if(pb) pb.onclick=()=>{ const box=$('ppProposeBox'); if(box.style.display==='none'){ box.style.display=''; pb.innerHTML='<i class="fa-solid fa-paper-plane"></i> Envoyer la proposition'; } else { _decideFromDrawer(id,'propose'); } };
   }
+  // Fil de discussion : compteur, envoi, clôture, réouverture
+  const mta=$('ppMsg'), mc=$('ppMsgCount');
+  if(mta&&mc){ const u=()=>mc.textContent=`${mta.value.length}/2000`; mta.oninput=u; u(); }
+  const sendBtn=$('ppSendBtn');
+  if(sendBtn) sendBtn.onclick=async()=>{
+    const v=($('ppMsg').value||'').trim(); if(!v){ flash('Message vide','w'); return; }
+    sendBtn.disabled=true;
+    try{ await BE.portalSendMessage(id,v); flash('Message envoyé'); openPortalRequest(id); refreshPortalBadges(); }
+    catch(e){ flash(_portalDecideErr(e),'e'); sendBtn.disabled=false; }
+  };
+  const closeBtn=$('ppCloseBtn'), closeBox=$('ppCloseBox');
+  if(closeBtn&&closeBox) closeBtn.onclick=()=>{ closeBox.style.display=closeBox.style.display==='none'?'':'none'; };
+  const closeConfirm=$('ppCloseConfirm');
+  if(closeConfirm) closeConfirm.onclick=async()=>{
+    const v=($('ppCloseMsg').value||'').trim(); if(!v){ flash('Le message final est obligatoire','w'); return; }
+    if(!confirm('Clôturer définitivement cette demande ? Le salarié ne pourra plus répondre.'))return;
+    try{ await BE.portalClose(id,v); flash('Demande clôturée'); openPortalRequest(id); refreshPortalBadges(); }
+    catch(e){ flash(_portalDecideErr(e),'e'); }
+  };
+  const reopenBtn=$('ppReopenBtn');
+  if(reopenBtn) reopenBtn.onclick=async()=>{
+    const j=prompt('Justification de la réouverture (obligatoire) :',''); if(j===null)return;
+    if(!j.trim()){ flash('Justification obligatoire','w'); return; }
+    try{ await BE.portalReopen(id,j.trim()); flash('Demande rouverte'); openPortalRequest(id); refreshPortalBadges(); }
+    catch(e){ flash(_portalDecideErr(e),'e'); }
+  };
 }
 
 async function _decideFromDrawer(id,action){
