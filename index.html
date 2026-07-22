@@ -5432,7 +5432,7 @@ function wireNotifBell(){
         BE.listDocumentAlerts(hotelId).catch(()=>[]),
         BE.listMedicalVisits(hotelId).catch(()=>[]),
         BE.listAbsences(hotelId).catch(()=>[]),
-        BE.db.from('portal_requests').select('id,type,employee:employees(first_name,last_name)').eq('hotel_id',hotelId).eq('status','pending').limit(10).then(r=>r.data||[]).catch(()=>[])
+        BE.db.from('portal_requests').select('id,type,employee:employees!portal_requests_employee_id_fkey(first_name,last_name)').eq('hotel_id',hotelId).eq('status','pending').limit(10).then(r=>r.data||[]).catch(()=>[])
       ]);
       const today=isoToday();
       const soon30=new Date(); soon30.setDate(soon30.getDate()+30);
@@ -13825,7 +13825,7 @@ async function loadPortalInbox(statusFilter,typeFilter){
   const list=$('piList'); if(!list) return;
   list.innerHTML='<div class="loading"><div class="spinner"></div></div>';
   let q=BE.db.from('portal_requests')
-    .select('id,type,date_start,date_end,message,status,manager_comment,created_at,employee:employees(first_name,last_name,role,department)')
+    .select('id,type,date_start,date_end,message,status,manager_comment,created_at,employee:employees!portal_requests_employee_id_fkey(first_name,last_name,role,department)')
     .eq('hotel_id',hotelId).order('created_at',{ascending:false}).limit(200);
   if(statusFilter) q=q.eq('status',statusFilter);
   if(typeFilter)   q=q.eq('type',typeFilter);
@@ -13864,7 +13864,7 @@ function fmtDate(d){if(!d)return'—';return new Date(d+'T00:00:00').toLocaleDat
 
 async function openPortalRequest(id){
   const {data:r,error}=await BE.db.from('portal_requests')
-    .select('*,employee:employees(id,first_name,last_name,role,department)')
+    .select('*,employee:employees!portal_requests_employee_id_fkey(id,first_name,last_name,role,department)')
     .eq('id',id).single();
   if(error||!r){flash('Impossible de charger la demande');return;}
   const emp=r.employee||{};
