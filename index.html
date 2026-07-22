@@ -998,9 +998,10 @@ async function makeRealBE(){
     // Extras : collaborateurs autorisés dans un hôtel (fiche lisible via RLS employees_secondary_read)
     async listAuthorizedExtras(h){const {data,error}=await sb.from('employee_hotel_assignments').select('employee_id,active,employee:employee_id(id,first_name,last_name,role,department,hotel_id,contract_type,photo_url,status,active)').eq('target_hotel_id',h).eq('active',true);if(error&&error.code==='42P01'){return[];}must(error,'Extras autorisés');return data||[];},
     // Activations mensuelles d'un extra dans un hôtel
-    async listExtraActivations(h,empId){const {data,error}=await sb.from('employee_extra_activations').select('id,year,month,active').eq('hotel_id',h).eq('employee_id',empId);if(error&&error.code==='42P01'){return[];}must(error,'Activations extra');return data||[];},
-    async listHotelExtraActivations(h,year,month){const {data,error}=await sb.from('employee_extra_activations').select('employee_id').eq('hotel_id',h).eq('year',year).eq('month',month).eq('active',true);if(error&&error.code==='42P01'){return[];}must(error,'Activations extra du mois');return data||[];},
-    async setExtraActivation(h,empId,year,month,active){const {error}=await sb.from('employee_extra_activations').upsert({hotel_id:h,employee_id:empId,year,month,active:!!active,updated_at:new Date().toISOString()},{onConflict:'employee_id,hotel_id,year,month'});must(error,'Activation extra');},
+    async listExtraActivations(h,empId){const {data,error}=await sb.from('employee_extra_activations').select('id,year,month,active,host_service_id,host_role,comment').eq('hotel_id',h).eq('employee_id',empId);if(error&&error.code==='42P01'){return[];}must(error,'Activations extra');return data||[];},
+    async listHotelExtraActivations(h,year,month){const {data,error}=await sb.from('employee_extra_activations').select('employee_id,host_service_id,host_role').eq('hotel_id',h).eq('year',year).eq('month',month).eq('active',true);if(error&&error.code==='42P01'){return[];}must(error,'Activations extra du mois');return data||[];},
+    async setExtraActivation(h,empId,year,month,service,role,active,comment){const {error}=await sb.rpc('extra_activation_set',{p_employee:empId,p_hotel:h,p_year:year,p_month:month,p_service:service||null,p_role:role||null,p_active:!!active,p_comment:comment||null});if(error)throw error;},
+    async listExtraActivationHistory(h,empId){const {data,error}=await sb.from('employee_extra_activation_history').select('*').eq('hotel_id',h).eq('employee_id',empId).order('created_at',{ascending:false});if(error){if(error.code==='42P01')return[];must(error,'Historique extra');}return data||[];},
 
     /* --- AUDIT --- */
     async logAudit(action,entity_type,entity_id,employee_id,details){
@@ -2194,11 +2195,17 @@ async function loadMonthExtras(){
       BE.listHotelExtraActivations(hotelId, cur.getFullYear(), cur.getMonth()+1),
       BE.listAuthorizedExtras(hotelId)
     ]);
-    const activeIds=new Set(actv.map(r=>r.employee_id));
+    // Première activation par salarié (service d'accueil retenu pour le classement dans la grille)
+    const actById=new Map(); actv.forEach(r=>{ if(!actById.has(r.employee_id)) actById.set(r.employee_id,r); });
     const byId=new Map();
-    auth.forEach(a=>{ const e=a.employee; if(e && e.hotel_id!==hotelId && activeIds.has(e.id) && !byId.has(e.id)) byId.set(e.id,{...e,_extra:true,active:true}); });
+    auth.forEach(a=>{ const e=a.employee; const act=actById.get(e&&e.id);
+      if(e && e.hotel_id!==hotelId && act && !byId.has(e.id)){
+        _extraEmpCache.set(e.id,e); // cache la fiche D'ORIGINE (principal jamais altéré)
+        // Service et poste = ceux de l'affectation Extra (hôtel d'accueil), PAS le service principal
+        const svcName=deps.find(d=>d.id===act.host_service_id)?.name || e.department || 'Extra';
+        byId.set(e.id,{...e,_extra:true,active:true,department:svcName,role:act.host_role||e.role,_originHotelId:e.hotel_id});
+      }});
     monthExtras=[...byId.values()];
-    monthExtras.forEach(e=>_extraEmpCache.set(e.id,e));
   }catch(e){ monthExtras=[]; console.warn('loadMonthExtras:',e.message||e); }
 }
 
@@ -5748,48 +5755,69 @@ async function _drawMultiHotelExtras(){
   }).join('');
 }
 
+const EXTRA_ACT_ERR={SERVICE_REQUIS:'Sélectionnez un service d\'affectation.',SERVICE_INCONNU:'Ce service n\'existe pas dans cet établissement.',NON_AUTORISE_HOTEL:'Ce collaborateur n\'est pas autorisé à intervenir ici.',NON_AUTORISE:'Action non autorisée.'};
+function _extraActErr(e){const m=(e&&e.message)||String(e||'');for(const k in EXTRA_ACT_ERR){if(m.includes(k))return EXTRA_ACT_ERR[k];}return 'Erreur : '+m;}
 async function _openExtraActivation(empId){
   const auth=await BE.listAuthorizedExtras(hotelId).catch(()=>[]);
   const e=auth.map(a=>a.employee).find(x=>x&&x.id===empId);
   if(!e){ flash('Collaborateur introuvable'); return; }
   const hotelName=hotels.find(h=>h.id===hotelId)?.name||'';
   let acts=[]; try{ acts=await BE.listExtraActivations(hotelId,empId); }catch(_){}
-  const activeKeys=new Set(acts.filter(a=>a.active).map(a=>a.year+'-'+a.month));
   const now=new Date(), months=[];
   for(let i=0;i<12;i++){ const d=new Date(now.getFullYear(),now.getMonth()+i,1); months.push({y:d.getFullYear(),m:d.getMonth()+1,lbl:d.toLocaleDateString('fr-FR',{month:'long',year:'numeric'})}); }
-  const anyOn=activeKeys.size>0;
+  const sortedDeps=[...deps].sort((a,b)=>(a.sort_order??999)-(b.sort_order??999));
+  const svcName=id=>deps.find(d=>d.id===id)?.name||'Service';
+  const buildSummary=()=>{
+    const by={}; acts.filter(a=>a.active).forEach(a=>{ const s=a.host_service_id||'—'; (by[s]=by[s]||[]).push(a); });
+    return Object.keys(by).length?`<div style="margin-bottom:12px">${Object.entries(by).map(([sid,arr])=>{
+      const mlbls=arr.sort((x,y)=>(x.year*12+x.month)-(y.year*12+y.month)).map(a=>new Date(a.year,a.month-1,1).toLocaleDateString('fr-FR',{month:'short',year:'2-digit'})).join(', ');
+      return `<div style="font-size:12px;padding:6px 9px;background:var(--violet-bg);color:var(--violet-d);border-radius:8px;margin-bottom:4px"><b>${esc(svcName(sid))}</b>${arr[0].host_role?' · '+esc(arr[0].host_role):''} — ${mlbls}</div>`;
+    }).join('')}</div>`:'';
+  };
   $('modal').innerHTML=`
     ${mhHTML('fa-solid fa-people-arrows','Activation extra',esc(e.first_name+' '+e.last_name)+' — '+esc(hotelName))}
     <div class="mb">
-      <label style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:#faf9ff;border:1px solid var(--line);border-radius:10px;margin-bottom:14px;cursor:pointer">
-        <input type="checkbox" id="eaMaster" ${anyOn?'checked':''} style="width:18px;height:18px;accent-color:var(--violet);flex-shrink:0">
-        <div><div style="font-weight:700;font-size:13.5px">Activer ce collaborateur dans cet établissement</div>
-        <div style="font-size:11px;color:var(--muted)">Cochez les mois durant lesquels il pourra être planifié ici. En dehors, il est totalement invisible.</div></div>
-      </label>
-      <div id="eaMonths" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;${anyOn?'':'opacity:.5;pointer-events:none'}">
-        ${months.map(mo=>{const k=mo.y+'-'+mo.m;return `
-          <label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:9px;cursor:pointer;text-transform:capitalize">
-            <input type="checkbox" data-y="${mo.y}" data-m="${mo.m}" ${activeKeys.has(k)?'checked':''} style="width:16px;height:16px;accent-color:var(--violet);flex-shrink:0">
-            <span style="font-size:12.5px">${mo.lbl}</span>
-          </label>`;}).join('')}
+      <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Poste principal : <b>${esc(e.role||'—')}</b> · ${esc(e.department||'—')} <span style="color:#c2410c">(jamais modifié)</span></div>
+      <div id="eaSummary">${buildSummary()}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+        <div class="fld"><label>Service d'affectation *</label>
+          <select id="eaService"><option value="">— Choisir un service —</option>${sortedDeps.map(d=>`<option value="${d.id}">${esc(d.name)}</option>`).join('')}</select></div>
+        <div class="fld"><label>Poste exercé en Extra</label>
+          <input id="eaRole" list="eaRoleList" placeholder="ex : Cafetière"><datalist id="eaRoleList"></datalist></div>
       </div>
+      <div class="fld" style="margin-bottom:12px"><label>Commentaire (optionnel)</label><input id="eaComment" placeholder="Consignes, contexte de la mission…"></div>
+      <div style="font-size:11.5px;color:var(--muted);margin-bottom:6px">Mois d'activation pour ce service :</div>
+      <div id="eaMonths" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;opacity:.5;pointer-events:none">
+        ${months.map(mo=>`<label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:9px;cursor:pointer;text-transform:capitalize">
+            <input type="checkbox" data-y="${mo.y}" data-m="${mo.m}" style="width:16px;height:16px;accent-color:var(--violet);flex-shrink:0">
+            <span style="font-size:12.5px">${mo.lbl}</span></label>`).join('')}
+      </div>
+      <div style="font-size:10.5px;color:var(--muted);margin-top:6px"><i class="fa-solid fa-circle-info"></i> Choisissez un service pour activer les mois. Le collaborateur n'apparaît dans le planning de ce service que pendant les mois cochés. Vous pouvez ajouter plusieurs services.</div>
     </div>
     <div class="mact"><div class="spacer"></div><button class="btn p" id="eaClose">Terminé</button></div>`;
   $('modalbg').classList.add('on');
-  const master=$('eaMaster'), monthsBox=$('eaMonths');
-  master.onchange=async()=>{
-    if(master.checked){ monthsBox.style.opacity=''; monthsBox.style.pointerEvents=''; }
-    else{
-      const checked=[...monthsBox.querySelectorAll('input:checked')];
-      if(checked.length && !confirm('Désactiver tous les mois pour ce collaborateur ?')){ master.checked=true; return; }
-      for(const cb of checked){ cb.checked=false; await BE.setExtraActivation(hotelId,empId,+cb.dataset.y,+cb.dataset.m,false).catch(()=>{}); }
-      monthsBox.style.opacity='.5'; monthsBox.style.pointerEvents='none';
-    }
+  const svc=$('eaService'), roleIn=$('eaRole'), commentIn=$('eaComment'), monthsBox=$('eaMonths'), roleList=$('eaRoleList');
+  const refreshForService=()=>{
+    const sid=svc.value;
+    roleList.innerHTML=rols.filter(r=>!sid||r.department_id===sid).map(r=>`<option value="${esc(r.name)}">`).join('');
+    const svcActs=acts.filter(a=>a.active && a.host_service_id===sid);
+    if(svcActs[0]){ roleIn.value=svcActs[0].host_role||''; commentIn.value=svcActs[0].comment||''; } else { roleIn.value=''; commentIn.value=''; }
+    const keys=new Set(svcActs.map(a=>a.year+'-'+a.month));
+    monthsBox.querySelectorAll('input[data-m]').forEach(cb=>{ cb.checked=keys.has(cb.dataset.y+'-'+cb.dataset.m); });
+    const on=!!sid; monthsBox.style.opacity=on?'':'.5'; monthsBox.style.pointerEvents=on?'':'none';
   };
+  svc.onchange=refreshForService;
   monthsBox.querySelectorAll('input[data-m]').forEach(cb=>cb.onchange=async()=>{
+    const sid=svc.value; if(!sid){ flash('Choisissez d\'abord un service','w'); cb.checked=false; return; }
+    const y=+cb.dataset.y, m=+cb.dataset.m, role=roleIn.value.trim(), comment=commentIn.value.trim();
     cb.disabled=true;
-    try{ await BE.setExtraActivation(hotelId,empId,+cb.dataset.y,+cb.dataset.m,cb.checked); }
-    catch(err){ flash('Erreur : '+(err.message||err),'e'); cb.checked=!cb.checked; }
+    try{
+      await BE.setExtraActivation(hotelId,empId,y,m,sid,role,cb.checked,comment);
+      if(cb.checked) acts.push({year:y,month:m,active:true,host_service_id:sid,host_role:role,comment});
+      else acts=acts.filter(a=>!(a.year===y&&a.month===m&&a.host_service_id===sid));
+      const s=$('eaSummary'); if(s) s.innerHTML=buildSummary();
+    }
+    catch(err){ flash(_extraActErr(err),'e'); cb.checked=!cb.checked; }
     finally{ cb.disabled=false; }
   });
   $('eaClose').onclick=()=>{ closeModal(); _drawPersonnelCards(); };
