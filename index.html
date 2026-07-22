@@ -15540,7 +15540,9 @@ async function exportPDF(){
           lineWidth:0.1, lineColor:[236,238,243]
         }}]);
       }
-      const r=[`${s.first_name} ${s.last_name}${s._extra?'  ★ extra':''}`, s.role||''];
+      // Nom rendu à l'identique pour tous (aucune distinction typographique pour les extras :
+      // le caractère ★ n'existe pas dans la police PDF et cassait l'espacement/la graisse)
+      const r=[`${s.first_name} ${s.last_name}`, s.role||''];
       let trav=0,extra=0,cp=0,abs=0;
       const isCDI=(s.contract_type||'CDI')==='CDI';
       const hpd=empHpd(s.id);
