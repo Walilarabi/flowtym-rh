@@ -1002,6 +1002,7 @@ async function makeRealBE(){
     async listHotelExtraActivations(h,year,month){const {data,error}=await sb.from('employee_extra_activations').select('employee_id,host_service_id,host_role').eq('hotel_id',h).eq('year',year).eq('month',month).eq('active',true);if(error&&error.code==='42P01'){return[];}must(error,'Activations extra du mois');return data||[];},
     async setExtraActivation(h,empId,year,month,service,role,active,comment){const {error}=await sb.rpc('extra_activation_set',{p_employee:empId,p_hotel:h,p_year:year,p_month:month,p_service:service||null,p_role:role||null,p_active:!!active,p_comment:comment||null});if(error)throw error;},
     async listExtraActivationHistory(h,empId){const {data,error}=await sb.from('employee_extra_activation_history').select('*').eq('hotel_id',h).eq('employee_id',empId).order('created_at',{ascending:false});if(error){if(error.code==='42P01')return[];must(error,'Historique extra');}return data||[];},
+    async listPlanningAudit(h,opts){opts=opts||{};let q=sb.from('planning_audit').select('*').eq('hotel_id',h).order('created_at',{ascending:false}).limit(opts.limit||300);if(opts.employee_id)q=q.eq('employee_id',opts.employee_id);if(opts.from)q=q.gte('day',opts.from);if(opts.to)q=q.lte('day',opts.to);const {data,error}=await q;if(error){if(error.code==='42P01')return[];must(error,'Journal planning');}return data||[];},
 
     /* --- AUDIT --- */
     async logAudit(action,entity_type,entity_id,employee_id,details){
@@ -1842,6 +1843,7 @@ function renderPlanning(){
         <button class="btn g ${editMode?'on':''}" id="editToggle"><i class="fa-solid fa-pen-to-square"></i> Édition</button>
         <button class="btn g" id="exportXlsx" title="Exporter le planning au format Excel"><i class="fa-solid fa-file-excel"></i> Excel</button>
         <button class="btn g" id="exportPdf" title="Exporter le planning en PDF (paysage, pleine page)"><i class="fa-regular fa-file-pdf"></i> PDF</button>
+        <button class="btn g" id="btnPlanAudit" title="Journal des modifications du planning"><i class="fa-solid fa-clock-rotate-left"></i> Historique</button>
         <button class="btn g" id="btnCreateCycle" title="Créer un cycle depuis le mois affiché"><i class="fa-solid fa-arrows-rotate"></i> Créer cycle</button>
         <button class="btn g" id="btnAutoFill" title="Générer le planning automatiquement"><i class="fa-solid fa-wand-magic-sparkles"></i> Auto-remplir</button>
         <button class="btn p" id="addEmp"><i class="fa-solid fa-user-plus"></i> Collaborateur</button>
@@ -1866,6 +1868,7 @@ function renderPlanning(){
   $('addEmp').onclick=()=>openEmpForm(null);
   $('exportXlsx').onclick=exportExcel;
   $('exportPdf').onclick=exportPDF;
+  $('btnPlanAudit').onclick=openPlanningAudit;
   $('btnCreateCycle').onclick=openCreateCycleModal;
   $('btnAutoFill').onclick=openAutoFillModal;
   $('grid').addEventListener('mousedown',gridMouseDown);
@@ -3712,6 +3715,42 @@ async function savePlanningOrder(updates){
     const idx=staff.findIndex(x=>x.id===s.id);
     if(idx>=0) staff[idx].planning_sort_order=s.planning_sort_order;
   }
+}
+
+/* ===================== JOURNAL D'AUDIT DU PLANNING ===================== */
+const AUDIT_ACTION={insert:'Ajout',update:'Modification',delete:'Suppression'};
+const AUDIT_SRC={app:'Application',portail:'Portail salarié','système':'Système / import'};
+async function openPlanningAudit(){
+  $('drawer').innerHTML=`<div class="dh"><button class="close" data-x><i class="fa-solid fa-xmark"></i></button>
+    <h2>Historique du planning</h2><div class="role">${esc(hotels.find(h=>h.id===hotelId)?.name||'')} · journal des modifications</div></div>
+    <div class="sec"><div id="paList"><div style="color:var(--muted);font-size:12px;padding:8px 0"><i class="fa-solid fa-spinner fa-spin"></i> Chargement…</div></div></div>`;
+  $('dbg').classList.add('on'); $('drawer').classList.add('on');
+  $('drawer').querySelector('[data-x]').onclick=closeFiche;
+  let rows=[]; try{ rows=await BE.listPlanningAudit(hotelId,{limit:300}); }
+  catch(e){ const el=$('paList'); if(el) el.innerHTML=`<div style="color:var(--red);font-size:12px">${esc(e.message||e)}</div>`; return; }
+  const el=$('paList'); if(!el)return;
+  if(!rows.length){ el.innerHTML='<div style="color:var(--muted);font-size:12px">Aucune modification enregistrée.</div>'; return; }
+  const empName=id=>{const s=staff.find(x=>x.id===id)||_extraEmpCache.get(id); return s?`${s.first_name} ${s.last_name}`:'—';};
+  const stLbl=v=>v?(CMAP[v]?.label||v):'—';
+  const fmtDT=d=>new Date(d).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+  el.innerHTML=rows.map(a=>{
+    const o=a.old_values||{}, n=a.new_values||{}, changes=[];
+    if((o.status||'')!==(n.status||'')) changes.push(`statut <b>${stLbl(o.status)}</b> → <b>${stLbl(n.status)}</b>`);
+    if((o.shift_label||'')!==(n.shift_label||'')) changes.push(`shift ${esc(o.shift_label||'—')} → ${esc(n.shift_label||'—')}`);
+    if(String(o.hours||'')!==String(n.hours||'')) changes.push(`heures ${o.hours||'—'} → ${n.hours||'—'}`);
+    if((o.note||'')!==(n.note||'')) changes.push('commentaire modifié');
+    const day=a.day?new Date(a.day+'T00:00').toLocaleDateString('fr-FR'):'';
+    const srcTag=`<span style="font-size:9.5px;background:#f3f4f6;color:#6b7280;padding:1px 5px;border-radius:5px">${AUDIT_SRC[a.source]||a.source||'—'}</span>`;
+    const dot=a.action==='delete'?'#dc2626':a.action==='insert'?'#16a34a':'var(--violet)';
+    return `<div style="display:flex;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)">
+      <div style="width:8px;height:8px;border-radius:50%;background:${dot};margin-top:5px;flex-shrink:0"></div>
+      <div style="flex:1;font-size:12.5px">
+        <div><b>${esc(a.actor_name||'—')}</b> · ${AUDIT_ACTION[a.action]||a.action} ${srcTag}</div>
+        <div style="color:var(--ink2)">${esc(empName(a.employee_id))}${day?` · ${day}`:''}</div>
+        ${changes.length?`<div style="color:var(--muted);margin-top:2px">${changes.join(' · ')}</div>`:''}
+        <div style="font-size:10.5px;color:var(--muted);margin-top:2px">${fmtDT(a.created_at)}</div>
+      </div></div>`;
+  }).join('');
 }
 
 /* ===================== SÉLECTION / ÉDITION EN MASSE ===================== */
