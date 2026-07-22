@@ -42,6 +42,10 @@ button,select,input,textarea{font-family:inherit}
 .sidebar .menu .it .ic{width:20px;text-align:center;font-size:13px;flex-shrink:0}
 .sidebar .menu .it .soon{margin-left:auto;font-size:9.5px;background:#fef3c7;color:#92400e;padding:2px 6px;border-radius:5px;font-weight:700}
 .sidebar .menu .it.on .soon{background:rgba(255,255,255,.18);color:#fff}
+.sidebar .menu .it .navbadge{margin-left:auto;min-width:18px;height:18px;line-height:18px;text-align:center;font-size:10.5px;background:#dc2626;color:#fff;padding:0 5px;border-radius:9px;font-weight:800}
+.sidebar.collapsed .menu .it .navbadge{position:absolute;top:4px;right:6px;margin:0;min-width:15px;height:15px;line-height:15px;font-size:8.5px}
+.sidebar.collapsed .menu .it{position:relative}
+.sidebar .menu .it.on .navbadge{background:#fff;color:var(--violet-d)}
 .sidebar .me{padding:12px 14px;border-top:1px solid var(--line);display:flex;align-items:center;gap:10px;font-size:12px;color:var(--ink2)}
 .sidebar.collapsed .me{justify-content:center;padding:12px 0}
 .sidebar.collapsed .me .mail{display:none}
@@ -1654,6 +1658,7 @@ function canManageUsers(){return canDo('config','edit');}
 const TABS=[
   ['Pilotage',[
     ['dashboard','Tableau de bord','fa-solid fa-table-columns'],
+    ['portal_inbox','Demandes portail','fa-solid fa-inbox'],
     ['planning', 'Planning',        'fa-regular fa-calendar'],
     ['reporting','Reporting',       'fa-solid fa-chart-line'],
   ]],
@@ -1679,9 +1684,6 @@ const TABS=[
     ['orgchart','Organigramme','fa-solid fa-sitemap'],
     ['conformite','Conformité','fa-solid fa-shield-check'],
     ['onboarding','Onboarding','fa-solid fa-rocket'],
-  ]],
-  ['Portail salarié',[
-    ['portal_inbox','Demandes portail','fa-solid fa-inbox'],
   ]],
   ['Réglages',[
     ['organisation','Organisation','fa-solid fa-sitemap'],
@@ -1710,7 +1712,7 @@ function renderShell(){
             if(!vis.length) return '';
             return `<div class="grp">${grp}</div>`
               + vis.map(([k,lab,ic,soon])=>`<button class="it ${k===view?'on':''}" data-v="${k}" title="${lab}">
-                <i class="ic ${ic}"></i><span class="lbl">${lab}</span>${soon?'<span class="soon">à venir</span>':''}</button>`).join('');
+                <i class="ic ${ic}"></i><span class="lbl">${lab}</span>${soon?'<span class="soon">à venir</span>':''}${k==='portal_inbox'?'<span class="navbadge" id="navBadgePortal" style="display:none"></span>':''}</button>`).join('');
           }).join('')}
         </nav>
         <div class="me" title="${userEmail}">
@@ -5456,15 +5458,44 @@ function wireNotifBell(){
     }catch(e){panel.innerHTML=`<div style="padding:16px;color:#dc2626;font-size:12px">${e.message}</div>`;}
   };
   document.addEventListener('click',e=>{if(!bell.contains(e.target)&&!panel.contains(e.target))closePanel();},{passive:true});
-  // badge count on load
-  Promise.all([
-    BE.listDocumentAlerts(hotelId).catch(()=>[]),
-    BE.db.from('portal_requests').select('id',{count:'exact',head:true}).eq('hotel_id',hotelId).eq('status','pending').then(r=>Array(r.count||0).fill(null)).catch(()=>[])
-  ]).then(([docAlerts,portalPending])=>{
-    const b=$('notifBadge');if(!b)return;
-    const n=docAlerts.length+portalPending.length;
-    if(n){b.textContent=n>9?'9+':n;b.style.display='block';}
-  }).catch(()=>{});
+  // Compteur d'alertes documents (mis en cache) puis calcul des badges (cloche + menu)
+  BE.listDocumentAlerts(hotelId).then(a=>{_docAlertCount=(a||[]).length;refreshPortalBadges();}).catch(()=>{_docAlertCount=0;refreshPortalBadges();});
+  subscribePortalRealtime();
+}
+
+// ── Badges « Demandes portail » : cloche (non consultées) + menu (en attente) ──
+let _docAlertCount=0, _portalChannel=null;
+async function refreshPortalBadges(){
+  if(!hotelId||!BE?.db) return;
+  try{
+    const [pRes,uRes]=await Promise.all([
+      BE.db.from('portal_requests').select('id',{count:'exact',head:true}).eq('hotel_id',hotelId).eq('status','pending'),
+      BE.db.from('portal_requests').select('id',{count:'exact',head:true}).eq('hotel_id',hotelId).eq('status','pending').is('seen_by_manager_at',null),
+    ]);
+    const pending=pRes.count||0, unseen=uRes.count||0;
+    const nb=$('navBadgePortal');
+    if(nb){ if(pending>0){nb.textContent=pending>99?'99+':pending;nb.style.display='';} else nb.style.display='none'; }
+    const bell=$('notifBadge');
+    if(bell){ const n=(_docAlertCount||0)+unseen; if(n>0){bell.textContent=n>9?'9+':n;bell.style.display='block';} else bell.style.display='none'; }
+  }catch(e){/* silencieux */}
+}
+// Temps réel : toute création/mise à jour de demande met à jour les badges (et la liste si ouverte)
+function subscribePortalRealtime(){
+  if(BE.isTest || !BE.sb || !BE.sb.channel) return;
+  if(_portalChannel){ try{BE.sb.removeChannel(_portalChannel);}catch(_){} _portalChannel=null; }
+  try{
+    _portalChannel=BE.sb.channel('portal_req_'+hotelId)
+      .on('postgres_changes',{event:'*',schema:'public',table:'portal_requests',filter:'hotel_id=eq.'+hotelId},()=>{
+        refreshPortalBadges();
+        if(view==='portal_inbox' && $('piFilterStatus')) loadPortalInbox($('piFilterStatus').value,$('piFilterType').value);
+      })
+      .subscribe();
+  }catch(e){ console.warn('realtime portal_requests:',e.message||e); }
+}
+// Marquer les demandes en attente comme consultées (fait diminuer la cloche, pas le menu)
+async function markPortalRequestsSeen(){
+  if(!hotelId||!BE?.db) return;
+  try{ await BE.db.from('portal_requests').update({seen_by_manager_at:new Date().toISOString()}).eq('hotel_id',hotelId).eq('status','pending').is('seen_by_manager_at',null); }catch(e){}
 }
 
 function aggCommitted(){
@@ -13755,6 +13786,7 @@ document.addEventListener('mousedown',e=>{if(!pop.contains(e.target)&&!e.target.
 
 /* ===================== PORTAIL SALARIÉ — INBOX MANAGER ===================== */
 const REQ_TYPE_LABELS={conge_paye:'Congé payé',rtt:'RTT',absence_exceptionnelle:'Absence exceptionnelle',
+  absence_except:'Absence exceptionnelle',recuperation:'Récupération',modification_planning:'Modification planning',
   maladie:'Maladie',extra:'Demande d\'extra',echange_shift:'Échange de shift',autre:'Autre'};
 const REQ_STATUS_LABELS={pending:'En attente',approved:'Approuvée',rejected:'Refusée',cancelled:'Annulée'};
 const REQ_STATUS_COLORS={pending:'#f59e0b',approved:'#22c55e',rejected:'#ef4444',cancelled:'#9ca3af'};
@@ -13784,6 +13816,9 @@ async function renderPortalInbox(){
   $('piFilterType').onchange=applyFilters;
   await loadPortalInbox('pending','');
   $('piFilterStatus').value='pending';
+  // Ouvrir le module = consulter les demandes → la cloche diminue (le menu reste tant que non traité)
+  await markPortalRequestsSeen();
+  refreshPortalBadges();
 }
 
 async function loadPortalInbox(statusFilter,typeFilter){
@@ -13837,6 +13872,13 @@ async function openPortalRequest(id){
   const col=REQ_STATUS_COLORS[r.status]||'#9ca3af';
   const dates=r.date_end&&r.date_end!==r.date_start?`${fmtDate(r.date_start)} → ${fmtDate(r.date_end)}`:fmtDate(r.date_start);
   const canAct=r.status==='pending';
+  // Pièce jointe (bucket portal-documents) → URL signée temporaire
+  let attachHtml='';
+  if(r.attachment_path){
+    let url=null;
+    try{ const {data}=await BE.sb.storage.from('portal-documents').createSignedUrl(r.attachment_path,300); url=data?.signedUrl; }catch(_){}
+    attachHtml=`<div><div style="font-size:11px;color:var(--ink2);text-transform:uppercase;letter-spacing:.5px">Justificatif</div><div>${url?`<a href="${esc(url)}" target="_blank" style="color:var(--violet)"><i class="fa-solid fa-paperclip" style="margin-right:4px"></i>${esc(r.attachment_name||'Voir le fichier')}</a>`:`<span style="color:var(--muted)"><i class="fa-solid fa-paperclip"></i> ${esc(r.attachment_name||'Fichier joint')}</span>`}</div></div>`;
+  }
   showModal(`
     <div style="padding:24px;min-width:320px;max-width:560px">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
@@ -13850,7 +13892,7 @@ async function openPortalRequest(id){
         <div><div style="font-size:11px;color:var(--ink2);text-transform:uppercase;letter-spacing:.5px">Type</div><div style="font-weight:600">${REQ_TYPE_LABELS[r.type]||r.type}</div></div>
         <div><div style="font-size:11px;color:var(--ink2);text-transform:uppercase;letter-spacing:.5px">Dates</div><div style="font-weight:600">${dates}</div></div>
         <div><div style="font-size:11px;color:var(--ink2);text-transform:uppercase;letter-spacing:.5px">Soumis le</div><div>${new Date(r.created_at).toLocaleDateString('fr-FR')}</div></div>
-        ${r.attachment_url?`<div><div style="font-size:11px;color:var(--ink2);text-transform:uppercase;letter-spacing:.5px">Justificatif</div><div><a href="${esc(r.attachment_url)}" target="_blank" style="color:var(--violet)">Voir le fichier</a></div></div>`:''}
+        ${attachHtml}
       </div>
       ${r.message?`<div style="margin-bottom:16px"><div style="font-size:11px;color:var(--ink2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Message du salarié</div><div style="background:var(--bg2);padding:12px;border-radius:8px;font-size:13px;white-space:pre-wrap">${esc(r.message)}</div></div>`:''}
       ${canAct?`
@@ -13878,6 +13920,7 @@ async function decidePortalRequest(id,decision){
   closeModal();
   flash(decision==='approved'?'Demande approuvée ✓':'Demande refusée');
   await loadPortalInbox($('piFilterStatus')?.value||'',$('piFilterType')?.value||'');
+  refreshPortalBadges(); // compteurs à jour immédiatement (validation/refus)
 }
 
 /* ===================== FICHE (drawer) ===================== */
