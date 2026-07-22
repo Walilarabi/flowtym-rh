@@ -7407,23 +7407,23 @@ async function _genStep3(){
           source_contract_number:s.renewalSource.contract_number,
         }).catch(()=>{});
       }
-      // 3. Envoi via contract-send-signature
+      // 3. Envoi via sig-send (moteur v2 unifié — OTP haché, PDF serveur, journal append-only)
       btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Envoi du lien de signature…';
-      const SUPA_URL='https://hzrzkvdebaadditvbqis.supabase.co/functions/v1';
       const {data:{session}}=await BE.sb.auth.getSession();
-      const resp=await fetch(`${SUPA_URL}/contract-send-signature`,{
+      const resp=await fetch(`${SUPABASE_FUNCTIONS_URL}/sig-send`,{
         method:'POST',
         headers:{'Authorization':`Bearer ${session?.access_token}`,'Content-Type':'application/json'},
         body:JSON.stringify({
           contract_id:saved.id,
           employee_id:s.employee_id, hotel_id:hotelId,
-          signer_first_name:emp.first_name, signer_name:emp.last_name,
+          signer_name:((emp.first_name||'')+' '+(emp.last_name||'')).trim()||email,
           signer_email:email,
         }),
       });
       const result=await resp.json();
       if(!resp.ok||result.error) throw new Error(result.error||'Erreur envoi signature');
-      flash(`Contrat ${contractNumber} envoyé pour signature${result.email_sent ? '' : ' ⚠️ Email non envoyé — vérifiez RESEND_API_KEY'}`);
+      BE.logContractAudit(hotelId,saved.id,s.employee_id,'sent_signature',(session?.user?.email||null),{signer_email:email,request_id:result.request_id}).catch(()=>{});
+      flash(`Contrat ${contractNumber} envoyé pour signature${result.email_warning ? ' ⚠️ '+result.email_warning : ''}`);
       genInlineState.step=4; renderContractsGenerate();
     }catch(e){
       flash('Erreur : '+e.message,'e');
