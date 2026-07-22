@@ -69,8 +69,24 @@ function emailHtml(name: string, label: string, link: string): string {
   </div></body></html>`;
 }
 
+// ⚠️ DEPRECATED — MOTEUR DE SIGNATURE v1 (LEGACY).
+// Ce moteur stocke l'OTP en clair (signature_sessions.otp_code) et fait générer
+// le PDF signé par le navigateur du signataire. Il est remplacé par sig-send /
+// sig-sign (OTP haché SHA-256, PDF généré côté serveur, journal append-only).
+// La création de nouvelles demandes via ce moteur est DÉSACTIVÉE. La lecture des
+// anciennes sessions reste possible via contract-sign. Suppression définitive
+// prévue dans une migration distincte une fois la migration validée.
+const V1_DISABLED = true;
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: CORS });
+
+  if (V1_DISABLED) {
+    return new Response(JSON.stringify({
+      error: 'Moteur de signature v1 désactivé. Utilisez sig-send (moteur v2).',
+      deprecated: true,
+    }), { status: 410, headers: CORS });
+  }
 
   // Auth
   const token = (req.headers.get('Authorization') ?? '').replace('Bearer ', '');
