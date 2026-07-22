@@ -849,6 +849,9 @@ async function makeRealBE(){
     async orgSetHotelStatus(hid,status){const {data,error}=await sb.rpc('org_set_hotel_status',{p_hotel:hid,p_status:status});if(error)throw error;return data;},
     async orgDetachHotel(hid){const {data,error}=await sb.rpc('org_detach_hotel',{p_hotel:hid});if(error)throw error;return data;},
     async orgUpdateGroup(gid,patch){const {error}=await sb.from('hotel_groups').update(patch).eq('id',gid);must(error,'Groupe');},
+    // ── Workflow demandes portail ──
+    async portalDecide(id,action,comment,start,end,shift){const {data,error}=await sb.rpc('portal_request_decide',{p_request:id,p_action:action,p_comment:comment||null,p_start:start||null,p_end:end||null,p_shift:shift||null});if(error)throw error;return data;},
+    async listPortalHistory(id){const {data,error}=await sb.from('portal_request_history').select('*').eq('request_id',id).order('created_at');if(error){if(error.code==='42P01')return[];must(error,'Historique demande');}return data||[];},
 
     async listDocumentSettings(h){const {data}=await sb.from('hotel_document_settings').select('*').eq('hotel_id',h);return data||[];},
     async saveDocumentSetting(h,doc_type,patch){const {error}=await sb.from('hotel_document_settings').upsert({hotel_id:h,doc_type,...patch,updated_at:new Date().toISOString()},{onConflict:'hotel_id,doc_type'});must(error,'Config document');},
@@ -5469,8 +5472,8 @@ async function refreshPortalBadges(){
   if(!hotelId||!BE?.db) return;
   try{
     const [pRes,uRes]=await Promise.all([
-      BE.db.from('portal_requests').select('id',{count:'exact',head:true}).eq('hotel_id',hotelId).eq('status','pending'),
-      BE.db.from('portal_requests').select('id',{count:'exact',head:true}).eq('hotel_id',hotelId).eq('status','pending').is('seen_by_manager_at',null),
+      BE.db.from('portal_requests').select('id',{count:'exact',head:true}).eq('hotel_id',hotelId).in('status',REQ_ACTIONABLE),
+      BE.db.from('portal_requests').select('id',{count:'exact',head:true}).eq('hotel_id',hotelId).in('status',REQ_ACTIONABLE).is('seen_by_manager_at',null),
     ]);
     const pending=pRes.count||0, unseen=uRes.count||0;
     const nb=$('navBadgePortal');
@@ -5495,7 +5498,7 @@ function subscribePortalRealtime(){
 // Marquer les demandes en attente comme consultées (fait diminuer la cloche, pas le menu)
 async function markPortalRequestsSeen(){
   if(!hotelId||!BE?.db) return;
-  try{ await BE.db.from('portal_requests').update({seen_by_manager_at:new Date().toISOString()}).eq('hotel_id',hotelId).eq('status','pending').is('seen_by_manager_at',null); }catch(e){}
+  try{ await BE.db.from('portal_requests').update({seen_by_manager_at:new Date().toISOString()}).eq('hotel_id',hotelId).in('status',REQ_ACTIONABLE).is('seen_by_manager_at',null); }catch(e){}
 }
 
 function aggCommitted(){
@@ -13788,8 +13791,13 @@ document.addEventListener('mousedown',e=>{if(!pop.contains(e.target)&&!e.target.
 const REQ_TYPE_LABELS={conge_paye:'Congé payé',rtt:'RTT',absence_exceptionnelle:'Absence exceptionnelle',
   absence_except:'Absence exceptionnelle',recuperation:'Récupération',modification_planning:'Modification planning',
   maladie:'Maladie',extra:'Demande d\'extra',echange_shift:'Échange de shift',autre:'Autre'};
-const REQ_STATUS_LABELS={pending:'En attente',approved:'Approuvée',rejected:'Refusée',cancelled:'Annulée'};
-const REQ_STATUS_COLORS={pending:'#f59e0b',approved:'#22c55e',rejected:'#ef4444',cancelled:'#9ca3af'};
+const REQ_STATUS_LABELS={pending:'En attente',approved:'Acceptée',rejected:'Refusée',cancelled:'Annulée',
+  change_proposed:'Modification proposée',info_requested:'Informations demandées',employee_replied:'Réponse du salarié',
+  proposal_rejected:'Proposition refusée',expired:'Expirée'};
+// Statuts nécessitant une action du responsable (pour les compteurs/badges)
+const REQ_ACTIONABLE=['pending','employee_replied','proposal_rejected'];
+const REQ_STATUS_COLORS={pending:'#f59e0b',approved:'#22c55e',rejected:'#ef4444',cancelled:'#9ca3af',
+  change_proposed:'#7c3aed',info_requested:'#2563eb',employee_replied:'#0d9488',proposal_rejected:'#ea580c',expired:'#9ca3af'};
 
 async function renderPortalInbox(){
   $('view').innerHTML=`<div class="phead"><div><h1><i class="fa-solid fa-inbox" style="margin-right:8px;color:var(--violet)"></i>Demandes portail</h1><div class="sub">Demandes des salariés via l'application mobile</div></div></div>
@@ -13797,10 +13805,16 @@ async function renderPortalInbox(){
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px">
       <select id="piFilterStatus" class="input" style="width:auto">
         <option value="">Tous les statuts</option>
+        <option value="__actionable">À traiter</option>
         <option value="pending">En attente</option>
-        <option value="approved">Approuvées</option>
+        <option value="change_proposed">Modification proposée</option>
+        <option value="info_requested">Informations demandées</option>
+        <option value="employee_replied">Réponse du salarié</option>
+        <option value="proposal_rejected">Proposition refusée</option>
+        <option value="approved">Acceptées</option>
         <option value="rejected">Refusées</option>
         <option value="cancelled">Annulées</option>
+        <option value="expired">Expirées</option>
       </select>
       <select id="piFilterType" class="input" style="width:auto">
         <option value="">Tous les types</option>
@@ -13825,9 +13839,10 @@ async function loadPortalInbox(statusFilter,typeFilter){
   const list=$('piList'); if(!list) return;
   list.innerHTML='<div class="loading"><div class="spinner"></div></div>';
   let q=BE.db.from('portal_requests')
-    .select('id,type,date_start,date_end,message,status,manager_comment,created_at,employee:employees!portal_requests_employee_id_fkey(first_name,last_name,role,department)')
+    .select('id,type,date_start,date_end,proposed_start,proposed_end,message,status,manager_comment,created_at,employee:employees!portal_requests_employee_id_fkey(first_name,last_name,role,department)')
     .eq('hotel_id',hotelId).order('created_at',{ascending:false}).limit(200);
-  if(statusFilter) q=q.eq('status',statusFilter);
+  if(statusFilter==='__actionable') q=q.in('status',REQ_ACTIONABLE);
+  else if(statusFilter) q=q.eq('status',statusFilter);
   if(typeFilter)   q=q.eq('type',typeFilter);
   const {data,error}=await q;
   if(error){list.innerHTML=`<div class="empty-state"><i class="fa-solid fa-triangle-exclamation"></i><p>${error.message}</p></div>`;return;}
@@ -13854,13 +13869,29 @@ async function loadPortalInbox(statusFilter,typeFilter){
         <span><i class="fa-regular fa-calendar" style="margin-right:4px"></i>${dates}</span>
         <span style="margin-left:auto;font-size:11px">${new Date(r.created_at).toLocaleDateString('fr-FR')}</span>
       </div>
+      ${r.proposed_start?`<div style="margin-top:6px;font-size:12px;color:#7c3aed"><i class="fa-solid fa-arrows-left-right" style="margin-right:4px"></i>Nouvelle période proposée : ${fmtDate(r.proposed_start)}${r.proposed_end&&r.proposed_end!==r.proposed_start?' → '+fmtDate(r.proposed_end):''}</div>`:''}
       ${r.message?`<div style="margin-top:8px;font-size:13px;color:var(--ink);background:var(--bg2);padding:8px 12px;border-radius:8px;white-space:pre-wrap">${esc(r.message)}</div>`:''}
       ${r.manager_comment?`<div style="margin-top:6px;font-size:12px;color:var(--violet);background:var(--violet-bg);padding:6px 10px;border-radius:6px"><i class="fa-solid fa-comment-dots" style="margin-right:4px"></i>${esc(r.manager_comment)}</div>`:''}
+      ${REQ_ACTIONABLE.includes(r.status)?`<div style="margin-top:10px;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap" onclick="event.stopPropagation()">
+        ${canPortalDecide()?`<button class="btn p" style="font-size:11.5px;padding:5px 10px" onclick="quickPortalAccept('${r.id}')"><i class="fa-solid fa-check"></i> Accepter</button>
+        <button class="btn" style="font-size:11.5px;padding:5px 10px;background:#fee2e2;color:#dc2626;border-color:#fca5a5" onclick="openPortalRequest('${r.id}')"><i class="fa-solid fa-xmark"></i> Refuser</button>`:''}
+        <button class="btn g" style="font-size:11.5px;padding:5px 10px" onclick="openPortalRequest('${r.id}')"><i class="fa-solid fa-pen-to-square"></i> Traiter</button>
+      </div>`:''}
     </div>`;
   }).join('');
 }
+function canPortalDecide(){ return canDo('portal_inbox','validate'); }
+async function quickPortalAccept(id){
+  if(!confirm('Accepter cette demande ?\nLes modules Absences et Planning seront mis à jour.'))return;
+  try{ await BE.portalDecide(id,'accept',null); flash('Demande acceptée ✓'); await loadPortalInbox($('piFilterStatus')?.value||'',$('piFilterType')?.value||''); refreshPortalBadges(); }
+  catch(e){ flash(_portalDecideErr(e),'e'); }
+}
+const PORTAL_DECIDE_ERR={DEJA_TRAITEE:'Cette demande a déjà été traitée par un autre responsable.',COMMENTAIRE_REQUIS:'Un commentaire est obligatoire.',DATE_REQUISE:'La date de début proposée est requise.',NON_AUTORISE:'Vous n\'avez pas les droits pour cette action.',INTROUVABLE:'Demande introuvable.',ACTION_INVALIDE:'Action invalide.'};
+function _portalDecideErr(e){const m=(e&&e.message)||String(e||'');for(const k in PORTAL_DECIDE_ERR){if(m.includes(k))return PORTAL_DECIDE_ERR[k];}return 'Erreur : '+m;}
 
 function fmtDate(d){if(!d)return'—';return new Date(d+'T00:00:00').toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric'});}
+
+const HIST_ACTION={submit:'Demande envoyée',accept:'Demande acceptée',reject:'Demande refusée',propose:'Nouvelle période proposée',request_info:'Complément demandé',employee_accept:'Proposition acceptée par le salarié',employee_reject:'Proposition refusée par le salarié',employee_reply:'Réponse du salarié'};
 
 async function openPortalRequest(id){
   const {data:r,error}=await BE.db.from('portal_requests')
@@ -13869,58 +13900,83 @@ async function openPortalRequest(id){
   if(error||!r){flash('Impossible de charger la demande');return;}
   const emp=r.employee||{};
   const name=`${emp.first_name||''} ${emp.last_name||''}`.trim()||'—';
+  const hotelName=hotels.find(h=>h.id===r.hotel_id)?.name||'';
   const col=REQ_STATUS_COLORS[r.status]||'#9ca3af';
-  const dates=r.date_end&&r.date_end!==r.date_start?`${fmtDate(r.date_start)} → ${fmtDate(r.date_end)}`:fmtDate(r.date_start);
-  const canAct=r.status==='pending';
-  // Pièce jointe (bucket portal-documents) → URL signée temporaire
-  let attachHtml='';
+  const period=r.date_end&&r.date_end!==r.date_start?`${fmtDate(r.date_start)} → ${fmtDate(r.date_end)}`:fmtDate(r.date_start);
+  const nbDays=(r.date_start&&r.date_end)?(Math.round((new Date(r.date_end)-new Date(r.date_start))/86400000)+1):(r.date_start?1:0);
+  const canAct=REQ_ACTIONABLE.includes(r.status) && canPortalDecide();
+  // Pièce jointe → URL signée temporaire
+  let attachHtml='—';
   if(r.attachment_path){
-    let url=null;
-    try{ const {data}=await BE.sb.storage.from('portal-documents').createSignedUrl(r.attachment_path,300); url=data?.signedUrl; }catch(_){}
-    attachHtml=`<div><div style="font-size:11px;color:var(--ink2);text-transform:uppercase;letter-spacing:.5px">Justificatif</div><div>${url?`<a href="${esc(url)}" target="_blank" style="color:var(--violet)"><i class="fa-solid fa-paperclip" style="margin-right:4px"></i>${esc(r.attachment_name||'Voir le fichier')}</a>`:`<span style="color:var(--muted)"><i class="fa-solid fa-paperclip"></i> ${esc(r.attachment_name||'Fichier joint')}</span>`}</div></div>`;
+    let url=null; try{ const {data}=await BE.sb.storage.from('portal-documents').createSignedUrl(r.attachment_path,300); url=data?.signedUrl; }catch(_){}
+    attachHtml=url?`<a href="${esc(url)}" target="_blank" style="color:var(--violet)"><i class="fa-solid fa-paperclip"></i> ${esc(r.attachment_name||'Voir le fichier')}</a>`:esc(r.attachment_name||'Fichier joint');
   }
-  showModal(`
-    <div style="padding:24px;min-width:320px;max-width:560px">
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
-        <div style="flex:1">
-          <div style="font-size:18px;font-weight:700">${esc(name)}</div>
-          <div style="font-size:13px;color:var(--ink2)">${esc(emp.role||'')}${emp.department?' · '+esc(emp.department):''}</div>
+  // Historique (entrée « envoyée » synthétisée + lignes DB)
+  let hist=[]; try{ hist=await BE.listPortalHistory(id); }catch(_){}
+  const timeline=[{created_at:r.created_at,action:'submit',actor_name:name},...hist];
+  const fmtDT=d=>new Date(d).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+  const histHtml=timeline.map(h=>`<div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)">
+      <div style="width:8px;height:8px;border-radius:50%;background:var(--violet);margin-top:5px;flex-shrink:0"></div>
+      <div style="flex:1"><div style="font-size:12.5px;font-weight:600">${HIST_ACTION[h.action]||h.action}${h.actor_name?` — ${esc(h.actor_name)}`:''}</div>
+      <div style="font-size:11px;color:var(--muted)">${fmtDT(h.created_at)}</div>
+      ${h.comment?`<div style="font-size:12px;color:var(--ink2);margin-top:2px;background:var(--bg2);padding:5px 8px;border-radius:6px;white-space:pre-wrap">${esc(h.comment)}</div>`:''}</div></div>`).join('');
+  const row=(k,v)=>`<div class="fr"><span class="k">${k}</span><span class="v">${v}</span></div>`;
+  $('drawer').innerHTML=`
+    <div class="dh"><button class="close" data-x><i class="fa-solid fa-xmark"></i></button>
+      <h2>${esc(name)}</h2>
+      <div class="role">${esc(emp.role||'—')} · ${esc(emp.department||'—')} <span class="badge" style="background:${col}22;color:${col};margin-left:4px">${REQ_STATUS_LABELS[r.status]||r.status}</span></div></div>
+    <div class="sec"><h4>Demande</h4>
+      ${row('Établissement',esc(hotelName))}
+      ${row('Service',esc(emp.department||'—'))}
+      ${row('Poste',esc(emp.role||'—'))}
+      ${row('Type',REQ_TYPE_LABELS[r.type]||r.type)}
+      ${row('Date d\'envoi',new Date(r.created_at).toLocaleString('fr-FR'))}
+      ${row('Période demandée',period)}
+      ${row('Nombre de jours',nbDays||'—')}
+      ${r.proposed_start?row('Nouvelle période proposée','<span style="color:#7c3aed;font-weight:700">'+fmtDate(r.proposed_start)+(r.proposed_end&&r.proposed_end!==r.proposed_start?' → '+fmtDate(r.proposed_end):'')+'</span>'):''}
+      ${row('Pièce jointe',attachHtml)}
+      ${r.message?`<div style="margin-top:10px"><div class="k" style="margin-bottom:4px">Motif du salarié</div><div style="background:var(--bg2);padding:10px;border-radius:8px;font-size:13px;white-space:pre-wrap">${esc(r.message)}</div></div>`:''}
+      ${r.manager_comment?`<div style="margin-top:10px"><div class="k" style="margin-bottom:4px">Commentaire du responsable</div><div style="background:var(--violet-bg);color:var(--violet-d);padding:10px;border-radius:8px;font-size:13px;white-space:pre-wrap">${esc(r.manager_comment)}</div></div>`:''}
+    </div>
+    <div class="sec"><h4>Historique de traitement</h4>${histHtml||'<div style="color:var(--muted);font-size:12px">—</div>'}</div>
+    ${canAct?`<div class="sec"><h4>Traiter la demande</h4>
+      <div id="ppProposeBox" style="display:none;margin-bottom:10px;padding:10px;border:1px dashed var(--violet);border-radius:8px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div class="fld"><label>Nouvelle date début</label><input type="date" id="ppStart" value="${r.date_start||''}"></div>
+          <div class="fld"><label>Nouvelle date fin</label><input type="date" id="ppEnd" value="${r.date_end||''}"></div>
         </div>
-        <span style="background:${col}22;color:${col};font-size:13px;font-weight:600;padding:4px 12px;border-radius:20px">${REQ_STATUS_LABELS[r.status]||r.status}</span>
+        <div class="fld" style="margin-top:6px"><label>Nouvel horaire (optionnel)</label><input id="ppShift" placeholder="ex : 09:00-17:00"></div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
-        <div><div style="font-size:11px;color:var(--ink2);text-transform:uppercase;letter-spacing:.5px">Type</div><div style="font-weight:600">${REQ_TYPE_LABELS[r.type]||r.type}</div></div>
-        <div><div style="font-size:11px;color:var(--ink2);text-transform:uppercase;letter-spacing:.5px">Dates</div><div style="font-weight:600">${dates}</div></div>
-        <div><div style="font-size:11px;color:var(--ink2);text-transform:uppercase;letter-spacing:.5px">Soumis le</div><div>${new Date(r.created_at).toLocaleDateString('fr-FR')}</div></div>
-        ${attachHtml}
+      <label style="font-size:11px;color:var(--ink2);text-transform:uppercase;letter-spacing:.5px;display:flex;justify-content:space-between"><span>Commentaire du responsable</span><span id="ppCount" style="color:var(--muted);text-transform:none">0/1000</span></label>
+      <textarea id="piComment" maxlength="1000" style="width:100%;height:82px;resize:vertical;border:1px solid var(--line);border-radius:8px;padding:8px;font-family:inherit;font-size:13px" placeholder="Obligatoire pour un refus, un report ou une demande de complément…"></textarea>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px">
+        <button class="btn p" onclick="_decideFromDrawer('${id}','accept')"><i class="fa-solid fa-check"></i> Accepter</button>
+        <button class="btn" style="background:#ede9fe;color:#6d28d9;border:1px solid #c4b5fd" id="ppProposeBtn"><i class="fa-solid fa-arrows-left-right"></i> Proposer une date</button>
+        <button class="btn" style="background:#dbeafe;color:#1d4ed8;border:1px solid #93c5fd" onclick="_decideFromDrawer('${id}','request_info')"><i class="fa-solid fa-circle-question"></i> Complément</button>
+        <button class="btn" style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5" onclick="_decideFromDrawer('${id}','reject')"><i class="fa-solid fa-xmark"></i> Refuser</button>
       </div>
-      ${r.message?`<div style="margin-bottom:16px"><div style="font-size:11px;color:var(--ink2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Message du salarié</div><div style="background:var(--bg2);padding:12px;border-radius:8px;font-size:13px;white-space:pre-wrap">${esc(r.message)}</div></div>`:''}
-      ${canAct?`
-      <div style="margin-bottom:16px">
-        <label style="font-size:11px;color:var(--ink2);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">Commentaire (optionnel)</label>
-        <textarea id="piComment" class="input" style="width:100%;height:80px;resize:vertical" placeholder="Motif de décision, informations complémentaires…"></textarea>
-      </div>
-      <div style="display:flex;gap:12px">
-        <button class="btn p" style="flex:1" onclick="decidePortalRequest('${id}','approved')"><i class="fa-solid fa-check"></i> Approuver</button>
-        <button class="btn" style="flex:1;background:#fee2e2;color:#dc2626;border-color:#fca5a5" onclick="decidePortalRequest('${id}','rejected')"><i class="fa-solid fa-xmark"></i> Refuser</button>
-        <button class="btn g" onclick="closeModal()">Annuler</button>
-      </div>
-      `:`<div style="text-align:center;padding:12px 0"><button class="btn g" onclick="closeModal()">Fermer</button></div>`}
-    </div>`);
+    </div>`:''}`;
+  $('dbg').classList.add('on'); $('drawer').classList.add('on');
+  $('drawer').querySelector('[data-x]').onclick=closeFiche;
+  if(canAct){
+    const ta=$('piComment'), cnt=$('ppCount'); if(ta&&cnt){ const upd=()=>cnt.textContent=`${ta.value.length}/1000`; ta.oninput=upd; upd(); }
+    const pb=$('ppProposeBtn'); if(pb) pb.onclick=()=>{ const box=$('ppProposeBox'); if(box.style.display==='none'){ box.style.display=''; pb.innerHTML='<i class="fa-solid fa-paper-plane"></i> Envoyer la proposition'; } else { _decideFromDrawer(id,'propose'); } };
+  }
 }
 
-async function decidePortalRequest(id,decision){
-  const comment=$('piComment')?.value.trim()||null;
-  const {error}=await BE.db.from('portal_requests').update({
-    status:decision,
-    manager_comment:comment,
-    decided_at:new Date().toISOString()
-  }).eq('id',id).eq('hotel_id',hotelId);
-  if(error){flash('Erreur: '+error.message);return;}
-  closeModal();
-  flash(decision==='approved'?'Demande approuvée ✓':'Demande refusée');
-  await loadPortalInbox($('piFilterStatus')?.value||'',$('piFilterType')?.value||'');
-  refreshPortalBadges(); // compteurs à jour immédiatement (validation/refus)
+async function _decideFromDrawer(id,action){
+  const comment=($('piComment')?.value||'').trim();
+  if((action==='reject'||action==='propose'||action==='request_info') && !comment){ flash('Le commentaire est obligatoire pour cette action','w'); $('piComment')?.focus(); return; }
+  let start=null,end=null,shift=null;
+  if(action==='propose'){ start=$('ppStart')?.value||null; end=$('ppEnd')?.value||null; shift=$('ppShift')?.value?.trim()||null; if(!start){ flash('La date de début proposée est requise','w'); return; } }
+  const confirmMsg={reject:'Refuser cette demande ?',propose:'Envoyer cette proposition de nouvelle date au salarié ?',accept:'Accepter cette demande ?\nLes modules Absences et Planning seront mis à jour.'}[action];
+  if(confirmMsg && !confirm(confirmMsg)) return;
+  try{
+    await BE.portalDecide(id,action,comment||null,start,end,shift);
+    closeFiche();
+    flash({accept:'Demande acceptée ✓',reject:'Demande refusée',propose:'Proposition envoyée',request_info:'Complément demandé'}[action]);
+    await loadPortalInbox($('piFilterStatus')?.value||'',$('piFilterType')?.value||''); refreshPortalBadges();
+  }catch(e){ flash(_portalDecideErr(e),'e'); }
 }
 
 /* ===================== FICHE (drawer) ===================== */
