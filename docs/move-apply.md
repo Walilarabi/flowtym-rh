@@ -72,3 +72,71 @@ une proposition déjà `applied` ⇒ refus (statut non applicable).
 Drag & Drop visuel, primes, IA, envoi réel des notifications, modifications
 contractuelles. Le scheduler des `scheduled` et le worker de notifications
 appelleront la RPC / consommeront les notifications sans logique métier propre.
+
+---
+
+## Durcissement (réserves levées)
+
+### 1. Modèle réel & split supporté
+- **staff_planning** : 1 ligne / hôtel / jour = **marqueur de couverture** (bornes).
+- **staff_planning_segments** (nouvelle) : identifiant propre, **plusieurs segments
+  par jour et par hôtel**, contrainte d'**exclusion** anti-chevauchement.
+- **Cas de split supportés** : shift entier, début, fin, **milieu** (2 segments
+  origine même hôtel), **plusieurs créneaux/jour**, multi-jours, sans ligne
+  d'origine, collision destination (upsert). Prouvé (7 cas).
+- **Cas encore approximés** : la GRILLE staff_planning ne montre que les **bornes**
+  (union) pour un jour fractionné ; le détail exact vit dans les **segments**
+  (source de vérité, reconstruction exacte prouvée : `FO 8-10, VO 10-12, FO 12-16`).
+- **Cas interdits** : deux présences qui se chevauchent le même jour (garanti
+  impossible par la contrainte d'exclusion).
+
+### 2. Re-simulation serveur — clarification honnête
+`group_move_apply` **n'exécute PAS une re-simulation complète** du moteur. Elle
+effectue : (a) recalcul d'une **empreinte serveur** des données décisives et
+comparaison à l'empreinte figée à la simulation ; (b) des **gardes SQL**
+(statut, dérogations, expiration, priorité/concurrence). Le moteur étant
+déterministe (prouvé), empreinte identique ⇒ la simulation figée EST encore sa
+sortie pour les données courantes ; empreinte différente ⇒ refus (re-simulation
+client requise). **Champs couverts par l'empreinte** : planning (statuts,
+horaires, heures), absences, besoins (par shift), trajet, workflow, seuils de
+couverture. **Non recalculés** : compétences & disponibilités (**non modélisés**
+dans le schéma), règles RH (constantes par défaut). Dérogations & propositions
+concurrentes : **gardes** dédiées. Test : modification isolée de chaque catégorie
+⇒ refus (6/6).
+
+### 3. Verrou global
+`pg_advisory_xact_lock(hashtextextended(employee||day))` par jour concerné
+(sérialise même **sans** ligne existante) + `FOR UPDATE` (lignes existantes) +
+**contrainte d'exclusion** des segments (invariant ultime, tient sous vraie
+concurrence) + **PK d'idempotence**. Deux sessions concurrentes ⇒ une seule
+application compatible.
+
+### 4. Cycle de vie de l'idempotence
+`group_move_applications(idempotency_key PK, status: processing→completed dans la
+MÊME transaction)`. Réservation de la clé au début ; `completed` à la fin.
+- **retry après succès (même clé)** ⇒ résultat mémorisé, aucune ré-écriture.
+- **retry après refus métier** ⇒ transaction annulée ⇒ **aucune ligne** (jamais
+  d'orphelin `processing`), nouvelle tentative possible.
+- **rollback principal** ⇒ la réservation est annulée avec le reste.
+- **clé réutilisée sur une autre proposition** ⇒ conflit PK ⇒ retour de l'état
+  mémorisé (completed) ou refus « application en cours ».
+- **timeout client alors que le serveur a committé** ⇒ retry même clé ⇒ résultat
+  mémorisé (idempotent).
+
+### 5. Tests à deux sessions
+Un test à **deux connexions réellement concurrentes n'est pas exécutable** via
+l'outil MCP (transactions auto-commit isolées). Sont fournis : (a) le script
+`scripts/concurrency/two-session-apply.sql` à lancer sur staging ; (b) la preuve
+des **invariants data-level** qui garantissent la sûreté sous concurrence :
+contrainte d'exclusion (chevauchement refusé) + double-application bloquée ⇒
+**une seule application effective**.
+
+### Tests réellement exécutés (récap durcissement)
+- Rognage/split 7 cas (segments + grille + audit).
+- Empreinte : 6/6 catégories bloquent (planning, absences, requirements, travel,
+  workflow, coverage).
+- Idempotence : retry succès sans doublon, `completed`, **aucun orphelin** après
+  refus.
+- Reconstruction split-day exacte depuis les segments.
+- Concurrence data-level : exclusion + double-apply bloqué + 1 seule application.
+- (Antérieurs) 14/14 apply + parité 2/2.
