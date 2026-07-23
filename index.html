@@ -482,6 +482,9 @@ tr.dept-sep td{pointer-events:none}
 <div class="pop" id="pop"></div>
 <div class="toast" id="toast"></div>
 
+<!-- Moteur de simulation (pur) + couche d'adaptation. Chargés avant l'app. -->
+<script src="js/move-simulator.js"></script>
+<script src="js/sim-adapter.js"></script>
 <script>
 /* =====================================================================
    Flowtym RH — Étape 2 : application live branchée sur Supabase
@@ -1009,6 +1012,8 @@ async function makeRealBE(){
     async groupReqList(){const {data,error}=await sb.rpc('group_requirements_list');if(error){if(error.code==='42883')return[];must(error,'Besoins effectif');}return data||[];},
     async groupReqSet(hotel,service,weekday,required){const {error}=await sb.rpc('group_requirement_set',{p_hotel:hotel,p_service:service,p_weekday:weekday,p_required:required});must(error,'Enregistrement du besoin');},
     async groupReqDelete(hotel,service,weekday){const {error}=await sb.rpc('group_requirement_delete',{p_hotel:hotel,p_service:service,p_weekday:weekday});must(error,'Suppression du besoin');},
+    async groupTravelTimes(){const {data,error}=await sb.rpc('group_travel_times');if(error){if(error.code==='42883')return[];must(error,'Temps de trajet');}return data||[];},
+    async listEmployeeShifts(empId,from,to){const {data,error}=await sb.from('staff_planning').select('hotel_id,day,shift_start,shift_end').eq('employee_id',empId).gte('day',from).lte('day',to).not('shift_start','is',null);if(error){if(error.code==='42P01')return[];must(error,'Vacations du collaborateur');}return (data||[]).map(r=>({hotel_id:r.hotel_id,date:r.day,start:r.shift_start,end:r.shift_end}));},
 
     /* --- AUDIT --- */
     async logAudit(action,entity_type,entity_id,employee_id,details){
@@ -2091,12 +2096,14 @@ function gpBuildCard(h, data, cellsDay, reqMap, wd, K){
   const collabRows=cs.sort((a,b)=>(a.is_extra?1:0)-(b.is_extra?1:0)||(a.name||'').localeCompare(b.name||'')).map(c=>{
     const originCode=(data.hotels.find(x=>x.id===c.origin_hotel_id)||{}).hotel_code||(data.hotels.find(x=>x.id===c.origin_hotel_id)||{}).name||'';
     const st=CMAP[c.status]?CMAP[c.status].label:(c.status||'');
-    return `<div class="gp-collab" onclick="gpOpenCollab('${c.employee_id}')" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px solid #f1f1f6;cursor:pointer">
+    return `<div class="gp-collab" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px solid #f1f1f6">
       <span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;background:${gpIsWorking(c.status)?'#16a34a':'#cbd5e1'}"></span>
-      <div style="flex:1;min-width:0">
+      <div style="flex:1;min-width:0;cursor:pointer" onclick="gpOpenCollab('${c.employee_id}')">
         <div style="font-size:12.5px;font-weight:600;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.name)}${c.is_extra?' <span style="font-size:9px;font-weight:700;color:#E65100;background:#FFF3E0;padding:1px 5px;border-radius:4px">EXTRA</span>':''}</div>
         <div style="font-size:10.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.role||'')} · ${esc(st)}${c.is_extra?' · origine '+esc(originCode):''}</div>
-      </div></div>`;
+      </div>
+      <button title="Simuler un renfort vers un autre établissement (lecture seule)" onclick="gpOpenSimForm('${c.employee_id}','${c.hotel_id}',decodeURIComponent('${encodeURIComponent(c.service||'')}'))" style="flex-shrink:0;border:1px solid #d8d8e2;background:#f7f7fb;border-radius:6px;padding:3px 7px;font-size:10.5px;cursor:pointer;color:#5B21B6;font-weight:600"><i class="fa-solid fa-arrows-turn-right" style="font-size:9px"></i> Simuler</button>
+    </div>`;
   }).join('') || '<div style="padding:10px;font-size:11px;color:var(--muted);text-align:center">Aucun collaborateur ce jour</div>';
   const ecartTxt=(ecart===null)?'—':(ecart>0?'+':'')+ecart;
   // --- Zone Suggestions (emplacement réservé, enrichissable par IA plus tard ; règle simple non-IA) ---
@@ -2188,6 +2195,136 @@ function gpOpenReqEditor(){
       }catch(e){ flash('Erreur : '+(e.message||e),'e'); }
     };
   }).catch(e=>flash('Erreur : '+(e.message||e),'e'));
+}
+
+/* ---- SIMULATION DE RENFORT (LECTURE SEULE — lot d'intégration) ---- */
+// Politique si temps de trajet non configuré : configurable via org features.
+function gpTravelPolicy(){ const c=(typeof _orgInfo!=='undefined'&&_orgInfo&&_orgInfo.features)||{}; return c.missingTravelLevel||'warning'; }
+
+// Formulaire de sélection du renfort (destination, service, date, plage, motif).
+function gpOpenSimForm(empId, fromHotelId, originService){
+  const hotels=((gpData&&gpData.hotels)||[]).filter(h=>h.id!==fromHotelId);
+  const emp=(staff||[]).find(x=>x.id===empId)||(typeof _extraEmpCache!=='undefined'&&_extraEmpCache.get&&_extraEmpCache.get(empId))||{};
+  const name=(emp.first_name?emp.first_name+' '+emp.last_name:empId);
+  const svcs=(gpData&&gpData.services)||['Réception','Petit-déjeuner','Étage','Technique'];
+  const today=gpISO(gpDay||new Date());
+  gpModal('Simuler un renfort — '+esc(name), `
+    <p style="font-size:12px;color:var(--muted);margin-bottom:12px"><i class="fa-solid fa-eye"></i> Simulation <b>lecture seule</b> : aucune donnée ne sera modifiée.</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="fld"><label>Origine</label><input type="text" value="${esc(originService)} — ${esc((((gpData&&gpData.hotels)||[]).find(h=>h.id===fromHotelId)||{}).hotel_code||'')}" disabled></div>
+      <div class="fld"><label>Hôtel de destination *</label><select id="simDestHotel">${hotels.map(h=>`<option value="${h.id}">${esc(h.hotel_code||'')} — ${esc(h.name)}</option>`).join('')}</select></div>
+      <div class="fld"><label>Service de destination *</label><select id="simDestSvc">${svcs.map(s=>`<option value="${esc(s)}" ${s===originService?'selected':''}>${esc(s)}</option>`).join('')}</select></div>
+      <div class="fld"><label>Date *</label><input type="date" id="simDate" value="${today}"></div>
+      <div class="fld"><label>Début (optionnel)</label><input type="time" id="simStart"></div>
+      <div class="fld"><label>Fin (optionnel)</label><input type="time" id="simEnd"></div>
+    </div>
+    <div class="fld" style="margin-top:8px"><label>Motif de la simulation</label><input type="text" id="simReason" placeholder="Ex : renfort sous-effectif Vendôme"></div>
+    <p style="font-size:11px;color:var(--muted);margin-top:6px">Sans horaire = journée complète. Plusieurs jours : à venir (V1 : un créneau).</p>
+    <div style="margin-top:12px;text-align:right"><button class="btn p" id="simRun"><i class="fa-solid fa-play"></i> Lancer la simulation</button></div>`);
+  $('simRun').onclick=async()=>{
+    const dest=$('simDestHotel').value, destSvc=$('simDestSvc').value, date=$('simDate').value;
+    const st=$('simStart').value||null, en=$('simEnd').value||null;
+    if(!dest||!destSvc||!date){ flash('Destination, service et date requis','e'); return; }
+    const slot={date:date}; if(st) slot.start=st; if(en) slot.end=en;
+    $('simRun').disabled=true; $('simRun').innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Simulation…';
+    try{
+      const built=await buildMoveSimulationContext({employeeId:empId,employeeName:name,fromHotelId:fromHotelId,originService:originService,destHotelId:dest,destService:destSvc,slots:[slot],reason:$('simReason').value||null});
+      gpRenderSimPanel(built);
+    }catch(e){ flash('Erreur simulation : '+(e.message||e),'e'); $('simRun').disabled=false; $('simRun').innerHTML='<i class="fa-solid fa-play"></i> Lancer la simulation'; }
+  };
+}
+
+// COUCHE D'ADAPTATION : récupère + normalise les données Flowtym, PUIS délègue
+// aux helpers purs (FlowtymSimAdapter) et au moteur (FlowtymMoveSim).
+// Le moteur n'accède jamais à Supabase : seule cette fonction interroge les données.
+async function buildMoveSimulationContext(p){
+  if(!window.FlowtymMoveSim||!window.FlowtymSimAdapter) throw new Error('Moteur de simulation non chargé');
+  const dates=p.slots.map(s=>s.date).sort();
+  const from=dates[0], to=dates[dates.length-1];
+  // Données de couverture : destination (et origine si service différent).
+  const destData=await BE.groupPlanning(p.destService, from, to);
+  let cells=(destData&&destData.cells)||[];
+  let requirements=(destData&&destData.requirements)||[];
+  const hotels=(destData&&destData.hotels)||[];
+  if(p.originService && p.originService!==p.destService){
+    const origData=await BE.groupPlanning(p.originService, from, to);
+    cells=cells.concat((origData&&origData.cells)||[]);
+    requirements=requirements.concat((origData&&origData.requirements)||[]);
+  }
+  const [travelTimes, employeeShifts]=await Promise.all([ BE.groupTravelTimes(), BE.listEmployeeShifts(p.employeeId, from, to) ]);
+  const emp=(staff||[]).find(x=>x.id===p.employeeId)||(typeof _extraEmpCache!=='undefined'&&_extraEmpCache.get&&_extraEmpCache.get(p.employeeId))||{};
+  const raw={
+    employee:{ id:p.employeeId, name:p.employeeName, skills:(Array.isArray(emp.skills)?emp.skills:undefined), principalService:emp.department||null, availability:null, plannedThisWeek:null },
+    origin:{ hotelId:p.fromHotelId, service:p.originService },
+    destination:{ hotelId:p.destHotelId, service:p.destService },
+    slots:p.slots, reason:p.reason,
+    cells:cells, requirements:requirements, hotels:hotels,
+    employeeShifts:employeeShifts, travelTimes:travelTimes,
+    serviceSkills:null,                                  // référentiel compétences par service : non modélisé (voir limites)
+    coverageCfg:(typeof _orgInfo!=='undefined'&&_orgInfo&&_orgInfo.features&&_orgInfo.features.coverage)||null,
+    rhRules:null,                                        // règles RH structurées : non modélisées -> défauts
+    accessibleHotelIds:hotels.map(h=>h.id),
+  };
+  const assessment=window.FlowtymSimAdapter.assessInputs(raw);
+  const baseConfig={ time:{ missingTravelLevel:gpTravelPolicy() } };
+  const built=window.FlowtymSimAdapter.buildContext(raw, baseConfig);
+  const result=window.FlowtymMoveSim.simulateMove(built);
+  return { result:result, assessment:assessment, raw:raw, meta:p };
+}
+
+// Panneau de simulation (lecture seule) — fidèle Flowtym.
+function gpRenderSimPanel(built){
+  const r=built.result, a=built.assessment, p=built.meta;
+  const hById={}; ((gpData&&gpData.hotels)||[]).forEach(h=>hById[h.id]=h);
+  const fromH=hById[p.fromHotelId]||{}, toH=hById[p.destHotelId]||{};
+  const DEC={ blocked:{c:'#dc2626',bg:'#fee2e2',l:'Déplacement bloqué',i:'fa-ban'}, allowed_with_warnings:{c:'#b45309',bg:'#fef3c7',l:'Autorisé avec avertissements',i:'fa-triangle-exclamation'}, allowed:{c:'#15803d',bg:'#dcfce7',l:'Déplacement autorisé',i:'fa-circle-check'} }[r.decision];
+  const covPct=v=>v==null?'—':Math.round(v*100)+'%';
+  const s0=r.slots[0]||{origin:{},destination:{}};
+  const list=(arr,color,icon,title)=>arr.length?`<div style="margin-bottom:8px"><div style="font-size:11px;font-weight:700;color:${color};margin-bottom:4px"><i class="fa-solid ${icon}"></i> ${title}</div>${arr.map(c=>`<div style="font-size:12px;padding:5px 8px;background:#fff;border:1px solid #eee;border-left:3px solid ${color};border-radius:4px;margin-bottom:4px">${esc(c.message)}${c.waivable?' <span style="font-size:9px;color:#6b7280">(dérogeable)</span>':''}${c.details&&c.details.date?' <span style="font-size:9px;color:#9ca3af">'+esc(c.details.date)+'</span>':''}</div>`).join('')}</div>`:'';
+  // Données manquantes / hypothèses
+  const missing=a.fields.filter(f=>f.status!=='available');
+  const dataZone=missing.length?`<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px;margin-top:10px">
+      <div style="font-size:11px;font-weight:700;color:#92400e;margin-bottom:6px">Données manquantes / hypothèses · confiance ${a.confidence}%</div>
+      ${a.fields.map(f=>`<div style="font-size:11.5px;display:flex;gap:6px;padding:2px 0"><span style="color:${f.status==='available'?'#16a34a':f.status==='assumption'?'#b45309':'#dc2626'}">${f.status==='available'?'✔':f.status==='assumption'?'≈':'✘'}</span><span>${esc(f.label)}${f.detail?' — <span style="color:#6b7280">'+esc(f.detail)+'</span>':''}</span></div>`).join('')}
+    </div>`:`<div style="font-size:11px;color:#15803d;margin-top:8px">✔ Données complètes (confiance ${a.confidence}%)</div>`;
+  const scoreBox=(r.score!=null)?`<div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:10px;margin-top:10px">
+      <div style="display:flex;align-items:center;gap:8px"><div style="font-size:24px;font-weight:800;color:${DEC.c}">${r.score}</div><div style="font-size:11px;color:var(--muted)">score /100<br>indicatif — ne remplace pas les règles</div></div>
+      <div style="margin-top:6px;font-size:11px">${r.scoreBreakdown.map(b=>`<span style="display:inline-block;margin:2px 4px 0 0;padding:1px 6px;border-radius:8px;background:${b.points<0?'#fee2e2':'#dcfce7'};color:${b.points<0?'#dc2626':'#15803d'}">${esc(b.label)} ${b.points>0?'+':''}${b.points}</span>`).join('')}</div>
+    </div>`:`<div style="font-size:11px;color:#dc2626;margin-top:10px">Score non calculé (déplacement bloqué).</div>`;
+  const covRow=(label,before,after)=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0"><span style="color:var(--muted)">${label}</span><span><b>${before}</b> → <b>${after}</b></span></div>`;
+  const impactCard=(title,side,reqB,reqA)=>`<div style="flex:1;min-width:200px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:10px">
+      <div style="font-size:12px;font-weight:700;margin-bottom:4px">${title}</div>
+      ${covRow('Couverture', covPct(side==='o'?r.impact.originCoverageBefore:r.impact.destinationCoverageBefore), covPct(side==='o'?r.impact.originCoverageAfter:r.impact.destinationCoverageAfter))}
+      ${covRow('Effectif prévu', reqB, reqA)}
+    </div>`;
+  const html=`
+    <div style="background:${DEC.bg};border-radius:8px;padding:12px;margin-bottom:12px;display:flex;align-items:center;gap:10px">
+      <i class="fa-solid ${DEC.i}" style="font-size:22px;color:${DEC.c}"></i>
+      <div><div style="font-weight:800;color:${DEC.c}">${DEC.l}</div><div style="font-size:12px;color:#374151">${esc(r.summary)}</div></div>
+    </div>
+    <div style="font-size:12px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:10px;margin-bottom:10px">
+      <b>${esc(p.employeeName||'')}</b> — ${esc(p.originService||'')} · ${esc(fromH.hotel_code||'')} <i class="fa-solid fa-arrow-right" style="font-size:9px;color:#9ca3af"></i> ${esc(p.destService||'')} · ${esc(toH.hotel_code||'')}<br>
+      <span style="color:var(--muted)">${(p.slots||[]).map(s=>esc(s.date)+(s.start?' '+esc(s.start)+'–'+esc(s.end||'?'):' (journée)')).join(', ')}</span>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:6px">
+      ${impactCard('Impact origine — '+esc(fromH.name||''),'o', s0.origin.prevuBefore, s0.origin.prevuAfter)}
+      ${impactCard('Impact destination — '+esc(toH.name||''),'d', s0.destination.prevuBefore, s0.destination.prevuAfter)}
+    </div>
+    <div style="font-size:12px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:10px;margin-bottom:10px">
+      <b>Impact groupe</b> — sous-effectifs ${r.impact.groupUnderstaffingBefore} → ${r.impact.groupUnderstaffingAfter}
+      ${r.impact.groupUnderstaffingAfter<r.impact.groupUnderstaffingBefore?'<span style="color:#15803d"> (amélioration)</span>':(r.impact.groupUnderstaffingAfter>r.impact.groupUnderstaffingBefore?'<span style="color:#dc2626"> (dégradation)</span>':'')}
+    </div>
+    ${list(r.blockers,'#dc2626','fa-ban','Blocages')}
+    ${list(r.warnings,'#b45309','fa-triangle-exclamation','Avertissements')}
+    ${list(r.positives,'#15803d','fa-circle-check','Effets positifs')}
+    ${list(r.infos,'#2563eb','fa-circle-info','Informations')}
+    ${scoreBox}
+    ${dataZone}
+    <div style="margin-top:14px;display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn g" onclick="closeModal()">Fermer la simulation</button>
+      <button class="btn g" title="Aucune écriture dans cette phase" disabled style="opacity:.6">Préparer le déplacement</button>
+    </div>`;
+  gpModal('Simulation de renfort (lecture seule)', html, 'fa-solid fa-flask');
 }
 
 /* ===================== VUES PLANNING ALTERNATIVES ===================== */

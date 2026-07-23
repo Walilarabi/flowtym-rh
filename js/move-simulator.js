@@ -29,6 +29,7 @@
       minBreakMin: 20,               // pause minimale entre 2 vacations le même jour
       maxDailyAmplitudeHours: 13,    // amplitude journalière maximale
       minRestBetweenDaysHours: 11,   // repos minimal entre deux journées
+      missingTravelLevel: 'warning', // politique si temps de trajet non configuré : 'info'|'warning'|'blocking'
     },
     workingStatuses: ['P', 'PE'],
     blockOnMissingRequiredSkill: true,   // compétence OBLIGATOIRE manquante = blocage
@@ -188,8 +189,15 @@
       originVacated[date] = originShifts.length ? originRemainMin === 0 : full;
     });
 
+    // ── Trajet non configuré pour le couple (politique configurable) ──
+    const pairTravel = (fromId && toId && fromId !== toId) ? travelMinutes(ctx.travel, fromId, toId) : 0;
+    if (fromId && toId && fromId !== toId && pairTravel == null) {
+      const lvl = cfg.time.missingTravelLevel || 'warning';
+      add('TRAVEL_TIME_NOT_CONFIGURED', lvl, 'Temps de trajet non configuré entre les deux établissements.', { field: 'travel', waivable: lvl !== 'blocking' });
+    }
+
     // ── Contrôles temps / trajet (par date) ──
-    let travelUnknownFlagged = false, travelOkFlagged = false;
+    let travelOkFlagged = false;
     dates.forEach(date => {
       const timed = (byDate[date] || []).filter(x => x.s != null && x.e != null).sort((a, b) => a.s - b.s);
       // chevauchements
@@ -202,7 +210,7 @@
         const gap = nxt.s - cur.e;
         if (cur.hotel !== nxt.hotel) {
           const tv = travelMinutes(ctx.travel, cur.hotel, nxt.hotel);
-          if (tv == null) { if (!travelUnknownFlagged) { add('TRAVEL_TIME_UNKNOWN', 'info', 'Temps de trajet inter-hôtels non fourni : faisabilité non vérifiée.', { field: 'travel' }); travelUnknownFlagged = true; } }
+          if (tv == null) { /* déjà signalé globalement par TRAVEL_TIME_NOT_CONFIGURED */ }
           else {
             const need = tv + cfg.time.travelSafetyMarginMin;
             if (gap < need) add('TRAVEL_TIME_INSUFFICIENT', 'blocking', 'Temps de trajet insuffisant le ' + date + ' : ' + gap + ' min disponibles, ' + need + ' min requis (trajet ' + tv + ' + marge ' + cfg.time.travelSafetyMarginMin + ').', { field: 'travel', details: { gap, need, travel: tv } });
