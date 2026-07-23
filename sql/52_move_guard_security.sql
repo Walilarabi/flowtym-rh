@@ -1,0 +1,24 @@
+-- 52_move_guard_security.sql — Sécurisation anti-divergence (réserve GUC).
+-- Appliqué via migrations MCP : move_guard_role_based + staff_day_flags.
+--
+-- AUDIT : le GUC flowtym.allow_move_write est FALSIFIABLE — un rôle 'authenticated'
+-- peut exécuter set_config('flowtym.allow_move_write','on',true) (prouvé : renvoie
+-- 'on'). Le trigger basé sur ce GUC était donc contournable par un utilisateur
+-- frontend disposant d'un accès RLS à la ligne.
+--
+-- CORRECTION (Option C / A) : le trigger trg_staff_planning_move_guard ne dépend
+-- PLUS d'un GUC. Il bloque toute modification/suppression d'une ligne dérivée
+-- (source_proposal_id non nul) lorsque current_user IN ('authenticated','anon').
+-- Signal NON falsifiable : un utilisateur frontend ne peut pas changer son
+-- current_user (non membre de postgres/service_role — vérifié). La RPC
+-- group_move_apply est SECURITY DEFINER (owner=postgres) : à l'intérieur,
+-- current_user='postgres' => écritures autorisées. Les segments restent
+-- inaccessibles en écriture aux rôles frontend (REVOKE INSERT/UPDATE/DELETE).
+--
+-- PREUVE (rôle authenticated, GUC forgé à 'on', RLS neutralisée pour isoler le
+-- trigger) : ligne normale modifiable (1) ; ligne move-owned UPDATE bloquée par
+-- trigger ; DELETE bloquée ; insertion de segment refusée (GRANT).
+--
+-- v_staff_day_flags : is_segmented / segment_count / has_multiple_hotels /
+-- has_multiple_statuses / derived_from_segments — pour que les écrans legacy
+-- détectent une journée fractionnée et n'affichent pas de fausse présence continue.
