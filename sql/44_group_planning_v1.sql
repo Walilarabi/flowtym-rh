@@ -39,3 +39,9 @@ END $$;
 -- group_requirements_list/set/delete est appliqué par la migration
 -- `group_planning_v1_lot1`. Il inclut le statut collaborateur (emp_status) et la
 -- résolution du service exercé (Extra -> service d'accueil, sinon service principal).
+
+-- ── Ajouts (migrations group_staffing_requirements_shift, group_planning_v1_lot1) ──
+-- * group_staffing_requirements.shift text NULL (besoin par shift, prêt ; NULL=jour)
+--   + unique index ux_gsr_hotel_service_weekday_shift(hotel_id,service_name,weekday,coalesce(shift,''))
+-- * group_requirement_set/delete : 5e param p_shift text DEFAULT NULL (compat 4-args)
+-- * group_planning.requirements expose 'shift' ; la couverture V1 utilise shift NULL (jour)
