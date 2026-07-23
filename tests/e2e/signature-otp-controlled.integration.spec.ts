@@ -1,7 +1,20 @@
 /**
- * E2E — Moteur de signature Flowtym v2 (sig-send / sig-sign)
+ * TEST D'INTÉGRATION DU PARCOURS DE SIGNATURE AVEC OTP CONTRÔLÉ
  * =========================================================================
- * Test reproductible du parcours complet + contrôles de non-régression.
+ * ⚠️ CECI N'EST PAS UN E2E COMPLET DE L'OTP. Ce test fixe un otp_hash connu
+ * via service_role juste avant verify_otp. Il CONTOURNE donc volontairement :
+ *   - la génération réelle de l'OTP par sig-send/sig-sign ;
+ *   - son hachage initial ;
+ *   - son envoi par e-mail (RESEND) ;
+ *   - sa réception ;
+ *   - l'extraction du code depuis le message reçu.
+ * Il ne doit JAMAIS être présenté comme la preuve du fonctionnement complet de
+ * l'envoi d'OTP. La preuve de l'envoi réel est couverte par le test séparé
+ * tests/e2e/signature-real-email.spec.ts.
+ *
+ * Ce test reste utile pour valider de façon déterministe : refus avant OTP,
+ * mauvais codes, incrément atomique des tentatives, passage à otp_verified,
+ * accès au contrat, signature, stockage, hashes, événements, synchronisation.
  *
  * PRÉREQUIS (variables d'environnement) :
  *   SUPABASE_URL                 https://<ref>.supabase.co
@@ -40,7 +53,7 @@ const KNOWN_OTP = '135790';
 // PNG 1x1 transparent → signature bidon valide
 const SIG_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 
-test.describe.serial('Signature v2 — parcours E2E complet', () => {
+test.describe.serial('Signature v2 — intégration (OTP contrôlé, envoi e-mail contourné)', () => {
   let requestId = '';
 
   test('1-2. sig-send crée la demande (moteur v2)', async () => {
@@ -128,6 +141,11 @@ test.describe.serial('Signature v2 — parcours E2E complet', () => {
     expect(buf.byteLength, 'PDF vide').toBeGreaterThan(1000);
     // en-tête PDF
     expect(new TextDecoder().decode(buf.slice(0, 5))).toBe('%PDF-');
+
+    // 15. Hash recalculé DEPUIS LES OCTETS TÉLÉCHARGÉS == valeur stockée
+    const recomputed = createHash('sha256').update(Buffer.from(buf)).digest('hex');
+    expect(recomputed, 'le SHA-256 du PDF archivé doit égaler signed_document_hash_sha256')
+      .toBe(sr!.signed_document_hash_sha256);
 
     // 16. chaîne d'événements attendue
     const { data: evts } = await sb.from('signature_events').select('type').eq('request_id', requestId).order('created_at');

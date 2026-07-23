@@ -521,6 +521,11 @@ Deno.serve(async (req) => {
     await sb.from('signature_requests').update({ accepted_terms_at: now }).eq('id', request_id);
     await sb.from('signature_events').insert({ request_id, hotel_id: sr.hotel_id, type: 'terms_accepted', actor_ip: ip, actor_ua: ua, metadata: {} });
 
+    // Un SEUL rendu : le hash porte sur les octets EXACTEMENT archivés.
+    // (On ne peut pas imprimer dans le PDF le hash de ce même PDF — self-référence.
+    //  L'attestation n'affiche donc que le hash du document source ; le hash du
+    //  document signé est stocké en base et vérifiable en recalculant le SHA-256
+    //  du fichier téléchargé.)
     let pdfBytes: Uint8Array;
     let signedDocHash = '';
     try {
@@ -531,9 +536,8 @@ Deno.serve(async (req) => {
         signatureImageB64: signature_image,
         contractNumber, contractType, contractHtml,
       };
-      const first = await buildSignedPDF(opts);
-      signedDocHash = await sha256hex(first);
-      pdfBytes = await buildSignedPDF({ ...opts, signedDocHash });
+      pdfBytes = await buildSignedPDF(opts);
+      signedDocHash = await sha256hex(pdfBytes);
     } catch (e: unknown) {
       return jsonR({ error: 'Erreur génération PDF : ' + (e instanceof Error ? e.message : String(e)) }, 500);
     }

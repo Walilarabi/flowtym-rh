@@ -366,10 +366,40 @@ function errorPage(title: string, msg: string): string {
   </div></body></html>`;
 }
 
+// ⚠️ DEPRECATED — MOTEUR DE SIGNATURE v1 (LEGACY). Signature DÉSACTIVÉE.
+// La lecture/signature via ce lien public est bloquée. Les anciens contrats et
+// documents restent consultables depuis l'interface interne autorisée. Aucune
+// donnée ni fonction n'est supprimée à ce stade (migration dédiée ultérieure).
+const V1_SIGN_DISABLED = true;
+
 // ── Handler principal ─────────────────────────────────────────────────────────
 Deno.serve(async (req) => {
   const url = new URL(req.url);
   const sb  = createClient(SUPABASE_URL, SUPABASE_SVC);
+
+  if (V1_SIGN_DISABLED) {
+    // Log technique sans donnée personnelle : on ne journalise pas le token,
+    // ni l'email, ni le contenu — juste l'usage d'un ancien lien.
+    if (req.method === 'GET') {
+      console.warn('[contract-sign] ancien lien v1 consulté — désactivé');
+      const htmlHeaders = new Headers({ 'Content-Type': 'text/html; charset=utf-8' });
+      // Message informatif uniquement : ni contrat, ni OTP historique.
+      return new Response(errorPage(
+        'Lien de signature inactif',
+        'Ce lien de signature n’est plus actif. Veuillez contacter votre employeur afin de recevoir une nouvelle demande de signature sécurisée.',
+      ), { headers: htmlHeaders });
+    }
+    if (req.method === 'POST') {
+      console.warn('[contract-sign] tentative de signature v1 refusée — désactivé');
+      // 410 Gone : aucune mise à jour de signature_sessions, aucun PDF, aucune
+      // modification de contrat.
+      return jsonResp({
+        error: 'Moteur de signature v1 désactivé. Une nouvelle demande de signature sécurisée est requise.',
+        deprecated: true,
+      }, 410);
+    }
+    return new Response('Method not allowed', { status: 405 });
+  }
 
   // ── GET → page HTML ───────────────────────────────────────────────────────
   if (req.method === 'GET') {
