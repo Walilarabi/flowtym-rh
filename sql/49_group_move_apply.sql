@@ -1,0 +1,34 @@
+-- 49_group_move_apply.sql
+-- Application atomique du déplacement inter-hôtels. Appliqué via migrations MCP
+-- group_move_apply_schema + group_move_apply_rpc. Ce fichier fait foi.
+--
+-- Analyse staff_planning : la clé unique (hotel_id, employee_id, day) autorise
+-- des lignes sur PLUSIEURS hôtels le même jour -> affectation temporaire
+-- inter-hôtels (split-day) représentable. employee_id non lié à un hôtel.
+-- Statuts PE (présence extra, destination) et MAD (mise à dispo, origine)
+-- disponibles. shift_start/end pour les créneaux partiels.
+--
+-- Migration minimale (traçabilité) :
+--   staff_planning.source_proposal_id  (FK group_move_proposals, ON DELETE SET NULL)
+--   staff_planning.origin_hotel_id     (FK hotels)
+--   group_move_proposals.server_fingerprint / applied_at / applied_operation_id
+--   group_move_applications(idempotency_key PK, ...)   -- idempotence
+--   _gmp_fingerprint(...)  -- empreinte serveur déterministe des données décisives
+--
+-- RPC group_move_apply(p_id, p_idempotency_key) :
+--   1. verrou proposition (FOR UPDATE) ;
+--   2. idempotence (retour du résultat mémorisé si clé déjà utilisée) ;
+--   3. statut applicable : approved OU scheduled arrivée à échéance ;
+--   4. re-simulation/recheck serveur : refus si bloquée / dérogation manquante /
+--      expirée / données modifiées (empreinte serveur) / concurrente prioritaire ;
+--   5. verrou du planning du collaborateur (jours concernés, FOR UPDATE) ;
+--   6. GUC audit (source=group_planning, reason, operation_id commun) ;
+--   7. écriture ATOMIQUE : destination PE (+ créneau), origine MAD si journée
+--      complète (splits/partiels : origine conservée) ; multi-jours géré ;
+--   8. passage 'applied' (employees intact : hôtel/service principaux conservés) ;
+--   9. annulation des concurrentes ouvertes perdantes ;
+--   10. enregistrement idempotent.
+--   Toute exception => rollback intégral (atomicité plpgsql). Le journal
+--   planning_audit est écrit par le trigger dans la MÊME transaction.
+--
+-- Droit : group_move_apply (frontend) ; accès aux deux hôtels garanti par _gmp_guard.
