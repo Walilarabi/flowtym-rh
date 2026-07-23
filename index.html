@@ -1022,6 +1022,11 @@ async function makeRealBE(){
     async gmpAddWaiver(id,code,justification,before,overage){const {error}=await sb.rpc('group_move_proposal_add_waiver',{p_id:id,p_code:code,p_justification:justification,p_value_before:before||null,p_overage:overage||null});must(error,'Dérogation');},
     async gmpResimulate(id,sim,inputHash,resultHash,score,confidence,decision){const {error}=await sb.rpc('group_move_proposal_resimulate',{p_id:id,p_simulation:sim,p_input_hash:inputHash,p_result_hash:resultHash,p_score:score,p_confidence:confidence,p_decision:decision});must(error,'Re-simulation');},
     async gmpMarkStale(id,staleness,reason){const {error}=await sb.rpc('group_move_proposal_mark_staleness',{p_id:id,p_staleness:staleness,p_reason:reason||null});must(error,'Fraîcheur');},
+    async gmpWorkflowGet(group){const {data,error}=await sb.rpc('group_move_workflow_get',{p_group:group});if(error){if(error.code==='42883')return[];must(error,'Workflow');}return data||[];},
+    async gmpWorkflowSet(group,steps){const {error}=await sb.rpc('group_move_workflow_set',{p_group:group,p_steps:steps});must(error,'Configuration workflow');},
+    async gmpApprovalDecide(id,approve,comment){const {error}=await sb.rpc('group_move_approval_decide',{p_id:id,p_approve:approve,p_comment:comment||null});must(error,approve?'Approbation':'Rejet');},
+    async gmpSchedule(id,when){const {error}=await sb.rpc('group_move_schedule',{p_id:id,p_when:when});must(error,'Programmation');},
+    async gmpTimeline(id){const {data,error}=await sb.rpc('group_move_timeline',{p_id:id});if(error){if(error.code==='42883')return null;must(error,'Timeline');}return data||null;},
 
     /* --- AUDIT --- */
     async logAudit(action,entity_type,entity_id,employee_id,details){
@@ -1621,6 +1626,11 @@ const MODULE_LABELS = {
   ai_assistant:'Assistant RH IA', conformite:'Conformité', onboarding:'Onboarding',
   group_planning:'Planning Groupe',
   group_move_prepare:'Propositions de renfort',
+  group_move_review:'Renfort — revue',
+  group_move_approve:'Renfort — approbation',
+  group_move_reject:'Renfort — rejet',
+  group_move_schedule:'Renfort — programmation',
+  group_move_apply:'Renfort — application',
 };
 const ALL_MODULES = Object.keys(MODULE_LABELS);
 const PERM_ACTIONS = [
@@ -2401,7 +2411,14 @@ async function gpLoadProposals(){
     const acts=[];
     acts.push(`<button class="btn g" style="font-size:11px" onclick="gpOpenProposal('${r.id}')">Ouvrir</button>`);
     if(r.status==='draft'){ acts.push(`<button class="btn g" style="font-size:11px" onclick="gpProposalAction('${r.id}','submit')">Soumettre</button>`); acts.push(`<button class="btn g" style="font-size:11px" onclick="gpProposalAction('${r.id}','cancel')">Annuler</button>`); }
-    if(r.status==='pending_review'){ acts.push(`<button class="btn g" style="font-size:11px" onclick="gpProposalAction('${r.id}','reject')">Rejeter</button>`); acts.push(`<button class="btn g" style="font-size:11px" onclick="gpProposalAction('${r.id}','back')">Retour brouillon</button>`); }
+    if(r.status==='pending_review'){
+      if(canDo('group_move_approve','validate')||canDo('group_move_approve','create')) acts.push(`<button class="btn p" style="font-size:11px" onclick="gpProposalAction('${r.id}','approve')">Approuver l'étape</button>`);
+      if(canDo('group_move_reject','create')||canDo('group_move_reject','delete')) acts.push(`<button class="btn g" style="font-size:11px;color:#dc2626" onclick="gpProposalAction('${r.id}','wreject')">Rejeter</button>`);
+      acts.push(`<button class="btn g" style="font-size:11px" onclick="gpProposalAction('${r.id}','back')">Retour brouillon</button>`);
+    }
+    if(r.status==='approved' && (canDo('group_move_schedule','create'))){ acts.push(`<button class="btn p" style="font-size:11px" onclick="gpProposalAction('${r.id}','schedule')">Programmer</button>`); }
+    if(['approved','scheduled'].includes(r.status)){ acts.push(`<button class="btn g" style="font-size:11px" onclick="gpProposalAction('${r.id}','cancel')">Annuler</button>`); }
+    if(r.status==='scheduled' && r.scheduled_at){ acts.push(`<span style="font-size:10.5px;color:#15803d;align-self:center">⏰ ${esc((r.scheduled_at||'').slice(0,16).replace('T',' '))}</span>`); }
     return `<div style="border:1px solid #e5e7eb;border-radius:10px;padding:10px;margin-bottom:8px;background:#fff">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
         <div style="font-size:13px;font-weight:700">${esc(nm)}</div>
@@ -2419,6 +2436,9 @@ async function gpProposalAction(id,action){
     else if(action==='cancel') await BE.gmpSetStatus(id,'cancelled');
     else if(action==='reject'){ const c=prompt('Motif du rejet (optionnel) :')||''; await BE.gmpSetStatus(id,'rejected',c); }
     else if(action==='back') await BE.gmpSetStatus(id,'draft');
+    else if(action==='approve'){ const c=prompt('Commentaire (optionnel) :')||''; await BE.gmpApprovalDecide(id,true,c); }
+    else if(action==='wreject'){ const c=prompt('Motif du rejet :')||''; await BE.gmpApprovalDecide(id,false,c); }
+    else if(action==='schedule'){ const w=prompt('Programmer à (AAAA-MM-JJ HH:MM) :',''); if(!w) return; const iso=new Date(w.replace(' ','T')).toISOString(); await BE.gmpSchedule(id,iso); }
     flash('Proposition mise à jour'); gpLoadProposals();
   }catch(e){ flash('Erreur : '+(e.message||e),'e'); }
 }
@@ -2434,7 +2454,19 @@ function gpOpenProposal(id){
       ${list(sim.positives,'#15803d','Effets positifs')}
       ${(sim.missing&&sim.missing.length)?`<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px;margin-top:6px;font-size:11px">Données manquantes : ${sim.missing.map(m=>esc(m.label)).join(', ')} — confiance ${r.confidence}%</div>`:''}
       <div style="font-size:10.5px;color:var(--muted);margin-top:8px">Simulation du ${esc((r.simulation_created_at||'').slice(0,16).replace('T',' '))} · empreinte ${esc((r.simulation_input_hash||'').slice(0,8))} · statut ${esc(r.status)}${r.staleness&&r.staleness!=='valid'?' · '+esc(GMP_STALE[r.staleness]||r.staleness):''}</div>
+      <div id="gmpTimeline" style="margin-top:10px"><div style="font-size:11px;color:var(--muted)"><i class="fa-solid fa-spinner fa-spin"></i> Chargement de la timeline…</div></div>
       <div style="margin-top:12px;text-align:right"><button class="btn g" onclick="gpOpenProposals()">Retour</button></div>`, 'fa-solid fa-file-lines');
+    // Timeline (événements + circuit d'approbation)
+    BE.gmpTimeline(id).then(tl=>{
+      const host=$('gmpTimeline'); if(!host||!tl) { if(host) host.innerHTML=''; return; }
+      const AT={ created:'Créée', submitted:'Soumise', step_approved:'Étape approuvée', approved:'Approuvée', rejected:'Rejetée', cancelled:'Annulée', back_to_draft:'Retour brouillon', scheduled:'Programmée', waiver_added:'Dérogation', resimulated:'Re-simulée', marked_stale:'Marquée à actualiser' };
+      const steps=(tl.approvals||[]).map(s=>{ const col=s.status==='approved'?'#15803d':s.status==='rejected'?'#dc2626':'#9ca3af'; return `<span style="display:inline-block;font-size:10.5px;padding:2px 8px;border-radius:10px;background:#f3f4f6;color:${col};margin:2px">${esc(s.approver_type||s.key||('Étape '+s.step))} : ${s.status==='approved'?'✔':s.status==='rejected'?'✘':'…'}</span>`; }).join('');
+      const evs=(tl.events||[]).map(e=>`<div style="font-size:11px;padding:3px 0;border-bottom:1px solid #f3f3f7"><span style="color:#5B21B6">${esc(AT[e.action]||e.action)}</span> <span style="color:#9ca3af">${esc((e.at||'').slice(0,16).replace('T',' '))}</span>${e.comment?' — '+esc(e.comment):''}</div>`).join('');
+      const notifs=(tl.notifications||[]).length;
+      host.innerHTML=`${steps?`<div style="margin-bottom:6px"><b style="font-size:11px">Circuit d'approbation</b><br>${steps}</div>`:''}
+        <div style="background:#fff;border:1px solid #eee;border-radius:8px;padding:8px"><b style="font-size:11px">Timeline</b>${evs}</div>
+        ${notifs?`<div style="font-size:10.5px;color:var(--muted);margin-top:4px">${notifs} notification(s) préparée(s) — non envoyées dans cette phase.</div>`:''}`;
+    }).catch(()=>{ const host=$('gmpTimeline'); if(host) host.innerHTML=''; });
   }).catch(e=>flash('Erreur : '+(e.message||e),'e'));
 }
 

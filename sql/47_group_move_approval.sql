@@ -1,0 +1,35 @@
+-- 47_group_move_approval.sql
+-- Workflow d'approbation des propositions de renfort (avant group_move_apply).
+-- Appliqué via migrations MCP : group_move_approval_workflow + group_move_approval_rpcs.
+-- N'écrit toujours RIEN dans staff_planning ni planning_audit.
+--
+-- Statuts étendus : draft, pending_review, approved, scheduled, rejected,
+--   cancelled, expired, applied (applied réservé à la phase d'application).
+-- + colonne scheduled_at (programmation d'un déplacement approuvé, sans exécution).
+--
+-- Tables :
+--   group_move_workflows      : circuit paramétrable par groupe (steps jsonb ordonné)
+--                               [{key,label,approver_type,hotel_scope}]
+--                               approver_type: origin_director|dest_director|group_director|rh|any
+--   group_move_approvals      : instances d'étape par proposition (pending/approved/rejected)
+--   group_move_notifications  : notifications PRÉPARÉES (sent_at NULL = non envoyées)
+--
+-- RLS : workflows -> accès si un hôtel du groupe est autorisé ; approvals /
+--   notifications -> SELECT via jointure ; écritures via RPC SECURITY DEFINER.
+--
+-- RPC :
+--   group_move_workflow_get(group)  -> steps configurés ou défaut (dest_director)
+--   group_move_workflow_set(group, steps)
+--   group_move_proposal_submit(id)  -> génère les étapes ; si 0 étape => approved auto,
+--                                      sinon pending_review + notif 1er approbateur
+--   group_move_approval_decide(id, approve, comment) -> étape courante ; dernier
+--                                      approbateur => approved ; rejet => rejected
+--   group_move_schedule(id, when)   -> approved -> scheduled (date future obligatoire)
+--   group_move_proposal_set_status  -> cancel (draft/pending/approved/scheduled),
+--                                      back_to_draft (efface les approbations), reject direct
+--   group_move_timeline(id)         -> events + approvals + notifications
+--
+-- Droits (frontend) : group_move_review, group_move_approve, group_move_reject,
+--   group_move_schedule, group_move_apply (apply = phase suivante).
+--
+-- Corps SQL complet : voir les 2 migrations citées.
