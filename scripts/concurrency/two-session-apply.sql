@@ -1,0 +1,27 @@
+-- Test de concurrence RÉEL à deux connexions (à exécuter sur staging avec psql,
+-- impossible via une seule connexion auto-commit). Remplacer :PID par l'id d'une
+-- proposition 'approved' du collaborateur ciblé.
+--
+-- Terminal 1 :
+--   BEGIN;
+--   SELECT set_config('request.jwt.claim.sub', '<AUTH_ID_MANAGER>', true);
+--   SELECT group_move_apply(':PID', 'key-session-1');
+--   -- NE PAS committer tout de suite (laisser la transaction ouverte ~10s)
+--
+-- Terminal 2 (pendant que T1 est ouverte) :
+--   BEGIN;
+--   SELECT set_config('request.jwt.claim.sub', '<AUTH_ID_MANAGER>', true);
+--   SELECT group_move_apply(':PID', 'key-session-2');
+--   -- T2 BLOQUE sur pg_advisory_xact_lock(employee||day) tant que T1 n'a pas fini.
+--
+-- Terminal 1 : COMMIT;
+-- Terminal 2 : se débloque, relit la proposition => statut 'applied'
+--   => RAISE 'Statut non applicable (applied)'  (une seule application effective).
+--
+-- Cas à vérifier :
+--   1. même proposition, 2 clés différentes  -> 1 seule application (T2 refusée).
+--   2. 2 propositions différentes, même collab/créneau -> 2e refusée (priorité ou
+--      exclusion de segments).
+--   3. 2 propositions, même collab, JOURS différents -> les deux appliquées
+--      (verrous sur des clés advisory distinctes, aucun blocage).
+--   4. aucune ligne destination initiale -> le verrou advisory sérialise quand même.

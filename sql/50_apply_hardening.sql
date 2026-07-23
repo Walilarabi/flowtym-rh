@@ -1,0 +1,32 @@
+-- 50_apply_hardening.sql — Durcissement de group_move_apply (réserves 1..5).
+-- Appliqué via migrations MCP : staff_planning_segments, gmp_fingerprint_expand,
+-- group_move_apply_v2. Ce fichier fait foi.
+--
+-- RÉSERVE 1 — Multi-segments (règle produit B) :
+--   staff_planning garde 1 ligne/hôtel/jour (marqueur de couverture).
+--   staff_planning_segments : id propre, plusieurs segments/jour/hôtel,
+--   contrainte d'EXCLUSION (employee_id=, day=, int4range(start,end) &&) =>
+--   aucun chevauchement possible (pas deux endroits à la fois). Planning existant
+--   intact, aucune migration de données.
+--
+-- RÉSERVE 3 — _gmp_fingerprint étendu (empreinte serveur des données décisives
+--   EXTERNES modélisées) : PLAN (statuts=absences journalières, horaires, heures)
+--   + ABS (staff_absences) + REQ (par shift) + TRV (trajet) + WF (workflow) +
+--   COV (hotel_groups.features->coverage). NON couvert : compétences &
+--   disponibilités (non modélisées : employees n'a pas ces colonnes), règles RH
+--   (constantes par défaut). Dérogations & concurrentes = GARDES dédiées.
+--
+-- RÉSERVE 4 — Verrou global : pg_advisory_xact_lock(hash(employee||day)) par jour
+--   (sérialise même sans ligne existante) + FOR UPDATE (lignes existantes) +
+--   contrainte d'exclusion (invariant data-level ultime) + PK idempotence.
+--
+-- RÉSERVE 5 — Idempotence : group_move_applications(idempotency_key PK, status
+--   processing->completed dans la MÊME transaction). Réservation de la clé en
+--   début de RPC ; completed en fin. Rollback => aucune ligne (jamais d'orphelin
+--   processing). Retry même clé après succès => résultat mémorisé ; après refus =>
+--   aucune trace, nouvelle tentative possible.
+--
+-- Écriture (réserve 2) : par jour, segments destination + segments origine
+--   RESTANTS (rognage/split via _gmp_subtract), grille destination PE (bornes),
+--   grille origine MAD si vacance totale sinon horaires rognés. Multi-jours géré.
+--   Les SEGMENTS sont la source de vérité ; la grille est un marqueur (bornes).
