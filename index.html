@@ -1004,6 +1004,12 @@ async function makeRealBE(){
     async listExtraActivationHistory(h,empId){const {data,error}=await sb.from('employee_extra_activation_history').select('*').eq('hotel_id',h).eq('employee_id',empId).order('created_at',{ascending:false});if(error){if(error.code==='42P01')return[];must(error,'Historique extra');}return data||[];},
     async listPlanningAudit(h,opts){opts=opts||{};let q=sb.from('planning_audit').select('*').eq('hotel_id',h).order('created_at',{ascending:false}).limit(opts.limit||300);if(opts.employee_id)q=q.eq('employee_id',opts.employee_id);if(opts.from)q=q.gte('day',opts.from);if(opts.to)q=q.lte('day',opts.to);const {data,error}=await q;if(error){if(error.code==='42P01')return[];must(error,'Journal planning');}return data||[];},
 
+    /* --- PLANNING GROUPE (lecture seule V1) — 1 requête agrégée --- */
+    async groupPlanning(service,from,to){const {data,error}=await sb.rpc('group_planning',{p_service:service,p_from:from,p_to:to});if(error){if(error.code==='42883')return null;must(error,'Planning Groupe');}return data||null;},
+    async groupReqList(){const {data,error}=await sb.rpc('group_requirements_list');if(error){if(error.code==='42883')return[];must(error,'Besoins effectif');}return data||[];},
+    async groupReqSet(hotel,service,weekday,required){const {error}=await sb.rpc('group_requirement_set',{p_hotel:hotel,p_service:service,p_weekday:weekday,p_required:required});must(error,'Enregistrement du besoin');},
+    async groupReqDelete(hotel,service,weekday){const {error}=await sb.rpc('group_requirement_delete',{p_hotel:hotel,p_service:service,p_weekday:weekday});must(error,'Suppression du besoin');},
+
     /* --- AUDIT --- */
     async logAudit(action,entity_type,entity_id,employee_id,details){
       try{
@@ -1458,6 +1464,14 @@ const _extraEmpCache=new Map();   // cache des fiches extras (id -> employee) po
 let planView='month';   // 'month' | 'week' | 'day' | 'service'
 let planningRows=[];    // lignes brutes listMonthPlanning (avec shift_label etc.)
 let coverageCache=[];   // règles de couverture mises en cache pour l'hôtel courant
+// --- Planning Groupe (lecture seule V1) ---
+let planMode='hotel';           // 'hotel' | 'group'
+let gpData=null;                // dernier payload group_planning
+let gpService='';               // service sélectionné
+let gpDay=null;                 // jour ciblé pour la comparaison (Date)
+let gpHotelSel=null;            // Set d'hotel_id sélectionnés (null = tous)
+let gpFilters={status:'', subOnly:false, extraOnly:false, search:''};
+let gpEligible=null;            // cache éligibilité {ok, hotels}
 let curWeekStart=null;  // Date : lundi de la semaine affichée en vue hebdo
 let curDayDate=null;    // Date : journée affichée en vue journalière
 
@@ -1591,6 +1605,7 @@ const MODULE_LABELS = {
   reviews:'Entretiens', medical:'Visites médicales', equipment:'Matériel remis',
   orgchart:'Organigramme', portal_inbox:'Demandes portail', config:'Paramètres',
   ai_assistant:'Assistant RH IA', conformite:'Conformité', onboarding:'Onboarding',
+  group_planning:'Planning Groupe',
 };
 const ALL_MODULES = Object.keys(MODULE_LABELS);
 const PERM_ACTIONS = [
@@ -1818,9 +1833,11 @@ function goView(v){
 }
 /* ===================== VUE PLANNING ===================== */
 function renderPlanning(){
+  if(planMode==='group'){ renderGroupPlanning(); return; }
   $('view').innerHTML=`
     <div style="display:flex;flex-direction:column;height:100%;min-height:0">
       <div class="ptbar">
+        <span id="gpModeSwitch"></span>
         <div class="monthnav"><button id="prev"><i class="fa-solid fa-chevron-left"></i></button>
           <span class="m" id="mlabel"></span><button id="next"><i class="fa-solid fa-chevron-right"></i></button></div>
         <div class="pvswitch">
@@ -1875,6 +1892,227 @@ function renderPlanning(){
   $('grid').addEventListener('mouseover',gridMouseOver);
   document.querySelectorAll('.pvswitch button').forEach(b=>b.onclick=()=>switchPlanView(b.dataset.pv));
   fillFilters(); updateHint(); renderCurrentPlanView(); updateNavLabel();
+  renderGroupModeSwitch();
+}
+
+/* ===================== PLANNING GROUPE (LECTURE SEULE V1) ===================== */
+// Petit wrapper sur le pattern modal existant (mhHTML + #modalbg).
+function gpModal(title, html, icon){
+  $('modal').innerHTML = mhHTML(icon||'fa-solid fa-layer-group', title) + '<div class="mb">'+html+'</div>';
+  $('modalbg').classList.add('on');
+}
+// Éligibilité : droit group_planning + organisation multi-établissements +
+// accès effectif à ≥2 établissements du même groupe. Vérifié via la RPC scopée
+// (pl_my_hotels()) — l'appartenance au groupe seule ne suffit jamais.
+async function gpCheckEligible(){
+  if(gpEligible!==null) return gpEligible;
+  if(!canDo('group_planning','view')){ gpEligible={ok:false,hotels:[]}; return gpEligible; }
+  try{
+    const iso=new Date().toISOString().slice(0,10);
+    const d=await BE.groupPlanning('',iso,iso);
+    const hs=(d&&d.hotels)||[];
+    gpEligible={ok:!!(d&&d.group_id)&&hs.length>=2, hotels:hs, services:(d&&d.services)||[]};
+  }catch(_){ gpEligible={ok:false,hotels:[]}; }
+  return gpEligible;
+}
+// Injecte le sélecteur de mode dans la barre planning si éligible.
+async function renderGroupModeSwitch(){
+  const host=$('gpModeSwitch'); if(!host) return;
+  const e=await gpCheckEligible();
+  if(!e.ok){ host.innerHTML=''; return; }
+  host.innerHTML=`<span class="pvswitch" style="margin-right:8px">
+    <button class="${planMode==='hotel'?'on':''}" id="gpModeHotel" title="Planning de l'établissement">Établissement</button>
+    <button class="${planMode==='group'?'on':''}" id="gpModeGroup" title="Vue comparative multi-établissements"><i class="fa-solid fa-layer-group" style="font-size:10px"></i> Groupe</button>
+  </span>`;
+  $('gpModeHotel').onclick=()=>{ if(planMode!=='hotel'){ planMode='hotel'; renderPlanning(); } };
+  $('gpModeGroup').onclick=()=>{ if(planMode!=='group'){ planMode='group'; renderPlanning(); } };
+}
+
+// ---- Logique de couverture CENTRALISÉE (source unique) ----
+// prévu vs requis -> niveau + couleur + libellé. Ne pas dupliquer ailleurs.
+function COVERAGE_LEVEL(prevu, requis){
+  if(requis===null||requis===undefined) return {level:'non_configure', color:'#9ca3af', bg:'#f3f4f6', label:'Besoin non configuré'};
+  const marge=Math.max(1, Math.round(requis*0.3));
+  if(prevu < requis)              return {level:'sous_effectif', color:'#dc2626', bg:'#fee2e2', label:'Sous-effectif'};
+  if(prevu === requis)            return {level:'limite',        color:'#b45309', bg:'#fef3c7', label:'Limite'};
+  if(prevu <= requis + marge)     return {level:'conforme',      color:'#15803d', bg:'#dcfce7', label:'Conforme'};
+  return {level:'sureffectif', color:'#1d4ed8', bg:'#dbeafe', label:'Sureffectif'};
+}
+// Statuts comptant comme "effectif présent" (centralisé via CMAP.cat==='worked').
+function gpIsWorking(status){ return !!(status && CMAP[status] && CMAP[status].cat==='worked'); }
+
+function gpWeekday(d){ return d.getDay(); } // 0=dimanche .. 6=samedi
+function gpISO(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+
+async function renderGroupPlanning(){
+  if(!gpService){ const e=await gpCheckEligible(); gpService=(e.services&&e.services[0])||'Réception'; }
+  if(!gpDay) gpDay=new Date();
+  $('view').innerHTML=`
+    <div style="display:flex;flex-direction:column;height:100%;min-height:0">
+      <div class="ptbar">
+        <span id="gpModeSwitch"></span>
+        <div class="monthnav"><button id="gpPrev"><i class="fa-solid fa-chevron-left"></i></button>
+          <span class="m" id="gpDayLabel"></span><button id="gpNext"><i class="fa-solid fa-chevron-right"></i></button></div>
+        <select id="gpServiceSel" title="Service"></select>
+        <div class="search"><i class="fa-solid fa-magnifying-glass"></i><input type="text" id="gpSearch" placeholder="Rechercher un collaborateur…" value="${gpFilters.search}"></div>
+        <select id="gpStatus" title="Statut collaborateur">
+          <option value="">Statut : tous</option>
+          <option value="actif">Actifs</option><option value="pause">En pause</option><option value="parti">Partis</option>
+        </select>
+        <label class="btn g" style="cursor:pointer"><input type="checkbox" id="gpSub" ${gpFilters.subOnly?'checked':''} style="margin-right:5px">Sous-effectifs</label>
+        <label class="btn g" style="cursor:pointer"><input type="checkbox" id="gpExtra" ${gpFilters.extraOnly?'checked':''} style="margin-right:5px">Extras</label>
+        <div class="spacer" style="flex:1"></div>
+        <button class="btn g" id="gpHotelsBtn" title="Établissements affichés"><i class="fa-solid fa-hotel"></i> Établissements</button>
+        <button class="btn g" id="gpReqBtn" title="Configurer les effectifs requis"><i class="fa-solid fa-sliders"></i> Besoins</button>
+      </div>
+      <div class="hint" style="padding:6px 10px;font-size:11px;color:var(--muted)">
+        <i class="fa-solid fa-eye"></i> Vue comparative <b>lecture seule</b> — comparez les effectifs par service sur les établissements de votre groupe.
+      </div>
+      <div id="gpBody" style="flex:1;overflow:auto;padding:4px"></div>
+    </div>`;
+  renderGroupModeSwitch();
+  // Sélecteur service
+  const e=await gpCheckEligible();
+  const svcSel=$('gpServiceSel');
+  const svcs=(e.services&&e.services.length?e.services:['Réception','Petit-déjeuner','Étage','Technique','Maintenance','Direction','Commercial','Revenue','Comptabilité']);
+  svcSel.innerHTML=svcs.map(s=>`<option value="${esc(s)}" ${s===gpService?'selected':''}>${esc(s)}</option>`).join('');
+  svcSel.onchange=()=>{ gpService=svcSel.value; gpLoadAndRender(); };
+  $('gpPrev').onclick=()=>{ gpDay=new Date(gpDay.getFullYear(),gpDay.getMonth(),gpDay.getDate()-1); gpLoadAndRender(); };
+  $('gpNext').onclick=()=>{ gpDay=new Date(gpDay.getFullYear(),gpDay.getMonth(),gpDay.getDate()+1); gpLoadAndRender(); };
+  $('gpSearch').oninput=ev=>{ gpFilters.search=ev.target.value.toLowerCase(); gpRenderBody(); };
+  $('gpStatus').onchange=ev=>{ gpFilters.status=ev.target.value; gpRenderBody(); };
+  $('gpSub').onchange=ev=>{ gpFilters.subOnly=ev.target.checked; gpRenderBody(); };
+  $('gpExtra').onchange=ev=>{ gpFilters.extraOnly=ev.target.checked; gpRenderBody(); };
+  $('gpHotelsBtn').onclick=gpOpenHotelPicker;
+  $('gpReqBtn').onclick=gpOpenReqEditor;
+  gpLoadAndRender();
+}
+
+// Charge le mois du jour ciblé (1 requête agrégée), puis rend la comparaison.
+async function gpLoadAndRender(){
+  const body=$('gpBody'); if(body) body.innerHTML='<div style="padding:40px;text-align:center;color:var(--muted)"><i class="fa-solid fa-spinner fa-spin"></i> Chargement…</div>';
+  const from=new Date(gpDay.getFullYear(),gpDay.getMonth(),1), to=new Date(gpDay.getFullYear(),gpDay.getMonth()+1,0);
+  try{
+    gpData=await BE.groupPlanning(gpService, gpISO(from), gpISO(to));
+  }catch(err){ if(body) body.innerHTML='<div style="padding:40px;text-align:center;color:#dc2626">Erreur : '+esc(err.message||err)+'</div>'; return; }
+  const lbl=$('gpDayLabel'); if(lbl) lbl.textContent=gpDay.toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  gpRenderBody();
+}
+
+function gpRenderBody(){
+  const body=$('gpBody'); if(!body) return;
+  if(!gpData||!gpData.group_id){ body.innerHTML='<div style="padding:40px;text-align:center;color:var(--muted)">Aucune donnée de groupe accessible.</div>'; return; }
+  let hotels=(gpData.hotels||[]);
+  if(gpHotelSel) hotels=hotels.filter(h=>gpHotelSel.has(h.id));
+  const dayISO=gpISO(gpDay), wd=gpWeekday(gpDay);
+  const reqMap={}; (gpData.requirements||[]).forEach(r=>{ reqMap[r.hotel_id+'|'+r.weekday]=r.required; });
+  // cellules du jour ciblé
+  const cellsDay=(gpData.cells||[]).filter(c=>c.day===dayISO);
+  const cards=hotels.map(h=>{
+    let cs=cellsDay.filter(c=>c.hotel_id===h.id);
+    // filtres collaborateur
+    if(gpFilters.status) cs=cs.filter(c=>(c.emp_status||'')===gpFilters.status);
+    if(gpFilters.extraOnly) cs=cs.filter(c=>c.is_extra);
+    if(gpFilters.search) cs=cs.filter(c=>(c.name||'').toLowerCase().includes(gpFilters.search));
+    const present=cs.filter(c=>gpIsWorking(c.status));
+    const prevu=new Set(present.map(c=>c.employee_id)).size;
+    const reqKey=h.id+'|'+wd;
+    const requis=(reqKey in reqMap)?reqMap[reqKey]:null;
+    const cov=COVERAGE_LEVEL(prevu, requis);
+    const ecart=(requis===null)?null:(prevu-requis);
+    const nbExtra=cs.filter(c=>c.is_extra).length;
+    if(gpFilters.subOnly && cov.level!=='sous_effectif') return null;
+    if(gpFilters.extraOnly && nbExtra===0) return null;
+    const collabRows=cs.sort((a,b)=>(a.is_extra?1:0)-(b.is_extra?1:0)||(a.name||'').localeCompare(b.name||'')).map(c=>{
+      const originName=(gpData.hotels.find(x=>x.id===c.origin_hotel_id)||{}).name||'';
+      const originCode=(gpData.hotels.find(x=>x.id===c.origin_hotel_id)||{}).hotel_code||'';
+      const st=CMAP[c.status]?CMAP[c.status].label:(c.status||'');
+      return `<div class="gp-collab" onclick="gpOpenCollab('${c.employee_id}')" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px solid #f1f1f6;cursor:pointer">
+        <span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;background:${gpIsWorking(c.status)?'#16a34a':'#cbd5e1'}"></span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12.5px;font-weight:600;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.name)}${c.is_extra?' <span style="font-size:9px;font-weight:700;color:#E65100;background:#FFF3E0;padding:1px 5px;border-radius:4px">EXTRA</span>':''}</div>
+          <div style="font-size:10.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.role||'')} · ${esc(st)}${c.is_extra?' · origine '+esc(originCode||originName):''}</div>
+        </div>
+      </div>`;
+    }).join('') || '<div style="padding:10px;font-size:11px;color:var(--muted);text-align:center">Aucun collaborateur ce jour</div>';
+    const ecartTxt=(ecart===null)?'—':(ecart>0?'+':'')+ecart;
+    return `<div class="gp-card" style="border:1px solid #e5e7eb;border-radius:12px;background:#fff;min-width:260px;max-width:320px;flex:1 1 260px;display:flex;flex-direction:column;box-shadow:0 1px 3px rgba(0,0,0,.05)">
+      <div style="padding:10px 12px;border-bottom:2px solid ${cov.color};border-radius:12px 12px 0 0;background:${cov.bg}">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
+          <div><span style="font-weight:800;font-size:13px;color:var(--ink2)">${esc(h.hotel_code||'')}</span> <span style="font-size:11px;color:var(--muted)">${esc(h.name)}</span></div>
+          <span style="font-size:10px;font-weight:700;color:${cov.color};background:#fff;padding:2px 7px;border-radius:10px;white-space:nowrap">${cov.label}</span>
+        </div>
+        <div style="display:flex;gap:12px;margin-top:6px;font-size:11px">
+          <span>Prévu <b style="font-size:13px;color:var(--ink2)">${prevu}</b></span>
+          <span>Requis <b style="font-size:13px;color:var(--ink2)">${requis===null?'—':requis}</b></span>
+          <span>Écart <b style="font-size:13px;color:${cov.color}">${ecartTxt}</b></span>
+          ${nbExtra?`<span style="margin-left:auto;color:#E65100">${nbExtra} extra${nbExtra>1?'s':''}</span>`:''}
+        </div>
+      </div>
+      <div style="flex:1;overflow:auto;max-height:340px">${collabRows}</div>
+      <div style="padding:6px 8px;border-top:1px solid #f1f1f6">
+        <button class="btn g" style="width:100%;font-size:11px" onclick="gpOpenHotelPlanning('${h.id}')"><i class="fa-solid fa-arrow-up-right-from-square" style="font-size:10px"></i> Ouvrir dans le planning de l'établissement</button>
+      </div>
+    </div>`;
+  }).filter(Boolean).join('');
+  body.innerHTML=`<div style="display:flex;gap:12px;flex-wrap:nowrap;overflow-x:auto;padding-bottom:8px;align-items:stretch" class="gp-scroll">${cards||'<div style="padding:40px;color:var(--muted)">Aucun établissement à afficher avec ces filtres.</div>'}</div>`;
+}
+
+// Ouvre la fiche collaborateur existante (openFiche gère titulaires + extras via cache).
+function gpOpenCollab(empId){
+  const known=(staff||[]).find(x=>x.id===empId)||(typeof _extraEmpCache!=='undefined'&&_extraEmpCache.get&&_extraEmpCache.get(empId));
+  if(known) openFiche(empId);
+  else flash('Fiche détaillée disponible dans l\'établissement d\'origine du collaborateur','i');
+}
+// Bascule vers le planning de l'établissement concerné (réutilise loadHotel).
+async function gpOpenHotelPlanning(hid){
+  planMode='hotel';
+  if(hotelId!==hid){
+    hotelId=hid;
+    try{ if(typeof pending!=='undefined'&&pending.clear) pending.clear(); if(typeof selection!=='undefined'&&selection.clear) selection.clear(); }catch(_){}
+    const sel=$('hotelSel'); if(sel) sel.value=hid;
+    await loadHotel();
+  }
+  goView('planning');
+}
+
+// Sélecteur d'établissements (multi).
+function gpOpenHotelPicker(){
+  const hotels=(gpData&&gpData.hotels)||[];
+  const sel=gpHotelSel||new Set(hotels.map(h=>h.id));
+  gpModal('Établissements affichés', hotels.map(h=>`<label style="display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid #f1f1f6;cursor:pointer">
+    <input type="checkbox" class="gpHchk" value="${h.id}" ${sel.has(h.id)?'checked':''}>
+    <span><b>${esc(h.hotel_code||'')}</b> ${esc(h.name)}</span></label>`).join('')+
+    `<div style="margin-top:12px;text-align:right"><button class="btn p" id="gpHapply">Appliquer</button></div>`);
+  $('gpHapply').onclick=()=>{ const ids=[...document.querySelectorAll('.gpHchk:checked')].map(c=>c.value); gpHotelSel=(ids.length&&ids.length<hotels.length)?new Set(ids):null; closeModal(); gpRenderBody(); };
+}
+
+// Éditeur compact des besoins (établissement + service + jour de semaine).
+function gpOpenReqEditor(){
+  const hotels=(gpData&&gpData.hotels)||[];
+  const WD=['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'];
+  BE.groupReqList().then(reqs=>{
+    const rmap={}; reqs.forEach(r=>{ rmap[r.hotel_id+'|'+r.service_name+'|'+r.weekday]=r.required_count; });
+    const rows=hotels.map(h=>{
+      const inputs=WD.map((w,wd)=>{ const v=rmap[h.id+'|'+gpService+'|'+wd]; return `<td style="padding:2px"><input type="number" min="0" class="gpReqIn" data-h="${h.id}" data-wd="${wd}" value="${v===undefined?'':v}" placeholder="—" style="width:44px;padding:4px;border:1px solid #d1d5db;border-radius:6px;text-align:center;font-size:12px"></td>`; }).join('');
+      return `<tr><td style="padding:4px 8px;font-size:12px;white-space:nowrap"><b>${esc(h.hotel_code||'')}</b> ${esc(h.name)}</td>${inputs}</tr>`;
+    }).join('');
+    gpModal('Effectifs requis — '+esc(gpService), `
+      <p style="font-size:12px;color:var(--muted);margin-bottom:10px">Effectif requis par jour de semaine. Laisser vide = <b>Besoin non configuré</b> (jamais interprété comme zéro).</p>
+      <div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:11px"><thead><tr><th style="text-align:left;padding:4px 8px">Établissement</th>${WD.map(w=>`<th style="padding:2px;font-size:10px">${w.slice(0,3)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div>
+      <div style="margin-top:12px;text-align:right"><button class="btn p" id="gpReqSave">Enregistrer</button></div>`);
+    $('gpReqSave').onclick=async()=>{
+      const ins=[...document.querySelectorAll('.gpReqIn')];
+      try{
+        for(const el of ins){ const h=el.dataset.h, wd=parseInt(el.dataset.wd,10), raw=el.value.trim();
+          const prev=rmap[h+'|'+gpService+'|'+wd];
+          if(raw===''){ if(prev!==undefined) await BE.groupReqDelete(h,gpService,wd); }
+          else { const n=parseInt(raw,10); if(!isNaN(n)&&n!==prev) await BE.groupReqSet(h,gpService,wd,n); }
+        }
+        flash('Besoins enregistrés'); closeModal(); gpLoadAndRender();
+      }catch(e){ flash('Erreur : '+(e.message||e),'e'); }
+    };
+  }).catch(e=>flash('Erreur : '+(e.message||e),'e'));
 }
 
 /* ===================== VUES PLANNING ALTERNATIVES ===================== */
