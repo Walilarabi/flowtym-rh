@@ -1466,8 +1466,9 @@ let planningRows=[];    // lignes brutes listMonthPlanning (avec shift_label etc
 let coverageCache=[];   // règles de couverture mises en cache pour l'hôtel courant
 // --- Planning Groupe (lecture seule V1) ---
 let planMode='hotel';           // 'hotel' | 'group'
-let gpData=null;                // dernier payload group_planning
-let gpService='';               // service sélectionné
+let gpData=null;                // payload de référence (hôtels/meta)
+let gpSections=[];              // [{service, data}] — une section par service affiché
+let gpService='';               // service sélectionné ('' = tous les services)
 let gpDay=null;                 // jour ciblé pour la comparaison (Date)
 let gpHotelSel=null;            // Set d'hotel_id sélectionnés (null = tous)
 let gpFilters={status:'', subOnly:false, extraOnly:false, search:''};
@@ -1995,7 +1996,7 @@ async function renderGroupPlanning(){
   const e=await gpCheckEligible();
   const svcSel=$('gpServiceSel');
   const svcs=(e.services&&e.services.length?e.services:['Réception','Petit-déjeuner','Étage','Technique','Maintenance','Direction','Commercial','Revenue','Comptabilité']);
-  svcSel.innerHTML=svcs.map(s=>`<option value="${esc(s)}" ${s===gpService?'selected':''}>${esc(s)}</option>`).join('');
+  svcSel.innerHTML=`<option value="" ${gpService===''?'selected':''}>Tous les services</option>`+svcs.map(s=>`<option value="${esc(s)}" ${s===gpService?'selected':''}>${esc(s)}</option>`).join('');
   svcSel.onchange=()=>{ gpService=svcSel.value; gpLoadAndRender(); };
   $('gpPrev').onclick=()=>{ gpDay=new Date(gpDay.getFullYear(),gpDay.getMonth(),gpDay.getDate()-1); gpLoadAndRender(); };
   $('gpNext').onclick=()=>{ gpDay=new Date(gpDay.getFullYear(),gpDay.getMonth(),gpDay.getDate()+1); gpLoadAndRender(); };
@@ -2008,12 +2009,18 @@ async function renderGroupPlanning(){
   gpLoadAndRender();
 }
 
-// Charge le mois du jour ciblé (1 requête agrégée), puis rend la comparaison.
+// Charge le mois du jour ciblé. Une requête agrégée PAR SERVICE affiché
+// (1 si un service est sélectionné, sinon tous — borné au nb de services).
 async function gpLoadAndRender(){
   const body=$('gpBody'); if(body) body.innerHTML='<div style="padding:40px;text-align:center;color:var(--muted)"><i class="fa-solid fa-spinner fa-spin"></i> Chargement…</div>';
   const from=new Date(gpDay.getFullYear(),gpDay.getMonth(),1), to=new Date(gpDay.getFullYear(),gpDay.getMonth()+1,0);
+  const e=await gpCheckEligible();
+  const allSvcs=(e.services&&e.services.length?e.services:['Réception','Petit-déjeuner','Étage','Technique','Maintenance','Direction','Commercial','Revenue','Comptabilité']);
+  const svcs=gpService?[gpService]:allSvcs;
   try{
-    gpData=await BE.groupPlanning(gpService, gpISO(from), gpISO(to));
+    const results=await Promise.all(svcs.map(s=>BE.groupPlanning(s, gpISO(from), gpISO(to))));
+    gpSections=svcs.map((s,i)=>({service:s,data:results[i]})).filter(x=>x.data&&x.data.group_id);
+    gpData=(gpSections[0]&&gpSections[0].data)||null;
   }catch(err){ if(body) body.innerHTML='<div style="padding:40px;text-align:center;color:#dc2626">Erreur : '+esc(err.message||err)+'</div>'; return; }
   const lbl=$('gpDayLabel'); if(lbl) lbl.textContent=gpDay.toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
   gpRenderBody();
@@ -2021,89 +2028,109 @@ async function gpLoadAndRender(){
 
 function gpRenderBody(){
   const body=$('gpBody'); if(!body) return;
-  if(!gpData||!gpData.group_id){ body.innerHTML='<div style="padding:40px;text-align:center;color:var(--muted)">Aucune donnée de groupe accessible.</div>'; return; }
-  let hotels=(gpData.hotels||[]);
-  if(gpHotelSel) hotels=hotels.filter(h=>gpHotelSel.has(h.id));
+  if(!gpSections.length||!gpData){ body.innerHTML='<div style="padding:40px;text-align:center;color:var(--muted)">Aucune donnée de groupe accessible.</div>'; return; }
   const dayISO=gpISO(gpDay), wd=gpWeekday(gpDay);
-  // Besoin au niveau JOUR (shift null) pour la V1. Les besoins par shift (shift
-  // non null) sont conservés mais non agrégés dans la couverture journée V1.
-  const reqMap={}; (gpData.requirements||[]).forEach(r=>{ if(r.shift==null) reqMap[r.hotel_id+'|'+r.weekday]=r.required; });
-  // cellules du jour ciblé
-  const cellsDay=(gpData.cells||[]).filter(c=>c.day===dayISO);
-  // --- Agrégats KPI Groupe (sur les hôtels affichés) ---
-  let kTotal=new Set(), kPresent=new Set(), kExtra=new Set(), kSous=0, kSur=0;
-  const cards=hotels.map(h=>{
-    let cs=cellsDay.filter(c=>c.hotel_id===h.id);
-    // filtres collaborateur
-    if(gpFilters.status) cs=cs.filter(c=>(c.emp_status||'')===gpFilters.status);
-    if(gpFilters.extraOnly) cs=cs.filter(c=>c.is_extra);
-    if(gpFilters.search) cs=cs.filter(c=>(c.name||'').toLowerCase().includes(gpFilters.search));
-    const totalPlan=new Set(cs.map(c=>c.employee_id)).size;
-    const present=cs.filter(c=>gpIsWorking(c.status));
-    const prevu=new Set(present.map(c=>c.employee_id)).size;
-    const dispo=Math.max(0, totalPlan-prevu); // planifiés non présents ce jour (repos/dispo)
-    const reqKey=h.id+'|'+wd;
-    const requis=(reqKey in reqMap)?reqMap[reqKey]:null;
-    const cov=COVERAGE_LEVEL(prevu, requis);
-    const ecart=(requis===null)?null:(prevu-requis);
-    const nbExtra=cs.filter(c=>c.is_extra).length;
-    const tauxCouv=(requis&&requis>0)?Math.round(prevu/requis*100):null;      // couverture = prévu/requis
-    const tauxOcc=(totalPlan>0)?Math.round(prevu/totalPlan*100):null;          // occupation = présents/planifiés
-    // Agrégats KPI (avant filtre sous/extra pour refléter la situation réelle)
-    cs.forEach(c=>{ kTotal.add(c.hotel_id+'|'+c.employee_id); if(c.is_extra)kExtra.add(c.hotel_id+'|'+c.employee_id); });
-    present.forEach(c=>kPresent.add(c.hotel_id+'|'+c.employee_id));
-    if(cov.level==='sous_effectif')kSous++; if(cov.level==='sureffectif')kSur++;
-    if(gpFilters.subOnly && cov.level!=='sous_effectif') return null;
-    if(gpFilters.extraOnly && nbExtra===0) return null;
-    const collabRows=cs.sort((a,b)=>(a.is_extra?1:0)-(b.is_extra?1:0)||(a.name||'').localeCompare(b.name||'')).map(c=>{
-      const originName=(gpData.hotels.find(x=>x.id===c.origin_hotel_id)||{}).name||'';
-      const originCode=(gpData.hotels.find(x=>x.id===c.origin_hotel_id)||{}).hotel_code||'';
-      const st=CMAP[c.status]?CMAP[c.status].label:(c.status||'');
-      return `<div class="gp-collab" onclick="gpOpenCollab('${c.employee_id}')" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px solid #f1f1f6;cursor:pointer">
-        <span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;background:${gpIsWorking(c.status)?'#16a34a':'#cbd5e1'}"></span>
-        <div style="flex:1;min-width:0">
-          <div style="font-size:12.5px;font-weight:600;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.name)}${c.is_extra?' <span style="font-size:9px;font-weight:700;color:#E65100;background:#FFF3E0;padding:1px 5px;border-radius:4px">EXTRA</span>':''}</div>
-          <div style="font-size:10.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.role||'')} · ${esc(st)}${c.is_extra?' · origine '+esc(originCode||originName):''}</div>
-        </div>
-      </div>`;
-    }).join('') || '<div style="padding:10px;font-size:11px;color:var(--muted);text-align:center">Aucun collaborateur ce jour</div>';
-    const ecartTxt=(ecart===null)?'—':(ecart>0?'+':'')+ecart;
-    return `<div class="gp-card" style="border:1px solid #e5e7eb;border-radius:12px;background:#fff;min-width:260px;max-width:320px;flex:1 1 260px;display:flex;flex-direction:column;box-shadow:0 1px 3px rgba(0,0,0,.05)">
-      <div style="padding:10px 12px;border-bottom:2px solid ${cov.color};border-radius:12px 12px 0 0;background:${cov.bg}">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
-          <div><span style="font-weight:800;font-size:13px;color:var(--ink2)">${esc(h.hotel_code||'')}</span> <span style="font-size:11px;color:var(--muted)">${esc(h.name)}</span></div>
-          <span style="font-size:10px;font-weight:700;color:${cov.color};background:#fff;padding:2px 7px;border-radius:10px;white-space:nowrap">${cov.label}</span>
-        </div>
-        <div style="display:flex;gap:12px;margin-top:6px;font-size:11px">
-          <span>Prévu <b style="font-size:13px;color:var(--ink2)">${prevu}</b></span>
-          <span>Requis <b style="font-size:13px;color:var(--ink2)">${requis===null?'—':requis}</b></span>
-          <span>Écart <b style="font-size:13px;color:${cov.color}">${ecartTxt}</b></span>
-          ${nbExtra?`<span style="margin-left:auto;color:#E65100">${nbExtra} extra${nbExtra>1?'s':''}</span>`:''}
-        </div>
-        <div style="display:flex;gap:12px;margin-top:4px;font-size:10.5px;color:var(--muted)">
-          <span>Couverture <b style="color:${cov.color}">${tauxCouv===null?'—':tauxCouv+'%'}</b></span>
-          <span>Occupation <b style="color:var(--ink2)">${tauxOcc===null?'—':tauxOcc+'%'}</b></span>
-          <span>Disponibles <b style="color:var(--ink2)">${dispo}</b></span>
-        </div>
-      </div>
-      <div style="flex:1;overflow:auto;max-height:340px">${collabRows}</div>
-      <div style="padding:6px 8px;border-top:1px solid #f1f1f6">
-        <button class="btn g" style="width:100%;font-size:11px" onclick="gpOpenHotelPlanning('${h.id}')"><i class="fa-solid fa-arrow-up-right-from-square" style="font-size:10px"></i> Ouvrir dans le planning de l'établissement</button>
-      </div>
-    </div>`;
-  }).filter(Boolean).join('');
+  // Agrégats KPI Groupe (cumulés sur toutes les sections/services affichés)
+  const K={total:new Set(),present:new Set(),extra:new Set(),sous:0,sur:0};
+  const sectionsHtml=gpSections.map(sec=>gpBuildSection(sec, dayISO, wd, K)).filter(Boolean).join('');
   // --- Bandeau KPI Groupe (Directeur Groupe) ---
   const kpi=(label,val,color)=>`<div style="flex:1;min-width:120px;padding:10px 14px;background:#fff;border:1px solid #e5e7eb;border-radius:10px;text-align:center">
     <div style="font-size:20px;font-weight:800;color:${color||'var(--ink2)'}">${val}</div>
     <div style="font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px">${label}</div></div>`;
-  const banner=`<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
-    ${kpi('Collaborateurs', kTotal.size)}
-    ${kpi('Présents', kPresent.size, '#15803d')}
-    ${kpi('Extras', kExtra.size, '#E65100')}
-    ${kpi('Hôtels sous-effectif', kSous, kSous?'#dc2626':'var(--ink2)')}
-    ${kpi('Hôtels sureffectif', kSur, kSur?'#1d4ed8':'var(--ink2)')}
+  const banner=`<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+    ${kpi('Collaborateurs', K.total.size)}
+    ${kpi('Présents', K.present.size, '#15803d')}
+    ${kpi('Extras', K.extra.size, '#E65100')}
+    ${kpi('Hôtels sous-effectif', K.sous, K.sous?'#dc2626':'var(--ink2)')}
+    ${kpi('Hôtels sureffectif', K.sur, K.sur?'#1d4ed8':'var(--ink2)')}
   </div>`;
-  body.innerHTML=banner+`<div style="display:flex;gap:12px;flex-wrap:nowrap;overflow-x:auto;padding-bottom:8px;align-items:stretch" class="gp-scroll">${cards||'<div style="padding:40px;color:var(--muted)">Aucun établissement à afficher avec ces filtres.</div>'}</div>`;
+  body.innerHTML=banner+(sectionsHtml||'<div style="padding:40px;color:var(--muted);text-align:center">Aucun établissement à afficher avec ces filtres.</div>');
+}
+
+// Construit une SECTION service : bandeau titre + rangée comparative des hôtels.
+function gpBuildSection(sec, dayISO, wd, K){
+  const data=sec.data;
+  let hotels=(data.hotels||[]);
+  if(gpHotelSel) hotels=hotels.filter(h=>gpHotelSel.has(h.id));
+  // Besoin au niveau JOUR (shift null) pour la V1.
+  const reqMap={}; (data.requirements||[]).forEach(r=>{ if(r.shift==null) reqMap[r.hotel_id+'|'+r.weekday]=r.required; });
+  const cellsDay=(data.cells||[]).filter(c=>c.day===dayISO);
+  const cards=hotels.map(h=>gpBuildCard(h, data, cellsDay, reqMap, wd, K)).filter(Boolean).join('');
+  const header=`<div style="display:flex;align-items:center;gap:10px;margin:6px 2px 10px">
+      <span style="height:1px;flex:0 0 18px;background:var(--violet)"></span>
+      <span style="font-size:13px;font-weight:800;color:var(--violet);text-transform:uppercase;letter-spacing:.4px">${esc(sec.service)}</span>
+      <span style="height:1px;flex:1;background:linear-gradient(90deg,var(--violet-bg),transparent)"></span>
+    </div>`;
+  const row=`<div style="display:flex;gap:12px;flex-wrap:nowrap;overflow-x:auto;padding-bottom:8px;align-items:stretch" class="gp-scroll">${cards||'<div style="padding:24px;color:var(--muted);font-size:12px">Aucun établissement à afficher pour ce service.</div>'}</div>`;
+  return `<section style="margin-bottom:22px">${header}${row}</section>`;
+}
+
+// Construit une carte hôtel pour un service donné. Met à jour les agrégats KPI (K).
+function gpBuildCard(h, data, cellsDay, reqMap, wd, K){
+  let cs=cellsDay.filter(c=>c.hotel_id===h.id);
+  if(gpFilters.status) cs=cs.filter(c=>(c.emp_status||'')===gpFilters.status);
+  if(gpFilters.extraOnly) cs=cs.filter(c=>c.is_extra);
+  if(gpFilters.search) cs=cs.filter(c=>(c.name||'').toLowerCase().includes(gpFilters.search));
+  const totalPlan=new Set(cs.map(c=>c.employee_id)).size;
+  const present=cs.filter(c=>gpIsWorking(c.status));
+  const prevu=new Set(present.map(c=>c.employee_id)).size;
+  const mobilisable=Math.max(0, totalPlan-prevu); // planifiés non présents = renfort mobilisable sur place
+  const reqKey=h.id+'|'+wd;
+  const requis=(reqKey in reqMap)?reqMap[reqKey]:null;
+  const cov=COVERAGE_LEVEL(prevu, requis);
+  const ecart=(requis===null)?null:(prevu-requis);
+  const nbExtra=cs.filter(c=>c.is_extra).length;
+  const tauxCouv=(requis&&requis>0)?Math.round(prevu/requis*100):null;
+  const tauxOcc=(totalPlan>0)?Math.round(prevu/totalPlan*100):null;
+  // KPI (situation réelle, avant filtres sous/extra)
+  cs.forEach(c=>{ K.total.add(c.hotel_id+'|'+c.employee_id); if(c.is_extra)K.extra.add(c.hotel_id+'|'+c.employee_id); });
+  present.forEach(c=>K.present.add(c.hotel_id+'|'+c.employee_id));
+  if(cov.level==='sous_effectif')K.sous++; if(cov.level==='sureffectif')K.sur++;
+  if(gpFilters.subOnly && cov.level!=='sous_effectif') return null;
+  if(gpFilters.extraOnly && nbExtra===0) return null;
+  const collabRows=cs.sort((a,b)=>(a.is_extra?1:0)-(b.is_extra?1:0)||(a.name||'').localeCompare(b.name||'')).map(c=>{
+    const originCode=(data.hotels.find(x=>x.id===c.origin_hotel_id)||{}).hotel_code||(data.hotels.find(x=>x.id===c.origin_hotel_id)||{}).name||'';
+    const st=CMAP[c.status]?CMAP[c.status].label:(c.status||'');
+    return `<div class="gp-collab" onclick="gpOpenCollab('${c.employee_id}')" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px solid #f1f1f6;cursor:pointer">
+      <span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;background:${gpIsWorking(c.status)?'#16a34a':'#cbd5e1'}"></span>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12.5px;font-weight:600;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.name)}${c.is_extra?' <span style="font-size:9px;font-weight:700;color:#E65100;background:#FFF3E0;padding:1px 5px;border-radius:4px">EXTRA</span>':''}</div>
+        <div style="font-size:10.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.role||'')} · ${esc(st)}${c.is_extra?' · origine '+esc(originCode):''}</div>
+      </div></div>`;
+  }).join('') || '<div style="padding:10px;font-size:11px;color:var(--muted);text-align:center">Aucun collaborateur ce jour</div>';
+  const ecartTxt=(ecart===null)?'—':(ecart>0?'+':'')+ecart;
+  // --- Zone Suggestions (emplacement réservé, enrichissable par IA plus tard ; règle simple non-IA) ---
+  const sugg = mobilisable>0
+    ? `<div style="color:#15803d">• ${mobilisable} collaborateur${mobilisable>1?'s':''} mobilisable${mobilisable>1?'s':''} sur place</div>`
+    : `<div style="color:var(--muted)">Aucun renfort identifié</div>`;
+  const suggBox=`<div style="padding:7px 10px;border-top:1px solid #f1f1f6;background:#fbfbfd">
+      <div style="font-size:9.5px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px">Suggestions</div>
+      <div style="font-size:11px">${sugg}</div>
+    </div>`;
+  return `<div class="gp-card" style="border:1px solid #e5e7eb;border-radius:12px;background:#fff;min-width:260px;max-width:320px;flex:1 1 260px;display:flex;flex-direction:column;box-shadow:0 1px 3px rgba(0,0,0,.05)">
+    <div style="padding:10px 12px;border-bottom:2px solid ${cov.color};border-radius:12px 12px 0 0;background:${cov.bg}">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
+        <div><span style="font-weight:800;font-size:13px;color:var(--ink2)">${esc(h.hotel_code||'')}</span> <span style="font-size:11px;color:var(--muted)">${esc(h.name)}</span></div>
+        <span style="font-size:10px;font-weight:700;color:${cov.color};background:#fff;padding:2px 7px;border-radius:10px;white-space:nowrap">${cov.label}</span>
+      </div>
+      <div style="display:flex;gap:12px;margin-top:6px;font-size:11px">
+        <span>Prévu <b style="font-size:13px;color:var(--ink2)">${prevu}</b></span>
+        <span>Requis <b style="font-size:13px;color:var(--ink2)">${requis===null?'—':requis}</b></span>
+        <span>Écart <b style="font-size:13px;color:${cov.color}">${ecartTxt}</b></span>
+        ${nbExtra?`<span style="margin-left:auto;color:#E65100">${nbExtra} extra${nbExtra>1?'s':''}</span>`:''}
+      </div>
+      <div style="display:flex;gap:12px;margin-top:4px;font-size:10.5px;color:var(--muted)">
+        <span>Couverture <b style="color:${cov.color}">${tauxCouv===null?'—':tauxCouv+'%'}</b></span>
+        <span>Occupation <b style="color:var(--ink2)">${tauxOcc===null?'—':tauxOcc+'%'}</b></span>
+        <span>Renfort mobilisable <b style="color:var(--ink2)">${mobilisable}</b></span>
+      </div>
+    </div>
+    <div style="flex:1;overflow:auto;max-height:300px">${collabRows}</div>
+    ${suggBox}
+    <div style="padding:6px 8px;border-top:1px solid #f1f1f6">
+      <button class="btn g" style="width:100%;font-size:11px" onclick="gpOpenHotelPlanning('${h.id}')"><i class="fa-solid fa-arrow-up-right-from-square" style="font-size:10px"></i> Ouvrir dans le planning de l'établissement</button>
+    </div>
+  </div>`;
 }
 
 // Ouvre la fiche collaborateur existante (openFiche gère titulaires + extras via cache).
