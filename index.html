@@ -1032,6 +1032,7 @@ async function makeRealBE(){
     async gmpOpenForEmployee(emp,exclude){const {data,error}=await sb.rpc('group_move_open_for_employee',{p_emp:emp,p_exclude:exclude||null});if(error){if(error.code==='42883')return[];must(error,'Concurrence');}return data||[];},
     async gmpRecheck(id,hashes,conflicts){const {data,error}=await sb.rpc('group_move_recheck',{p_id:id,p_current_hashes:hashes,p_conflicts:conflicts||0});must(error,'Re-vérification');return data;},
     async gmpExpireRun(){const {data,error}=await sb.rpc('group_move_expire_run');if(error){if(error.code==='42883')return null;must(error,'Expiration');}return (data&&data[0])||data;},
+    async gmpApply(id,key){const {data,error}=await sb.rpc('group_move_apply',{p_id:id,p_idempotency_key:key});must(error,'Application du déplacement');return data;},
 
     /* --- AUDIT --- */
     async logAudit(action,entity_type,entity_id,employee_id,details){
@@ -2426,6 +2427,7 @@ async function gpLoadProposals(){
       acts.push(`<button class="btn g" style="font-size:11px" onclick="gpProposalAction('${r.id}','back')">Retour brouillon</button>`);
     }
     if(r.status==='approved' && (canDo('group_move_schedule','create'))){ acts.push(`<button class="btn p" style="font-size:11px" onclick="gpProposalAction('${r.id}','schedule')">Programmer</button>`); }
+    if(['approved','scheduled'].includes(r.status) && canDo('group_move_apply','create')){ acts.push(`<button class="btn p" style="font-size:11px;background:#15803d" onclick="gpProposalAction('${r.id}','apply')"><i class="fa-solid fa-check-double" style="font-size:10px"></i> Appliquer</button>`); }
     if(['approved','scheduled'].includes(r.status)){ acts.push(`<button class="btn g" style="font-size:11px" onclick="gpProposalAction('${r.id}','cancel')">Annuler</button>`); }
     if(r.status==='scheduled' && r.scheduled_at){ acts.push(`<span style="font-size:10.5px;color:#15803d;align-self:center">⏰ ${esc((r.scheduled_at||'').slice(0,16).replace('T',' '))}</span>`); }
     if(['draft','pending_review','approved','scheduled'].includes(r.status)){ acts.push(`<button class="btn g" style="font-size:11px" title="Re-vérifier avec les données à jour" onclick='gpRecheckProposal(${JSON.stringify({id:r.id,employee_id:r.employee_id,group_id:r.group_id,to_service:r.to_service,period_from:r.period_from,period_to:r.period_to,slots:r.slots}).replace(/'/g,"&#39;")})'>Revérifier</button>`); }
@@ -2449,6 +2451,7 @@ async function gpProposalAction(id,action){
     else if(action==='approve'){ const c=prompt('Commentaire (optionnel) :')||''; await BE.gmpApprovalDecide(id,true,c); }
     else if(action==='wreject'){ const c=prompt('Motif du rejet :')||''; await BE.gmpApprovalDecide(id,false,c); }
     else if(action==='schedule'){ const w=prompt('Programmer à (AAAA-MM-JJ HH:MM) :',''); if(!w) return; const iso=new Date(w.replace(' ','T')).toISOString(); await BE.gmpSchedule(id,iso); }
+    else if(action==='apply'){ if(!confirm('Appliquer réellement ce déplacement au planning ? Cette action écrit dans le planning et est journalisée.')) return; const key=(window.crypto&&crypto.randomUUID?crypto.randomUUID():('k'+Date.now()+'-'+Math.round(Math.random()*1e9))); const rr=await BE.gmpApply(id,key); flash('Déplacement appliqué ('+(rr&&rr.slots_applied||0)+' créneau(x)).'); }
     flash('Proposition mise à jour'); gpLoadProposals();
   }catch(e){ flash('Erreur : '+(e.message||e),'e'); }
 }
