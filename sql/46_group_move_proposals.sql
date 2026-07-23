@@ -1,0 +1,30 @@
+-- 46_group_move_proposals.sql
+-- Brouillons de déplacement inter-hôtels (phase "proposition", AUCUNE écriture
+-- planning). Appliqué via migrations MCP : group_move_proposals +
+-- group_move_proposal_rpcs. Ce fichier fait foi pour le dépôt.
+--
+-- Tables :
+--   group_move_proposals         : la proposition (snapshot de simulation inclus)
+--   group_move_proposal_events   : historique propre (PAS planning_audit)
+--   group_move_proposal_waivers  : dérogations explicites (justification obligatoire)
+--
+-- RLS : accès aux DEUX hôtels (origine ET destination) via pl_my_hotels().
+--   L'appartenance au même group_id ne suffit pas.
+-- Historique/dérogations : écrits uniquement via RPC SECURITY DEFINER.
+--
+-- RPC :
+--   group_move_proposal_create(p jsonb)            -> refuse si blocage NON dérogeable
+--   group_move_proposal_submit(id)                 -> exige une dérogation par blocage
+--   group_move_proposal_set_status(id,status,cmt)  -> rejected|cancelled|draft (retour)
+--   group_move_proposal_add_waiver(id,code,justif,...) -> justification obligatoire
+--   group_move_proposal_resimulate(id,sim,hashes,...)  -> réactualise le snapshot
+--   group_move_proposal_mark_staleness(id,state,...)   -> valid|to_refresh|conflict|expired
+--   group_move_proposals_list(status)
+--
+-- Statuts (cette phase) : draft, pending_review, rejected, cancelled
+--   (approved, expired réservés à la phase d'application).
+-- Fraîcheur : valid, to_refresh, conflict, expired + simulation_input_hash /
+--   simulation_result_hash / simulation_created_at / expires_at pour imposer une
+--   RE-SIMULATION avant toute application future.
+--
+-- Le corps SQL complet est appliqué par les 2 migrations citées ci-dessus.
