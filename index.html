@@ -485,6 +485,7 @@ tr.dept-sep td{pointer-events:none}
 <!-- Moteur de simulation (pur) + couche d'adaptation. Chargés avant l'app. -->
 <script src="js/move-simulator.js"></script>
 <script src="js/sim-adapter.js"></script>
+<script src="js/conflict-engine.js"></script>
 <script>
 /* =====================================================================
    Flowtym RH — Étape 2 : application live branchée sur Supabase
@@ -1027,6 +1028,10 @@ async function makeRealBE(){
     async gmpApprovalDecide(id,approve,comment){const {error}=await sb.rpc('group_move_approval_decide',{p_id:id,p_approve:approve,p_comment:comment||null});must(error,approve?'Approbation':'Rejet');},
     async gmpSchedule(id,when){const {error}=await sb.rpc('group_move_schedule',{p_id:id,p_when:when});must(error,'Programmation');},
     async gmpTimeline(id){const {data,error}=await sb.rpc('group_move_timeline',{p_id:id});if(error){if(error.code==='42883')return null;must(error,'Timeline');}return data||null;},
+    async gmpReservations(from,to){const {data,error}=await sb.rpc('group_move_reservations',{p_from:from,p_to:to});if(error){if(error.code==='42883')return[];must(error,'Réservations');}return data||[];},
+    async gmpOpenForEmployee(emp,exclude){const {data,error}=await sb.rpc('group_move_open_for_employee',{p_emp:emp,p_exclude:exclude||null});if(error){if(error.code==='42883')return[];must(error,'Concurrence');}return data||[];},
+    async gmpRecheck(id,hashes,conflicts){const {data,error}=await sb.rpc('group_move_recheck',{p_id:id,p_current_hashes:hashes,p_conflicts:conflicts||0});must(error,'Re-vérification');return data;},
+    async gmpExpireRun(){const {data,error}=await sb.rpc('group_move_expire_run');if(error){if(error.code==='42883')return null;must(error,'Expiration');}return (data&&data[0])||data;},
 
     /* --- AUDIT --- */
     async logAudit(action,entity_type,entity_id,employee_id,details){
@@ -1491,6 +1496,7 @@ let gpDay=null;                 // jour ciblé pour la comparaison (Date)
 let gpHotelSel=null;            // Set d'hotel_id sélectionnés (null = tous)
 let gpFilters={status:'', subOnly:false, extraOnly:false, search:''};
 let gpEligible=null;            // cache éligibilité {ok, hotels}
+let gpReserved={};              // employee_id -> réservation (proposition approuvée/programmée)
 let curWeekStart=null;  // Date : lundi de la semaine affichée en vue hebdo
 let curDayDate=null;    // Date : journée affichée en vue journalière
 
@@ -2049,6 +2055,9 @@ async function gpLoadAndRender(){
     gpData=(gpSections[0]&&gpSections[0].data)||null;
   }catch(err){ if(body) body.innerHTML='<div style="padding:40px;text-align:center;color:#dc2626">Erreur : '+esc(err.message||err)+'</div>'; return; }
   const lbl=$('gpDayLabel'); if(lbl) lbl.textContent=gpDay.toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  // Réservations (propositions approuvées/programmées) pour matérialiser un blocage visuel.
+  gpReserved={};
+  try{ const rv=await BE.gmpReservations(gpISO(from), gpISO(to)); (rv||[]).forEach(r=>{ gpReserved[r.employee_id]=r; }); }catch(_){}
   gpRenderBody();
 }
 
@@ -2120,8 +2129,8 @@ function gpBuildCard(h, data, cellsDay, reqMap, wd, K){
     return `<div class="gp-collab" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px solid #f1f1f6">
       <span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;background:${gpIsWorking(c.status)?'#16a34a':'#cbd5e1'}"></span>
       <div style="flex:1;min-width:0;cursor:pointer" onclick="gpOpenCollab('${c.employee_id}')">
-        <div style="font-size:12.5px;font-weight:600;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.name)}${c.is_extra?' <span style="font-size:9px;font-weight:700;color:#E65100;background:#FFF3E0;padding:1px 5px;border-radius:4px">EXTRA</span>':''}</div>
-        <div style="font-size:10.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.role||'')} · ${esc(st)}${c.is_extra?' · origine '+esc(originCode):''}</div>
+        <div style="font-size:12.5px;font-weight:600;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.name)}${c.is_extra?' <span style="font-size:9px;font-weight:700;color:#E65100;background:#FFF3E0;padding:1px 5px;border-radius:4px">EXTRA</span>':''}${gpReserved[c.employee_id]?' <span title="Un déplacement est approuvé/programmé pour ce collaborateur" style="font-size:9px;font-weight:700;color:#5B21B6;background:#EDE9FE;padding:1px 5px;border-radius:4px">RÉSERVÉ</span>':''}</div>
+        <div style="font-size:10.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.role||'')} · ${esc(st)}${c.is_extra?' · origine '+esc(originCode):''}${gpReserved[c.employee_id]?' · <span style="color:#5B21B6">Proposition en attente</span>':''}</div>
       </div>
       <button title="Simuler un renfort vers un autre établissement (lecture seule)" onclick="gpOpenSimForm('${c.employee_id}','${c.hotel_id}',decodeURIComponent('${encodeURIComponent(c.service||'')}'))" style="flex-shrink:0;border:1px solid #d8d8e2;background:#f7f7fb;border-radius:6px;padding:3px 7px;font-size:10.5px;cursor:pointer;color:#5B21B6;font-weight:600"><i class="fa-solid fa-arrows-turn-right" style="font-size:9px"></i> Simuler</button>
     </div>`;
@@ -2419,6 +2428,7 @@ async function gpLoadProposals(){
     if(r.status==='approved' && (canDo('group_move_schedule','create'))){ acts.push(`<button class="btn p" style="font-size:11px" onclick="gpProposalAction('${r.id}','schedule')">Programmer</button>`); }
     if(['approved','scheduled'].includes(r.status)){ acts.push(`<button class="btn g" style="font-size:11px" onclick="gpProposalAction('${r.id}','cancel')">Annuler</button>`); }
     if(r.status==='scheduled' && r.scheduled_at){ acts.push(`<span style="font-size:10.5px;color:#15803d;align-self:center">⏰ ${esc((r.scheduled_at||'').slice(0,16).replace('T',' '))}</span>`); }
+    if(['draft','pending_review','approved','scheduled'].includes(r.status)){ acts.push(`<button class="btn g" style="font-size:11px" title="Re-vérifier avec les données à jour" onclick='gpRecheckProposal(${JSON.stringify({id:r.id,employee_id:r.employee_id,group_id:r.group_id,to_service:r.to_service,period_from:r.period_from,period_to:r.period_to,slots:r.slots}).replace(/'/g,"&#39;")})'>Revérifier</button>`); }
     return `<div style="border:1px solid #e5e7eb;border-radius:10px;padding:10px;margin-bottom:8px;background:#fff">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
         <div style="font-size:13px;font-weight:700">${esc(nm)}</div>
@@ -2440,6 +2450,26 @@ async function gpProposalAction(id,action){
     else if(action==='wreject'){ const c=prompt('Motif du rejet :')||''; await BE.gmpApprovalDecide(id,false,c); }
     else if(action==='schedule'){ const w=prompt('Programmer à (AAAA-MM-JJ HH:MM) :',''); if(!w) return; const iso=new Date(w.replace(' ','T')).toISOString(); await BE.gmpSchedule(id,iso); }
     flash('Proposition mise à jour'); gpLoadProposals();
+  }catch(e){ flash('Erreur : '+(e.message||e),'e'); }
+}
+// Re-vérifie la fraîcheur d'une proposition avec les DONNÉES À JOUR (moteur de conflits).
+async function gpRecheckProposal(r){
+  if(!window.FlowtymConflictEngine){ flash('Moteur de conflits non chargé','e'); return; }
+  try{
+    const CE=window.FlowtymConflictEngine;
+    const from=r.period_from, to=r.period_to||r.period_from;
+    // Données courantes (destination) + trajet + vacations du collaborateur.
+    const destData=await BE.groupPlanning(r.to_service, from, to);
+    const [travelTimes, shifts, wf]=await Promise.all([BE.groupTravelTimes(), BE.listEmployeeShifts(r.employee_id, from, to), BE.gmpWorkflowGet(r.group_id)]);
+    const emp=(staff||[]).find(x=>x.id===r.employee_id)||{};
+    const raw={ cells:(destData&&destData.cells)||[], requirements:(destData&&destData.requirements)||[],
+      employee:{ skills:(Array.isArray(emp.skills)?emp.skills:undefined), availability:null, plannedThisWeek:null }, travelTimes, rhRules:null, workflow:wf };
+    const hashes=CE.categoryHashes(raw);
+    const open=await BE.gmpOpenForEmployee(r.employee_id, r.id);
+    const conflicts=(open||[]).filter(o=>CE.slotsOverlap(r.slots, o.slots)).length;
+    const st=await BE.gmpRecheck(r.id, hashes, conflicts);
+    flash('Fraîcheur : '+({valid:'à jour',to_refresh:'à actualiser',conflict:'en conflit',expired:'expirée'}[st]||st));
+    gpLoadProposals();
   }catch(e){ flash('Erreur : '+(e.message||e),'e'); }
 }
 function gpOpenProposal(id){

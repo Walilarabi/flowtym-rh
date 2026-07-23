@@ -1,0 +1,20 @@
+-- 48_group_move_concurrency.sql
+-- Moteur de conflits & concurrence (support DB). N'écrit RIEN dans staff_planning
+-- ni planning_audit. Appliqué via migration MCP group_move_concurrency.
+--
+-- RPC :
+--   group_move_reservations(from,to)        -> collaborateurs réservés (propositions
+--                                              approved/scheduled chevauchant la période)
+--   group_move_open_for_employee(emp,excl)  -> propositions ouvertes concurrentes
+--   group_move_expire_run()                 -> expire draft/pending_review au délai
+--                                              dépassé (+ notif), repère les scheduled
+--                                              en retard (notif deadline_passed)
+--   group_move_recheck(id,current_hashes,conflicts) -> compare les empreintes de
+--                                              catégories stockées (simulation.category_hashes)
+--                                              aux courantes ; met à jour staleness
+--                                              (valid|to_refresh|conflict|expired) et
+--                                              prépare les notifications.
+--
+-- La logique de raisonnement (chevauchement, priorité, obsolescence) vit dans le
+-- module pur js/conflict-engine.js. Ces RPC fournissent les données et persistent
+-- le verdict. Notifications préparées (sent_at NULL).
