@@ -1,71 +1,153 @@
-# Moteur de simulation de déplacement inter-hôtels
+# Moteur de simulation de déplacement inter-hôtels (v2)
 
-Module **pur et indépendant de l'interface** : `js/move-simulator.js`
-(exposé en CommonJS `module.exports` et en global navigateur `window.FlowtymMoveSim`).
+Module **pur, indépendant de l'interface** : `js/move-simulator.js`
+(CommonJS `module.exports` + global navigateur `window.FlowtymMoveSim`).
+Aucune dépendance DOM/réseau/écriture. **Aucune API cartographique** : le temps
+de trajet est fourni dans le contexte (moteur déterministe).
 
-Il **ne déplace jamais** un collaborateur : il calcule les conséquences d'un
-déplacement proposé et renvoie un verdict structuré. Réutilisable par le
-Drag & Drop, les suggestions IA, les simulations RH et les propositions
-automatiques de renfort.
-
-## API
+Il **ne déplace jamais** un collaborateur : il calcule les conséquences et
+renvoie une **décision explicable**. Cœur métier commun au Drag & Drop, aux
+suggestions IA, aux simulations RH et aux propositions de renfort.
 
 ```js
 const { simulateMove } = FlowtymMoveSim;
 const result = simulateMove({ move, context, config });
 ```
 
-### Entrée
+## 1. Contrat d'entrée
 
-- `move` : `{ employeeId, service, day 'YYYY-MM-DD', fromHotelId, toHotelId, requiredSkills? }`
-- `context` :
-  - `hotels` : `[{ id, name, hotel_code, active }]`
-  - `cells` : cellules de planning du jour `[{ hotel_id, employee_id, day, status, is_extra, origin_hotel_id, ... }]`
-  - `requirements` : `[{ hotel_id, weekday, shift, required }]` (shift null = jour, V1)
-  - `employee` : `{ id, skills?, availability?{unavailableDays[],available?,reason?}, plannedThisWeek?{hours,consecutiveDays}, lastRestHours? }`
-  - `serviceSkills?` : `{ [service]: [compétences requises] }`
-- `config` (tout est surchargeable, aucune valeur métier codée en dur dans la logique) :
-  - `coverage` : `{ redBelow, limiteUpTo, conformeUpTo }` (ratios prévu/requis — **même logique que le Planning Groupe**)
-  - `regulatory` : `{ maxWeeklyHours, maxConsecutiveDays, minRestHours, shiftHours }`
-  - `workingStatuses`, `blockOnMissingSkill`, `blockOnUnavailable`
+### `move`
+```js
+{
+  employeeId, employeeName?,
+  fromHotelId, toHotelId,
+  service | serviceId,                 // clé de service (couverture)
+  requiredSkills?, recommendedSkills?, // override du référentiel
+  slots: [ { date:'YYYY-MM-DD', start?:'HH:MM', end?:'HH:MM' } ]  // 1..n
+}
+```
+- `slots` supporte : journée complète (sans `start`/`end`), shift complet, plage
+  horaire partielle, plusieurs jours, plusieurs créneaux.
+- Rétro-compat : `move.day` (sans `slots`) = journée complète.
 
-### Sortie (`SimulationResult`)
+### `context`
+```js
+{
+  hotels: [{ id, name, hotel_code, active }],
+  cells:  [{ hotel_id, employee_id, day, status, is_extra, origin_hotel_id }],
+  requirements: [{ hotel_id, weekday, shift, required }],   // shift null = jour (V1)
+  employee: {
+    id, skills?:[],
+    availability?: { unavailableDays?:[...], available?:bool, reason? },
+    shifts?: [{ hotel_id, date, start:'HH:MM', end:'HH:MM' }],  // vacations existantes
+    plannedThisWeek?: { hours?, consecutiveDays? }
+  },
+  serviceSkills?: { [service]: { required:[], recommended:[] } },
+  travel: { minutesBetween: { 'FROM|TO': minutes, ... }, defaultMinutes? }  // fourni, pas d'API
+}
+```
 
-| Champ | Contenu |
-|---|---|
-| `ok` | `false` si au moins un blocage dur |
-| `blockers` | blocages empêchant le déplacement `[{code,message}]` |
-| `warnings` | avertissements non bloquants |
-| `conflicts` | conflits (ex. double affectation) |
-| `from` / `to` | impact hôtel départ / arrivée : `before`/`after` = `{prevu,requis,ecart,level,label,tauxCouverture}` |
-| `coverageChange` | évolution des niveaux de couverture aux 2 hôtels |
-| `sousEffectif` | `{before, after, delta}` |
-| `skills` | `{required, have, missing}` |
-| `regulatory` | dépassements `[{code,message,severity}]` |
-| `availability` | `{available, reason}` |
-| `summary` | résumé lisible |
+### `config` (tout surchargeable — aucune valeur métier codée en dur)
+```js
+{
+  coverage:   { redBelow:1.0, limiteUpTo:1.0, conformeUpTo:1.3 },        // ratios prévu/requis (= Planning Groupe)
+  regulatory: { maxWeeklyHours:48, maxConsecutiveDays:6, shiftHours:7 },
+  time:       { travelSafetyMarginMin:10, minBreakMin:20, maxDailyAmplitudeHours:13, minRestBetweenDaysHours:11 },
+  workingStatuses: ['P','PE'],
+  blockOnMissingRequiredSkill:true, blockOnUnavailable:true,
+  score: { enabled:true, weights:{ base:50, destImproved:20, destFullyCovered:15, originSafe:20, groupReduced:15, warningPenalty:8 } }
+}
+```
 
-### Codes
+## 2. Contrat de sortie (`SimulationResult`)
+```js
+{
+  decision: 'blocked' | 'allowed_with_warnings' | 'allowed',
+  score: number|null,                 // null si bloqué ; jamais prioritaire sur un blocage
+  scoreBreakdown: [{ label, points }],
+  summary: string,
+  reasons: [ '…' ],                    // lisibles UI / IA
+  impact: {
+    groupUnderstaffingBefore, groupUnderstaffingAfter,
+    originCoverageBefore, originCoverageAfter,          // ratios (ou null)
+    destinationCoverageBefore, destinationCoverageAfter
+  },
+  checks:    [ Check ],               // TOUS les contrôles, classification uniforme
+  blockers:  [ Check ], warnings:[ Check ], infos:[ Check ], positives:[ Check ],
+  slots:     [ { date, origin:{before,after,prevuBefore,prevuAfter,requis}, destination:{…} } ],
+  skills:    { required, recommended, have, missingRequired, missingRecommended },
+  ok: boolean                          // miroir de decision !== 'blocked'
+}
+```
+### `Check` (structure uniforme)
+```js
+{ code, level:'blocking'|'warning'|'info'|'positive', message, details, field, waivable }
+```
 
-- Blocages : `BLK_INVALID_INPUT`, `BLK_SAME_HOTEL`, `BLK_DEST_INACTIVE`,
-  `BLK_NOT_PRESENT_AT_SOURCE`, `BLK_ALREADY_AT_DEST`, `BLK_MISSING_SKILLS` (opt.),
-  `BLK_UNAVAILABLE` (opt.)
-- Avertissements : `WARN_CREATES_UNDERSTAFF_SOURCE`, `WARN_OVERSTAFF_DEST`,
-  `WARN_DEST_REQ_NOT_CONFIGURED`, `WARN_MISSING_SKILLS`, `WARN_UNAVAILABLE`,
-  `WARN_REG_*`
-- Réglementaire : `REG_WEEKLY_HOURS`, `REG_CONSECUTIVE_DAYS`, `REG_REST`
-- Conflit : `CFL_ALREADY_AT_DEST`
+## 3. Codes de contrôle
 
-## Tests
+| Code | Niveau | Dérogeable |
+|---|---|---|
+| `INVALID_INPUT` | blocking | non |
+| `SAME_HOTEL` | blocking | non |
+| `DESTINATION_INACTIVE` | blocking | non |
+| `EMPLOYEE_UNAVAILABLE` | blocking* | selon config |
+| `REQUIRED_SKILL_MISSING` | blocking* | **oui** |
+| `SHIFT_OVERLAP` | blocking | non |
+| `TRAVEL_TIME_INSUFFICIENT` | blocking | non |
+| `MINIMUM_REST_NOT_RESPECTED` | blocking | **oui** |
+| `WEEKLY_HOURS_EXCEEDED` | warning | oui |
+| `BREAK_TOO_SHORT` | warning | oui |
+| `DAILY_AMPLITUDE_EXCEEDED` | warning | oui |
+| `ORIGIN_UNDERSTAFFED_AFTER_MOVE` | warning | oui |
+| `DESTINATION_STILL_UNDERSTAFFED` | warning | oui |
+| `RECOMMENDED_SKILL_MISSING` | info | — |
+| `TRAVEL_TIME_UNKNOWN` | info | — |
+| `TRAVEL_TIME_OK` | positive | — |
+| `DESTINATION_COVERAGE_IMPROVED` | positive | — |
+| `GROUP_UNDERSTAFFING_REDUCED` | positive | — |
 
-`node tests/simulation/move-simulator.test.mjs` — 22 assertions, couvrant les
-9 dimensions demandées + la paramétrabilité des seuils + la pureté (aucune
-mutation des entrées).
+\* Niveau `blocking` par défaut, abaissé en `warning` selon `config`
+(`blockOnUnavailable`, `blockOnMissingRequiredSkill`).
 
-## Phase suivante (non développée ici)
+## 4. Règles bloquantes vs dérogeables
 
-**Drag & Drop intelligent** : la couche UI construira l'objet `move` à partir
-du glisser-déposer, appellera `simulateMove`, **affichera** le `SimulationResult`
-(impacts, couverture, blocages, avertissements) et ne déclenchera l'écriture
-réelle qu'après confirmation — toute écriture posant `operation_id` / `source =
-group_planning` / `reason` (journal déjà prêt).
+- **Bloquantes non dérogeables** : entrée invalide, même hôtel, hôtel inactif,
+  chevauchement de présence, temps de trajet insuffisant.
+- **Bloquantes dérogeables** (`waivable:true`) : compétence obligatoire manquante,
+  repos minimal, (indisponibilité si configurée bloquante). La dérogation est
+  portée par l'appelant — le moteur signale seulement la possibilité.
+- **Avertissements** : dépassements réglementaires « autorisables », pause courte,
+  amplitude, sous-effectif induit / résiduel.
+- Le **score** n'écrase jamais un blocage : `decision='blocked'` ⇒ `score=null`.
+
+## 5. Score (documenté & paramétrable)
+
+`score = base + destImproved? + destFullyCovered? + originSafe? + groupReduced? − warningPenalty×(#warnings)`,
+borné [0,100], calculé seulement si non bloqué. Chaque composante est explicitée
+dans `scoreBreakdown`. Poids dans `config.score.weights`.
+
+## 6. Tests réellement exécutés
+
+`node tests/simulation/move-simulator.test.mjs` — **15/15** :
+trajet impossible / suffisant, chevauchement, déplacement partiel, multi-jours,
+origine sous-effectif après, destination améliorée mais encore sous-effectif,
+compétence obligatoire (blocage) / recommandée (info), dépassement dérogeable,
+repos légal (blocage), multi-avertissements sans blocage, blocage prioritaire,
+déterminisme, non-mutation des entrées.
+
+## 7. Limites réglementaires encore NON couvertes (à cadrer)
+
+- Majorations/contingent d'heures supplémentaires (seuil simple hebdo uniquement).
+- Repos hebdomadaire de 35h consécutives et jours de repos obligatoires.
+- Travail de nuit (contreparties, durée max nuit) et coupures HCR spécifiques.
+- Temps de pause légal détaillé (≥20 min après 6h) — approché par `minBreakMin`.
+- Conventions/accords d'entreprise et statuts particuliers (mineurs, temps partiel).
+- Trajet dépendant de l'heure/trafic (le moteur consomme une valeur fournie fixe).
+
+## Phase suivante (non développée)
+
+**Drag & Drop intelligent** : la couche UI construit `move` depuis le glisser-
+déposer, appelle `simulateMove`, **affiche** le `SimulationResult`, et n'écrit
+qu'après confirmation — écriture posant `operation_id` / `source=group_planning`
+/ `reason` (journal déjà prêt).
