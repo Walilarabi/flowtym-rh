@@ -1,0 +1,15 @@
+-- 51_segments_hours_integrity.sql — Modèle A (segments = source de vérité).
+-- Appliqué via migrations MCP : segments_hours_and_integrity + apply_validation_levels.
+--
+-- staff_segment_hours(emp,day) -> heures par hôtel depuis les segments (exact).
+-- staff_day_hours(emp,day,hpd) -> total jour : segments si présents, sinon grille
+--   (hours, sinon durée du shift, sinon barème). Jamais end-start sur un jour
+--   fractionné.
+-- trg_staff_planning_move_guard : une ligne "possédée" par un déplacement
+--   (source_proposal_id non nul) ne peut être modifiée/supprimée manuellement
+--   (hors RPC, qui pose flowtym.allow_move_write='on'). Empêche la divergence
+--   résumé/segments.
+-- group_move_apply : pose le GUC allow_move_write ; ajoute un niveau de VALIDATION
+--   explicite (valide_sur_donnees_disponibles | validation_partielle) avec
+--   checks_run / checks_unavailable / missing, présent dans la réponse RPC ET
+--   l'événement d'audit 'applied'.
