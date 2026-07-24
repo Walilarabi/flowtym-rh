@@ -13,3 +13,8 @@
 --   explicite (valide_sur_donnees_disponibles | validation_partielle) avec
 --   checks_run / checks_unavailable / missing, présent dans la réponse RPC ET
 --   l'événement d'audit 'applied'.
+
+-- [RECONSTRUCTION] Les objets réels de cette migration sont désormais
+-- versionnés et reconstructibles depuis le dépôt : voir db/reconstruct/
+-- (20_planning_move.sql = tables, 30_functions.sql = RPC/triggers) et sql/54.
+-- Preuve : db/reconstruct/rebuild.sh + scripts/p0 + scripts/concurrency (24/24 ; A-G 7/7).

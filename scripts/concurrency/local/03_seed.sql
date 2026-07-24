@@ -15,9 +15,9 @@ INSERT INTO hotel_groups(id,name,features) VALUES ('11111111-1111-1111-1111-1111
 INSERT INTO hotels(id,name,city,group_id) VALUES
   (:'FO','Hôtel Origine','Paris','11111111-1111-1111-1111-111111111111'),
   (:'VO','Hôtel Destination','Paris','11111111-1111-1111-1111-111111111111');
-INSERT INTO users(id,auth_id,full_name,email) VALUES ('44444444-4444-4444-4444-444444444444',:'MGR','Manager Test','mgr@test.local');
+INSERT INTO users(id,auth_id,hotel_id,full_name,email) VALUES ('44444444-4444-4444-4444-444444444444',:'MGR',:'FO','Manager Test','mgr@test.local');
 INSERT INTO user_hotels(user_id,hotel_id) VALUES ('44444444-4444-4444-4444-444444444444',:'FO'),('44444444-4444-4444-4444-444444444444',:'VO');
-INSERT INTO employees(id,first_name,last_name) VALUES (:'EMP','Alex','Test');
+INSERT INTO employees(id,hotel_id,first_name,last_name) VALUES (:'EMP',:'FO','Alex','Test');
 INSERT INTO hotel_travel_times(from_hotel_id,to_hotel_id,duration_min,safety_margin_min) VALUES (:'FO',:'VO',20,10);
 
 -- Workflow vide => auto-approuvé (pas d'approbateur).

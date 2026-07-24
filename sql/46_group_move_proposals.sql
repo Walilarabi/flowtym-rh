@@ -28,3 +28,8 @@
 --   RE-SIMULATION avant toute application future.
 --
 -- Le corps SQL complet est appliqué par les 2 migrations citées ci-dessus.
+
+-- [RECONSTRUCTION] Les objets réels de cette migration sont désormais
+-- versionnés et reconstructibles depuis le dépôt : voir db/reconstruct/
+-- (20_planning_move.sql = tables, 30_functions.sql = RPC/triggers) et sql/54.
+-- Preuve : db/reconstruct/rebuild.sh + scripts/p0 + scripts/concurrency (24/24 ; A-G 7/7).
