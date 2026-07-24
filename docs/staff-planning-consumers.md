@@ -90,16 +90,23 @@ proposition n'est jamais présentée comme « totalement conforme ». La panneau
 simulation affiche déjà « Données manquantes / hypothèses · confiance X% » avant
 l'application.
 
-## Concurrence — statut HONNÊTE
-Un test à **deux connexions réellement concurrentes n'a PAS pu être exécuté**
-dans cet environnement : le réseau sortant vers Postgres est bloqué et `dblink`
-exige le mot de passe de la base (TCP et sockets testés : « password required »),
-`pg_background` indisponible. **Je ne qualifie donc pas la concurrence comme
-validée.** Sont garantis et prouvés en revanche :
+## Concurrence — statut VALIDÉ (exécution réelle)
+Le test à **deux connexions réellement concurrentes A PU être exécuté** sur une
+instance **PostgreSQL 16 locale, isolée et jetable** (schéma reconstruit en DDL
+seul depuis le schéma live, seed 100 % fictif, aucune donnée de production). Deux
+`psql` = deux `pg_backend_pid()` distincts (12 backends au total). **Scénarios
+A–G : 7/7 PASS, 0 deadlock, 0 orphelin, 0 chevauchement ⇒ verdict GO** pour la
+concurrence/atomicité. Détails, PID, temps d'attente et différences local↔hébergé :
+`docs/move-concurrency-local-run.md` ; scripts rejouables :
+`scripts/concurrency/local/`. Le socle est confirmé au niveau runtime, en plus des
+garanties data-level ci-dessous :
 - **Invariant data-level** (indépendant des connexions) : contrainte d'exclusion
   des segments ⇒ deux présences chevauchantes le même jour **impossibles** ;
   double-application ⇒ **une seule effective** (prouvé).
-- **Verrou** `pg_advisory_xact_lock(employee||jour)` (sérialise même sans ligne)
-  + `FOR UPDATE` + **PK d'idempotence**.
-Le test réel à deux sessions doit être joué sur **staging avec identifiants** via
-`scripts/concurrency/two-session-apply.sql`. À exécuter avant tout GO Drag & Drop.
+- **Verrou** `pg_advisory_xact_lock(employee||jour)` (sérialise même sans ligne —
+  **prouvé** par le scénario E) + `FOR UPDATE` + **PK d'idempotence** (retry
+  same-clé idempotent — **prouvé** par A et G).
+Le test réel à deux sessions a été joué localement via
+`scripts/concurrency/local/run-local.sh` (dérivé de
+`scripts/concurrency/two-session-apply.sql`) ; rapport :
+`docs/move-concurrency-local-run.md`.
