@@ -161,3 +161,15 @@ BEGIN
     ORDER BY updated_at DESC LIMIT 1;
   RETURN coalesce(v, 0);
 END $function$;
+
+-- Vue d'indicateurs jour (security_invoker : respecte la RLS de l'appelant).
+CREATE OR REPLACE VIEW public.v_staff_day_flags
+WITH (security_invoker = on) AS
+  SELECT employee_id, day,
+    count(*) AS segment_count,
+    count(*) > 0 AS is_segmented,
+    count(DISTINCT hotel_id) > 1 AS has_multiple_hotels,
+    count(DISTINCT status) > 1 AS has_multiple_statuses,
+    true AS derived_from_segments
+  FROM public.staff_planning_segments
+  GROUP BY employee_id, day;
