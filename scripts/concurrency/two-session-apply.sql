@@ -136,31 +136,94 @@ SELECT group_move_workflow_set((SELECT group_id FROM hotels WHERE id='<FO>'), '[
 -- Session A (retry, "après timeout") : BEGIN; ...; SELECT cc_apply('G','A-retry','<PID_G>','KEY-G'); COMMIT;
 --   Attendu : 2e appel -> même operation_id, idem_status='completed', sp_count inchangé.
 
--- ─────────────────────────────────────────────────────────────────────────────
--- 2) VÉRIFICATION FINALE (session admin) — une ligne par (scénario, session)
--- ─────────────────────────────────────────────────────────────────────────────
+-- ═════════════════════════════════════════════════════════════════════════════
+-- 2) VÉRIFICATION FINALE AUTO — produit les 5 livrables attendus
+-- ═════════════════════════════════════════════════════════════════════════════
+
+-- ── (1) SORTIE BRUTE : une ligne par (scénario, session) ──────────────────────
 SELECT scenario, session_label, backend_pid, proposal_id, employee_id, locked_day,
        round(wait_ms) AS wait_ms, final_status, operation_id, idem_key, idem_status,
        sp_count, audit_count, deadlock, timeout_hit,
-       coalesce(error_text, (rpc_result->>'applied')) AS outcome
+       coalesce(error_text, 'applied='||(rpc_result->>'applied')) AS outcome
 FROM public.cc_results ORDER BY scenario, session_label;
 
--- Contrôles d'intégrité attendus :
---   * A/B/C/E : exactement UNE ligne 'applied'=true par scénario ; l'autre en
---     erreur ('Statut non applicable' / concurrente prioritaire / exclusion).
---   * B/E : wait_ms de la session B >~ durée du pg_sleep de A (blocage réel).
---   * D : wait_ms de B faible ; les DEUX 'applied'=true.
---   * F : session A error/rollback (aucune écriture) ; B 'applied'=true.
---   * G : A-retry -> même operation_id, idem_status='completed', sp_count inchangé.
---   * deadlock = false partout ; timeout_hit = false (sauf test dédié).
--- Aucune ligne 'processing' orpheline :
-SELECT * FROM group_move_applications WHERE status='processing';   -- attendu : 0 ligne
--- Aucun chevauchement de segments :
-SELECT employee_id, day, count(*) FROM staff_planning_segments s
-  WHERE EXISTS (SELECT 1 FROM staff_planning_segments t
-                WHERE t.employee_id=s.employee_id AND t.day=s.day AND t.id<>s.id
-                  AND int4range(t.seg_start_min,t.seg_end_min) && int4range(s.seg_start_min,s.seg_end_min))
-  GROUP BY 1,2;   -- attendu : 0 ligne
+-- ── (2) TABLEAU SYNTHÉTIQUE A–G (PASS/FAIL calculé vs attendu) ────────────────
+WITH agg AS (
+  SELECT scenario,
+         count(DISTINCT backend_pid)                                   AS pids,
+         count(DISTINCT operation_id) FILTER (WHERE operation_id IS NOT NULL) AS effective_apps,
+         round(max(wait_ms))                                           AS max_wait_ms,
+         round(min(wait_ms))                                           AS min_wait_ms,
+         bool_or(deadlock)                                             AS any_deadlock,
+         bool_or(timeout_hit)                                          AS any_timeout,
+         count(*) FILTER (WHERE error_text IS NOT NULL)                AS n_errors,
+         string_agg(DISTINCT final_status, ',')                        AS final_statuses
+  FROM public.cc_results GROUP BY scenario),
+exp(scenario, effective_expected, both_apply, expect_block) AS (VALUES
+  ('A',1,false,true), ('B',1,false,true), ('C',1,false,true),
+  ('D',2,true,false),  ('E',1,false,true), ('F',1,false,true), ('G',1,false,false))
+SELECT e.scenario, a.pids, a.effective_apps, e.effective_expected,
+       a.min_wait_ms, a.max_wait_ms, a.any_deadlock, a.any_timeout, a.n_errors, a.final_statuses,
+       CASE
+         WHEN a.scenario IS NULL THEN 'NON EXÉCUTÉ'
+         WHEN a.any_deadlock THEN 'FAIL: deadlock'
+         WHEN a.effective_apps <> e.effective_expected THEN 'FAIL: '||a.effective_apps||' appli. (attendu '||e.effective_expected||')'
+         WHEN e.expect_block AND a.max_wait_ms < 1000 THEN 'FAIL: pas de blocage observé'
+         WHEN NOT e.expect_block AND e.both_apply AND a.max_wait_ms >= 1000 THEN 'WARN: sérialisation inattendue (jours différents)'
+         ELSE 'PASS'
+       END AS verdict
+FROM exp e LEFT JOIN agg a USING (scenario) ORDER BY e.scenario;
+-- Note A : le 2e appel renvoie le résultat mémorisé (operation_id identique) =>
+--   effective_apps=1 (déduplication par operation_id). Note F : la session A ayant
+--   fait ROLLBACK, sa ligne cc_results est absente (par conception) ; seule B figure.
+--   Note G : le retry peut réutiliser le même backend_pid (même client).
+
+-- ── (3) ÉTAT FINAL DES TABLES concernées (par jour de test) ───────────────────
+-- Adapter la borne de dates aux jours utilisés (2035-xx).
+SELECT 'staff_planning' t, hotel_id::text, day::text, status, shift_start::text, shift_end::text, source_proposal_id::text
+  FROM staff_planning WHERE day >= '2035-01-01' ORDER BY day, hotel_id;
+SELECT 'segments' t, hotel_id::text, day::text, kind, (seg_start_min/60)||'h-'||(seg_end_min/60)||'h', status, source_proposal_id::text
+  FROM staff_planning_segments WHERE day >= '2035-01-01' ORDER BY day, seg_start_min;
+SELECT 'proposals' t, id::text, status, staleness, applied_operation_id::text
+  FROM group_move_proposals WHERE period_from >= '2035-01-01' ORDER BY created_at;
+SELECT 'applications' t, idempotency_key, status, proposal_id::text, operation_id::text FROM group_move_applications ORDER BY applied_at;
+SELECT 'audit' t, operation_id::text, count(*) FROM planning_audit WHERE day >= '2035-01-01' GROUP BY operation_id;
+
+-- ── (4) ANOMALIES (toutes ces requêtes doivent renvoyer 0 ligne) ──────────────
+-- 4a. Enregistrement d'idempotence bloqué en processing :
+SELECT 'orphan_processing' anomaly, * FROM group_move_applications WHERE status='processing';
+-- 4b. Chevauchement de segments (double présence) :
+SELECT 'segment_overlap' anomaly, s.employee_id, s.day FROM staff_planning_segments s
+  WHERE EXISTS (SELECT 1 FROM staff_planning_segments t WHERE t.employee_id=s.employee_id AND t.day=s.day AND t.id<>s.id
+                AND int4range(t.seg_start_min,t.seg_end_min) && int4range(s.seg_start_min,s.seg_end_min));
+-- 4c. Écriture planning SANS operation_id d'audit correspondant (incohérence) :
+SELECT 'audit_mismatch' anomaly, sp.source_proposal_id, sp.day FROM staff_planning sp
+  JOIN group_move_proposals p ON p.id=sp.source_proposal_id
+  WHERE sp.day >= '2035-01-01' AND p.applied_operation_id IS NOT NULL
+    AND NOT EXISTS (SELECT 1 FROM planning_audit a WHERE a.operation_id=p.applied_operation_id);
+-- 4d. operation_id NON commun aux écritures d'une même application (doit être unique/appli) :
+SELECT 'multi_operation_per_apply' anomaly, source_proposal_id, count(DISTINCT p.applied_operation_id)
+  FROM staff_planning sp JOIN group_move_proposals p ON p.id=sp.source_proposal_id
+  WHERE sp.day >= '2035-01-01' GROUP BY 1,2 HAVING count(DISTINCT p.applied_operation_id) > 1;
+
+-- ── (5) VERDICT GO / NO-GO (calculé) ──────────────────────────────────────────
+WITH agg AS (
+  SELECT scenario, bool_or(deadlock) dl,
+         count(DISTINCT operation_id) FILTER (WHERE operation_id IS NOT NULL) eff
+  FROM public.cc_results GROUP BY scenario),
+exp(scenario, eff_exp) AS (VALUES ('A',1),('B',1),('C',1),('D',2),('E',1),('F',1),('G',1)),
+checks AS (
+  SELECT
+    (SELECT count(*) FROM exp WHERE scenario NOT IN (SELECT scenario FROM agg))                 AS missing_scenarios,
+    (SELECT count(*) FROM agg WHERE dl)                                                          AS deadlocks,
+    (SELECT count(*) FROM exp e JOIN agg a USING(scenario) WHERE a.eff <> e.eff_exp)             AS wrong_effective,
+    (SELECT count(*) FROM group_move_applications WHERE status='processing')                     AS orphans,
+    (SELECT count(*) FROM staff_planning_segments s WHERE EXISTS (SELECT 1 FROM staff_planning_segments t
+        WHERE t.employee_id=s.employee_id AND t.day=s.day AND t.id<>s.id
+          AND int4range(t.seg_start_min,t.seg_end_min) && int4range(s.seg_start_min,s.seg_end_min))) AS overlaps)
+SELECT *, CASE WHEN missing_scenarios=0 AND deadlocks=0 AND wrong_effective=0 AND orphans=0 AND overlaps=0
+               THEN 'GO' ELSE 'NO-GO' END AS verdict
+FROM checks;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 3) NETTOYAGE (session admin)
