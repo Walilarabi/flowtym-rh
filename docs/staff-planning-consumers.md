@@ -32,6 +32,15 @@ durées**. `staff_planning` est un **résumé/cache dérivé** = marqueur de
 couverture et de statut, jamais utilisé pour calculer des heures sur un jour
 fractionné.
 
+> **Règle de vérité (explicite)** : pour **toute journée segmentée**,
+> `staff_planning_segments` est la **source de vérité** et `staff_planning` une
+> **projection reconstruisible** (`staff_planning_rebuild_day`). La reconstruction
+> est prouvée par **égalité exacte sur toutes les colonnes métier et
+> opérationnelles dérivables** (`status`, `shift_start`, `shift_end`,
+> `source_proposal_id`, `origin_hotel_id`, `duration`, `break_minutes`) ; les
+> champs **cosmétiques ou legacy** (`shift_label`) sont exclus. Le résumé ne doit
+> jamais être traité comme source de vérité.
+
 Conditions (accord avec votre préférence) :
 - **Heures & durées** : toujours via `staff_day_hours` / `staff_segment_hours`
   (segments). Prouvé : FO 08-10 + VO 10-12 + FO 12-16 ⇒ **FO=6h, VO=2h, total=8h**,

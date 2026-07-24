@@ -27,10 +27,15 @@ mince adaptateur.
 
 ### E2 — Dimension SERVICE sur les segments (seule migration nécessaire)
 Aujourd'hui `staff_planning_segments` porte `hotel_id, kind, status`, **pas le
-service**. Pour attribuer une présence à un service, ajouter `service_name text`
-au segment (rempli par `group_move_apply` depuis `to_service`/`from_service`).
-C'est **le** point d'extension structurant. (À défaut, jointure via
-`source_proposal_id → group_move_proposals.to_service`, moins direct.)
+service**. Pour attribuer une présence à un service, ajouter **`service_id uuid`
+(référence structurée vers `staff_departments.id`)** au segment — le **nom** de
+service peut changer ou être dupliqué, l'identifiant doit donc être la référence ;
+`service_name` reste une simple donnée d'affichage (dénormalisée, optionnelle).
+Le segment sera rempli par `group_move_apply` depuis les services d'accueil /
+d'origine résolus en **identifiants** (`host_service_id` pour l'Extra, sinon le
+service principal). C'est **le** point d'extension structurant. (À défaut,
+jointure via `source_proposal_id → group_move_proposals`, moins direct et non
+structuré.)
 
 ### E3 — Requis par tranche (déjà prêt)
 `group_staffing_requirements.shift` existe déjà (V1 = shift NULL au jour). Le

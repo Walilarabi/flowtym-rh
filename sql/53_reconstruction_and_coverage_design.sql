@@ -8,7 +8,10 @@
 -- break_minutes. shift_label = champ cosmétique/legacy (posé 'custom' si horaires),
 -- exclu de la comparaison.
 --
--- PREUVE (rolled-back) : snapshot -> DELETE du résumé -> rebuild -> comparaison
--- jsonb bit-à-bit : IDENTIQUE pour le cas journée complète (PE dest + MAD origine)
--- ET le cas fractionné milieu (PE 10-12 + origine P 08-16 bornes). => le résumé
--- n'est JAMAIS la source de vérité ; il est intégralement dérivable des segments.
+-- PREUVE (rolled-back) : snapshot -> DELETE du résumé -> rebuild -> comparaison :
+-- ÉGALITÉ EXACTE sur toutes les colonnes MÉTIER et OPÉRATIONNELLES dérivables
+-- (les champs cosmétiques/legacy comme shift_label sont exclus), pour le cas
+-- journée complète (PE dest + MAD origine) ET le cas fractionné milieu
+-- (PE 10-12 + origine P 08-16 bornes).
+-- => Pour toute journée SEGMENTÉE, staff_planning_segments est la SOURCE DE
+--    VÉRITÉ et staff_planning une PROJECTION reconstruisible (jamais l'inverse).
