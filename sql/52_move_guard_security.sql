@@ -22,3 +22,8 @@
 -- v_staff_day_flags : is_segmented / segment_count / has_multiple_hotels /
 -- has_multiple_statuses / derived_from_segments — pour que les écrans legacy
 -- détectent une journée fractionnée et n'affichent pas de fausse présence continue.
+
+-- [RECONSTRUCTION] Les objets réels de cette migration sont désormais
+-- versionnés et reconstructibles depuis le dépôt : voir db/reconstruct/
+-- (20_planning_move.sql = tables, 30_functions.sql = RPC/triggers) et sql/54.
+-- Preuve : db/reconstruct/rebuild.sh + scripts/p0 + scripts/concurrency (24/24 ; A-G 7/7).

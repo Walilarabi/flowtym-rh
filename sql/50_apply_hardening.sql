@@ -30,3 +30,8 @@
 --   RESTANTS (rognage/split via _gmp_subtract), grille destination PE (bornes),
 --   grille origine MAD si vacance totale sinon horaires rognés. Multi-jours géré.
 --   Les SEGMENTS sont la source de vérité ; la grille est un marqueur (bornes).
+
+-- [RECONSTRUCTION] Les objets réels de cette migration sont désormais
+-- versionnés et reconstructibles depuis le dépôt : voir db/reconstruct/
+-- (20_planning_move.sql = tables, 30_functions.sql = RPC/triggers) et sql/54.
+-- Preuve : db/reconstruct/rebuild.sh + scripts/p0 + scripts/concurrency (24/24 ; A-G 7/7).
