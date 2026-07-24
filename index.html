@@ -1715,6 +1715,11 @@ function effectivePerms(role,mod){
 function canSee(tab){if(!myRole)return false;return effectivePerms(myRole,tab).view===true;}
 function canDo(tab,action){if(!myRole)return false;return effectivePerms(myRole,tab)[action]===true;}
 function canFicheFull(){return canDo('personnel','sensitive');}
+/* Compteurs légaux indicatifs : réservés aux rôles ayant la supervision du temps
+   de travail (module « Suivi du temps »). Direction/Admin hôtel/Comptabilité y ont
+   accès via la matrice existante ; Réception (tracking:0) est exclue. Aucune
+   création de rôle : on défère à la permission déjà décidée du projet. */
+function canSeeLegalCounters(){return canDo('tracking','view');}
 function canManageUsers(){return canDo('config','edit');}
 
 const TABS=[
@@ -1905,10 +1910,10 @@ function renderPlanning(){
       <div class="legend" id="legend"></div>
       <div class="hint" id="hint"></div>
       <div class="gridwrap"><table id="grid"></table></div>
-      <div id="planLegalNote" style="margin-top:8px;padding:8px 12px;background:#f8f8fc;border:1px solid #e0def8;border-radius:8px;font-size:11px;color:var(--muted);display:flex;align-items:flex-start;gap:8px">
+      ${canSeeLegalCounters()?`<div id="planLegalNote" style="margin-top:8px;padding:8px 12px;background:#f8f8fc;border:1px solid #e0def8;border-radius:8px;font-size:11px;color:var(--muted);display:flex;align-items:flex-start;gap:8px">
         <i class="fa-solid fa-circle-info" style="color:var(--violet);margin-top:1px;flex-shrink:0"></i>
         <span><b style="color:var(--ink2)">Compteurs légaux indicatifs</b> — Calculés sur le planning affiché (estimations en heures : jours travaillés × barème horaire du service, fallback 7h/j). <b>Limités au mois affiché</b>, sans continuité avec le mois précédent/suivant. Seuils : Code du travail — votre convention collective (HCR), vos accords d'entreprise et les situations particulières peuvent prévoir des règles différentes. <b>À valider avec votre conseil ou cabinet paie.</b></span>
-      </div>
+      </div>`:''}
     </div>`;
   $('legend').innerHTML=CODES.map(c=>`<span class="lc"><b style="background:${c[2]}"></b>${c[0]} · ${c[1]}</span>`).join('')
     +`<span class="lc"><b style="background:#fff;border-style:dashed"></b>Vide · Repos</span>`;
@@ -2921,7 +2926,9 @@ function render(){
       lastDept=deptName;
       h+=`<tr class="dept-sep"><td colspan="${nd+8}" style="background:#f1f0fb;font-size:11px;font-weight:700;color:var(--violet-d);padding:4px 10px;letter-spacing:.05em;text-transform:uppercase">${deptName||'Sans service'}</td></tr>`;
     }
-    const _empAlerts=s._extra?[]:_planLegalAlerts(s.id,y,m,nd,_hpdMap.get(s.id));
+    // Compteurs légaux : ni calculés ni affichés si le rôle n'est pas habilité
+    // (pas de « calcul puis masquage » — les données ne sont pas produites).
+    const _empAlerts=(s._extra||!canSeeLegalCounters())?[]:_planLegalAlerts(s.id,y,m,nd,_hpdMap.get(s.id));
     const _alertBadge=_planAlertBadge(_empAlerts);
     const _extraTag=s._extra?` <span style="font-size:9.5px;color:#c2410c;font-weight:700;background:#fff7ed;border:1px solid #fed7aa;padding:1px 5px;border-radius:5px;margin-left:4px"><i class="fa-solid fa-people-arrows" style="font-size:8px"></i> Extra</span>`:'';
     const _extraSub=s._extra?` · <span style="color:#c2410c">${esc(hotels.find(h=>h.id===s.hotel_id)?.name||'autre étab.')}</span>`:'';
@@ -13904,12 +13911,17 @@ async function drawOrgTree(){
   const el=$('orgTree'); if(!el)return;
   const actStaff=staff.filter(s=>s.active);
   // Build tree from manager_id
-  const roots=actStaff.filter(s=>!s.manager_id||!actStaff.find(e=>e.id===s.manager_id));
   const byMgr=new Map();
   actStaff.forEach(s=>{if(s.manager_id){if(!byMgr.has(s.manager_id))byMgr.set(s.manager_id,[]);byMgr.get(s.manager_id).push(s);}});
-  // Group roots by dept if no manager hierarchy
+  // Racine = pas de responsable présent. On distingue les VRAIES têtes hiérarchiques
+  // (elles ont des subordonnés dans les données existantes) des salariés SANS
+  // responsable affecté, qui ne doivent jamais apparaître comme racine par défaut.
+  const roots=actStaff.filter(s=>!s.manager_id||!actStaff.find(e=>e.id===s.manager_id));
+  const genuineRoots=roots.filter(s=>byMgr.has(s.id));   // têtes hiérarchiques réelles
+  const unassigned=roots.filter(s=>!byMgr.has(s.id));    // « Responsable hiérarchique non affecté »
+  // Group genuine roots by dept (les non-affectés vont dans une section dédiée en bas)
   const deptGroups=new Map();
-  roots.forEach(s=>{const d=s.department||'Sans service';if(!deptGroups.has(d))deptGroups.set(d,[]);deptGroups.get(d).push(s);});
+  genuineRoots.forEach(s=>{const d=s.department||'Sans service';if(!deptGroups.has(d))deptGroups.set(d,[]);deptGroups.get(d).push(s);});
   function nodeCard(s,depth){
     const reports=byMgr.get(s.id)||[];
     return `<div style="display:inline-flex;flex-direction:column;align-items:center;margin:0 8px">
@@ -13930,6 +13942,14 @@ async function drawOrgTree(){
     html+=`<div style="margin-bottom:30px"><div style="font-size:11px;font-weight:700;color:var(--violet-d);text-transform:uppercase;letter-spacing:.05em;margin-bottom:12px;padding:4px 10px;background:var(--violet-bg);border-radius:8px;display:inline-block">${dept}</div>
       <div style="display:flex;flex-wrap:wrap;gap:16px">${emps.map(s=>nodeCard(s,0)).join('')}</div></div>`;
   });
+  // Section distincte, APRÈS l'organigramme, pour les salariés sans responsable affecté.
+  // Style neutre (non « niveau supérieur ») ; accès à la fiche conservé via data-emp.
+  if(unassigned.length){
+    html+=`<div style="margin-top:6px;padding-top:18px;border-top:2px dashed var(--line)">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;padding:4px 10px;background:#f4f4f6;border-radius:8px;display:inline-block"><i class="fa-solid fa-user-slash" style="margin-right:6px"></i>Responsable hiérarchique non affecté</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:12px">${unassigned.length} collaborateur${unassigned.length>1?'s':''} sans responsable hiérarchique — à rattacher.</div>
+      <div style="display:flex;flex-wrap:wrap;gap:16px">${unassigned.map(s=>nodeCard(s,1)).join('')}</div></div>`;
+  }
   html+='</div>';
   el.innerHTML=html;
   el.querySelectorAll('[data-emp]').forEach(c=>c.onclick=()=>openFiche(c.dataset.emp));
