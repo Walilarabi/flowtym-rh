@@ -14188,6 +14188,14 @@ async function drawTracking(){
       if(!clockMap.has(c.employee_id)) clockMap.set(c.employee_id,[]);
       clockMap.get(c.employee_id).push(c);
     });
+    // P0 — heures planifiées via segments (source de vérité) si flag = 'segments'.
+    let canonMap=null;
+    try{
+      if((await BE.hoursSource(hotelId))==='segments'){
+        canonMap=new Map();
+        (await BE.hotelHoursRange(hotelId,from,to)).forEach(r=>canonMap.set(r.employee_id+'|'+r.day, Number(r.net_hours)));
+      }
+    }catch(_){ canonMap=null; }
     const nd=dim(y,m);
     const rows=active.map(emp=>{
       const sc=schedules.find(s=>s.id===emp.schedule_id);
@@ -14197,7 +14205,7 @@ async function drawTracking(){
         const k=emp.id+'|'+iso(y,m,d);
         const cell=planMap.get(k);
         const st=cell?.status||'';
-        if(st==='P'||st==='PE'){ planned++; plannedHacc+=(cell.hours>0?Number(cell.hours):hpd); }
+        if(st==='P'||st==='PE'){ planned++; plannedHacc+=canonMap?Number(canonMap.get(k)||0):(cell.hours>0?Number(cell.hours):hpd); }
         if(st==='CP') cp++;
         if(st==='RTT') rtt++;
         if(st==='MAL'||st==='ABS'||st==='MAT'||st==='CSS') abs++;
