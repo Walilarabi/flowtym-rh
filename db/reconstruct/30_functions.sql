@@ -399,3 +399,18 @@ END $function$;
 CREATE TRIGGER planning_audit_trg AFTER INSERT OR DELETE OR UPDATE ON public.staff_planning FOR EACH ROW EXECUTE FUNCTION trg_planning_audit();
 CREATE TRIGGER trg_planning_touch BEFORE UPDATE ON public.staff_planning FOR EACH ROW EXECUTE FUNCTION pl_touch_updated_at();
 CREATE TRIGGER trg_sp_move_guard BEFORE DELETE OR UPDATE ON public.staff_planning FOR EACH ROW EXECUTE FUNCTION trg_staff_planning_move_guard();
+
+-- ── Accès : rôle par hôtel + admin transverse (verbatim schéma live) ─────────
+CREATE OR REPLACE FUNCTION public.rh_my_role(p_hotel uuid)
+ RETURNS text LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public'
+AS $function$
+  select uh.role::text from public.user_hotels uh
+  join public.users u on u.id = uh.user_id
+  where u.auth_id = auth.uid() and uh.hotel_id = p_hotel limit 1
+$function$;
+
+CREATE OR REPLACE FUNCTION public.is_platform_admin()
+ RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public','pg_temp'
+AS $function$
+  SELECT EXISTS (SELECT 1 FROM public.platform_admins WHERE auth_id = auth.uid() AND is_active = true);
+$function$;

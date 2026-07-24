@@ -935,6 +935,11 @@ async function makeRealBE(){
       const {error}=await sb.from('staff_planning').upsert({hotel_id:h,...row},{onConflict:'hotel_id,employee_id,day'});
       if(error)console.warn('upsertPlanningRow:',error.message);
     },
+    // Demandes de modification de statut (journées passées, rôle Réception)
+    async pcrCreate(h,emp,day,requested,reason,comment){const {data,error}=await sb.rpc('planning_change_request_create',{p_hotel:h,p_employee:emp,p_day:day,p_requested_status:requested,p_reason:reason,p_comment:comment||null});must(error,'Demande de modification');return data;},
+    async pcrDecide(id,decision,rejectReason){const {data,error}=await sb.rpc('planning_change_request_decide',{p_id:id,p_decision:decision,p_reject_reason:rejectReason||null});must(error,'Décision');return data;},
+    async pcrCancel(id){const {error}=await sb.rpc('planning_change_request_cancel',{p_id:id});must(error,'Annulation');},
+    async pcrList(h,statuses){let q=sb.from('planning_change_requests').select('*').eq('hotel_id',h);if(statuses&&statuses.length)q=q.in('status',statuses);const {data,error}=await q.order('created_at',{ascending:false});if(error){if(error.code==='42P01')return[];must(error,'Demandes');}return data||[];},
     async findReplacementAssignment(h,absentEmpId,date){
       const {data,error}=await sb.from('replacement_assignments').select('id').eq('hotel_id',h).eq('absent_employee_id',absentEmpId).eq('assignment_date',date).maybeSingle();
       if(error){console.warn('findReplacementAssignment:',error.message);return null;}
@@ -1261,6 +1266,10 @@ function makeTestBE(){
     async listMonthPlanning(h,y,m){const s=iso(y,m,1),end=iso(y,m,dim(y,m));return planning.filter(p=>p.hotel_id===h&&p.day>=s&&p.day<=end);},
     async hoursSource(h){return 'legacy';},              // démo : moteur segments non activé
     async hotelHoursRange(h,from,to){return [];},
+    async pcrCreate(h,emp,day,requested,reason,comment){return null;}, // démo : pas de backend
+    async pcrDecide(id,decision,rejectReason){return null;},
+    async pcrCancel(id){},
+    async pcrList(h,statuses){return [];},
     async savePlanning(h,ups,dels){
       ups.forEach(u=>{const i=planning.findIndex(p=>p.hotel_id===u.hotel_id&&p.employee_id===u.employee_id&&p.day===u.day);
         if(i>=0)planning[i]={...planning[i],...u};else planning.push({...u});});
@@ -1902,6 +1911,7 @@ function renderPlanning(){
         <button class="btn g ${editMode?'on':''}" id="editToggle"><i class="fa-solid fa-pen-to-square"></i> Édition</button>
         <button class="btn g" id="exportXlsx" title="Exporter le planning au format Excel"><i class="fa-solid fa-file-excel"></i> Excel</button>
         <button class="btn g" id="exportPdf" title="Exporter le planning en PDF (paysage, pleine page)"><i class="fa-regular fa-file-pdf"></i> PDF</button>
+        <button class="btn g" id="btnPcrInbox" title="Demandes de modification (journées passées)"><i class="fa-solid fa-inbox"></i> Demandes</button>
         <button class="btn g" id="btnPlanAudit" title="Journal des modifications du planning"><i class="fa-solid fa-clock-rotate-left"></i> Historique</button>
         <button class="btn g" id="btnCreateCycle" title="Créer un cycle depuis le mois affiché"><i class="fa-solid fa-arrows-rotate"></i> Créer cycle</button>
         <button class="btn g" id="btnAutoFill" title="Générer le planning automatiquement"><i class="fa-solid fa-wand-magic-sparkles"></i> Auto-remplir</button>
@@ -1928,6 +1938,7 @@ function renderPlanning(){
   $('exportXlsx').onclick=exportExcel;
   $('exportPdf').onclick=exportPDF;
   $('btnPlanAudit').onclick=openPlanningAudit;
+  { const _b=$('btnPcrInbox'); if(_b) _b.onclick=openPcrInbox; }
   $('btnCreateCycle').onclick=openCreateCycleModal;
   $('btnAutoFill').onclick=openAutoFillModal;
   $('grid').addEventListener('mousedown',gridMouseDown);
@@ -2822,6 +2833,7 @@ async function loadMonth(){
   const rows=await BE.listMonthPlanning(hotelId,cur.getFullYear(),cur.getMonth());
   planningRows=rows;
   committed=new Map(rows.map(r=>[r.employee_id+'|'+r.day,{status:r.status,duration:Number(r.duration),note:r.note||'',shift_label:r.shift_label||'',hours:(r.hours==null?0:Number(r.hours))}]));
+  await loadPcrPending();  // demandes de modification en attente (indicateur cellule)
   await loadMonthExtras();
   renderCurrentPlanView();
 }
@@ -2956,7 +2968,8 @@ function render(){
       const hoursPend=(pendingHours.has(k)&&pendingHours.get(k)!==committedHours(k))?' pend':'';
       const cellLabel=hrs>0?fmtHours(hrs):(code||'');
       const cls2=cls+(note?' has-note':'')+(hrs>0?' hcell':'')+((pendingNotes.has(k)&&pendingNotes.get(k)!==committedNote(k))?' pend':'')+hoursPend;
-      h+=`<td class="${cls2}" data-k="${k}" data-r="${ri}" data-d="${d}" style="${st}"${noteTitle}>${cellLabel}${shBadge}${noteMark}</td>`;
+      const pcrMark=pcrPending.has(k)?'<span title="Demande de modification en attente de confirmation" style="position:absolute;top:1px;right:1px;font-size:8px">⏳</span>':'';
+      h+=`<td class="${cls2}" data-k="${k}" data-r="${ri}" data-d="${d}" style="${st};position:relative"${noteTitle}>${cellLabel}${shBadge}${noteMark}${pcrMark}</td>`;
       if(code==='PE')extra++;
       // Décompte : une présence en heures compte comme fraction de journée (hrs/hpd), pas une journée complète
       if(c){if(c.cat==='worked')trav+=(hrs>0?hrs/_hpd:1);else if(c.cat==='paid')cp++;else if(c.cat==='abs')abs++;} else rep++;}
@@ -14486,6 +14499,9 @@ function renderStub(title, icon, desc, bullets){
 /* ===================== POPOVER (édition simple) ===================== */
 const pop=$('pop'); let popK=null;
 function openPop(td){ popK=td.dataset.k;
+  // Réception + journée passée (fuseau hôtel) : modification directe interdite (garde
+  // backend FL010) — on ouvre le formulaire de demande de modification à la place.
+  if(myRole==='reception'){ const _d=(popK||'').split('|')[1]; if(_isPastDay(_d)){ openPcrRequest(popK); return; } }
   const curNote=effectiveNote(popK);
   const curHours=effectiveHours(popK);
   pop.innerHTML='<div class="pg">'+CODES.map(c=>`<div class="pc" data-code="${c[0]}" style="background:${c[2]};color:${c[3]}"><b style="background:${c[2]}"></b>${c[0]}</div>`).join('')
@@ -14528,6 +14544,61 @@ function openPop(td){ popK=td.dataset.k;
   pop.style.top=Math.min(r.bottom+6,innerHeight-470)+'px'; pop.classList.add('on');
 }
 function closePop(){pop.classList.remove('on');popK=null;}
+
+/* ===== Demandes de modification de statut (journées passées — Réception) =====
+   Backend : planning_change_requests (RPC + garde FL010). La restriction réelle
+   est côté base ; l'UI oriente vers la demande. Jour « passé » = fuseau hôtel. */
+let pcrPending=new Map();   // 'emp|day' -> demande pending de l'hôtel affiché
+function _hotelTz(){ return (hotels.find(x=>x.id===hotelId)||{}).timezone||'Europe/Paris'; }
+function _hotelTodayISO(){ try{ return new Intl.DateTimeFormat('en-CA',{timeZone:_hotelTz(),year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()); }catch(_){ return new Date().toISOString().slice(0,10); } }
+function _isPastDay(dayISO){ return !!dayISO && dayISO < _hotelTodayISO(); }
+async function loadPcrPending(){ pcrPending=new Map(); try{ (await BE.pcrList(hotelId,['pending'])).forEach(r=>pcrPending.set(r.employee_id+'|'+r.day,r)); }catch(_){} }
+function openPcrRequest(key){
+  const [emp,day]=(key||'').split('|'); const s=staff.find(x=>x.id===emp)||{};
+  const cur=(committed.get(key)&&committed.get(key).status)||effective(key)||'—';
+  pop.innerHTML=`<div style="padding:10px;min-width:230px">
+    <div style="font-weight:700;font-size:13px;margin-bottom:2px">Demander une modification</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Journée passée — validation requise (responsable ou direction).</div>
+    <div style="font-size:12px;margin-bottom:4px"><b>${esc(s.first_name||'')} ${esc(s.last_name||'')}</b> · ${day}</div>
+    <div style="font-size:12px;margin-bottom:6px">Statut actuel : <b>${esc(cur)}</b></div>
+    <label style="font-size:11px;color:var(--muted)">Nouveau statut</label>
+    <select id="pcrNew" style="width:100%;margin:3px 0 8px;padding:6px;border:1px solid var(--line);border-radius:8px">${CODES.map(c=>`<option value="${c[0]}">${c[0]} — ${c[1]}</option>`).join('')}</select>
+    <label style="font-size:11px;color:var(--muted)">Motif (obligatoire)</label>
+    <textarea id="pcrReason" rows="2" style="width:100%;box-sizing:border-box;margin:3px 0 8px;padding:6px;border:1px solid var(--line);border-radius:8px" placeholder="Ex : oubli de saisie"></textarea>
+    <label style="font-size:11px;color:var(--muted)">Commentaire (facultatif)</label>
+    <textarea id="pcrComment" rows="2" style="width:100%;box-sizing:border-box;margin:3px 0 8px;padding:6px;border:1px solid var(--line);border-radius:8px"></textarea>
+    <button class="btn p" id="pcrSubmit" style="width:100%"><i class="fa-solid fa-paper-plane"></i> Envoyer pour validation</button></div>`;
+  pop.classList.add('on');
+  $('pcrSubmit').onclick=async()=>{ const reason=($('pcrReason').value||'').trim(); if(!reason){flash('Motif obligatoire');return;}
+    try{ await BE.pcrCreate(hotelId,emp,day,$('pcrNew').value,reason,$('pcrComment').value||null); flash('Demande envoyée pour validation'); closePop(); await loadPcrPending(); render(); }catch(e){ flash(e.message||'Erreur'); } };
+}
+let pcrFilter={status:'pending',emp:'',day:''};
+async function openPcrInbox(){
+  let rows=[]; try{ rows=await BE.pcrList(hotelId,pcrFilter.status?[pcrFilter.status]:['pending','approved','rejected','cancelled','obsolete']); }catch(e){ flash(e.message); return; }
+  const empName=id=>{const s=staff.find(x=>x.id===id)||(typeof _extraEmpCache!=='undefined'&&_extraEmpCache.get&&_extraEmpCache.get(id));return s?`${s.first_name} ${s.last_name}`:'—';};
+  const fr=rows.filter(r=>(!pcrFilter.emp||r.employee_id===pcrFilter.emp)&&(!pcrFilter.day||r.day===pcrFilter.day));
+  const hName=(hotels.find(h=>h.id===hotelId)||{}).name||'';
+  $('modal').innerHTML=`<div class="mh"><div class="mh-ic"><i class="fa-solid fa-inbox"></i></div>
+    <div class="mh-ti"><h2>Demandes de modification</h2><div class="sub">${esc(hName)} · ${fr.length} demande(s)</div></div>
+    <button class="mh-x" onclick="closeModal()"><i class="fa-solid fa-xmark"></i></button></div>
+    <div class="mb"><div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+      <select id="pcrfStatus" style="padding:6px;border:1px solid var(--line);border-radius:8px">${['pending','approved','rejected','cancelled','obsolete',''].map(s=>`<option value="${s}" ${pcrFilter.status===s?'selected':''}>${s||'Tous statuts'}</option>`).join('')}</select>
+      <input id="pcrfEmp" placeholder="ID collaborateur" value="${esc(pcrFilter.emp)}" style="padding:6px;border:1px solid var(--line);border-radius:8px">
+      <input id="pcrfDay" type="date" value="${pcrFilter.day||''}" style="padding:6px;border:1px solid var(--line);border-radius:8px"></div>
+    <div style="max-height:52vh;overflow:auto">${fr.length?fr.map(r=>`<div style="border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center"><div><b>${esc(empName(r.employee_id))}</b> · ${r.day}</div>
+        <span style="font-size:11px;padding:2px 8px;border-radius:6px;background:#f1f0fb;color:var(--violet-d)">${r.status}</span></div>
+      <div style="font-size:12px;color:var(--ink2);margin:4px 0">${esc(r.current_status)} → <b>${esc(r.requested_status)}</b></div>
+      <div style="font-size:11px;color:var(--muted)">Motif : ${esc(r.reason||'')}${r.comment?' · '+esc(r.comment):''}${r.reject_reason?' · Refus : '+esc(r.reject_reason):''}</div>
+      ${r.status==='pending'?`<div style="display:flex;gap:8px;margin-top:8px"><button class="btn p" data-appr="${r.id}"><i class="fa-solid fa-check"></i> Approuver</button><button class="btn g" data-rej="${r.id}"><i class="fa-solid fa-xmark"></i> Refuser</button></div>`:''}
+    </div>`).join(''):'<div style="padding:20px;text-align:center;color:var(--muted)">Aucune demande.</div>'}</div></div>`;
+  openModal();
+  $('pcrfStatus').onchange=e=>{pcrFilter.status=e.target.value;openPcrInbox();};
+  $('pcrfEmp').onchange=e=>{pcrFilter.emp=e.target.value.trim();openPcrInbox();};
+  $('pcrfDay').onchange=e=>{pcrFilter.day=e.target.value;openPcrInbox();};
+  $('modal').querySelectorAll('[data-appr]').forEach(b=>b.onclick=async()=>{ try{const r=await BE.pcrDecide(b.dataset.appr,'approve'); flash(r&&r.status==='obsolete'?'Statut modifié entre-temps : demande obsolète (non appliquée)':'Demande approuvée'); await loadPcrPending(); openPcrInbox(); render(); }catch(e){flash(e.message);} });
+  $('modal').querySelectorAll('[data-rej]').forEach(b=>b.onclick=async()=>{ const m=prompt('Motif de refus (facultatif) :')||''; try{ await BE.pcrDecide(b.dataset.rej,'reject',m); flash('Demande refusée'); await loadPcrPending(); openPcrInbox(); }catch(e){flash(e.message);} });
+}
 document.addEventListener('mousedown',e=>{if(!pop.contains(e.target)&&!e.target.closest('td.day'))closePop();});
 
 /* ===================== PORTAIL SALARIÉ — INBOX MANAGER ===================== */
