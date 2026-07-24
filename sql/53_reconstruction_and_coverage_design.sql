@@ -1,0 +1,14 @@
+-- 53_reconstruction_and_coverage_design.sql
+-- Appliqué via migrations MCP : staff_planning_rebuild + reconstruction test.
+--
+-- staff_planning_rebuild_day(emp,day) : reconstruit le RÉSUMÉ (grille) UNIQUEMENT
+-- depuis staff_planning_segments (+ métadonnées portées par les segments :
+-- source_proposal_id, origin_hotel_id). Colonnes opérationnelles reconstruites :
+-- status, shift_start/end, source_proposal_id, origin_hotel_id, duration,
+-- break_minutes. shift_label = champ cosmétique/legacy (posé 'custom' si horaires),
+-- exclu de la comparaison.
+--
+-- PREUVE (rolled-back) : snapshot -> DELETE du résumé -> rebuild -> comparaison
+-- jsonb bit-à-bit : IDENTIQUE pour le cas journée complète (PE dest + MAD origine)
+-- ET le cas fractionné milieu (PE 10-12 + origine P 08-16 bornes). => le résumé
+-- n'est JAMAIS la source de vérité ; il est intégralement dérivable des segments.
