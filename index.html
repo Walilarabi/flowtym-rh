@@ -9140,8 +9140,6 @@ async function renderHtmlToPdfBlob(html, title){
   const wrapRectForSig  = wrap.getBoundingClientRect();
   const sigField         = _measureYsSig(wrap.querySelector('#ys-sig-field'), wrapRectForSig);
   const sigFieldEmployer = _measureYsSig(wrap.querySelector('#ys-sig-employer'), wrapRectForSig);
-  if(sigField)         console.log('[renderHtmlToPdfBlob] sigField:', JSON.stringify(sigField));
-  if(sigFieldEmployer) console.log('[renderHtmlToPdfBlob] sigFieldEmployer:', JSON.stringify(sigFieldEmployer));
 
   try {
     const canvas = await window.html2canvas(wrap, {
@@ -15764,8 +15762,8 @@ function computeCodeForDate(emp, dateStr, pattern){
     const got=computeCodeForDate(null,ds,PAT2)?.code??null;
     if(got!==exp){console.error(`[cycle-test2] FAIL ${ds}: attendu="${exp}" obtenu="${got}"`);ok=false;}
   });
-  if(ok) console.log('[cycle-test] ✓ 38 dates vérifiées (sept/oct 2026, nov 2026–janv 2027) — 0 erreur');
-  else    console.error('[cycle-test] ✗ Des erreurs de cycle ont été détectées !');
+  /* [cycle-test] auto-vérification silencieuse (38 dates) ; erreurs signalées ci-dessous */
+  if(!ok) console.error('[cycle-test] ✗ Des erreurs de cycle ont été détectées !');
 })();
 
 // Charge les patterns de tous les employés visibles en mémoire (cache léger)
