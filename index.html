@@ -666,6 +666,9 @@ async function makeRealBE(){
       const {data,error}=await sb.from('staff_planning').select('employee_id,day,status,duration,shift_label,shift_start,shift_end,break_minutes,note,hours').eq('hotel_id',h).gte('day',s).lte('day',e);
       must(error,"Lecture du planning"); return data||[];
     },
+    // P0 — moteur d'heures basé sur les segments (source de vérité). Défaut legacy.
+    async hoursSource(h){ try{const {data,error}=await sb.rpc('group_hours_source',{p_hotel:h});if(error)return 'legacy';return data||'legacy';}catch(_){return 'legacy';} },
+    async hotelHoursRange(h,from,to){ const {data,error}=await sb.rpc('staff_hotel_hours_range',{p_hotel:h,p_from:from,p_to:to});must(error,"Heures (segments)");return data||[]; },
     async listYearPlanning(h,year){
       const {data,error}=await sb.from('staff_planning').select('employee_id,day,status').eq('hotel_id',h).gte('day',`${year}-01-01`).lte('day',`${year}-12-31`);
       must(error,"Lecture du planning annuel"); return data||[];
@@ -1256,6 +1259,8 @@ function makeTestBE(){
     async updateEmployee(id,p){Object.assign(emps.find(e=>e.id===id)||{},p);},
     async deleteEmployee(id){const e=emps.find(x=>x.id===id);if(e)e.active=false;},
     async listMonthPlanning(h,y,m){const s=iso(y,m,1),end=iso(y,m,dim(y,m));return planning.filter(p=>p.hotel_id===h&&p.day>=s&&p.day<=end);},
+    async hoursSource(h){return 'legacy';},              // démo : moteur segments non activé
+    async hotelHoursRange(h,from,to){return [];},
     async savePlanning(h,ups,dels){
       ups.forEach(u=>{const i=planning.findIndex(p=>p.hotel_id===u.hotel_id&&p.employee_id===u.employee_id&&p.day===u.day);
         if(i>=0)planning[i]={...planning[i],...u};else planning.push({...u});});
@@ -14306,6 +14311,15 @@ async function drawPayroll(){
     });
     const planMap=new Map(); planRows.forEach(r=>planMap.set(r.employee_id+'|'+r.day, r));
     const clockMap=new Map(); clockRows.forEach(c=>{if(!clockMap.has(c.employee_id))clockMap.set(c.employee_id,[]);clockMap.get(c.employee_id).push(c);});
+    // P0 — heures via segments (source de vérité) si le flag du groupe = 'segments'.
+    // Défaut legacy : comportement inchangé. canonMap = part de CET hôtel par (emp,jour).
+    let canonMap=null;
+    try{
+      if((await BE.hoursSource(hotelId))==='segments'){
+        canonMap=new Map();
+        (await BE.hotelHoursRange(hotelId,from,to)).forEach(r=>canonMap.set(r.employee_id+'|'+r.day, Number(r.net_hours)));
+      }
+    }catch(_){ canonMap=null; }  // en cas d'échec RPC : repli legacy silencieux
     const nd=dim(y,m);
     const rows=active.map(emp=>{
       const sc2=schedules.find(s=>s.id===emp.schedule_id);
@@ -14316,8 +14330,9 @@ async function drawPayroll(){
         const cell=planMap.get(emp.id+'|'+iso(y,m,d));
         const st=cell?.status||'';
         if(!st){repos++;continue;}
-        if(st==='P'){ P++; presenceH+=(cell.hours>0?Number(cell.hours):hpd2); }
-        else if(st==='PE'){ PE++; presenceH+=(cell.hours>0?Number(cell.hours):hpd2); }
+        // canonMap actif : heures nettes de CET hôtel (segments) ; sinon legacy (grille × hpd).
+        if(st==='P'){ P++; presenceH+=canonMap?Number(canonMap.get(emp.id+'|'+iso(y,m,d))||0):(cell.hours>0?Number(cell.hours):hpd2); }
+        else if(st==='PE'){ PE++; presenceH+=canonMap?Number(canonMap.get(emp.id+'|'+iso(y,m,d))||0):(cell.hours>0?Number(cell.hours):hpd2); }
         else if(st==='CP') CP++;
         else if(st==='RTT') RTT++;
         else if(st==='MAL') MAL++;
