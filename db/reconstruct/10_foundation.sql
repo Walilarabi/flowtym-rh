@@ -57,5 +57,9 @@ CREATE TABLE public.employees (
   active boolean NOT NULL DEFAULT true,
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
   departure_date date, planning_sort_order integer NOT NULL DEFAULT 0,
-  portal_auth_id uuid, schedule_id uuid,
+  portal_auth_id uuid, schedule_id uuid, email text, manager_id uuid,
   status text NOT NULL DEFAULT 'actif', departure_reason text, last_worked_date date);
+
+-- Admins transverses (RH Groupe / Super Admin) — mécanisme existant, réutilisé.
+CREATE TABLE IF NOT EXISTS public.platform_admins (
+  auth_id uuid PRIMARY KEY, is_active boolean NOT NULL DEFAULT true, created_at timestamptz NOT NULL DEFAULT now());

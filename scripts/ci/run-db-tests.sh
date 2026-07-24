@@ -46,4 +46,15 @@ ORPH=$(psql -d pilot_cc -tA -c "SELECT count(*) FROM group_move_applications WHE
 echo "   scénarios KO=$CC  chevauchements=$OV  orphelins=$ORPH"
 [ "$CC" = "0" ] && [ "$OV" = "0" ] && [ "$ORPH" = "0" ] || { echo "ECHEC concurrence"; exit 1; }
 
-echo "TOUS LES CONTROLES DB PASSENT (P0 $P0 ; A-G 7/7 ; 0 chevauchement ; 0 orphelin)."
+
+echo "== 4. Demandes de modification de statut (attendu 22/22) =="
+psql -c "DROP DATABASE IF EXISTS pilot_pcr" postgres
+psql -c "CREATE DATABASE pilot_pcr" postgres
+export PSQL="psql -d pilot_pcr"; bash "$ROOT/db/reconstruct/rebuild.sh" >/dev/null
+Q -d pilot_pcr -f "$ROOT/scripts/planning-change/10_tests.sql" >/dev/null
+PCRF=$(psql -d pilot_pcr -tA -c "SELECT count(*) FROM pcr_results WHERE NOT pass")
+PCR=$(psql -d pilot_pcr -tA -c "SELECT count(*) FILTER (WHERE pass)||'/'||count(*) FROM pcr_results")
+echo "   PCR = $PCR"
+[ "$PCRF" = "0" ] || { echo "ECHEC PCR ($PCRF)"; psql -d pilot_pcr -c "SELECT test FROM pcr_results WHERE NOT pass"; exit 1; }
+
+echo "TOUS LES CONTROLES DB PASSENT (P0 $P0 ; A-G 7/7 ; PCR $PCR ; 0 anomalie)."
