@@ -2443,6 +2443,7 @@ function gpBuildServiceCell(cell, rowCls){
 }
 
 // Ligne d'un collaborateur (voyant + nom + badge de statut + bouton Affecter).
+// Le bouton Affecter est désactivé si le collaborateur est indisponible ce jour.
 function gpBuildCollab(c, hotel, service){
   const isWork = gpIsWorking(c.status);
   const dot = gpDotClass(c.status, c.is_extra);
@@ -2450,11 +2451,15 @@ function gpBuildCollab(c, hotel, service){
   const nameCls = isWork ? 'nm' : (c.status && CMAP[c.status] && (CMAP[c.status].cat==='abs'||CMAP[c.status].cat==='paid') ? 'nm mut' : 'nm');
   const badgeHtml = badge ? `<span class="sbadge ${badge.cls}">${esc(badge.label)}</span>` : '';
   const eid=esc(c.employee_id), hid=esc(hotel.id||''), svc=esc(service||c.service||'');
+  const unavail = gpUnavailReason(c.employee_id);
+  const affBtn = unavail
+    ? `<button class="aff" disabled title="Indisponible : ${esc(unavail)}" style="opacity:.5;cursor:not-allowed">Affecter</button>`
+    : `<button class="aff" data-affect="${eid}" data-hotel="${hid}" data-svc="${svc}" title="Affecter à une mission">Affecter</button>`;
   return `<div class="gp-collab">
     <span class="dot ${dot}"></span>
     <span class="${nameCls}" data-collab="${eid}" data-hotel="${hid}" data-svc="${svc}" title="${esc(c.name||'')}">${esc(c.name||'')}</span>
     ${badgeHtml}
-    <button class="aff" data-affect="${eid}" data-hotel="${hid}" data-svc="${svc}" title="Affecter à une mission">Affecter</button>
+    ${affBtn}
   </div>`;
 }
 
@@ -2498,19 +2503,50 @@ function gpBuildAISuggestions(empId, currentSvc){
   return suggs;
 }
 
+// Raison d'indisponibilité (retourne '' si le collaborateur est affectable ce jour).
+// Empêche de suggérer/affecter un CP, MAL, ABS, MAT/PAT, FORM, mission programmée, etc.
+function gpUnavailReason(empId){
+  const cellInfo = gpFindCollabCell(empId);
+  const c = cellInfo && cellInfo.collab;
+  if(gpReserved && gpReserved[empId]) return 'mission déjà programmée';
+  if(!c) return '';
+  const st = c.status;
+  if(!st) return '';
+  if(gpIsWorking(st)) return '';
+  const meta = CMAP[st];
+  if(!meta) return '';
+  const cat = meta.cat;
+  if(cat==='abs' || cat==='paid'){
+    const specific = {
+      CP:'congé payé', MAL:'maladie', ABS:'absence', MAT:'maternité', PAT:'paternité',
+      FORM:'formation', RTT:'RTT', REC:'récupération', AE:'absence exceptionnelle',
+      CSS:'congé sans solde',
+    };
+    return specific[st] || (meta.label||'').toLowerCase();
+  }
+  return '';
+}
+
 function gpOpenCollabDrawer(empId, hotelId, service){
   const emp = gpFindEmployee(empId) || {};
   const cellInfo = gpFindCollabCell(empId);
   const c = (cellInfo && cellInfo.collab) || {};
   const currentHotel = (cellInfo && cellInfo.cell && cellInfo.cell.hotel) || null;
-  const name = c.name || (emp.first_name?emp.first_name+' '+emp.last_name:'Collaborateur');
+  const name = c.name || (emp.first_name?((emp.first_name||'')+' '+(emp.last_name||'')).trim():'');
+  if(!name){
+    // Fallback : ni le rendu Planning Groupe ni la fiche employé ne connaissent ce collaborateur.
+    // Ne jamais exposer l'UUID.
+    flash('Les informations du collaborateur n\'ont pas pu être chargées.','e');
+    return;
+  }
   const initials = (name||'').split(/\s+/).filter(Boolean).map(w=>w[0]||'').slice(0,2).join('').toUpperCase() || '?';
   const role = c.role || emp.job_title || emp.department || service || '';
   const isExtra = !!c.is_extra;
   const isWorking = gpIsWorking(c.status);
-  const availTxt = isWorking ? 'Disponible aujourd\'hui'
-                 : (c.status && CMAP[c.status] ? CMAP[c.status].label : 'Non disponible aujourd\'hui');
-  const availCls = isWorking ? '' : 'na';
+  const unavail = gpUnavailReason(empId);
+  const availTxt = unavail ? ('Indisponible : '+unavail)
+                 : (isWorking ? 'Disponible aujourd\'hui' : 'Non disponible aujourd\'hui');
+  const availCls = (isWorking && !unavail) ? '' : 'na';
 
   // Compétences (skills) : depuis la fiche employé si dispo, sinon fallback lisible.
   const skills = Array.isArray(emp.skills)&&emp.skills.length ? emp.skills.slice(0,6)
@@ -2524,13 +2560,14 @@ function gpOpenCollabDrawer(empId, hotelId, service){
     return `<span class="gp-dr-h-badge"><span class="d ${cls}"></span>${esc(h.name||'')}</span>`;
   }).join('') || '<span style="font-size:12px;color:var(--muted)">Aucun hôtel de rattachement</span>';
 
-  // Disponibilité (frise 00h → 24h) : très simple si présent = 100 %, sinon 0.
-  const availPct = isWorking ? 100 : 0;
-  const availLabel = isWorking ? 'Disponible' : (c.status ? (CMAP[c.status]?CMAP[c.status].label:'—') : 'Non disponible');
-  const availLabelCls = isWorking ? '' : 'na';
+  // Disponibilité (frise 00h → 24h) : présent = 100 %, sinon 0.
+  const availPct = (isWorking && !unavail) ? 100 : 0;
+  const availLabel = unavail ? ('Indisponible : '+unavail)
+                   : (isWorking ? 'Disponible' : 'Non disponible');
+  const availLabelCls = (isWorking && !unavail) ? '' : 'na';
 
-  // Suggestions IA.
-  const suggs = gpBuildAISuggestions(empId, service).slice(0,3);
+  // Suggestions IA : jamais pour un collaborateur indisponible.
+  const suggs = unavail ? [] : gpBuildAISuggestions(empId, service).slice(0,3);
   const suggBadges = suggs.slice(0,2).map(s=>{
     const imp = s.impact==='Élevé' ? 'hi' : (s.impact==='Faible' ? 'lo' : '');
     return `<div class="gp-dr-sug">
@@ -2582,8 +2619,9 @@ function gpOpenCollabDrawer(empId, hotelId, service){
       </div>`:''}
     </div>
     <div class="gp-dr-foot">
-      <button class="btnp" id="gpDrSim"><i class="fa-solid fa-flask"></i> Simuler mission</button>
-      <button class="btns" id="gpDrAffect"><i class="fa-regular fa-calendar-check"></i> Affecter à une mission</button>
+      ${unavail
+        ? `<button class="btnp" disabled title="${esc(unavail)}" style="opacity:.55;cursor:not-allowed"><i class="fa-solid fa-ban"></i> Indisponible : ${esc(unavail)}</button>`
+        : `<button class="btnp" id="gpDrAffect"><i class="fa-regular fa-calendar-check"></i> Affecter à une mission</button>`}
     </div>
   </div>`;
   $('dbg').classList.add('on'); $('drawer').classList.add('on');
@@ -2592,13 +2630,13 @@ function gpOpenCollabDrawer(empId, hotelId, service){
 
   const hidNow = currentHotel ? currentHotel.id : hotelId;
   const svcNow = (cellInfo && cellInfo.cell && cellInfo.cell.service) || service || '';
-  const bindSim=(destHotelId, destSvc)=>{
-    if(!canDo('group_planning','view')){ flash('Droit requis pour simuler','e'); return; }
+  const bindAffect=(destHotelId, destSvc)=>{
+    if(!canDo('group_planning','view')){ flash('Droit requis pour affecter','e'); return; }
+    if(unavail){ flash('Indisponible : '+unavail+' — affectation impossible.','e'); return; }
     gpOpenSimFormPrefilled(empId, hidNow, svcNow, destHotelId, destSvc);
   };
-  const sim=$('gpDrSim'); if(sim) sim.onclick=()=>bindSim(null, null);
-  const aff=$('gpDrAffect'); if(aff) aff.onclick=()=>bindSim(null, null);
-  $('drawer').querySelectorAll('[data-sug-hotel]').forEach(b=>b.onclick=()=>bindSim(b.dataset.sugHotel, b.dataset.sugSvc));
+  const aff=$('gpDrAffect'); if(aff) aff.onclick=()=>bindAffect(null, null);
+  $('drawer').querySelectorAll('[data-sug-hotel]').forEach(b=>b.onclick=()=>bindAffect(b.dataset.sugHotel, b.dataset.sugSvc));
   const see=$('gpDrSeeAll'); if(see) see.onclick=gpOpenProposals;
 }
 function gpCloseDrawer(){ $('drawer').classList.remove('on'); $('dbg').classList.remove('on'); }
@@ -2668,37 +2706,107 @@ function gpOpenReqEditor(){
 // Politique si temps de trajet non configuré : configurable via org features.
 function gpTravelPolicy(){ const c=(typeof _orgInfo!=='undefined'&&_orgInfo&&_orgInfo.features)||{}; return c.missingTravelLevel||'warning'; }
 
-// Formulaire de sélection du renfort (destination, service, date, plage, motif).
+// Résolution du nom affiché du collaborateur (jamais l'UUID).
+// Cherche dans le cache staff/extras, puis dans le dernier rendu Planning Groupe.
+function gpResolveEmployeeName(empId){
+  const emp=(staff||[]).find(x=>x.id===empId)||(typeof _extraEmpCache!=='undefined'&&_extraEmpCache.get&&_extraEmpCache.get(empId))||null;
+  if(emp && (emp.first_name||emp.last_name)) return ((emp.first_name||'')+' '+(emp.last_name||'')).trim();
+  const cellInfo=gpFindCollabCell(empId);
+  const n=cellInfo && cellInfo.collab && cellInfo.collab.name;
+  return n || '';
+}
+
+// Formulaire d'affectation d'un renfort (destination, service, date, plage, motif).
+// Le collaborateur est identifié par son UUID en interne, mais l'UI n'affiche que
+// son prénom + nom (jamais l'identifiant Supabase).
 function gpOpenSimForm(empId, fromHotelId, originService){
   const hotels=((gpData&&gpData.hotels)||[]).filter(h=>h.id!==fromHotelId);
-  const emp=(staff||[]).find(x=>x.id===empId)||(typeof _extraEmpCache!=='undefined'&&_extraEmpCache.get&&_extraEmpCache.get(empId))||{};
-  const name=(emp.first_name?emp.first_name+' '+emp.last_name:empId);
+  const name=gpResolveEmployeeName(empId);
+  if(!name){ flash('Les informations du collaborateur n\'ont pas pu être chargées.','e'); return; }
+  // Blocage préventif — un collaborateur indisponible ne peut pas être affecté.
+  const unavail=gpUnavailReason(empId);
+  if(unavail){ flash('Indisponible : '+unavail+' — affectation impossible.','e'); return; }
   const svcs=(gpData&&gpData.services)||['Réception','Petit-déjeuner','Étage','Technique'];
   const today=gpISO(gpDay||new Date());
-  gpModal('Simuler un renfort — '+esc(name), `
-    <p style="font-size:12px;color:var(--muted);margin-bottom:12px"><i class="fa-solid fa-eye"></i> Simulation <b>lecture seule</b> : aucune donnée ne sera modifiée.</p>
+  const originHotel=((gpData&&gpData.hotels)||[]).find(h=>h.id===fromHotelId)||{};
+  const originHotelLabel=originHotel.hotel_code? (originHotel.hotel_code+' — '+(originHotel.name||'')) : (originHotel.name||'');
+  gpModal('Affecter un renfort — '+esc(name), `
+    <p style="font-size:12px;color:var(--muted);margin-bottom:12px"><i class="fa-regular fa-circle-check"></i> Vérifiez les informations avant de confirmer l'affectation.</p>
+    <div class="fld"><label>Collaborateur</label><input type="text" value="${esc(name)}" disabled></div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-      <div class="fld"><label>Origine</label><input type="text" value="${esc(originService)} — ${esc((((gpData&&gpData.hotels)||[]).find(h=>h.id===fromHotelId)||{}).hotel_code||'')}" disabled></div>
+      <div class="fld"><label>Origine</label><input type="text" value="${esc(originService||'—')}${originHotelLabel?(' — '+esc(originHotelLabel)):''}" disabled></div>
       <div class="fld"><label>Hôtel de destination *</label><select id="simDestHotel">${hotels.map(h=>`<option value="${h.id}">${esc(h.hotel_code||'')} — ${esc(h.name)}</option>`).join('')}</select></div>
       <div class="fld"><label>Service de destination *</label><select id="simDestSvc">${svcs.map(s=>`<option value="${esc(s)}" ${s===originService?'selected':''}>${esc(s)}</option>`).join('')}</select></div>
       <div class="fld"><label>Date *</label><input type="date" id="simDate" value="${today}"></div>
       <div class="fld"><label>Début (optionnel)</label><input type="time" id="simStart"></div>
       <div class="fld"><label>Fin (optionnel)</label><input type="time" id="simEnd"></div>
     </div>
-    <div class="fld" style="margin-top:8px"><label>Motif de la simulation</label><input type="text" id="simReason" placeholder="Ex : renfort sous-effectif Vendôme"></div>
+    <div class="fld" style="margin-top:8px"><label>Motif de l'affectation</label><input type="text" id="simReason" placeholder="Ex : renfort sous-effectif Vendôme"></div>
     <p style="font-size:11px;color:var(--muted);margin-top:6px">Sans horaire = journée complète. Plusieurs jours : à venir (V1 : un créneau).</p>
-    <div style="margin-top:12px;text-align:right"><button class="btn p" id="simRun"><i class="fa-solid fa-play"></i> Lancer la simulation</button></div>`);
+    <div style="margin-top:12px;display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn g" onclick="closeModal()">Annuler</button>
+      <button class="btn p" id="simRun"><i class="fa-regular fa-circle-check"></i> Confirmer l'affectation</button>
+    </div>`);
   $('simRun').onclick=async()=>{
     const dest=$('simDestHotel').value, destSvc=$('simDestSvc').value, date=$('simDate').value;
     const st=$('simStart').value||null, en=$('simEnd').value||null;
     if(!dest||!destSvc||!date){ flash('Destination, service et date requis','e'); return; }
     const slot={date:date}; if(st) slot.start=st; if(en) slot.end=en;
-    $('simRun').disabled=true; $('simRun').innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Simulation…';
+    const btn=$('simRun'); btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Confirmation…';
     try{
       const built=await buildMoveSimulationContext({employeeId:empId,employeeName:name,fromHotelId:fromHotelId,originService:originService,destHotelId:dest,destService:destSvc,slots:[slot],reason:$('simReason').value||null});
-      gpRenderSimPanel(built);
-    }catch(e){ flash('Erreur simulation : '+(e.message||e),'e'); $('simRun').disabled=false; $('simRun').innerHTML='<i class="fa-solid fa-play"></i> Lancer la simulation'; }
+      // Re-vérification serveur : le moteur produit "blocked" si l'affectation est irrecevable.
+      if(built.result && built.result.decision==='blocked'){
+        gpRenderSimPanel(built);
+        flash('Affectation impossible : contraintes bloquantes détectées.','e');
+        return;
+      }
+      // Voie rapide : si l'utilisateur peut approuver + appliquer, on écrit directement.
+      const canApply = canDo('group_move_apply','create');
+      if(canApply){
+        await gpConfirmAffectation(built);
+      } else {
+        // Fallback : passe par le circuit d'approbation.
+        gpRenderSimPanel(built);
+        flash('Aperçu de l\'affectation — soumission au workflow requis.','i');
+      }
+    }catch(e){
+      flash('Erreur d\'affectation : '+(e.message||e),'e');
+      btn.disabled=false; btn.innerHTML='<i class="fa-regular fa-circle-check"></i> Confirmer l\'affectation';
+    }
   };
+}
+
+// Confirme et applique réellement une affectation à partir d'un contexte simulé.
+// Chaîne : gmpCreate → gmpSubmit → gmpApprovalDecide(true) → gmpApply.
+async function gpConfirmAffectation(built){
+  const b=built, r=b.result, p=b.meta;
+  const dates=(p.slots||[]).map(s=>s.date).sort();
+  const payload={
+    employee_id:p.employeeId, from_hotel_id:p.fromHotelId, to_hotel_id:p.destHotelId,
+    from_service:p.originService, to_service:p.destService,
+    period_from:dates[0], period_to:dates[dates.length-1], slots:p.slots, reason:p.reason,
+    decision:r.decision, score:r.score, confidence:b.assessment.confidence,
+    simulation:{ decision:r.decision, summary:r.summary, reasons:r.reasons, impact:r.impact,
+      blockers:r.blockers, warnings:r.warnings, positives:r.positives, infos:r.infos,
+      slots:r.slots, missing:b.assessment.fields.filter(f=>f.status!=='available') },
+    simulation_created_at:new Date().toISOString(),
+    simulation_input_hash:gpHash(b.raw), simulation_result_hash:gpHash(r),
+  };
+  const id=await BE.gmpCreate(payload);
+  try{ await BE.gmpSubmit(id); }catch(_){}
+  try{ await BE.gmpApprovalDecide(id, true, 'Confirmation directeur groupe'); }catch(_){}
+  const key=(window.crypto&&crypto.randomUUID)?crypto.randomUUID():('k'+Date.now()+'-'+Math.round(Math.random()*1e9));
+  const rr=await BE.gmpApply(id, key);
+  const destHotel=((gpData&&gpData.hotels)||[]).find(h=>h.id===p.destHotelId)||{};
+  const dtxt = new Date((p.slots[0]&&p.slots[0].date)||dates[0]).toLocaleDateString('fr-FR',{day:'numeric',month:'long',year:'numeric'});
+  closeModal();
+  gpCloseDrawer();
+  flash(esc(p.employeeName||'Collaborateur')+' a été affecté(e) au service '+esc(p.destService||'')+' du '+esc(destHotel.name||destHotel.hotel_code||'')+' le '+dtxt+'.');
+  // Rafraîchit le Planning Groupe (couvre l'origine et la destination car les deux
+  // hôtels sont chargés simultanément par la RPC group_planning).
+  gpLoadAndRender();
+  return rr;
 }
 
 // COUCHE D'ADAPTATION : récupère + normalise les données Flowtym, PUIS délègue
@@ -2793,43 +2901,53 @@ function gpRenderSimPanel(built){
     ${scoreBox}
     ${dataZone}
     <div style="margin-top:14px;display:flex;justify-content:flex-end;gap:8px">
-      <button class="btn g" onclick="closeModal()">Fermer la simulation</button>
+      <button class="btn g" onclick="closeModal()">Fermer</button>
       ${(r.decision!=='blocked'&&canDo('group_move_prepare','create'))
-        ? `<button class="btn p" id="gpPrepareBtn"><i class="fa-solid fa-file-pen"></i> Préparer le déplacement</button>`
-        : `<button class="btn g" title="${r.decision==='blocked'?'Déplacement bloqué':'Droit requis'}" disabled style="opacity:.6">Préparer le déplacement</button>`}
+        ? `<button class="btn p" id="gpPrepareBtn"><i class="fa-regular fa-circle-check"></i> Confirmer l'affectation</button>`
+        : `<button class="btn g" title="${r.decision==='blocked'?'Affectation bloquée : contraintes détectées':'Droit requis'}" disabled style="opacity:.6">Confirmer l'affectation</button>`}
     </div>`;
-  gpModal('Simulation de renfort (lecture seule)', html, 'fa-solid fa-flask');
+  gpModal('Aperçu de l\'affectation — '+esc(p.employeeName||''), html, 'fa-regular fa-calendar-check');
   const pb=$('gpPrepareBtn'); if(pb) pb.onclick=gpPrepareMove;
 }
 
-// Crée un BROUILLON (aucune écriture planning). S'appuie sur la dernière simulation.
+// Confirme l'affectation depuis le panneau d'aperçu. Applique réellement le
+// déplacement si l'utilisateur en a le droit (canDo group_move_apply), sinon
+// crée un brouillon dans le circuit d'approbation.
 async function gpPrepareMove(){
   if(!_gpLastBuilt){ return; }
-  const b=_gpLastBuilt, r=b.result, p=b.meta;
-  const dates=(p.slots||[]).map(s=>s.date).sort();
-  const payload={
-    employee_id:p.employeeId, from_hotel_id:p.fromHotelId, to_hotel_id:p.destHotelId,
-    from_service:p.originService, to_service:p.destService,
-    period_from:dates[0], period_to:dates[dates.length-1], slots:p.slots, reason:p.reason,
-    decision:r.decision, score:r.score, confidence:b.assessment.confidence,
-    // snapshot lisible + critique (pas de duplication inutile des données brutes)
-    simulation:{ decision:r.decision, summary:r.summary, reasons:r.reasons, impact:r.impact,
-      blockers:r.blockers, warnings:r.warnings, positives:r.positives, infos:r.infos,
-      slots:r.slots, missing:b.assessment.fields.filter(f=>f.status!=='available') },
-    simulation_created_at:new Date().toISOString(),
-    simulation_input_hash:gpHash(b.raw), simulation_result_hash:gpHash(r),
-  };
-  const btn=$('gpPrepareBtn'); if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Création…'; }
+  const btn=$('gpPrepareBtn'); if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Confirmation…'; }
   try{
-    const id=await BE.gmpCreate(payload);
-    closeModal(); flash('Brouillon de déplacement créé (aucune modification du planning).');
+    if(canDo('group_move_apply','create')){
+      await gpConfirmAffectation(_gpLastBuilt);
+      return;
+    }
+    // Fallback : brouillon (aucune écriture planning) — l'affectation attend l'approbation.
+    const b=_gpLastBuilt, r=b.result, p=b.meta;
+    const dates=(p.slots||[]).map(s=>s.date).sort();
+    const payload={
+      employee_id:p.employeeId, from_hotel_id:p.fromHotelId, to_hotel_id:p.destHotelId,
+      from_service:p.originService, to_service:p.destService,
+      period_from:dates[0], period_to:dates[dates.length-1], slots:p.slots, reason:p.reason,
+      decision:r.decision, score:r.score, confidence:b.assessment.confidence,
+      simulation:{ decision:r.decision, summary:r.summary, reasons:r.reasons, impact:r.impact,
+        blockers:r.blockers, warnings:r.warnings, positives:r.positives, infos:r.infos,
+        slots:r.slots, missing:b.assessment.fields.filter(f=>f.status!=='available') },
+      simulation_created_at:new Date().toISOString(),
+      simulation_input_hash:gpHash(b.raw), simulation_result_hash:gpHash(r),
+    };
+    await BE.gmpCreate(payload);
+    closeModal();
+    flash('Affectation soumise au circuit d\'approbation.');
     gpOpenProposals();
-  }catch(e){ flash('Erreur : '+(e.message||e),'e'); if(btn){ btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-file-pen"></i> Préparer le déplacement'; } }
+  }catch(e){
+    flash('Erreur : '+(e.message||e),'e');
+    if(btn){ btn.disabled=false; btn.innerHTML='<i class="fa-regular fa-circle-check"></i> Confirmer l\'affectation'; }
+  }
 }
 
 // Panneau "Propositions de renfort" (liste + actions, aucune application réelle).
 const GMP_STATUS={ draft:{l:'Brouillon',c:'#6b7280',bg:'#f3f4f6'}, pending_review:{l:'En attente de validation',c:'#b45309',bg:'#fef3c7'}, approved:{l:'Approuvé',c:'#15803d',bg:'#dcfce7'}, rejected:{l:'Rejeté',c:'#dc2626',bg:'#fee2e2'}, expired:{l:'Expiré',c:'#9ca3af',bg:'#f3f4f6'}, cancelled:{l:'Annulé',c:'#9ca3af',bg:'#f3f4f6'} };
-const GMP_STALE={ valid:'', to_refresh:'⟳ Simulation à actualiser', conflict:'⚠ En conflit', expired:'⌛ Expiré' };
+const GMP_STALE={ valid:'', to_refresh:'⟳ Affectation à revérifier', conflict:'⚠ En conflit', expired:'⌛ Expiré' };
 let _gmpFilter={status:'',search:''};
 async function gpOpenProposals(){
   gpModal('Propositions de renfort', `
@@ -2922,13 +3040,13 @@ function gpOpenProposal(id){
       ${list(sim.warnings,'#b45309','Avertissements')}
       ${list(sim.positives,'#15803d','Effets positifs')}
       ${(sim.missing&&sim.missing.length)?`<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px;margin-top:6px;font-size:11px">Données manquantes : ${sim.missing.map(m=>esc(m.label)).join(', ')} — confiance ${r.confidence}%</div>`:''}
-      <div style="font-size:10.5px;color:var(--muted);margin-top:8px">Simulation du ${esc((r.simulation_created_at||'').slice(0,16).replace('T',' '))} · empreinte ${esc((r.simulation_input_hash||'').slice(0,8))} · statut ${esc(r.status)}${r.staleness&&r.staleness!=='valid'?' · '+esc(GMP_STALE[r.staleness]||r.staleness):''}</div>
+      <div style="font-size:10.5px;color:var(--muted);margin-top:8px">Vérifiée le ${esc((r.simulation_created_at||'').slice(0,16).replace('T',' '))} · empreinte ${esc((r.simulation_input_hash||'').slice(0,8))} · statut ${esc(r.status)}${r.staleness&&r.staleness!=='valid'?' · '+esc(GMP_STALE[r.staleness]||r.staleness):''}</div>
       <div id="gmpTimeline" style="margin-top:10px"><div style="font-size:11px;color:var(--muted)"><i class="fa-solid fa-spinner fa-spin"></i> Chargement de la timeline…</div></div>
       <div style="margin-top:12px;text-align:right"><button class="btn g" onclick="gpOpenProposals()">Retour</button></div>`, 'fa-solid fa-file-lines');
     // Timeline (événements + circuit d'approbation)
     BE.gmpTimeline(id).then(tl=>{
       const host=$('gmpTimeline'); if(!host||!tl) { if(host) host.innerHTML=''; return; }
-      const AT={ created:'Créée', submitted:'Soumise', step_approved:'Étape approuvée', approved:'Approuvée', rejected:'Rejetée', cancelled:'Annulée', back_to_draft:'Retour brouillon', scheduled:'Programmée', waiver_added:'Dérogation', resimulated:'Re-simulée', marked_stale:'Marquée à actualiser' };
+      const AT={ created:'Créée', submitted:'Soumise', step_approved:'Étape approuvée', approved:'Approuvée', rejected:'Rejetée', cancelled:'Annulée', back_to_draft:'Retour brouillon', scheduled:'Programmée', waiver_added:'Dérogation', resimulated:'Revérifiée', marked_stale:'Marquée à actualiser' };
       const steps=(tl.approvals||[]).map(s=>{ const col=s.status==='approved'?'#15803d':s.status==='rejected'?'#dc2626':'#9ca3af'; return `<span style="display:inline-block;font-size:10.5px;padding:2px 8px;border-radius:10px;background:#f3f4f6;color:${col};margin:2px">${esc(s.approver_type||s.key||('Étape '+s.step))} : ${s.status==='approved'?'✔':s.status==='rejected'?'✘':'…'}</span>`; }).join('');
       const evs=(tl.events||[]).map(e=>`<div style="font-size:11px;padding:3px 0;border-bottom:1px solid #f3f3f7"><span style="color:#5B21B6">${esc(AT[e.action]||e.action)}</span> <span style="color:#9ca3af">${esc((e.at||'').slice(0,16).replace('T',' '))}</span>${e.comment?' — '+esc(e.comment):''}</div>`).join('');
       const notifs=(tl.notifications||[]).length;
