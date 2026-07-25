@@ -14548,6 +14548,24 @@ function closePop(){pop.classList.remove('on');popK=null;}
 /* ===== Demandes de modification de statut (journées passées — Réception) =====
    Backend : planning_change_requests (RPC + garde FL010). La restriction réelle
    est côté base ; l'UI oriente vers la demande. Jour « passé » = fuseau hôtel. */
+/* UX — n'affiche jamais le message brut PostgREST quand un OBJET backend est absent
+   (RPC/table non déployée). Détection ciblée ; les erreurs métier/validation NE sont
+   PAS masquées (message d'origine conservé). */
+function _isBackendUnavailable(e){
+  const m=((e&&(e.message||e))||'').toString().toLowerCase();
+  return m.includes('could not find the function')
+      || m.includes('could not find the table')
+      || m.includes('schema cache')
+      || m.includes('pgrst202') || m.includes('pgrst205')
+      || (m.includes('function') && m.includes('does not exist'))
+      || (m.includes('relation') && m.includes('does not exist'));
+}
+function friendlyErr(e, unavailableMsg){
+  if(_isBackendUnavailable(e)){ console.warn('[backend indisponible]', (e&&(e.message||e))||e); return unavailableMsg||"Cette fonctionnalité n'est pas encore disponible sur cet environnement."; }
+  return (e&&e.message)||'Erreur';
+}
+const PCR_UNAVAILABLE="Le module de validation des modifications n'est pas encore activé.";
+
 let pcrPending=new Map();   // 'emp|day' -> demande pending de l'hôtel affiché
 function _hotelTz(){ return (hotels.find(x=>x.id===hotelId)||{}).timezone||'Europe/Paris'; }
 function _hotelTodayISO(){ try{ return new Intl.DateTimeFormat('en-CA',{timeZone:_hotelTz(),year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()); }catch(_){ return new Date().toISOString().slice(0,10); } }
@@ -14570,11 +14588,11 @@ function openPcrRequest(key){
     <button class="btn p" id="pcrSubmit" style="width:100%"><i class="fa-solid fa-paper-plane"></i> Envoyer pour validation</button></div>`;
   pop.classList.add('on');
   $('pcrSubmit').onclick=async()=>{ const reason=($('pcrReason').value||'').trim(); if(!reason){flash('Motif obligatoire');return;}
-    try{ await BE.pcrCreate(hotelId,emp,day,$('pcrNew').value,reason,$('pcrComment').value||null); flash('Demande envoyée pour validation'); closePop(); await loadPcrPending(); render(); }catch(e){ flash(e.message||'Erreur'); } };
+    try{ await BE.pcrCreate(hotelId,emp,day,$('pcrNew').value,reason,$('pcrComment').value||null); flash('Demande envoyée pour validation'); closePop(); await loadPcrPending(); render(); }catch(e){ flash(friendlyErr(e, PCR_UNAVAILABLE)); } };
 }
 let pcrFilter={status:'pending',emp:'',day:''};
 async function openPcrInbox(){
-  let rows=[]; try{ rows=await BE.pcrList(hotelId,pcrFilter.status?[pcrFilter.status]:['pending','approved','rejected','cancelled','obsolete']); }catch(e){ flash(e.message); return; }
+  let rows=[]; try{ rows=await BE.pcrList(hotelId,pcrFilter.status?[pcrFilter.status]:['pending','approved','rejected','cancelled','obsolete']); }catch(e){ flash(friendlyErr(e, PCR_UNAVAILABLE)); return; }
   const empName=id=>{const s=staff.find(x=>x.id===id)||(typeof _extraEmpCache!=='undefined'&&_extraEmpCache.get&&_extraEmpCache.get(id));return s?`${s.first_name} ${s.last_name}`:'—';};
   const fr=rows.filter(r=>(!pcrFilter.emp||r.employee_id===pcrFilter.emp)&&(!pcrFilter.day||r.day===pcrFilter.day));
   const hName=(hotels.find(h=>h.id===hotelId)||{}).name||'';
@@ -14596,8 +14614,8 @@ async function openPcrInbox(){
   $('pcrfStatus').onchange=e=>{pcrFilter.status=e.target.value;openPcrInbox();};
   $('pcrfEmp').onchange=e=>{pcrFilter.emp=e.target.value.trim();openPcrInbox();};
   $('pcrfDay').onchange=e=>{pcrFilter.day=e.target.value;openPcrInbox();};
-  $('modal').querySelectorAll('[data-appr]').forEach(b=>b.onclick=async()=>{ try{const r=await BE.pcrDecide(b.dataset.appr,'approve'); flash(r&&r.status==='obsolete'?'Statut modifié entre-temps : demande obsolète (non appliquée)':'Demande approuvée'); await loadPcrPending(); openPcrInbox(); render(); }catch(e){flash(e.message);} });
-  $('modal').querySelectorAll('[data-rej]').forEach(b=>b.onclick=async()=>{ const m=prompt('Motif de refus (facultatif) :')||''; try{ await BE.pcrDecide(b.dataset.rej,'reject',m); flash('Demande refusée'); await loadPcrPending(); openPcrInbox(); }catch(e){flash(e.message);} });
+  $('modal').querySelectorAll('[data-appr]').forEach(b=>b.onclick=async()=>{ try{const r=await BE.pcrDecide(b.dataset.appr,'approve'); flash(r&&r.status==='obsolete'?'Statut modifié entre-temps : demande obsolète (non appliquée)':'Demande approuvée'); await loadPcrPending(); openPcrInbox(); render(); }catch(e){flash(friendlyErr(e, PCR_UNAVAILABLE));} });
+  $('modal').querySelectorAll('[data-rej]').forEach(b=>b.onclick=async()=>{ const m=prompt('Motif de refus (facultatif) :')||''; try{ await BE.pcrDecide(b.dataset.rej,'reject',m); flash('Demande refusée'); await loadPcrPending(); openPcrInbox(); }catch(e){flash(friendlyErr(e, PCR_UNAVAILABLE));} });
 }
 document.addEventListener('mousedown',e=>{if(!pop.contains(e.target)&&!e.target.closest('td.day'))closePop();});
 
