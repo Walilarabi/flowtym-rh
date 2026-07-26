@@ -147,15 +147,17 @@ describe('Frontend · dialog actionnable Modifier / Annuler', () => {
     expect(html).toMatch(/openMoveGuardModal\(target\)/);
   });
 
-  test('openMoveEdit passe par gmpCancelApplied puis rouvre le formulaire (aucune écriture directe)', () => {
+  test('openMoveEdit ouvre le formulaire pré-rempli SANS modifier les données (regression: le remplacement est fait au submit)', () => {
     const idx = html.indexOf('async function openMoveEdit');
     expect(idx).toBeGreaterThan(-1);
-    // Corps de la fonction : de sa signature jusqu'à la déclaration suivante.
     const next = html.indexOf('\nasync function ', idx + 30);
     const body = html.slice(idx, next > 0 ? next : idx + 3000);
-    expect(body).toMatch(/gmpCancelApplied/);
+    // Doit ouvrir le form pré-rempli.
     expect(body).toMatch(/gpOpenSimFormPrefilled/);
-    // Aucune écriture directe planning depuis openMoveEdit :
+    // Ne DOIT PAS canceller — le remplacement atomique se fait au submit
+    // via gpConfirmAffectation → BE.gmpReplaceApplied.
+    expect(body).not.toMatch(/BE\.gmpCancelApplied/);
+    // Aucune écriture directe planning :
     expect(body).not.toMatch(/savePlanning|from\('staff_planning'\)/);
   });
 

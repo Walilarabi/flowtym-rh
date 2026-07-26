@@ -1243,6 +1243,7 @@ async function makeRealBE(){
     async gmpExpireRun(){const {data,error}=await sb.rpc('group_move_expire_run');if(error){if(error.code==='42883')return null;must(error,'Expiration');}return (data&&data[0])||data;},
     async gmpApply(id,key){const {data,error}=await sb.rpc('group_move_apply',{p_id:id,p_idempotency_key:key});must(error,'Application du déplacement');return data;},
     async gmpCancelApplied(id, onlyDay, key){const {data,error}=await sb.rpc('group_move_cancel_applied',{p_id:id,p_only_day:onlyDay||null,p_idempotency_key:key||null});must(error,'Annulation de l\'affectation');return data;},
+    async gmpReplaceApplied(oldId, newPayload, key){const {data,error}=await sb.rpc('group_move_replace_applied',{p_old_id:oldId,p_new_payload:newPayload,p_idempotency_key:key||null});must(error,'Modification de l\'affectation');return data;},
     async gmpProposalGet(id){const {data,error}=await sb.from('group_move_proposals').select('*').eq('id',id).maybeSingle();must(error,'Lecture de la proposition');return data;},
 
     /* --- AUDIT --- */
@@ -2891,36 +2892,55 @@ function openMoveGuardModal(row){
 }
 
 async function openMoveEdit(row){
-  // Modification = annulation + création d'une nouvelle affectation pré-remplie.
-  // Aucune écriture directe : passe par la logique métier existante.
+  // Modification NON DESTRUCTIVE : ouvre le formulaire pré-rempli SANS
+  // toucher aux données. L'ancien reste actif tant que l'utilisateur ne
+  // confirme pas. Au submit, le nouveau flow appelle group_move_replace_applied
+  // qui remplace atomiquement (annulation + création + application dans une
+  // seule transaction PostgreSQL — cf. sql/60_group_move_replace_applied.sql).
+  // Si l'utilisateur ferme la fenêtre, _gpReplaceOldId est effacé (voir
+  // gpModalClose) et l'ancien reste intact.
   let prop;
   try{ prop = await BE.gmpProposalGet(row.proposal_id); }
-  catch(e){ flash('Erreur : '+(e.message||e),'e'); return; }
-  if(!prop){ flash('Proposition introuvable','e'); return; }
-  if(!confirm(
-    'Modifier l\'affectation : cela annule le déplacement en cours ('+prop.from_service+' → '+prop.to_service+
-    ') et ouvre une nouvelle fenêtre d\'affectation pré-remplie. Continuer ?'
-  )) return;
-  const btn=$('mgEditBtn'); if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Annulation…'; }
-  try{
-    const key=(window.crypto&&crypto.randomUUID)?crypto.randomUUID():('c'+Date.now()+'-'+Math.round(Math.random()*1e9));
-    await BE.gmpCancelApplied(prop.id, null, key);
-    closeModal();
-    await loadMonth();
-    // Ouvre le formulaire d'affectation pré-rempli avec les paramètres de la proposition annulée.
-    gpOpenSimFormPrefilled(prop.employee_id, prop.from_hotel_id, prop.from_service,
-                            prop.to_hotel_id, prop.to_service);
-  }catch(e){
-    flash('Erreur : '+(e.message||e),'e');
-    if(btn){ btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-pen"></i> Modifier l\'affectation'; }
-  }
+  catch(e){ flash(_fnErrorMsg(e, 'Impossible d\'ouvrir cette affectation.'),'e'); return; }
+  if(!prop){ flash('Impossible d\'ouvrir cette affectation.','e'); return; }
+
+  _gpReplaceOldId = prop.id;
+  closeModal();
+  // Le formulaire ci-dessous ne modifie rien avant le clic sur « Confirmer ».
+  gpOpenSimFormPrefilled(prop.employee_id, prop.from_hotel_id, prop.from_service,
+                          prop.to_hotel_id, prop.to_service);
+}
+
+// Wrapper de messages fonctionnels : masque les détails techniques Supabase /
+// PostgREST à l'utilisateur, garde le message brut dans la console pour l'audit.
+function _fnErrorMsg(err, fallback){
+  const raw = (err && err.message ? err.message : String(err||'')) || '';
+  console.error('[planning-groupe]', raw);
+  // Cartographie erreur brute → message métier.
+  const map = [
+    [/Proposition introuvable/i,                    'Cette affectation n\'existe plus.'],
+    [/Seule une affectation appliquée peut/i,       'Cette affectation a déjà été modifiée ou annulée.'],
+    [/Seule une proposition appliquée peut/i,       'Cette affectation a déjà été modifiée ou annulée.'],
+    [/Accès refusé/i,                               'Vous n\'avez pas les droits nécessaires sur cet établissement.'],
+    [/Blocage non déroge|Blocage non dérogé/i,      'La nouvelle affectation est bloquée par des contraintes.'],
+    [/Proposition bloquée/i,                        'La nouvelle affectation est bloquée par des contraintes.'],
+    [/Données modifiées depuis la simulation/i,     'Les données ont changé, la vérification est nécessaire à nouveau.'],
+    [/Proposition concurrente prioritaire/i,        'Une autre affectation concurrente doit être traitée en premier.'],
+    [/schema cache|not find the function/i,         'Fonctionnalité indisponible actuellement — rechargez la page.'],
+    [/déjà en cours pour cette clé/i,               'Opération déjà en cours, veuillez patienter.'],
+    [/ensure_visibility: service.* introuvable/i,   'Le service de destination est inconnu de cet établissement.'],
+    [/service.* introuvable sur l/i,                'Le service de destination est inconnu de cet établissement.'],
+    [/JWT|permission denied|RLS/i,                  'Vous n\'avez pas les droits nécessaires.'],
+  ];
+  for(const [rx, msg] of map){ if(rx.test(raw)) return msg; }
+  return fallback || 'Une erreur est survenue.';
 }
 
 async function openMoveCancel(row){
   let prop;
   try{ prop = await BE.gmpProposalGet(row.proposal_id); }
-  catch(e){ flash('Erreur : '+(e.message||e),'e'); return; }
-  if(!prop){ flash('Proposition introuvable','e'); return; }
+  catch(e){ flash(_fnErrorMsg(e, 'Impossible d\'ouvrir cette affectation.'),'e'); return; }
+  if(!prop){ flash('Cette affectation n\'existe plus.','e'); return; }
   const nbSlots = Array.isArray(prop.slots) ? prop.slots.length : 0;
   const isMultiDay = nbSlots > 1;
   const empName = gpResolveEmployeeName(prop.employee_id) || 'Collaborateur';
@@ -2953,7 +2973,7 @@ async function openMoveCancel(row){
       await loadMonth();
       flash('Annulation confirmée : '+(rr && rr.removed || 0)+' ligne(s) supprimée(s), '+(rr && rr.restored || 0)+' shift(s) d\'origine restauré(s).');
     }catch(e){
-      flash('Erreur : '+(e.message||e),'e');
+      flash(_fnErrorMsg(e, 'Impossible d\'annuler cette affectation.'),'e');
       if(btn){ btn.disabled=false; }
     }
   }
@@ -3109,6 +3129,12 @@ function gpOpenSimForm(empId, fromHotelId, originService){
 
 // Confirme et applique réellement une affectation à partir d'un contexte simulé.
 // Chaîne : gmpCreate → gmpSubmit → gmpApprovalDecide(true) → gmpApply.
+// État global : si non-null, la prochaine confirmation d'affectation doit
+// REMPLACER cette proposition existante via group_move_replace_applied
+// (atomique). Fixé par openMoveEdit, remis à null en cas de fermeture sans
+// confirmation ou après succès.
+let _gpReplaceOldId = null;
+
 async function gpConfirmAffectation(built){
   const b=built, r=b.result, p=b.meta;
   const dates=(p.slots||[]).map(s=>s.date).sort();
@@ -3123,31 +3149,33 @@ async function gpConfirmAffectation(built){
     simulation_created_at:new Date().toISOString(),
     simulation_input_hash:gpHash(b.raw), simulation_result_hash:gpHash(r),
   };
-  const id=await BE.gmpCreate(payload);
-  try{ await BE.gmpSubmit(id); }catch(_){}
-  try{ await BE.gmpApprovalDecide(id, true, 'Confirmation directeur groupe'); }catch(_){}
   const key=(window.crypto&&crypto.randomUUID)?crypto.randomUUID():('k'+Date.now()+'-'+Math.round(Math.random()*1e9));
-  // gmpApply est atomique : écriture staff_planning + upsert visibilité extra
-  // (employee_hotel_assignments + employee_extra_activations) dans la MÊME
-  // transaction PostgreSQL — cf. sql/57_group_move_apply_visibility.sql et
-  // db/reconstruct/30_functions.sql. Toute défaillance rollback l'intégralité
-  // côté serveur ; le front n'a plus à réparer les incohérences.
-  const rr=await BE.gmpApply(id, key);
+  let rr;
+  const replaceOldId = _gpReplaceOldId;   // capture locale (peut être remise à null par ailleurs)
+  if(replaceOldId){
+    // MODIFICATION : remplacement atomique. Ancien + nouveau dans la MÊME
+    // transaction PostgreSQL. En cas d'échec, l'ancien reste intact et le
+    // nouveau n'est pas créé.
+    rr = await BE.gmpReplaceApplied(replaceOldId, payload, 'replace_'+key);
+    _gpReplaceOldId = null;
+  } else {
+    // CRÉATION classique : create+submit+approve+apply.
+    const id=await BE.gmpCreate(payload);
+    try{ await BE.gmpSubmit(id); }catch(_){}
+    try{ await BE.gmpApprovalDecide(id, true, 'Confirmation directeur groupe'); }catch(_){}
+    rr = await BE.gmpApply(id, key);
+  }
 
   const destHotel=((gpData&&gpData.hotels)||[]).find(h=>h.id===p.destHotelId)||{};
   const dtxt = new Date((p.slots[0]&&p.slots[0].date)||dates[0]).toLocaleDateString('fr-FR',{day:'numeric',month:'long',year:'numeric'});
   closeModal();
   gpCloseDrawer();
-  flash('Affectation confirmée : '+esc(p.employeeName||'')+' rejoint le service '+esc(p.destService||'')+' du '+esc(destHotel.name||destHotel.hotel_code||'')+' le '+dtxt+'.');
+  const label = replaceOldId ? 'Affectation modifiée' : 'Affectation confirmée';
+  flash(label+' : '+esc(p.employeeName||'')+' rejoint le service '+esc(p.destService||'')+' du '+esc(destHotel.name||destHotel.hotel_code||'')+' le '+dtxt+'.');
 
   gpEligible=null;
   _gpLastRender=null;
-  // Rafraîchit le Planning Groupe : la RPC group_planning couvre l'origine ET
-  // la destination (tous les hôtels du groupe sont chargés simultanément).
   gpLoadAndRender();
-  // Si l'utilisateur est déjà positionné sur l'hôtel d'origine ou de
-  // destination, on relance loadMonth() pour prendre en compte immédiatement
-  // le nouvel extra activé côté serveur.
   if(typeof loadMonth==='function' && (hotelId===p.destHotelId || hotelId===p.fromHotelId)){
     try{ await loadMonth(); }catch(_){}
   }
@@ -3285,7 +3313,7 @@ async function gpPrepareMove(){
     flash('Affectation soumise au circuit d\'approbation.');
     gpOpenProposals();
   }catch(e){
-    flash('Erreur : '+(e.message||e),'e');
+    flash(_fnErrorMsg(e, 'Une erreur est survenue lors de la modification.'),'e');
     if(btn){ btn.disabled=false; btn.innerHTML='<i class="fa-regular fa-circle-check"></i> Confirmer l\'affectation'; }
   }
 }
@@ -16623,7 +16651,15 @@ function openEmpForm(s){
     }).catch(()=>{});
   }
 }
-function closeModal(){$('modalbg').classList.remove('on');}
+function closeModal(){
+  $('modalbg').classList.remove('on');
+  // Fermeture de modale = annulation implicite d'un flow de remplacement en cours.
+  // Sans cela, si l'utilisateur ferme le formulaire « Modifier », le prochain
+  // clic sur « Confirmer l'affectation » d'un flow différent tenterait de
+  // remplacer une proposition qui n'a rien à voir. Voir openMoveEdit et
+  // gpConfirmAffectation (sql/60_group_move_replace_applied.sql).
+  if(typeof _gpReplaceOldId !== 'undefined') _gpReplaceOldId = null;
+}
 
 /* ===================== RYTHMES DE TRAVAIL — HELPERS ===================== */
 
