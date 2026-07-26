@@ -97,6 +97,47 @@ describe('Planning Groupe · functionalErrorMessage — messages métier', () =>
   test('Erreur inconnue → fallback', () => expect(
     functionalErrorMessage(new Error('kaboom'), 'Impossible d\'annuler cette affectation.')
   ).toBe('Impossible d\'annuler cette affectation.'));
+
+  // Régression : les RAISE serveur sans accents doivent matcher exactement
+  // les mêmes messages que ceux avec accents. Le bug initial était que
+  // « Acces refuse » (sans accent) tombait dans le fallback au lieu d'être
+  // mappé sur « Vous n'avez pas les droits nécessaires… ».
+  describe('accents optionnels (le serveur peut RAISE sans accents)', () => {
+    test('Acces refuse (sans accent) → droits', () => t(
+      'Acces refuse',
+      'Vous n\'avez pas les droits nécessaires sur cet établissement.'
+    ));
+    test('Accès refusé (avec accent) → droits', () => t(
+      'Accès refusé',
+      'Vous n\'avez pas les droits nécessaires sur cet établissement.'
+    ));
+    test('Seule une affectation appliquee peut etre annulee (sans accents)', () => t(
+      'Seule une affectation appliquee peut etre annulee (statut actuel : cancelled)',
+      'Cette affectation a déjà été modifiée ou annulée.'
+    ));
+    test('Proposition bloquee (sans accent)', () => t(
+      'Proposition bloquee',
+      'La nouvelle affectation est bloquée par des contraintes.'
+    ));
+    test('Donnees modifiees depuis la simulation (sans accents)', () => t(
+      'Donnees modifiees depuis la simulation : re-simulation requise',
+      'Les données ont changé, la vérification est nécessaire à nouveau.'
+    ));
+    test('deja en cours pour cette cle (sans accents)', () => t(
+      'Annulation deja en cours pour cette cle',
+      'Opération déjà en cours, veuillez patienter.'
+    ));
+  });
+
+  // Régression : le bug SQL 42803 corrigé par migration 61
+  test('erreur SQL GROUP BY / ambiguous → message technique', () => t(
+    'column "staff_planning_segments.hotel_id" must appear in the GROUP BY clause',
+    'Une erreur technique empêche l\'opération. Rechargez la page.'
+  ));
+  test('erreur SQL ambiguous → message technique', () => t(
+    'column reference "d" is ambiguous',
+    'Une erreur technique empêche l\'opération. Rechargez la page.'
+  ));
 });
 
 // ── Contrat SQL — migration 60 ──────────────────────────────────────────────

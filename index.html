@@ -2913,26 +2913,31 @@ async function openMoveEdit(row){
 
 // Wrapper de messages fonctionnels : masque les détails techniques Supabase /
 // PostgREST à l'utilisateur, garde le message brut dans la console pour l'audit.
+// Note : les regex ci-dessous sont tolérantes aux accents car certaines RAISE
+// serveur (ex. migration 59 initiale) sont sans accents (« Acces refuse » au
+// lieu d'« Accès refusé »). Sans cette tolérance, le fallback affichait un
+// message générique au lieu du bon message métier.
 function _fnErrorMsg(err, fallback){
   const raw = (err && err.message ? err.message : String(err||'')) || '';
+  // Normalisation NFD → supprime les accents pour matcher indépendamment.
+  const norm = raw.normalize('NFD').replace(/[̀-ͯ]/g, '');
   console.error('[planning-groupe]', raw);
-  // Cartographie erreur brute → message métier.
   const map = [
     [/Proposition introuvable/i,                    'Cette affectation n\'existe plus.'],
-    [/Seule une affectation appliquée peut/i,       'Cette affectation a déjà été modifiée ou annulée.'],
-    [/Seule une proposition appliquée peut/i,       'Cette affectation a déjà été modifiée ou annulée.'],
-    [/Accès refusé/i,                               'Vous n\'avez pas les droits nécessaires sur cet établissement.'],
-    [/Blocage non déroge|Blocage non dérogé/i,      'La nouvelle affectation est bloquée par des contraintes.'],
-    [/Proposition bloquée/i,                        'La nouvelle affectation est bloquée par des contraintes.'],
-    [/Données modifiées depuis la simulation/i,     'Les données ont changé, la vérification est nécessaire à nouveau.'],
+    [/Seule une (affectation|proposition) appliquee peut/i, 'Cette affectation a déjà été modifiée ou annulée.'],
+    [/Acces refuse/i,                               'Vous n\'avez pas les droits nécessaires sur cet établissement.'],
+    [/Blocage non deroge/i,                         'La nouvelle affectation est bloquée par des contraintes.'],
+    [/Proposition bloquee/i,                        'La nouvelle affectation est bloquée par des contraintes.'],
+    [/Donnees modifiees depuis la simulation/i,     'Les données ont changé, la vérification est nécessaire à nouveau.'],
     [/Proposition concurrente prioritaire/i,        'Une autre affectation concurrente doit être traitée en premier.'],
     [/schema cache|not find the function/i,         'Fonctionnalité indisponible actuellement — rechargez la page.'],
-    [/déjà en cours pour cette clé/i,               'Opération déjà en cours, veuillez patienter.'],
+    [/deja en cours pour cette cle/i,               'Opération déjà en cours, veuillez patienter.'],
     [/ensure_visibility: service.* introuvable/i,   'Le service de destination est inconnu de cet établissement.'],
     [/service.* introuvable sur l/i,                'Le service de destination est inconnu de cet établissement.'],
+    [/must appear in the GROUP BY|ambiguous/i,      'Une erreur technique empêche l\'opération. Rechargez la page.'],
     [/JWT|permission denied|RLS/i,                  'Vous n\'avez pas les droits nécessaires.'],
   ];
-  for(const [rx, msg] of map){ if(rx.test(raw)) return msg; }
+  for(const [rx, msg] of map){ if(rx.test(norm)) return msg; }
   return fallback || 'Une erreur est survenue.';
 }
 
