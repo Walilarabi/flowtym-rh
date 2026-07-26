@@ -1197,7 +1197,7 @@ async function makeRealBE(){
     async gmpSubmit(id){const {error}=await sb.rpc('group_move_proposal_submit',{p_id:id});must(error,'Soumission');},
     async gmpSetStatus(id,status,comment){const {error}=await sb.rpc('group_move_proposal_set_status',{p_id:id,p_status:status,p_comment:comment||null});must(error,'Changement de statut');},
     async gmpAddWaiver(id,code,justification,before,overage){const {error}=await sb.rpc('group_move_proposal_add_waiver',{p_id:id,p_code:code,p_justification:justification,p_value_before:before||null,p_overage:overage||null});must(error,'Dérogation');},
-    async gmpResimulate(id,sim,inputHash,resultHash,score,confidence,decision){const {error}=await sb.rpc('group_move_proposal_resimulate',{p_id:id,p_simulation:sim,p_input_hash:inputHash,p_result_hash:resultHash,p_score:score,p_confidence:confidence,p_decision:decision});must(error,'Re-simulation');},
+    async gmpResimulate(id,sim,inputHash,resultHash,score,confidence,decision){const {error}=await sb.rpc('group_move_proposal_resimulate',{p_id:id,p_simulation:sim,p_input_hash:inputHash,p_result_hash:resultHash,p_score:score,p_confidence:confidence,p_decision:decision});must(error,'Revérification');},
     async gmpMarkStale(id,staleness,reason){const {error}=await sb.rpc('group_move_proposal_mark_staleness',{p_id:id,p_staleness:staleness,p_reason:reason||null});must(error,'Fraîcheur');},
     async gmpWorkflowGet(group){const {data,error}=await sb.rpc('group_move_workflow_get',{p_group:group});if(error){if(error.code==='42883')return[];must(error,'Workflow');}return data||[];},
     async gmpWorkflowSet(group,steps){const {error}=await sb.rpc('group_move_workflow_set',{p_group:group,p_steps:steps});must(error,'Configuration workflow');},
@@ -2802,9 +2802,13 @@ async function gpConfirmAffectation(built){
   const dtxt = new Date((p.slots[0]&&p.slots[0].date)||dates[0]).toLocaleDateString('fr-FR',{day:'numeric',month:'long',year:'numeric'});
   closeModal();
   gpCloseDrawer();
-  flash(esc(p.employeeName||'Collaborateur')+' a été affecté(e) au service '+esc(p.destService||'')+' du '+esc(destHotel.name||destHotel.hotel_code||'')+' le '+dtxt+'.');
-  // Rafraîchit le Planning Groupe (couvre l'origine et la destination car les deux
-  // hôtels sont chargés simultanément par la RPC group_planning).
+  // Formulation neutre — évite « affecté(e) ». La confirmation est réelle : le
+  // toast valide, et gpLoadAndRender() recharge l'ensemble du groupe (origine +
+  // destination sont couverts par la RPC group_planning) et invalide les
+  // suggestions IA obsolètes (dérivées de _gpLastRender).
+  flash('Affectation confirmée : '+esc(p.employeeName||'')+' rejoint le service '+esc(p.destService||'')+' du '+esc(destHotel.name||destHotel.hotel_code||'')+' le '+dtxt+'.');
+  gpEligible=null;           // force la re-vérification d'éligibilité au prochain accès
+  _gpLastRender=null;        // invalide le cache de rendu (et donc les suggestions IA affichées)
   gpLoadAndRender();
   return rr;
 }
@@ -2813,7 +2817,7 @@ async function gpConfirmAffectation(built){
 // aux helpers purs (FlowtymSimAdapter) et au moteur (FlowtymMoveSim).
 // Le moteur n'accède jamais à Supabase : seule cette fonction interroge les données.
 async function buildMoveSimulationContext(p){
-  if(!window.FlowtymMoveSim||!window.FlowtymSimAdapter) throw new Error('Moteur de simulation non chargé');
+  if(!window.FlowtymMoveSim||!window.FlowtymSimAdapter) throw new Error('Moteur d\'affectation non chargé');
   const dates=p.slots.map(s=>s.date).sort();
   const from=dates[0], to=dates[dates.length-1];
   // Données de couverture : destination (et origine si service différent).
