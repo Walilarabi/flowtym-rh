@@ -43,21 +43,25 @@ function planConfirmCall({ replaceOldId, payload, idempotencyKey }) {
  */
 function functionalErrorMessage(err, fallback) {
   const raw = (err && err.message ? err.message : String(err || '')) || '';
+  // Normalisation NFD — supprime les accents pour matcher indépendamment.
+  // Certaines RAISE serveur sont sans accents (migrations 59/60 initiales).
+  const norm = raw.normalize('NFD').replace(/[̀-ͯ]/g, '');
   const map = [
     [/Proposition introuvable/i,                    'Cette affectation n\'existe plus.'],
-    [/Seule une (affectation|proposition) appliquée peut/i, 'Cette affectation a déjà été modifiée ou annulée.'],
-    [/Accès refusé/i,                               'Vous n\'avez pas les droits nécessaires sur cet établissement.'],
-    [/Blocage non déroge|Blocage non dérogé/i,      'La nouvelle affectation est bloquée par des contraintes.'],
-    [/Proposition bloquée/i,                        'La nouvelle affectation est bloquée par des contraintes.'],
-    [/Données modifiées depuis la simulation/i,     'Les données ont changé, la vérification est nécessaire à nouveau.'],
+    [/Seule une (affectation|proposition) appliquee peut/i, 'Cette affectation a déjà été modifiée ou annulée.'],
+    [/Acces refuse/i,                               'Vous n\'avez pas les droits nécessaires sur cet établissement.'],
+    [/Blocage non deroge/i,                         'La nouvelle affectation est bloquée par des contraintes.'],
+    [/Proposition bloquee/i,                        'La nouvelle affectation est bloquée par des contraintes.'],
+    [/Donnees modifiees depuis la simulation/i,     'Les données ont changé, la vérification est nécessaire à nouveau.'],
     [/Proposition concurrente prioritaire/i,        'Une autre affectation concurrente doit être traitée en premier.'],
     [/schema cache|not find the function/i,         'Fonctionnalité indisponible actuellement — rechargez la page.'],
-    [/déjà en cours pour cette clé/i,               'Opération déjà en cours, veuillez patienter.'],
+    [/deja en cours pour cette cle/i,               'Opération déjà en cours, veuillez patienter.'],
     [/ensure_visibility: service.* introuvable/i,   'Le service de destination est inconnu de cet établissement.'],
     [/service.* introuvable sur l/i,                'Le service de destination est inconnu de cet établissement.'],
+    [/must appear in the GROUP BY|ambiguous/i,      'Une erreur technique empêche l\'opération. Rechargez la page.'],
     [/JWT|permission denied|RLS/i,                  'Vous n\'avez pas les droits nécessaires.'],
   ];
-  for (const [rx, msg] of map) { if (rx.test(raw)) return msg; }
+  for (const [rx, msg] of map) { if (rx.test(norm)) return msg; }
   return fallback || 'Une erreur est survenue.';
 }
 

@@ -110,6 +110,26 @@ describe('Planning Groupe · contrat SQL — group_move_cancel_applied', () => {
     expect(migration).toMatch(/INSERT INTO group_move_proposal_events/);
     expect(migration).toMatch(/cancelled_after_apply|cancelled_segment/);
   });
+
+  // Régression : migration 61 corrige le bug SQL 42803 (GROUP BY manquant)
+  // et le bug 42702 (colonne « d » ambiguë). Vérifier que le fix est présent
+  // dans le repo pour éviter toute régression future.
+  test('migration 61 corrective présente : GROUP BY hotel_id + alias renommé', () => {
+    const fix = fs.readFileSync(
+      path.join(__dirname, '..', 'sql', '61_group_move_cancel_applied_fix.sql'),
+      'utf8'
+    );
+    // Ré-écrit CREATE OR REPLACE
+    expect(fix).toMatch(/CREATE OR REPLACE FUNCTION public\.group_move_cancel_applied/);
+    // GROUP BY présent + LIMIT 1 (correctif 42803)
+    expect(fix).toMatch(/GROUP BY (s\.)?hotel_id/);
+    expect(fix).toMatch(/LIMIT 1/);
+    // Alias renommé pour éviter la collision avec la variable d PL/pgSQL
+    expect(fix).toMatch(/unnest\(v_days\) AS t\(dd\)/);
+    // Restauration best-effort pour propositions historiques sans segments
+    expect(fix).toMatch(/proposition historique|Propositions historiques/);
+    expect(fix).toMatch(/status\s*=\s*'MAD'/);
+  });
 });
 
 // ── Contrat frontend — dialog actionnable + BE method ────────────────────────
