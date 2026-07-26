@@ -623,6 +623,36 @@ tr.dept-sep td{pointer-events:none}
 .gp-dr-foot .btns:hover{border-color:var(--violet);color:var(--violet-d)}
 
 /* Drawer collaborateur : réutilise .drawer et .dbg existants */
+
+/* ── Planning Groupe · Drag & Drop ────────────────────────────────────────── */
+/* Seules les lignes .gp-collab[draggable="true"] sont glissables.
+   Le CSS ne pilote AUCUNE règle métier : la décision est prise en JS via
+   canDrag / classifyDrop (tests/lib/groupPlanningDnd.js). */
+.gp-collab[draggable="true"]{cursor:grab}
+.gp-collab[draggable="true"]:active{cursor:grabbing}
+.gp-collab[draggable="true"] .nm{cursor:grab}
+.gp-collab.gp-dragging{opacity:.4;background:#faf9ff}
+.gp-cell.gp-drop-valid{background:#f0fdf4;box-shadow:inset 0 0 0 2px #86efac}
+.gp-cell.gp-drop-warning{background:#faf5ff;box-shadow:inset 0 0 0 2px #d8b4fe}
+.gp-cell.gp-drop-invalid{background:#fef2f2;box-shadow:inset 0 0 0 2px #fca5a5;cursor:not-allowed}
+.gp-cell.gp-drop-origin{background:#f9fafb;box-shadow:inset 0 0 0 2px #e5e7eb;cursor:default}
+.gp-drop-hint{position:absolute;pointer-events:none;font-size:10.5px;font-weight:700;background:#fff;padding:2px 6px;border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,.12);z-index:70}
+.gp-drop-hint.v{color:#15803d;border:1px solid #86efac}
+.gp-drop-hint.w{color:var(--violet-d);border:1px solid #d8b4fe}
+.gp-drop-hint.i{color:var(--red);border:1px solid #fca5a5}
+/* Fantôme compact affiché à côté du curseur (nom + poste + hôtel d'origine).
+   Aucun UUID : seul le nom résolu est présent. */
+.gp-drag-ghost{position:fixed;z-index:200;pointer-events:none;background:#fff;border:1px solid var(--violet);border-radius:10px;box-shadow:0 8px 24px rgba(139,92,246,.25);padding:8px 12px;font-size:12px;display:flex;align-items:center;gap:10px;max-width:280px}
+.gp-drag-ghost .av{width:26px;height:26px;border-radius:8px;background:linear-gradient(135deg,var(--violet),var(--violet-d));color:#fff;display:grid;place-items:center;font-size:11px;font-weight:800}
+.gp-drag-ghost .who .n{font-weight:700;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px}
+.gp-drag-ghost .who .m{font-size:10.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px}
+/* Focus visible + accessibilité clavier : le bouton Affecter reste utilisable. */
+.gp-collab:focus-within{outline:2px solid var(--violet-bg);outline-offset:1px;border-radius:6px}
+/* Sous 900 px : Drag & Drop désactivé, le bouton Affecter reste le parcours principal. */
+@media(max-width:900px){
+  .gp-collab[draggable="true"]{cursor:default}
+  .gp-collab[draggable="true"] .nm{cursor:pointer}
+}
 </style>
 </head>
 <body>
@@ -2404,6 +2434,150 @@ function gpRenderBody(){
   });
   body.querySelectorAll('[data-open-hotel]').forEach(b=>b.onclick=()=>gpOpenHotelPlanning(b.dataset.openHotel));
   const dc=$('gpDisplayCfg'); if(dc) dc.onclick=gpOpenHotelPicker;
+
+  // Drag & Drop — attaché par délégation sur .gp-body.
+  gpDndAttach(body);
+}
+
+// ── Drag & Drop du Planning Groupe ────────────────────────────────────────
+// Un seul gestionnaire par re-render. Réutilise strictement le parcours
+// d'affectation existant : au drop, on ouvre la même fenêtre modale
+// (gpOpenSimFormPrefilled) préremplie avec origine + destination.
+let _gpDnd = null;
+function gpDndAttach(body){
+  if(!body) return;
+  // Nettoyage éventuel du gestionnaire précédent.
+  if(_gpDnd){
+    body.removeEventListener('dragstart', _gpDnd.start);
+    body.removeEventListener('dragover',  _gpDnd.over);
+    body.removeEventListener('dragleave', _gpDnd.leave);
+    body.removeEventListener('drop',      _gpDnd.drop);
+    body.removeEventListener('dragend',   _gpDnd.end);
+    if(_gpDnd.ghost && _gpDnd.ghost.parentNode) _gpDnd.ghost.parentNode.removeChild(_gpDnd.ghost);
+    if(_gpDnd.scrollTimer) cancelAnimationFrame(_gpDnd.scrollTimer);
+  }
+  _gpDnd = {ghost:null, source:null, payload:null, over:null, drop:null, end:null, leave:null, start:null, scrollTimer:null, lastX:0};
+
+  // Hôtels autorisés pour un collaborateur = tous les hôtels du groupe
+  // affichés dans _gpLastRender.refHotels (idem que les badges du drawer).
+  function allowedHotels(){ return new Set((_gpLastRender&&_gpLastRender.refHotels||[]).map(h=>h.id)); }
+  function findCell(el){ return el && el.closest ? el.closest('.gp-cell[data-drop-hid]') : null; }
+  function findRow(el){  return el && el.closest ? el.closest('.gp-collab[draggable="true"]') : null; }
+  function clearMarkers(){
+    body.querySelectorAll('.gp-drop-valid,.gp-drop-warning,.gp-drop-invalid,.gp-drop-origin')
+        .forEach(c=>c.classList.remove('gp-drop-valid','gp-drop-warning','gp-drop-invalid','gp-drop-origin'));
+  }
+  function updateGhost(x, y){
+    const g=_gpDnd.ghost; if(!g) return;
+    g.style.left = (x + 14) + 'px';
+    g.style.top  = (y + 8)  + 'px';
+  }
+  function makeGhost(name, role, hotelName){
+    const g=document.createElement('div');
+    g.className='gp-drag-ghost';
+    const initials=(name||'').split(/\s+/).filter(Boolean).map(w=>w[0]||'').slice(0,2).join('').toUpperCase()||'?';
+    g.innerHTML=`<div class="av">${esc(initials)}</div><div class="who"><div class="n">${esc(name||'')}</div><div class="m">${esc(role||'—')}${hotelName?(' · '+esc(hotelName)):''}</div></div>`;
+    document.body.appendChild(g);
+    return g;
+  }
+  function stepScroll(){
+    _gpDnd.scrollTimer=null;
+    if(!_gpDnd.source) return;
+    const r=body.getBoundingClientRect();
+    const d=gpDndAutoScrollAmount(_gpDnd.lastX, r.left, r.right);
+    if(d!==0){ body.scrollLeft += d; _gpDnd.scrollTimer=requestAnimationFrame(stepScroll); }
+  }
+
+  _gpDnd.start = function(ev){
+    const row=findRow(ev.target); if(!row) return;
+    const empId=row.dataset.emp, hid=row.dataset.hotel, svc=row.dataset.svc;
+    const unavail=gpUnavailReason(empId);
+    const decision=gpDndCanDrag(unavail, allowedHotels(), hid);
+    if(!decision.draggable){ ev.preventDefault(); flash('Indisponible : '+(decision.reason||'—'),'i'); return; }
+    _gpDnd.source=row; _gpDnd.payload=gpDndBuildPayload(empId, hid, svc, gpISO(gpDay||new Date()));
+    // Payload sans nom visible — la fenêtre finale utilise resolveEmployeeName.
+    try{ ev.dataTransfer.setData('application/x-flowtym-affect', JSON.stringify(_gpDnd.payload)); }catch(_){}
+    try{ ev.dataTransfer.effectAllowed='move'; }catch(_){}
+    row.classList.add('gp-dragging'); row.setAttribute('aria-grabbed','true');
+    // Ghost personnalisé + suppression du ghost natif.
+    const cellInfo=gpFindCollabCell(empId), collab=(cellInfo&&cellInfo.collab)||{};
+    const originH=((_gpLastRender&&_gpLastRender.refHotels)||[]).find(h=>h.id===hid)||{};
+    _gpDnd.ghost=makeGhost(collab.name||gpResolveEmployeeName(empId), collab.role||svc, originH.name||originH.hotel_code||'');
+    updateGhost(ev.clientX, ev.clientY);
+    try{ const img=new Image(); img.src='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABAQMAAAAl21bKAAAAA1BMVEUAAACnej3aAAAAAXRSTlMAQObYZgAAAApJREFUCNdjYAAAAAIAAeIhvDMAAAAASUVORK5CYII='; ev.dataTransfer.setDragImage(img, 0, 0); }catch(_){}
+  };
+  _gpDnd.over = function(ev){
+    if(!_gpDnd.source) return;
+    _gpDnd.lastX=ev.clientX;
+    const cell=findCell(ev.target); if(!cell) return;
+    ev.preventDefault(); // required to allow drop
+    try{ ev.dataTransfer.dropEffect = cell.classList.contains('gp-drop-invalid') || cell.classList.contains('gp-drop-origin') ? 'none' : 'move'; }catch(_){}
+    updateGhost(ev.clientX, ev.clientY);
+    // Marqueur non déjà posé → calcul puis application.
+    if(!cell.classList.contains('gp-drop-valid')&&!cell.classList.contains('gp-drop-warning')&&!cell.classList.contains('gp-drop-invalid')&&!cell.classList.contains('gp-drop-origin')){
+      const p=_gpDnd.payload, empId=p.employeeId;
+      const targetHid=cell.dataset.dropHid, targetSvc=cell.dataset.dropSvc;
+      const emp=gpFindEmployee(empId)||{};
+      const targetCellKey=targetHid+'|'+targetSvc;
+      const targetCell=_gpLastRender && _gpLastRender.perCell && _gpLastRender.perCell[targetCellKey];
+      const coverageLevel=targetCell && targetCell.cov && targetCell.cov.level;
+      // Chevauchement manifeste : le collab a-t-il un shift ce jour dans un autre hôtel
+      // que la destination (autre que son origine, où on va libérer) ?
+      let sameDayOtherHotel=false;
+      if(_gpLastRender && _gpLastRender.perCell){
+        Object.keys(_gpLastRender.perCell).forEach(k=>{
+          const c=_gpLastRender.perCell[k];
+          if(!c.hotel || c.hotel.id===targetHid || c.hotel.id===p.originHotelId) return;
+          if((c.csRaw||c.cs||[]).some(x=>x.employee_id===empId && gpIsWorking(x.status))) sameDayOtherHotel=true;
+        });
+      }
+      const cls=gpDndClassifyDrop({
+        origin:{hotelId:p.originHotelId, service:p.originService},
+        target:{hotelId:targetHid, service:targetSvc},
+        employeeCompetences: Array.isArray(emp.skills)?emp.skills:undefined,
+        allowedHotelIds: allowedHotels(),
+        coverageLevel, sameDayOtherHotel,
+      });
+      cell.classList.add('gp-drop-'+cls.level);
+    }
+    // Scroll automatique en bord de zone.
+    if(!_gpDnd.scrollTimer) _gpDnd.scrollTimer=requestAnimationFrame(stepScroll);
+  };
+  _gpDnd.leave = function(ev){
+    const cell=findCell(ev.target); if(!cell) return;
+    // On ne supprime que si on quitte réellement la cellule (pas en survolant un enfant).
+    const rel=ev.relatedTarget;
+    if(rel && cell.contains(rel)) return;
+    cell.classList.remove('gp-drop-valid','gp-drop-warning','gp-drop-invalid','gp-drop-origin');
+  };
+  _gpDnd.drop = function(ev){
+    const cell=findCell(ev.target); if(!cell || !_gpDnd.source) return;
+    ev.preventDefault();
+    const invalid = cell.classList.contains('gp-drop-invalid') || cell.classList.contains('gp-drop-origin');
+    const targetHid=cell.dataset.dropHid, targetSvc=cell.dataset.dropSvc;
+    const p=_gpDnd.payload;
+    clearMarkers();
+    if(invalid){
+      flash('Dépôt refusé : '+(cell.classList.contains('gp-drop-origin')?'même hôtel et même service':'contraintes non satisfaites'),'e');
+      return;
+    }
+    // Réutilise strictement le parcours existant. La confirmation finale
+    // repasse par le moteur qui refera la vérification (server-side aussi).
+    gpOpenSimFormPrefilled(p.employeeId, p.originHotelId, p.originService, targetHid, targetSvc);
+  };
+  _gpDnd.end = function(){
+    if(_gpDnd.source){ _gpDnd.source.classList.remove('gp-dragging'); _gpDnd.source.setAttribute('aria-grabbed','false'); }
+    _gpDnd.source=null; _gpDnd.payload=null;
+    if(_gpDnd.ghost && _gpDnd.ghost.parentNode){ _gpDnd.ghost.parentNode.removeChild(_gpDnd.ghost); }
+    _gpDnd.ghost=null;
+    clearMarkers();
+    if(_gpDnd.scrollTimer){ cancelAnimationFrame(_gpDnd.scrollTimer); _gpDnd.scrollTimer=null; }
+  };
+  body.addEventListener('dragstart', _gpDnd.start);
+  body.addEventListener('dragover',  _gpDnd.over);
+  body.addEventListener('dragleave', _gpDnd.leave);
+  body.addEventListener('drop',      _gpDnd.drop);
+  body.addEventListener('dragend',   _gpDnd.end);
 }
 
 // En-tête d'une colonne hôtel (KPIs synthétiques, lien "Ouvrir le planning").
@@ -2430,6 +2604,8 @@ function gpBuildHotelHead(h, ph){
 }
 
 // Cellule (service, hôtel) : liste des collaborateurs + bloc suggestions.
+// Marquée data-drop-hid / data-drop-svc pour être identifiable comme zone
+// de dépôt par le gestionnaire DnD (gpDndAttach).
 function gpBuildServiceCell(cell, rowCls){
   const {cs, mob, service, hotel} = cell;
   const rows = (cs||[]).sort((a,b)=>(a.is_extra?1:0)-(b.is_extra?1:0)||(a.name||'').localeCompare(b.name||''))
@@ -2439,11 +2615,14 @@ function gpBuildServiceCell(cell, rowCls){
     ? `<div class="gp-sugg-l"><i class="fa-solid fa-circle"></i>${mob} collaborateur${mob>1?'s':''} mobilisable${mob>1?'s':''} sur place</div>`
     : `<div class="gp-sugg-l none">Aucune suggestion</div>`;
   const showSugg = (cs && cs.length) ? `<div class="gp-sugg"><div class="gp-sugg-t">Suggestions</div>${sugg}</div>` : '';
-  return `<div class="gp-cell${rowCls}"><div class="gp-col-list">${list}</div>${showSugg}</div>`;
+  return `<div class="gp-cell${rowCls}" data-drop-hid="${esc(hotel.id||'')}" data-drop-svc="${esc(service||'')}" aria-label="Déposer sur ${esc(service||'')} — ${esc(hotel.name||hotel.hotel_code||'')}"><div class="gp-col-list">${list}</div>${showSugg}</div>`;
 }
 
 // Ligne d'un collaborateur (voyant + nom + badge de statut + bouton Affecter).
 // Le bouton Affecter est désactivé si le collaborateur est indisponible ce jour.
+// La ligne est rendue draggable=true uniquement si le collab est mobilisable :
+// aucune fuite de logique DnD n'est possible, elle est portée par les
+// attributs data-* et la logique JS commune (buildDragPayload / classifyDrop).
 function gpBuildCollab(c, hotel, service){
   const isWork = gpIsWorking(c.status);
   const dot = gpDotClass(c.status, c.is_extra);
@@ -2452,10 +2631,14 @@ function gpBuildCollab(c, hotel, service){
   const badgeHtml = badge ? `<span class="sbadge ${badge.cls}">${esc(badge.label)}</span>` : '';
   const eid=esc(c.employee_id), hid=esc(hotel.id||''), svc=esc(service||c.service||'');
   const unavail = gpUnavailReason(c.employee_id);
+  const draggable = !unavail && (typeof matchMedia==='undefined' || !matchMedia('(max-width:900px)').matches);
+  const dragAttrs = draggable
+    ? `draggable="true" role="button" aria-grabbed="false" aria-label="Glisser ${esc(c.name||'')} vers un autre établissement"`
+    : (unavail?`title="Indisponible : ${esc(unavail)}"`:'');
   const affBtn = unavail
     ? `<button class="aff" disabled title="Indisponible : ${esc(unavail)}" style="opacity:.5;cursor:not-allowed">Affecter</button>`
     : `<button class="aff" data-affect="${eid}" data-hotel="${hid}" data-svc="${svc}" title="Affecter à une mission">Affecter</button>`;
-  return `<div class="gp-collab">
+  return `<div class="gp-collab" ${dragAttrs} data-emp="${eid}" data-hotel="${hid}" data-svc="${svc}">
     <span class="dot ${dot}"></span>
     <span class="${nameCls}" data-collab="${eid}" data-hotel="${hid}" data-svc="${svc}" title="${esc(c.name||'')}">${esc(c.name||'')}</span>
     ${badgeHtml}
@@ -2501,6 +2684,39 @@ function gpBuildAISuggestions(empId, currentSvc){
   });
   suggs.sort((a,b)=>(b.sameSvc?1:0)-(a.sameSvc?1:0) || b.missing-a.missing);
   return suggs;
+}
+
+// ── DnD — pure fonctions (dupliquées côté navigateur pour éviter le bundling).
+// Source de vérité testée : tests/lib/groupPlanningDnd.js. Toute modification
+// doit rester alignée avec ce fichier ET ses tests jest.
+function gpDndCanDrag(unavailReason, allowedHotelIds, originHotelId){
+  if(unavailReason) return {draggable:false, reason:unavailReason};
+  if(allowedHotelIds && originHotelId && !allowedHotelIds.has(originHotelId)){
+    return {draggable:false, reason:'hôtel d\'origine hors périmètre'};
+  }
+  return {draggable:true};
+}
+function gpDndClassifyDrop(p){
+  const o=p.origin, t=p.target;
+  if(o&&t&&o.hotelId===t.hotelId&&o.service===t.service) return {level:'origin', reason:'même hôtel et même service'};
+  if(p.allowedHotelIds && t && !p.allowedHotelIds.has(t.hotelId)) return {level:'invalid', reason:'hôtel non autorisé'};
+  const sk=p.employeeCompetences;
+  if(Array.isArray(sk) && sk.length>0 && t && t.service && sk.indexOf(t.service)===-1) return {level:'invalid', reason:'service incompatible'};
+  if(p.sameDayOtherHotel) return {level:'invalid', reason:'chevauchement horaire'};
+  const cov=p.coverageLevel;
+  if(cov==='sous_effectif' || cov==='limite') return {level:'valid'};
+  if(cov==='non_configure') return {level:'warning', reason:'besoin non configuré'};
+  if(cov==='sureffectif') return {level:'warning', reason:'destination déjà en sureffectif'};
+  return {level:'valid'};
+}
+function gpDndBuildPayload(empId, oHid, oSvc, dayISO){
+  return {v:1, employeeId:String(empId||''), originHotelId:String(oHid||''), originService:String(oSvc||''), day:String(dayISO||'')};
+}
+function gpDndAutoScrollAmount(clientX, bLeft, bRight, edge, maxSpeed){
+  edge=edge||60; maxSpeed=maxSpeed||24;
+  if(clientX < bLeft+edge){ const t=1-(clientX-bLeft)/edge; return -Math.max(2, Math.round(maxSpeed*Math.max(0,Math.min(1,t)))); }
+  if(clientX > bRight-edge){ const t=1-(bRight-clientX)/edge; return Math.max(2, Math.round(maxSpeed*Math.max(0,Math.min(1,t)))); }
+  return 0;
 }
 
 // Raison d'indisponibilité (retourne '' si le collaborateur est affectable ce jour).
