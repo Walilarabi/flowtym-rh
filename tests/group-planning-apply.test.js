@@ -157,9 +157,17 @@ describe('Planning Groupe · contrat SQL atomique', () => {
     expect(migration).toMatch(/PERFORM public\._gmp_ensure_visibility/);
   });
 
-  test('migration utilise ON CONFLICT (idempotence)', () => {
+  test('migration utilise ON CONFLICT alignés sur les UNIQUE de production', () => {
+    // employee_hotel_assignments : UNIQUE (employee_id, target_hotel_id)
     expect(migration).toMatch(/ON CONFLICT \(employee_id, target_hotel_id\)/);
-    expect(migration).toMatch(/ON CONFLICT \(employee_id, hotel_id, year, month\)/);
+    // employee_extra_activations : UNIQUE inclut COALESCE(host_service_id, ...)
+    // pour matcher la contrainte partielle vérifiée en live sur production.
+    expect(migration).toMatch(/ON CONFLICT \(employee_id, hotel_id, year, month, COALESCE\(host_service_id/);
+  });
+
+  test('migration résout to_service → staff_departments.id (host_service_id NOT NULL)', () => {
+    expect(migration).toMatch(/staff_departments/);
+    expect(migration).toMatch(/service.*introuvable/);
   });
 
   test('migration ajoute la fonction d\'audit LECTURE SEULE', () => {

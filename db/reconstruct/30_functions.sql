@@ -277,7 +277,7 @@ BEGIN
   -- Visibilité extra (cf. sql/57_group_move_apply_visibility.sql) — même
   -- transaction : toute exception rollback l'intégralité (atomicité plpgsql).
   PERFORM public._gmp_ensure_visibility(
-    r.employee_id, r.from_hotel_id, r.to_hotel_id, v_days,
+    r.employee_id, r.from_hotel_id, r.to_hotel_id, r.to_service, v_days,
     'group_move:' || p_id::text
   );
 

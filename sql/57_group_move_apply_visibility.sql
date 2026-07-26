@@ -4,59 +4,43 @@
 -- dans le planning établissement de destination — dans la MÊME transaction
 -- que l'écriture staff_planning.
 --
--- Cause racine (voir PR #6, commit d'audit) :
+-- Cause racine :
 --   group_move_apply écrivait bien staff_planning (source de vérité) mais
 --   n'alimentait pas la couche de visibilité extra :
 --     · employee_hotel_assignments  (autorisation permanente)
 --     · employee_extra_activations  (activation mensuelle)
 --   Le rendu du planning établissement (index.html:render()) ne montre un
 --   collaborateur d'un autre hôtel que via l'intersection de ces deux tables.
---   Sans elles, la ligne staff_planning existait mais restait invisible.
 --
--- Correctif :
---   1. Fonction interne _gmp_ensure_visibility(...) — idempotente, réutilise
---      les mêmes conventions d'upsert que le parcours manuel d'ajout d'extra
---      (BE.addHotelAssignment et BE.setExtraActivation côté client).
---   2. group_move_apply l'appelle en fin de traitement, AVANT de marquer
---      la proposition 'applied'. Toute exception (RAISE) déclenche le
---      rollback plpgsql de l'intégralité de la transaction — atomicité
---      garantie : impossible d'avoir une mission écrite sans visibilité,
---      impossible d'avoir une visibilité sans mission, impossible d'avoir
---      une proposition marquée applied sans que les 3 opérations aient
---      réussi ensemble.
+-- Alignement schéma production (inspection live 2026-07-26) :
+--   · employee_hotel_assignments UNIQUE (employee_id, target_hotel_id)
+--     authorized_by est TEXT (pas UUID)
+--   · employee_extra_activations UNIQUE (employee_id, hotel_id, year, month,
+--     COALESCE(host_service_id, '00000000-0000-0000-0000-000000000000'::uuid))
+--     — la clé inclut host_service_id (contrainte partielle)
+--     host_service_id est FK → staff_departments(id), non-null en usage
+--     applicatif (extra_activation_set RAISE 'SERVICE_REQUIS' si NULL)
+--     employee_extra_activation_history reçoit une trace obligatoire (action)
 --
--- Migration destructive ? NON — les tables cibles et leurs contraintes
--- unique existent déjà en production ; on ajoute UNE fonction interne et on
--- réécrit CREATE OR REPLACE la RPC publique. Les données existantes ne sont
--- pas modifiées par cette migration. Voir la section « données déjà créées »
--- ci-dessous pour l'audit rétroactif.
+-- Deux invariants imposés par la conception existante :
+--   1. Une activation ne peut être créée sans autorisation préalable.
+--      (extra_activation_set RAISE 'NON_AUTORISE_HOTEL' sinon.)
+--   2. L'activation exige un host_service_id qui existe dans le staff_departments
+--      du même hôtel.
 --
--- Droits requis :
---   · SECURITY DEFINER pour _gmp_ensure_visibility (mêmes garanties d'accès
---     que group_move_apply, qui contient déjà _gmp_can_access).
---   · Aucun GRANT/REVOKE modifié : la RPC publique reste appelable par les
---     mêmes utilisateurs qu'avant (contrôlé par _gmp_can_access).
+-- La fonction _gmp_ensure_visibility ci-dessous respecte ces deux règles :
+--   · elle upsert d'abord l'autorisation ;
+--   · elle résout to_service (texte) → staff_departments.id (uuid) sur
+--     l'hôtel de destination ; en l'absence, RAISE explicite → rollback.
+--   · elle upsert l'activation avec host_service_id résolu.
+--   · elle écrit la trace history.
+-- Toute exception rollback l'intégralité de group_move_apply (plpgsql
+-- atomicity). Impossible d'aboutir à un état partiel.
 --
--- Dépendances :
---   · Tables : employee_hotel_assignments, employee_extra_activations,
---     staff_planning, group_move_proposals, group_move_proposal_events,
---     group_move_applications.
---   · Fonctions : _gmp_can_access, _gmp_fingerprint, _gmp_subtract,
---     _gmp_notify, group_move_open_for_employee.
+-- Migration destructive ? NON — création de fonctions et réécriture
+-- CREATE OR REPLACE. Aucune donnée touchée par cette migration.
 --
--- Prérequis à vérifier avant application (schémas en production) :
---   ✓ employee_hotel_assignments (
---       employee_id uuid, source_hotel_id uuid, target_hotel_id uuid,
---       notes text, authorized_by uuid, active boolean, ...)
---     UNIQUE (employee_id, target_hotel_id)
---   ✓ employee_extra_activations (
---       employee_id uuid, hotel_id uuid, year int, month int,
---       host_service_id uuid, host_role text, active boolean, comment text,
---       ...)
---     UNIQUE (employee_id, hotel_id, year, month)
---
--- Si l'une de ces contraintes UNIQUE n'existe pas exactement sous ce nom,
--- adapter la clause ON CONFLICT ci-dessous AVANT d'appliquer.
+-- Droits requis : SECURITY DEFINER (aligné sur group_move_apply).
 -- ============================================================================
 
 -- ── 1. Fonction interne (atomique, idempotente) ─────────────────────────────
@@ -64,6 +48,7 @@ CREATE OR REPLACE FUNCTION public._gmp_ensure_visibility(
   p_emp uuid,
   p_from_hotel uuid,
   p_to_hotel uuid,
+  p_to_service text,
   p_days date[],
   p_source text
 ) RETURNS void
@@ -75,29 +60,51 @@ DECLARE
   ym text;
   v_year int;
   v_month int;
+  v_service_id uuid;
+  v_uid uuid;
+  v_actor_name text;
 BEGIN
   IF p_emp IS NULL OR p_to_hotel IS NULL THEN
     RAISE EXCEPTION 'ensure_visibility: employee et hotel de destination requis';
   END IF;
 
+  -- Résolution du service de destination : nom (proposition) → id (destination).
+  IF p_to_service IS NOT NULL AND btrim(p_to_service) <> '' THEN
+    SELECT id INTO v_service_id
+      FROM staff_departments
+     WHERE hotel_id = p_to_hotel AND name = p_to_service
+     LIMIT 1;
+  END IF;
+  IF v_service_id IS NULL THEN
+    RAISE EXCEPTION 'ensure_visibility: service ''%'' introuvable sur l''hôtel de destination (%). '
+                    'Impossible de rendre la mission visible.', p_to_service, p_to_hotel;
+  END IF;
+
+  -- Identité de l'appelant pour la trace (auth.uid() est l'identité Supabase).
+  SELECT id, coalesce(full_name, email)
+    INTO v_uid, v_actor_name
+    FROM users WHERE auth_id = auth.uid() LIMIT 1;
+
   -- 1a. Autorisation permanente (employee_hotel_assignments) — upsert idempotent.
-  -- ON CONFLICT sur (employee_id, target_hotel_id) : la contrainte UNIQUE
-  -- porte ce nom logique en production (cf. BE.addHotelAssignment côté client).
+  -- ON CONFLICT (employee_id, target_hotel_id) : contrainte
+  -- employee_hotel_assignments_employee_id_target_hotel_id_key (production).
   INSERT INTO employee_hotel_assignments (
     employee_id, source_hotel_id, target_hotel_id, notes, authorized_by, active
   ) VALUES (
     p_emp, p_from_hotel, p_to_hotel,
     'Renfort inter-hôtels — Planning Groupe (' || p_source || ')',
-    auth.uid(), true
+    coalesce(v_actor_name, 'group_move_apply'),
+    true
   )
   ON CONFLICT (employee_id, target_hotel_id) DO UPDATE
     SET active = true,
         notes = COALESCE(EXCLUDED.notes, employee_hotel_assignments.notes),
         source_hotel_id = COALESCE(employee_hotel_assignments.source_hotel_id, EXCLUDED.source_hotel_id);
 
-  -- 1b. Activation mensuelle (employee_extra_activations) — un upsert par mois
-  -- couvert par les jours. Idempotent : la contrainte UNIQUE porte sur
-  -- (employee_id, hotel_id, year, month).
+  -- 1b. Activation mensuelle par mois couvert. La contrainte production est
+  -- UNIQUE (employee_id, hotel_id, year, month,
+  --         COALESCE(host_service_id, '00000000-0000-0000-0000-000000000000'::uuid))
+  -- On cible cette expression exacte pour ON CONFLICT.
   FOREACH d IN ARRAY coalesce(p_days, ARRAY[]::date[])
   LOOP
     v_year  := extract(year FROM d)::int;
@@ -106,30 +113,44 @@ BEGIN
     IF NOT (ym = ANY(seen)) THEN
       seen := seen || ym;
       INSERT INTO employee_extra_activations (
-        employee_id, hotel_id, year, month, host_service_id, host_role,
-        active, comment
+        employee_id, hotel_id, year, month,
+        host_service_id, host_role,
+        active, comment, created_by, updated_at
       ) VALUES (
-        p_emp, p_to_hotel, v_year, v_month, NULL, NULL,
-        true, 'Renfort inter-hôtels appliqué depuis le Planning Groupe (' || p_source || ')'
+        p_emp, p_to_hotel, v_year, v_month,
+        v_service_id, NULL,
+        true,
+        'Renfort inter-hôtels appliqué depuis le Planning Groupe (' || p_source || ')',
+        v_uid, now()
       )
-      ON CONFLICT (employee_id, hotel_id, year, month) DO UPDATE
+      ON CONFLICT (employee_id, hotel_id, year, month, COALESCE(host_service_id, '00000000-0000-0000-0000-000000000000'::uuid)) DO UPDATE
         SET active = true,
-            comment = COALESCE(EXCLUDED.comment, employee_extra_activations.comment);
+            comment = COALESCE(EXCLUDED.comment, employee_extra_activations.comment),
+            host_role = COALESCE(employee_extra_activations.host_role, EXCLUDED.host_role),
+            updated_at = now();
+
+      -- Historique — trace explicite pour l'audit RH (mêmes conventions que
+      -- extra_activation_set côté production).
+      INSERT INTO employee_extra_activation_history (
+        employee_id, hotel_id, year, month, host_service_id, host_role,
+        active, comment, action, actor_id, actor_name
+      ) VALUES (
+        p_emp, p_to_hotel, v_year, v_month, v_service_id, NULL,
+        true, 'Renfort Planning Groupe (' || p_source || ')',
+        'activate', v_uid, coalesce(v_actor_name, 'group_move_apply')
+      );
     END IF;
   END LOOP;
 END $function$;
 
-COMMENT ON FUNCTION public._gmp_ensure_visibility(uuid,uuid,uuid,date[],text) IS
+COMMENT ON FUNCTION public._gmp_ensure_visibility(uuid,uuid,uuid,text,date[],text) IS
   'Garantit la visibilité extra d''un collaborateur inter-hôtels : upsert '
-  'employee_hotel_assignments + employee_extra_activations pour chaque mois '
-  'couvert. Idempotent. Appelée UNIQUEMENT par group_move_apply, dans sa '
-  'transaction — toute exception déclenche le rollback complet.';
+  'employee_hotel_assignments + employee_extra_activations (avec host_service_id '
+  'résolu depuis staff_departments) + trace history. Idempotent. Appelée '
+  'UNIQUEMENT par group_move_apply, dans sa transaction — toute exception '
+  'déclenche le rollback complet.';
 
 -- ── 2. RPC publique group_move_apply — insertion de l'appel visibilité ──────
--- Réécriture complète (CREATE OR REPLACE) pour intégrer l'appel atomique.
--- Seule la nouvelle section (marquée « ── visibilité extra ── ») est ajoutée
--- par rapport à la version antérieure ; le reste reproduit la logique
--- existante à l'identique (voir db/reconstruct/30_functions.sql:169).
 CREATE OR REPLACE FUNCTION public.group_move_apply(p_id uuid, p_idempotency_key text)
  RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public'
 AS $function$
@@ -238,12 +259,10 @@ BEGIN
     v_applied := v_applied + 1;
   END LOOP;
 
-  -- ── visibilité extra (nouveau) ────────────────────────────────────────────
-  -- MÊME transaction : toute exception déclenchée par _gmp_ensure_visibility
-  -- rollback l'intégralité — impossible d'aboutir à une mission écrite sans
-  -- autorisation ni activation mensuelle.
+  -- ── visibilité extra ────────────────────────────────────────────────────
+  -- MÊME transaction : toute exception rollback l'intégralité.
   PERFORM public._gmp_ensure_visibility(
-    r.employee_id, r.from_hotel_id, r.to_hotel_id, v_days,
+    r.employee_id, r.from_hotel_id, r.to_hotel_id, r.to_service, v_days,
     'group_move:' || p_id::text
   );
 
@@ -262,15 +281,13 @@ BEGIN
 END $function$;
 
 -- ── 3. Audit rétroactif — missions appliquées avant ce correctif ────────────
--- Fonction de LECTURE SEULE qui liste les missions déjà appliquées mais
--- potentiellement invisibles dans le planning de destination faute de
--- visibilité extra. Ne modifie AUCUNE donnée.
 CREATE OR REPLACE FUNCTION public.group_move_visibility_audit()
  RETURNS TABLE (
    proposal_id uuid,
    employee_id uuid,
    from_hotel_id uuid,
    to_hotel_id uuid,
+   to_service text,
    period_from date,
    period_to date,
    applied_at timestamptz,
@@ -279,59 +296,57 @@ CREATE OR REPLACE FUNCTION public.group_move_visibility_audit()
  ) LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public'
 AS $function$
   WITH applied AS (
-    SELECT p.id, p.employee_id, p.from_hotel_id, p.to_hotel_id,
+    SELECT p.id, p.employee_id, p.from_hotel_id, p.to_hotel_id, p.to_service,
            p.period_from, p.period_to, p.applied_at, p.slots
     FROM group_move_proposals p
     WHERE p.status = 'applied'
   ),
-  needs AS (
-    SELECT a.id AS proposal_id, a.employee_id, a.from_hotel_id, a.to_hotel_id,
+  slots_months AS (
+    SELECT a.id AS proposal_id, a.employee_id, a.from_hotel_id, a.to_hotel_id, a.to_service,
            a.period_from, a.period_to, a.applied_at,
-           NOT EXISTS (
-             SELECT 1 FROM employee_hotel_assignments h
-             WHERE h.employee_id = a.employee_id AND h.target_hotel_id = a.to_hotel_id AND h.active = true
-           ) AS missing_assignment,
-           array_agg(DISTINCT (extract(year FROM (s->>'date')::date)::int || '-' ||
-                               lpad(extract(month FROM (s->>'date')::date)::text, 2, '0'))
-                     ORDER BY (extract(year FROM (s->>'date')::date)::int || '-' ||
-                               lpad(extract(month FROM (s->>'date')::date)::text, 2, '0'))
-           ) FILTER (
-             WHERE NOT EXISTS (
-               SELECT 1 FROM employee_extra_activations ea
-               WHERE ea.employee_id = a.employee_id
-                 AND ea.hotel_id = a.to_hotel_id
-                 AND ea.year = extract(year FROM (s->>'date')::date)::int
-                 AND ea.month = extract(month FROM (s->>'date')::date)::int
-                 AND ea.active = true
-             )
-           ) AS missing_activations
+           extract(year FROM (s->>'date')::date)::int AS y,
+           extract(month FROM (s->>'date')::date)::int AS m
     FROM applied a
     LEFT JOIN jsonb_array_elements(a.slots) s ON true
-    GROUP BY a.id, a.employee_id, a.from_hotel_id, a.to_hotel_id,
-             a.period_from, a.period_to, a.applied_at
+  ),
+  agg AS (
+    SELECT sm.proposal_id, sm.employee_id, sm.from_hotel_id, sm.to_hotel_id, sm.to_service,
+           sm.period_from, sm.period_to, sm.applied_at,
+           NOT EXISTS (
+             SELECT 1 FROM employee_hotel_assignments h
+             WHERE h.employee_id = sm.employee_id AND h.target_hotel_id = sm.to_hotel_id AND h.active = true
+           ) AS missing_assignment,
+           array_agg(DISTINCT sm.y::text || '-' || lpad(sm.m::text, 2, '0'))
+             FILTER (
+               WHERE sm.y IS NOT NULL AND NOT EXISTS (
+                 SELECT 1 FROM employee_extra_activations ea
+                 WHERE ea.employee_id = sm.employee_id AND ea.hotel_id = sm.to_hotel_id
+                   AND ea.year = sm.y AND ea.month = sm.m AND ea.active = true
+               )
+             ) AS missing_activations
+    FROM slots_months sm
+    GROUP BY sm.proposal_id, sm.employee_id, sm.from_hotel_id, sm.to_hotel_id, sm.to_service,
+             sm.period_from, sm.period_to, sm.applied_at
   )
-  SELECT proposal_id, employee_id, from_hotel_id, to_hotel_id,
+  SELECT proposal_id, employee_id, from_hotel_id, to_hotel_id, to_service,
          period_from, period_to, applied_at,
          missing_assignment,
          coalesce(missing_activations, ARRAY[]::text[]) AS missing_activations
-  FROM needs
+  FROM agg
   WHERE missing_assignment OR coalesce(array_length(missing_activations, 1), 0) > 0
-  ORDER BY applied_at DESC;
+  ORDER BY applied_at DESC NULLS LAST;
 $function$;
 
 COMMENT ON FUNCTION public.group_move_visibility_audit() IS
-  'Audit LECTURE SEULE : liste les propositions appliquées qui n''ont pas '
-  'l''autorisation extra et/ou une activation mensuelle correspondante. '
-  'À exécuter avant régularisation manuelle des données historiques.';
+  'Audit LECTURE SEULE : liste les propositions appliquées sans autorisation '
+  'extra active et/ou sans activation mensuelle correspondante. À exécuter '
+  'avant régularisation manuelle des données historiques.';
 
 -- ── 4. Consignes de déploiement ─────────────────────────────────────────────
---   1. Vérifier les contraintes UNIQUE mentionnées en tête de fichier.
---   2. Appliquer cette migration en dev/staging d'abord.
---   3. Exécuter : SELECT * FROM group_move_visibility_audit();
---      Cette requête retourne la liste des missions à régulariser (données
---      créées avant ce correctif). NE PAS régulariser automatiquement :
---      me fournir la liste et attendre autorisation explicite (cf. cahier
---      des charges).
---   4. Après validation manuelle, une seconde migration effectuera la
---      régularisation en appelant _gmp_ensure_visibility pour chaque ligne
---      remontée par l'audit.
+-- Appliquer dans cet ordre :
+--   1. Cette migration (57) en dev/staging.
+--   2. Exécuter : SELECT * FROM group_move_visibility_audit();
+--      Attendre validation manuelle avant régularisation.
+--   3. Migration 58 (sql/58_group_move_visibility_backfill.sql) — non
+--      appliquée automatiquement — régularise les propositions déjà
+--      appliquées en appelant _gmp_ensure_visibility par proposition.
