@@ -861,7 +861,10 @@ async function makeRealBE(){
     async deleteEmployee(id){const {error}=await sb.from('employees').update({active:false}).eq('id',id);must(error,"Suppression collaborateur");},
     async listMonthPlanning(h,y,m){
       const s=iso(y,m,1), e=iso(y,m,dim(y,m));
-      const {data,error}=await sb.from('staff_planning').select('employee_id,day,status,duration,shift_label,shift_start,shift_end,break_minutes,note,hours').eq('hotel_id',h).gte('day',s).lte('day',e);
+      // source_proposal_id / origin_hotel_id : nécessaires pour identifier
+      // qu'une ligne provient d'un déplacement inter-hôtels (garde trigger
+      // trg_staff_planning_move_guard, sql/59_group_move_cancel_applied.sql).
+      const {data,error}=await sb.from('staff_planning').select('employee_id,day,status,duration,shift_label,shift_start,shift_end,break_minutes,note,hours,source_proposal_id,origin_hotel_id').eq('hotel_id',h).gte('day',s).lte('day',e);
       must(error,"Lecture du planning"); return data||[];
     },
     // P0 — moteur d'heures basé sur les segments (source de vérité). Défaut legacy.
@@ -1239,6 +1242,8 @@ async function makeRealBE(){
     async gmpRecheck(id,hashes,conflicts){const {data,error}=await sb.rpc('group_move_recheck',{p_id:id,p_current_hashes:hashes,p_conflicts:conflicts||0});must(error,'Re-vérification');return data;},
     async gmpExpireRun(){const {data,error}=await sb.rpc('group_move_expire_run');if(error){if(error.code==='42883')return null;must(error,'Expiration');}return (data&&data[0])||data;},
     async gmpApply(id,key){const {data,error}=await sb.rpc('group_move_apply',{p_id:id,p_idempotency_key:key});must(error,'Application du déplacement');return data;},
+    async gmpCancelApplied(id, onlyDay, key){const {data,error}=await sb.rpc('group_move_cancel_applied',{p_id:id,p_only_day:onlyDay||null,p_idempotency_key:key||null});must(error,'Annulation de l\'affectation');return data;},
+    async gmpProposalGet(id){const {data,error}=await sb.from('group_move_proposals').select('*').eq('id',id).maybeSingle();must(error,'Lecture de la proposition');return data;},
 
     /* --- AUDIT --- */
     async logAudit(action,entity_type,entity_id,employee_id,details){
@@ -2856,6 +2861,115 @@ function gpOpenCollabDrawer(empId, hotelId, service){
   const see=$('gpDrSeeAll'); if(see) see.onclick=gpOpenProposals;
 }
 function gpCloseDrawer(){ $('drawer').classList.remove('on'); $('dbg').classList.remove('on'); }
+
+// ── Modal actionnable pour une ligne issue d'un déplacement inter-hôtels ────
+// Utilisée à la place du blocage brut du trigger trg_staff_planning_move_guard.
+// Détecte automatiquement une pending qui viserait une cellule protégée, ou
+// s'ouvre proactivement au clic. Trois actions : Modifier / Annuler / Fermer.
+function openMoveGuardModal(row){
+  // row = { proposal_id, employee_id, day, hotel_id, origin_hotel_id }
+  if(!row || !row.proposal_id){ flash('Aucun déplacement identifiable pour cette cellule','e'); return; }
+  const empName = gpResolveEmployeeName(row.employee_id) || 'Collaborateur';
+  const dayTxt = row.day ? new Date(row.day).toLocaleDateString('fr-FR',{day:'numeric',month:'long',year:'numeric'}) : '';
+  const html = `
+    <p style="font-size:13px;margin-bottom:10px">
+      Cette ligne provient d'un déplacement inter-hôtels. Elle ne peut pas être modifiée directement.
+    </p>
+    <div style="font-size:12px;color:var(--ink2);background:#faf9ff;border:1px solid #e6dffb;border-radius:8px;padding:10px;margin-bottom:14px">
+      <b>${esc(empName)}</b> — ${esc(dayTxt)}
+      <div style="color:var(--muted);font-size:11px;margin-top:4px">Déplacement <code>${esc(row.proposal_id).slice(0,8)}…</code></div>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
+      <button class="btn g" id="mgClose">Fermer</button>
+      <button class="btn d" id="mgCancelBtn"><i class="fa-solid fa-ban"></i> Annuler l'affectation</button>
+      <button class="btn p" id="mgEditBtn"><i class="fa-solid fa-pen"></i> Modifier l'affectation</button>
+    </div>`;
+  gpModal('Déplacement inter-hôtels', html, 'fa-solid fa-shield-halved');
+  $('mgClose').onclick=closeModal;
+  $('mgEditBtn').onclick=()=>openMoveEdit(row);
+  $('mgCancelBtn').onclick=()=>openMoveCancel(row);
+}
+
+async function openMoveEdit(row){
+  // Modification = annulation + création d'une nouvelle affectation pré-remplie.
+  // Aucune écriture directe : passe par la logique métier existante.
+  let prop;
+  try{ prop = await BE.gmpProposalGet(row.proposal_id); }
+  catch(e){ flash('Erreur : '+(e.message||e),'e'); return; }
+  if(!prop){ flash('Proposition introuvable','e'); return; }
+  if(!confirm(
+    'Modifier l\'affectation : cela annule le déplacement en cours ('+prop.from_service+' → '+prop.to_service+
+    ') et ouvre une nouvelle fenêtre d\'affectation pré-remplie. Continuer ?'
+  )) return;
+  const btn=$('mgEditBtn'); if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Annulation…'; }
+  try{
+    const key=(window.crypto&&crypto.randomUUID)?crypto.randomUUID():('c'+Date.now()+'-'+Math.round(Math.random()*1e9));
+    await BE.gmpCancelApplied(prop.id, null, key);
+    closeModal();
+    await loadMonth();
+    // Ouvre le formulaire d'affectation pré-rempli avec les paramètres de la proposition annulée.
+    gpOpenSimFormPrefilled(prop.employee_id, prop.from_hotel_id, prop.from_service,
+                            prop.to_hotel_id, prop.to_service);
+  }catch(e){
+    flash('Erreur : '+(e.message||e),'e');
+    if(btn){ btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-pen"></i> Modifier l\'affectation'; }
+  }
+}
+
+async function openMoveCancel(row){
+  let prop;
+  try{ prop = await BE.gmpProposalGet(row.proposal_id); }
+  catch(e){ flash('Erreur : '+(e.message||e),'e'); return; }
+  if(!prop){ flash('Proposition introuvable','e'); return; }
+  const nbSlots = Array.isArray(prop.slots) ? prop.slots.length : 0;
+  const isMultiDay = nbSlots > 1;
+  const empName = gpResolveEmployeeName(prop.employee_id) || 'Collaborateur';
+  const dayTxt = row.day ? new Date(row.day).toLocaleDateString('fr-FR',{day:'numeric',month:'long',year:'numeric'}) : '';
+  const fullConfirmTxt = 'Cette affectation provient d\'un déplacement inter-hôtels. '+
+    'Son annulation supprimera les segments associés dans les hôtels concernés. Confirmer l\'annulation ?';
+  const html = `
+    <p style="font-size:13px;margin-bottom:10px">${esc(fullConfirmTxt)}</p>
+    <div style="font-size:12px;color:var(--ink2);background:#fff7f7;border:1px solid #fecaca;border-radius:8px;padding:10px;margin-bottom:14px">
+      <b>${esc(empName)}</b> — déplacement ${esc(prop.from_service||'')} → ${esc(prop.to_service||'')}
+      <div style="color:var(--muted);font-size:11px;margin-top:4px">${nbSlots} créneau${nbSlots>1?'x':''}${dayTxt?(' · jour cliqué : '+esc(dayTxt)):''}</div>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
+      <button class="btn g" id="cxClose">Fermer</button>
+      ${isMultiDay && row.day ? `<button class="btn d" id="cxSeg"><i class="fa-solid fa-scissors"></i> Annuler uniquement ce segment</button>` : ''}
+      <button class="btn d" id="cxFull" style="background:#dc2626;color:#fff"><i class="fa-solid fa-ban"></i> Annuler tout le déplacement</button>
+    </div>`;
+  gpModal('Confirmer l\'annulation', html, 'fa-solid fa-triangle-exclamation');
+  $('cxClose').onclick=closeModal;
+  const cxSeg=$('cxSeg'); if(cxSeg) cxSeg.onclick=()=>doCancel(prop.id, row.day);
+  $('cxFull').onclick=()=>doCancel(prop.id, null);
+
+  async function doCancel(id, onlyDay){
+    const btn = onlyDay ? cxSeg : $('cxFull');
+    if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Annulation…'; }
+    try{
+      const key=(window.crypto&&crypto.randomUUID)?crypto.randomUUID():('c'+Date.now()+'-'+Math.round(Math.random()*1e9));
+      const rr = await BE.gmpCancelApplied(id, onlyDay, key);
+      closeModal();
+      await loadMonth();
+      flash('Annulation confirmée : '+(rr && rr.removed || 0)+' ligne(s) supprimée(s), '+(rr && rr.restored || 0)+' shift(s) d\'origine restauré(s).');
+    }catch(e){
+      flash('Erreur : '+(e.message||e),'e');
+      if(btn){ btn.disabled=false; }
+    }
+  }
+}
+
+// Helper — trouve la ligne planning correspondant à (eid, day) et retourne
+// { proposal_id, ... } si elle provient d'un déplacement, sinon null.
+function findMoveRowInPlanning(eid, day){
+  const row = (planningRows||[]).find(r=>r.employee_id===eid && r.day===day);
+  if(row && row.source_proposal_id) return {
+    proposal_id: row.source_proposal_id,
+    employee_id: eid, day: day,
+    hotel_id: hotelId, origin_hotel_id: row.origin_hotel_id||null,
+  };
+  return null;
+}
 // Variante de gpOpenSimForm avec pré-remplissage éventuel de la destination.
 function gpOpenSimFormPrefilled(empId, fromHotelId, originService, destHotelId, destService){
   // Ferme le drawer avant d'ouvrir la modale de simulation.
@@ -5297,8 +5411,32 @@ async function saveChanges(){
       flash('Sauvegardé — données rechargées depuis la base','w');
     }
   }catch(e){
-    // Sauvegarde DB échouée — pending intact, committed non touché
-    flash('Erreur lors de la sauvegarde : '+e.message,'e');
+    // Sauvegarde DB échouée — pending intact, committed non touché.
+    // Cas spécial : le trigger trg_staff_planning_move_guard a bloqué une
+    // ligne issue d'un déplacement inter-hôtels. Remplacer l'erreur brute
+    // par un dialog actionnable Modifier / Annuler.
+    const msg = String(e && e.message || '');
+    if(msg.includes('déplacement inter-hôtels')){
+      // Cherche parmi les pending la première qui touche une ligne protégée.
+      let target = null;
+      const keys = new Set();
+      pending.forEach((v,k)=>keys.add(k));
+      pendingShifts.forEach((v,k)=>keys.add(k));
+      pendingHours.forEach((v,k)=>keys.add(k));
+      for(const k of keys){
+        const [eid, day] = k.split('|');
+        const row = findMoveRowInPlanning(eid, day);
+        if(row){ target = row; break; }
+      }
+      if(target){
+        openMoveGuardModal(target);
+      } else {
+        flash('Une ligne visée par vos modifications provient d\'un déplacement inter-hôtels. '+
+              'Cliquez directement sur la cellule concernée pour la modifier ou l\'annuler.','e');
+      }
+    } else {
+      flash('Erreur lors de la sauvegarde : '+e.message,'e');
+    }
     console.error('[saveChanges]',e);
   }
   finally{$('saveBtn').disabled=false;}
@@ -15263,6 +15401,13 @@ function renderStub(title, icon, desc, bullets){
 /* ===================== POPOVER (édition simple) ===================== */
 const pop=$('pop'); let popK=null;
 function openPop(td){ popK=td.dataset.k;
+  // Ligne issue d'un déplacement inter-hôtels : ouvrir la modale actionnable
+  // (Modifier / Annuler) au lieu du picker. Correspond au garde-fou serveur
+  // trg_staff_planning_move_guard : intercepter proactivement évite un save
+  // qui de toute façon échouerait.
+  const [_eid,_day] = (popK||'').split('|');
+  const _mv = findMoveRowInPlanning(_eid, _day);
+  if(_mv){ openMoveGuardModal(_mv); return; }
   // Réception + journée passée (fuseau hôtel) : modification directe interdite (garde
   // backend FL010) — on ouvre le formulaire de demande de modification à la place.
   if(myRole==='reception'){ const _d=(popK||'').split('|')[1]; if(_isPastDay(_d)){ openPcrRequest(popK); return; } }
