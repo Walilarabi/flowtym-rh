@@ -455,6 +455,174 @@ tr.dept-sep td{pointer-events:none}
 .plan-cov-ok{color:#1b5e20}
 .plan-cov-warn{color:#c62828}
 .plan-dept-row td{background:#f1f0fb;font-size:11px;font-weight:700;color:var(--violet-d);padding:4px 10px!important;text-transform:uppercase}
+
+/* ── Planning Groupe — refonte pleine largeur ────────────────────────────── */
+.gp-wrap{display:flex;flex-direction:column;height:100%;min-height:0;background:var(--bg)}
+.gp-tbar{padding:12px 22px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;flex-wrap:wrap;flex-shrink:0}
+.gp-tbar h1{font-size:19px;font-weight:800;letter-spacing:-.01em;margin-right:6px}
+.gp-tbar .search{flex:1;min-width:220px;max-width:520px}
+.gp-tbar .search input{width:100%;padding:9px 12px 9px 34px;border:1px solid var(--line);border-radius:10px;font-size:13px;background:#fafafc}
+.gp-tbar .search input:focus{outline:none;border-color:var(--violet);box-shadow:0 0 0 3px var(--violet-bg);background:#fff}
+.gp-tbar .search .kb{position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:10px;color:var(--muted);background:#f0eefb;padding:2px 6px;border-radius:5px;font-weight:700;letter-spacing:.5px}
+.gp-tbar .search{position:relative}
+.gp-tbar .chip{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border:1px solid var(--line);border-radius:10px;background:#fff;font-size:12.5px;font-weight:600;color:var(--ink2);cursor:pointer;transition:.15s}
+.gp-tbar .chip:hover{border-color:var(--violet);color:var(--violet-d)}
+.gp-tbar .chip.on{border-color:var(--violet);color:var(--violet-d);background:var(--violet-bg)}
+.gp-tbar .chip input{margin:0;accent-color:var(--violet)}
+
+.gp-kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;padding:16px 22px 4px;flex-shrink:0}
+@media(max-width:1200px){.gp-kpis{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:720px){.gp-kpis{grid-template-columns:repeat(2,1fr);padding:12px}}
+.gp-kpi{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px 16px;display:flex;align-items:center;gap:12px;box-shadow:var(--shadow);transition:.15s}
+.gp-kpi:hover{box-shadow:var(--shadow-h);transform:translateY(-1px)}
+.gp-kpi .ic{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;font-size:15px;flex-shrink:0}
+.gp-kpi.v .ic{background:var(--violet-bg);color:var(--violet)}
+.gp-kpi.b .ic{background:#dbeafe;color:#2563eb}
+.gp-kpi.g .ic{background:var(--green-bg);color:var(--green)}
+.gp-kpi.a .ic{background:#fef3c7;color:#d97706}
+.gp-kpi.r .ic{background:var(--red-bg);color:var(--red)}
+.gp-kpi .n{font-size:22px;font-weight:800;letter-spacing:-.02em;line-height:1.05}
+.gp-kpi .l{color:var(--ink2);font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.02em;margin-top:1px}
+.gp-kpi .sub{color:var(--muted);font-size:11px;margin-top:2px}
+.gp-kpi .sub.up{color:var(--green)}
+.gp-kpi .sub.dn{color:var(--red)}
+.gp-kpi .sub.wa{color:#d97706}
+
+.gp-body{flex:1;overflow:auto;padding:14px 22px 22px}
+.gp-empty{padding:60px 30px;text-align:center;color:var(--muted);font-size:13px}
+
+/* Grid : lignes = services, colonnes = hôtels */
+.gp-grid{--svc-w:210px;--hcol-min:260px;display:grid;grid-template-columns:var(--svc-w) repeat(var(--hcount,1),minmax(var(--hcol-min),1fr));background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:var(--shadow);min-width:0}
+@media(max-width:1100px){.gp-grid{--hcol-min:240px;--svc-w:180px}}
+@media(max-width:800px){.gp-grid{--hcol-min:220px;--svc-w:150px}}
+
+.gp-cell{border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:10px 12px;background:#fff;display:flex;flex-direction:column;min-width:0}
+.gp-cell:last-child{border-right:0}
+.gp-row-last .gp-cell{border-bottom:0}
+
+/* Corner cell (top-left) */
+.gp-corner{background:#faf9ff;border-right:1px solid var(--line);border-bottom:1px solid var(--line);position:sticky;left:0;top:0;z-index:6;display:flex;align-items:center;padding:14px 14px}
+.gp-corner .cfg{width:26px;height:26px;border-radius:8px;background:#fff;border:1px solid var(--line);color:var(--muted);cursor:pointer;display:grid;place-items:center;font-size:11px;margin-left:auto;transition:.15s}
+.gp-corner .cfg:hover{border-color:var(--violet);color:var(--violet-d)}
+.gp-corner .lbl{font-size:12.5px;font-weight:700;color:var(--ink2)}
+
+/* Hotel header cells */
+.gp-hhead{padding:12px 14px;background:#faf9ff;border-right:1px solid var(--line);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5;min-width:0}
+.gp-hhead:last-child{border-right:0}
+.gp-hhead .top{display:flex;align-items:center;gap:6px;margin-bottom:6px}
+.gp-hhead .top .ico{width:22px;height:22px;border-radius:6px;background:var(--violet-bg);color:var(--violet-d);display:grid;place-items:center;font-size:10px;flex-shrink:0}
+.gp-hhead .top .code{font-weight:800;font-size:13px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gp-hhead .sub{font-size:11px;color:var(--muted);margin-bottom:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gp-hhead .stats{display:flex;flex-wrap:wrap;gap:10px;font-size:11.5px}
+.gp-hhead .stat{display:inline-flex;align-items:center;gap:4px;color:var(--ink2);font-weight:600}
+.gp-hhead .stat i{font-size:10.5px;color:var(--muted)}
+.gp-hhead .stat.g{color:#15803d}.gp-hhead .stat.g i{color:#15803d}
+.gp-hhead .stat.a{color:#d97706}.gp-hhead .stat.a i{color:#d97706}
+.gp-hhead .stat.r{color:var(--red)}.gp-hhead .stat.r i{color:var(--red)}
+.gp-hhead .stat.e{color:#E65100}.gp-hhead .stat.e i{color:#E65100}
+.gp-hhead .open{display:inline-flex;align-items:center;gap:4px;margin-top:8px;font-size:11px;color:var(--violet-d);font-weight:600;background:none;border:0;cursor:pointer;padding:0}
+.gp-hhead .open:hover{text-decoration:underline}
+
+/* Service label cells (first column) */
+.gp-svc{background:#fafafc;border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:14px 16px;display:flex;align-items:center;gap:10px;position:sticky;left:0;z-index:3;min-width:0}
+.gp-svc .ico{width:26px;height:26px;border-radius:8px;background:#fff;border:1px solid var(--line);color:var(--violet-d);display:grid;place-items:center;font-size:11px;flex-shrink:0}
+.gp-svc .nm{font-size:12px;font-weight:700;color:var(--ink);text-transform:uppercase;letter-spacing:.03em;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gp-svc .n{font-size:11px;color:var(--muted);font-weight:600}
+
+/* Collaborateur rows */
+.gp-col-list{display:flex;flex-direction:column;gap:2px;flex:1}
+.gp-collab{display:flex;align-items:center;gap:8px;padding:5px 4px;border-radius:6px;min-width:0}
+.gp-collab:hover{background:#faf9ff}
+.gp-collab .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.gp-collab .dot.g{background:#16a34a}
+.gp-collab .dot.q{background:#cbd5e1}
+.gp-collab .dot.r{background:#f87171}
+.gp-collab .dot.a{background:#fbbf24}
+.gp-collab .nm{flex:1;font-size:12.5px;font-weight:400;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;min-width:0}
+.gp-collab .nm.mut{color:var(--muted)}
+.gp-collab .nm:hover{color:var(--violet-d)}
+.gp-collab .sbadge{flex-shrink:0;font-size:9.5px;font-weight:700;padding:2px 6px;border-radius:5px;letter-spacing:.02em;text-transform:none;white-space:nowrap}
+.gp-collab .sbadge.rest{background:#f3f4f6;color:#6b7280}
+.gp-collab .sbadge.cp{background:#fee2e2;color:#b91c1c}
+.gp-collab .sbadge.mal{background:#fee2e2;color:#b91c1c}
+.gp-collab .sbadge.abs{background:#fee2e2;color:#b91c1c}
+.gp-collab .sbadge.mat{background:#fee2e2;color:#b91c1c}
+.gp-collab .sbadge.extra{background:var(--violet-bg);color:var(--violet-d)}
+.gp-collab .aff{flex-shrink:0;background:var(--violet-bg);color:var(--violet-d);border:0;border-radius:6px;padding:3px 9px;font-size:10.5px;font-weight:700;cursor:pointer;transition:.15s;font-family:inherit}
+.gp-collab .aff:hover{background:var(--violet);color:#fff}
+
+/* Suggestions bloc */
+.gp-sugg{margin-top:8px;padding-top:8px;border-top:1px dashed #eceef3}
+.gp-sugg-t{font-size:9.5px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px}
+.gp-sugg-l{font-size:11.5px;color:#15803d;font-weight:600;display:flex;align-items:center;gap:5px}
+.gp-sugg-l.none{color:var(--muted);font-weight:500}
+.gp-sugg-l i{font-size:8px}
+
+/* Header stats colors (occupation/présents/extras/sous) */
+.gp-hhead .cov-bar{height:3px;border-radius:2px;background:#eceef3;overflow:hidden;margin-top:6px}
+.gp-hhead .cov-bar>span{display:block;height:100%;background:var(--green)}
+.gp-hhead .cov-bar.warn>span{background:#d97706}
+.gp-hhead .cov-bar.err>span{background:var(--red)}
+
+/* Drawer collaborateur (nouveau) */
+.gp-dr{display:flex;flex-direction:column;height:100%}
+.gp-dr-h{padding:14px 20px 12px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;flex-shrink:0}
+.gp-dr-h .back{width:28px;height:28px;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--ink2);cursor:pointer;display:grid;place-items:center;font-size:11px;transition:.15s}
+.gp-dr-h .back:hover{border-color:var(--violet);color:var(--violet-d)}
+.gp-dr-h .ti{flex:1;font-size:13px;font-weight:600;color:var(--ink2)}
+.gp-dr-h .x{width:28px;height:28px;border-radius:8px;border:0;background:#f4f4f6;color:var(--ink2);cursor:pointer;font-size:13px}
+.gp-dr-scr{flex:1;overflow-y:auto}
+.gp-dr-hero{padding:16px 20px 18px;border-bottom:1px solid var(--line);display:flex;gap:14px;align-items:center}
+.gp-dr-hero .av{width:64px;height:64px;border-radius:14px;background:linear-gradient(135deg,var(--violet),var(--violet-d));color:#fff;display:grid;place-items:center;font-size:22px;font-weight:800;flex-shrink:0;text-transform:uppercase}
+.gp-dr-hero .who{flex:1;min-width:0}
+.gp-dr-hero .who h2{font-size:17px;font-weight:800;margin:0;display:flex;align-items:center;gap:6px}
+.gp-dr-hero .who .fav{color:#f59e0b;font-size:12px}
+.gp-dr-hero .who .role{font-size:12.5px;color:var(--ink2);margin-top:2px}
+.gp-dr-hero .who .avail{font-size:11.5px;color:#15803d;font-weight:600;margin-top:4px;display:flex;align-items:center;gap:5px}
+.gp-dr-hero .who .avail.na{color:var(--muted);font-weight:500}
+.gp-dr-hero .who .avail i{font-size:6px}
+.gp-dr-hero .badge-extra{background:var(--violet-bg);color:var(--violet-d);font-size:10px;font-weight:800;padding:2px 8px;border-radius:6px;letter-spacing:.02em}
+
+.gp-dr-sec{padding:14px 20px;border-bottom:1px solid var(--line)}
+.gp-dr-sec .t{font-size:10.5px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px}
+.gp-dr-sk{display:flex;flex-direction:column;gap:6px}
+.gp-dr-sk .s{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--ink)}
+.gp-dr-sk .s i{color:var(--violet);font-size:11px}
+.gp-dr-hlist{display:flex;flex-wrap:wrap;gap:8px}
+.gp-dr-h-badge{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:#fff;font-size:12px;font-weight:600;color:var(--ink)}
+.gp-dr-h-badge .d{width:7px;height:7px;border-radius:50%}
+.gp-dr-h-badge .d.g{background:var(--green)}
+.gp-dr-h-badge .d.a{background:#f59e0b}
+.gp-dr-h-badge .d.r{background:var(--red)}
+.gp-dr-h-badge .d.m{background:var(--muted)}
+
+.gp-dr-time .marks{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);font-weight:600;margin-bottom:4px}
+.gp-dr-time .bar{height:14px;border-radius:7px;background:#f3f4f6;overflow:hidden;position:relative}
+.gp-dr-time .bar>span{position:absolute;top:0;bottom:0;background:#bbf7d0;border-radius:7px}
+.gp-dr-time .st{display:inline-block;margin-top:8px;font-size:11.5px;font-weight:600;color:#15803d}
+.gp-dr-time .st.na{color:var(--muted)}
+
+.gp-dr-sug{background:#faf9ff;border:1px solid #e6dffb;border-radius:10px;padding:10px 12px;margin-bottom:8px;display:flex;align-items:center;gap:10px}
+.gp-dr-sug .arrow{width:28px;height:28px;border-radius:8px;background:#fff;color:var(--violet-d);display:grid;place-items:center;font-size:11px;flex-shrink:0;border:1px solid #e6dffb}
+.gp-dr-sug .body{flex:1;min-width:0}
+.gp-dr-sug .body .h{font-size:11px;color:var(--muted);font-weight:600;margin-bottom:1px}
+.gp-dr-sug .body .n{font-size:12.5px;font-weight:700;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gp-dr-sug .body .im{font-size:10.5px;color:var(--ink2);margin-top:2px}
+.gp-dr-sug .body .im b{color:#d97706;font-weight:700}
+.gp-dr-sug .body .im b.lo{color:var(--muted);font-weight:600}
+.gp-dr-sug .body .im b.hi{color:var(--red);font-weight:700}
+.gp-dr-sug .aff{background:var(--violet-bg);color:var(--violet-d);border:0;border-radius:6px;padding:5px 10px;font-size:10.5px;font-weight:700;cursor:pointer;font-family:inherit;flex-shrink:0}
+.gp-dr-sug .aff:hover{background:var(--violet);color:#fff}
+.gp-dr-see{display:block;width:100%;text-align:center;font-size:12px;color:var(--violet-d);font-weight:600;background:none;border:0;padding:4px 0;cursor:pointer;margin-top:6px}
+.gp-dr-see:hover{text-decoration:underline}
+
+.gp-dr-foot{padding:14px 20px 18px;border-top:1px solid var(--line);flex-shrink:0;display:flex;flex-direction:column;gap:8px;background:#fff}
+.gp-dr-foot .btnp{padding:11px;border-radius:10px;background:var(--violet);color:#fff;border:0;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;transition:.15s;font-family:inherit}
+.gp-dr-foot .btnp:hover{background:var(--violet-d)}
+.gp-dr-foot .btns{padding:11px;border-radius:10px;background:#fff;color:var(--ink);border:1px solid var(--line);font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;transition:.15s;font-family:inherit}
+.gp-dr-foot .btns:hover{border-color:var(--violet);color:var(--violet-d)}
+
+/* Drawer collaborateur : réutilise .drawer et .dbg existants */
 </style>
 </head>
 <body>
@@ -1029,7 +1197,7 @@ async function makeRealBE(){
     async gmpSubmit(id){const {error}=await sb.rpc('group_move_proposal_submit',{p_id:id});must(error,'Soumission');},
     async gmpSetStatus(id,status,comment){const {error}=await sb.rpc('group_move_proposal_set_status',{p_id:id,p_status:status,p_comment:comment||null});must(error,'Changement de statut');},
     async gmpAddWaiver(id,code,justification,before,overage){const {error}=await sb.rpc('group_move_proposal_add_waiver',{p_id:id,p_code:code,p_justification:justification,p_value_before:before||null,p_overage:overage||null});must(error,'Dérogation');},
-    async gmpResimulate(id,sim,inputHash,resultHash,score,confidence,decision){const {error}=await sb.rpc('group_move_proposal_resimulate',{p_id:id,p_simulation:sim,p_input_hash:inputHash,p_result_hash:resultHash,p_score:score,p_confidence:confidence,p_decision:decision});must(error,'Re-simulation');},
+    async gmpResimulate(id,sim,inputHash,resultHash,score,confidence,decision){const {error}=await sb.rpc('group_move_proposal_resimulate',{p_id:id,p_simulation:sim,p_input_hash:inputHash,p_result_hash:resultHash,p_score:score,p_confidence:confidence,p_decision:decision});must(error,'Revérification');},
     async gmpMarkStale(id,staleness,reason){const {error}=await sb.rpc('group_move_proposal_mark_staleness',{p_id:id,p_staleness:staleness,p_reason:reason||null});must(error,'Fraîcheur');},
     async gmpWorkflowGet(group){const {data,error}=await sb.rpc('group_move_workflow_get',{p_group:group});if(error){if(error.code==='42883')return[];must(error,'Workflow');}return data||[];},
     async gmpWorkflowSet(group,steps){const {error}=await sb.rpc('group_move_workflow_set',{p_group:group,p_steps:steps});must(error,'Configuration workflow');},
@@ -2018,34 +2186,34 @@ function gpWeekday(d){ return d.getDay(); } // 0=dimanche .. 6=samedi
 function gpISO(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 
 async function renderGroupPlanning(){
-  if(!gpService){ const e=await gpCheckEligible(); gpService=(e.services&&e.services[0])||'Réception'; }
+  // Par défaut : vue « Tous les services » pour donner immédiatement la matrice complète.
+  if(gpService===undefined) gpService='';
   if(!gpDay) gpDay=new Date();
   $('view').innerHTML=`
-    <div style="display:flex;flex-direction:column;height:100%;min-height:0">
-      <div class="ptbar">
+    <div class="gp-wrap">
+      <div class="gp-tbar">
         <span id="gpModeSwitch"></span>
-        <div class="monthnav"><button id="gpPrev"><i class="fa-solid fa-chevron-left"></i></button>
-          <span class="m" id="gpDayLabel"></span><button id="gpNext"><i class="fa-solid fa-chevron-right"></i></button></div>
-        <select id="gpServiceSel" title="Service"></select>
-        <div class="search"><i class="fa-solid fa-magnifying-glass"></i><input type="text" id="gpSearch" placeholder="Rechercher un collaborateur…" value="${gpFilters.search}"></div>
-        <select id="gpStatus" title="Statut collaborateur">
-          <option value="">Statut : tous</option>
-          <option value="actif">Actifs</option><option value="pause">En pause</option><option value="parti">Partis</option>
-        </select>
-        <label class="btn g" style="cursor:pointer"><input type="checkbox" id="gpSub" ${gpFilters.subOnly?'checked':''} style="margin-right:5px">Sous-effectifs</label>
-        <label class="btn g" style="cursor:pointer"><input type="checkbox" id="gpExtra" ${gpFilters.extraOnly?'checked':''} style="margin-right:5px">Extras</label>
-        <div class="spacer" style="flex:1"></div>
-        <button class="btn g" id="gpHotelsBtn" title="Établissements affichés"><i class="fa-solid fa-hotel"></i> Établissements</button>
-        <button class="btn g" id="gpReqBtn" title="Configurer les effectifs requis"><i class="fa-solid fa-sliders"></i> Besoins</button>
-        <button class="btn g" id="gpPropBtn" title="Propositions de renfort (brouillons)"><i class="fa-solid fa-people-arrows"></i> Propositions</button>
+        <h1>Planning Groupe</h1>
+        <div class="search"><i class="fa-solid fa-magnifying-glass" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:12px"></i>
+          <input type="text" id="gpSearch" placeholder="Rechercher un collaborateur, un hôtel, un service…" value="${esc(gpFilters.search||'')}">
+          <span class="kb">⌘ K</span>
+        </div>
+        <div class="monthnav">
+          <button id="gpPrev" title="Jour précédent"><i class="fa-solid fa-chevron-left"></i></button>
+          <span class="m" id="gpDayLabel"></span>
+          <button id="gpNext" title="Jour suivant"><i class="fa-solid fa-chevron-right"></i></button>
+        </div>
+        <select id="gpServiceSel" title="Service" style="padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:#fff;font-size:13px;font-weight:600;color:var(--ink)"></select>
+        <label class="chip ${gpFilters.subOnly?'on':''}" id="gpSubLbl"><input type="checkbox" id="gpSub" ${gpFilters.subOnly?'checked':''}> Sous-effectifs</label>
+        <label class="chip ${gpFilters.extraOnly?'on':''}" id="gpExtraLbl"><input type="checkbox" id="gpExtra" ${gpFilters.extraOnly?'checked':''}> Extras</label>
+        <button class="chip" id="gpHotelsBtn" title="Établissements affichés"><i class="fa-solid fa-hotel" style="font-size:11px"></i></button>
+        <button class="chip" id="gpReqBtn" title="Configurer les effectifs requis"><i class="fa-solid fa-sliders" style="font-size:11px"></i></button>
+        <button class="chip" id="gpPropBtn" title="Propositions de renfort"><i class="fa-solid fa-people-arrows" style="font-size:11px"></i></button>
       </div>
-      <div class="hint" style="padding:6px 10px;font-size:11px;color:var(--muted)">
-        <i class="fa-solid fa-eye"></i> Vue comparative <b>lecture seule</b> — comparez les effectifs par service sur les établissements de votre groupe.
-      </div>
-      <div id="gpBody" style="flex:1;overflow:auto;padding:4px"></div>
+      <div class="gp-kpis" id="gpKpis"></div>
+      <div class="gp-body" id="gpBody"></div>
     </div>`;
   renderGroupModeSwitch();
-  // Sélecteur service
   const e=await gpCheckEligible();
   const svcSel=$('gpServiceSel');
   const svcs=(e.services&&e.services.length?e.services:['Réception','Petit-déjeuner','Étage','Technique','Maintenance','Direction','Commercial','Revenue','Comptabilité']);
@@ -2054,13 +2222,17 @@ async function renderGroupPlanning(){
   $('gpPrev').onclick=()=>{ gpDay=new Date(gpDay.getFullYear(),gpDay.getMonth(),gpDay.getDate()-1); gpLoadAndRender(); };
   $('gpNext').onclick=()=>{ gpDay=new Date(gpDay.getFullYear(),gpDay.getMonth(),gpDay.getDate()+1); gpLoadAndRender(); };
   $('gpSearch').oninput=ev=>{ gpFilters.search=ev.target.value.toLowerCase(); gpRenderBody(); };
-  $('gpStatus').onchange=ev=>{ gpFilters.status=ev.target.value; gpRenderBody(); };
-  $('gpSub').onchange=ev=>{ gpFilters.subOnly=ev.target.checked; gpRenderBody(); };
-  $('gpExtra').onchange=ev=>{ gpFilters.extraOnly=ev.target.checked; gpRenderBody(); };
+  $('gpSub').onchange=ev=>{ gpFilters.subOnly=ev.target.checked; $('gpSubLbl').classList.toggle('on',ev.target.checked); gpRenderBody(); };
+  $('gpExtra').onchange=ev=>{ gpFilters.extraOnly=ev.target.checked; $('gpExtraLbl').classList.toggle('on',ev.target.checked); gpRenderBody(); };
   $('gpHotelsBtn').onclick=gpOpenHotelPicker;
   $('gpReqBtn').onclick=gpOpenReqEditor;
   $('gpPropBtn').onclick=gpOpenProposals;
+  // Raccourci ⌘K / Ctrl+K sur la recherche.
+  document.addEventListener('keydown', _gpKeydown);
   gpLoadAndRender();
+}
+function _gpKeydown(ev){
+  if((ev.metaKey||ev.ctrlKey) && (ev.key==='k'||ev.key==='K')){ const s=$('gpSearch'); if(s){ ev.preventDefault(); s.focus(); s.select(); } }
 }
 
 // Charge le mois du jour ciblé. Une requête agrégée PAR SERVICE affiché
@@ -2083,112 +2255,211 @@ async function gpLoadAndRender(){
   gpRenderBody();
 }
 
+// Icônes par service (fallback générique).
+const GP_SVC_ICONS={
+  'Administration':'fa-briefcase','Direction':'fa-user-tie','Réception':'fa-bell-concierge','Reception':'fa-bell-concierge',
+  'Étage':'fa-broom','Etage':'fa-broom','Petit-déjeuner':'fa-mug-hot','Petit déjeuner':'fa-mug-hot','Petit-déj.':'fa-mug-hot',
+  'Technique':'fa-screwdriver-wrench','Maintenance':'fa-screwdriver-wrench','Commercial':'fa-handshake',
+  'Revenue':'fa-chart-line','Comptabilité':'fa-calculator','Cuisine':'fa-utensils','Restauration':'fa-utensils',
+};
+function gpSvcIcon(name){ return GP_SVC_ICONS[name] || 'fa-people-group'; }
+
+// Classe du badge de statut par code (ou null si le statut est actif « présent »).
+function gpStatusBadge(code, isExtra){
+  if(isExtra) return {cls:'extra', label:'Extra'};
+  if(!code) return null;
+  const map={
+    'CP':{cls:'cp',label:'CP'}, 'MAL':{cls:'mal',label:'Maladie'},
+    'ABS':{cls:'abs',label:'Abs.'}, 'MAT':{cls:'mat',label:'Mat.'},
+    'PAT':{cls:'mat',label:'Pat.'}, 'CSS':{cls:'abs',label:'Sans solde'},
+    'AE':{cls:'abs',label:'Except.'}, 'RTT':{cls:'rest',label:'RTT'},
+    'REC':{cls:'rest',label:'Récup.'}, 'F':{cls:'rest',label:'Férié'},
+    'FORM':{cls:'rest',label:'Formation'},
+  };
+  if(map[code]) return map[code];
+  // Statut travaillé (P, PE, MAD) : pas de badge.
+  if(CMAP[code] && CMAP[code].cat==='worked') return null;
+  return {cls:'rest', label:CMAP[code]?CMAP[code].label:code};
+}
+// Couleur du voyant collaborateur : vert=présent, gris=repos, rouge=absent, jaune=extra
+function gpDotClass(code, isExtra){
+  if(gpIsWorking(code)) return 'g';
+  if(!code) return 'q';
+  const cat=CMAP[code]?CMAP[code].cat:null;
+  if(cat==='abs' || cat==='paid') return 'r';
+  return 'q';
+}
+
+// Cache global des données du dernier rendu pour l'ouverture du Drawer.
+let _gpLastRender=null;
+
 function gpRenderBody(){
-  const body=$('gpBody'); if(!body) return;
-  if(!gpSections.length||!gpData){ body.innerHTML='<div style="padding:40px;text-align:center;color:var(--muted)">Aucune donnée de groupe accessible.</div>'; return; }
+  const body=$('gpBody'), kpiHost=$('gpKpis');
+  if(!body) return;
+  if(!gpSections.length){ body.innerHTML='<div class="gp-empty"><i class="fa-solid fa-layer-group" style="font-size:22px;color:var(--muted);display:block;margin-bottom:8px"></i>Aucune donnée de groupe accessible.</div>'; if(kpiHost) kpiHost.innerHTML=''; return; }
   const dayISO=gpISO(gpDay), wd=gpWeekday(gpDay);
-  // Agrégats KPI Groupe (cumulés sur toutes les sections/services affichés)
-  const K={total:new Set(),present:new Set(),extra:new Set(),sous:0,sur:0};
-  const sectionsHtml=gpSections.map(sec=>gpBuildSection(sec, dayISO, wd, K)).filter(Boolean).join('');
-  // --- Bandeau KPI Groupe (Directeur Groupe) ---
-  const kpi=(label,val,color)=>`<div style="flex:1;min-width:120px;padding:10px 14px;background:#fff;border:1px solid #e5e7eb;border-radius:10px;text-align:center">
-    <div style="font-size:20px;font-weight:800;color:${color||'var(--ink2)'}">${val}</div>
-    <div style="font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px">${label}</div></div>`;
-  const banner=`<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
-    ${kpi('Collaborateurs', K.total.size)}
-    ${kpi('Présents', K.present.size, '#15803d')}
-    ${kpi('Extras', K.extra.size, '#E65100')}
-    ${kpi('Hôtels sous-effectif', K.sous, K.sous?'#dc2626':'var(--ink2)')}
-    ${kpi('Hôtels sureffectif', K.sur, K.sur?'#1d4ed8':'var(--ink2)')}
+  // Ensembles d'hôtels affichés (référence : intersection sur toutes les sections, dans l'ordre de la 1re section).
+  const refHotels=(gpSections[0].data.hotels||[]).filter(h=>!gpHotelSel||gpHotelSel.has(h.id));
+  // Pré-calcul agrégé PAR hôtel (tous services confondus) pour l'en-tête d'hôtel.
+  const perHotel={}; refHotels.forEach(h=>{ perHotel[h.id]={hotel:h,total:new Set(),present:new Set(),extra:new Set(),subCount:0,requis:0,prevu:0,hasReq:false,servicesSub:[]}; });
+  // Compteurs Groupe.
+  const G={collab:new Set(),present:new Set(),extra:new Set(),subServices:0,requisTot:0,prevuTot:0,hotelsSub:new Set()};
+
+  // Passe 1 : agrège par (hôtel, service).
+  const perCell={}; // key = hotelId|service -> {cs, present, prevu, requis, cov, mob, nbExtra}
+  gpSections.forEach(sec=>{
+    const svc=sec.service, data=sec.data;
+    const reqMap={}; (data.requirements||[]).forEach(r=>{ if(r.shift==null) reqMap[r.hotel_id+'|'+r.weekday]=r.required; });
+    const cellsDay=(data.cells||[]).filter(c=>c.day===dayISO);
+    refHotels.forEach(h=>{
+      let cs=cellsDay.filter(c=>c.hotel_id===h.id);
+      // filtre statut RH (actif/pause/parti) reste opérant côté fiche employé.
+      if(gpFilters.status) cs=cs.filter(c=>(c.emp_status||'')===gpFilters.status);
+      const filteredForDisplay = (arr)=>{
+        let a=arr;
+        if(gpFilters.extraOnly) a=a.filter(c=>c.is_extra);
+        if(gpFilters.search){ const s=gpFilters.search; a=a.filter(c=>(c.name||'').toLowerCase().includes(s)||(h.hotel_code||'').toLowerCase().includes(s)||(h.name||'').toLowerCase().includes(s)||(svc||'').toLowerCase().includes(s)); }
+        return a;
+      };
+      const csDisp = filteredForDisplay(cs);
+      const present=cs.filter(c=>gpIsWorking(c.status));
+      const totalPlan=new Set(cs.map(c=>c.employee_id)).size;
+      const prevu=new Set(present.map(c=>c.employee_id)).size;
+      const reqKey=h.id+'|'+wd;
+      const requis=(reqKey in reqMap)?reqMap[reqKey]:null;
+      const cov=COVERAGE_LEVEL(prevu, requis);
+      const mob=Math.max(0, totalPlan-prevu);
+      const nbExtra=cs.filter(c=>c.is_extra).length;
+      perCell[h.id+'|'+svc]={cs:csDisp, csRaw:cs, prevu, requis, cov, mob, nbExtra, service:svc, hotel:h};
+      // Agrégats hôtel.
+      const ph=perHotel[h.id];
+      cs.forEach(c=>{ ph.total.add(c.employee_id); if(c.is_extra)ph.extra.add(c.employee_id); });
+      present.forEach(c=>ph.present.add(c.employee_id));
+      if(cov.level==='sous_effectif'){ ph.subCount++; ph.servicesSub.push(svc); G.hotelsSub.add(h.id); G.subServices++; }
+      if(requis!=null){ ph.hasReq=true; ph.requis+=requis; ph.prevu+=prevu; G.requisTot+=requis; G.prevuTot+=prevu; }
+      // Agrégats Groupe.
+      cs.forEach(c=>{ G.collab.add(h.id+'|'+c.employee_id); if(c.is_extra)G.extra.add(h.id+'|'+c.employee_id); });
+      present.forEach(c=>G.present.add(h.id+'|'+c.employee_id));
+    });
+  });
+
+  // --- Bandeau KPI Groupe (5 tuiles) ---
+  const totalCollab=G.collab.size, totalPresent=G.present.size, totalExtras=G.extra.size;
+  const totalSubServices=G.subServices;
+  const occMoy=(G.requisTot>0)?Math.round(G.prevuTot/G.requisTot*100):null;
+  const nbHotels=refHotels.length, nbHotelsSub=G.hotelsSub.size;
+  const kpiHtml=`
+    <div class="gp-kpi v"><div class="ic"><i class="fa-solid fa-users"></i></div><div><div class="n">${totalCollab}</div><div class="l">Collaborateurs</div><div class="sub">${totalPresent} présent${totalPresent>1?'s':''}</div></div></div>
+    <div class="gp-kpi ${totalSubServices?'r':'g'}"><div class="ic"><i class="fa-solid fa-clipboard-list"></i></div><div><div class="n">${totalSubServices}</div><div class="l">Sous-effectif</div><div class="sub ${totalSubServices?'dn':''}">${G.requisTot?((G.prevuTot-G.requisTot>=0?'+':'')+(G.prevuTot-G.requisTot)+' vs requis'):'—'}</div></div></div>
+    <div class="gp-kpi a"><div class="ic"><i class="fa-solid fa-calendar-check"></i></div><div><div class="n">${totalExtras}</div><div class="l">Extras disponibles</div><div class="sub">aujourd'hui</div></div></div>
+    <div class="gp-kpi g"><div class="ic"><i class="fa-solid fa-chart-line"></i></div><div><div class="n">${occMoy==null?'—':occMoy+'%'}</div><div class="l">Occupation moyenne</div><div class="sub ${occMoy!=null&&occMoy>=100?'up':(occMoy!=null&&occMoy<80?'dn':'')}">groupe entier</div></div></div>
+    <div class="gp-kpi b"><div class="ic"><i class="fa-solid fa-hotel"></i></div><div><div class="n">${nbHotels}</div><div class="l">Hôtels</div><div class="sub ${nbHotelsSub?'dn':''}">${nbHotelsSub} sous-effectif</div></div></div>`;
+  if(kpiHost) kpiHost.innerHTML=kpiHtml;
+
+  // Libellé jour (dans la toolbar).
+  const lbl=$('gpDayLabel'); if(lbl){ const s=gpDay.toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long',year:'numeric'}); lbl.textContent=s.charAt(0).toUpperCase()+s.slice(1); }
+
+  if(!refHotels.length){ body.innerHTML='<div class="gp-empty">Aucun établissement à afficher.</div>'; return; }
+
+  // Filtre "Sous-effectifs" : masque les hôtels sans sous-effectif (au niveau groupe) — colonnes.
+  let displayHotels=refHotels.slice();
+  if(gpFilters.subOnly) displayHotels=displayHotels.filter(h=>perHotel[h.id].subCount>0);
+  if(gpFilters.extraOnly) displayHotels=displayHotels.filter(h=>perHotel[h.id].extra.size>0);
+
+  if(!displayHotels.length){ body.innerHTML='<div class="gp-empty">Aucun établissement ne correspond aux filtres.</div>'; return; }
+
+  // --- GRID ---
+  const hcount=displayHotels.length;
+  const parts=[];
+  // Ligne 1 : coin + en-tête d'hôtels.
+  parts.push(`<div class="gp-corner"><span class="lbl">Afficher : Collaborateurs</span><button class="cfg" id="gpDisplayCfg" title="Personnaliser l'affichage"><i class="fa-solid fa-gear"></i></button></div>`);
+  displayHotels.forEach(h=>parts.push(gpBuildHotelHead(h, perHotel[h.id])));
+  // Lignes : services x hôtels.
+  gpSections.forEach((sec, idx)=>{
+    const isLast = (idx===gpSections.length-1);
+    const rowCls=isLast?' gp-row-last':'';
+    // Compteur : nombre de collaborateurs affichés dans cette ligne (agrégé).
+    let rowN=0; displayHotels.forEach(h=>{ const c=perCell[h.id+'|'+sec.service]; if(c) rowN+=c.cs.length; });
+    parts.push(`<div class="gp-svc${rowCls}"><span class="ico"><i class="fa-solid ${gpSvcIcon(sec.service)}"></i></span><span class="nm">${esc(sec.service)}</span><span class="n">${rowN}</span></div>`);
+    displayHotels.forEach(h=>{
+      const cell=perCell[h.id+'|'+sec.service]||{cs:[],mob:0,service:sec.service,hotel:h};
+      parts.push(gpBuildServiceCell(cell, rowCls));
+    });
+  });
+  body.innerHTML=`<div class="gp-grid" style="--hcount:${hcount}">${parts.join('')}</div>`;
+
+  // Cache pour Drawer.
+  _gpLastRender={refHotels:displayHotels, perHotel, perCell, sections:gpSections};
+
+  // Bind : boutons Affecter + clics collaborateur.
+  body.querySelectorAll('[data-affect]').forEach(b=>b.onclick=(ev)=>{
+    ev.stopPropagation();
+    const eid=b.dataset.affect, hid=b.dataset.hotel, svc=b.dataset.svc;
+    gpOpenCollabDrawer(eid, hid, svc);
+  });
+  body.querySelectorAll('[data-collab]').forEach(n=>n.onclick=(ev)=>{
+    ev.stopPropagation();
+    const eid=n.dataset.collab, hid=n.dataset.hotel, svc=n.dataset.svc;
+    gpOpenCollabDrawer(eid, hid, svc);
+  });
+  body.querySelectorAll('[data-open-hotel]').forEach(b=>b.onclick=()=>gpOpenHotelPlanning(b.dataset.openHotel));
+  const dc=$('gpDisplayCfg'); if(dc) dc.onclick=gpOpenHotelPicker;
+}
+
+// En-tête d'une colonne hôtel (KPIs synthétiques, lien "Ouvrir le planning").
+function gpBuildHotelHead(h, ph){
+  const occ=(ph.requis>0)?Math.round(ph.prevu/ph.requis*100):null;
+  const presN=ph.present.size, extraN=ph.extra.size, subN=ph.subCount;
+  const covCls = occ==null?'' : (occ<80?'err':(occ<100?'warn':''));
+  const covPct = occ==null?0:Math.min(100,occ);
+  const subStat = subN>0
+    ? `<span class="stat r"><i class="fa-solid fa-user-slash"></i>${subN}</span>`
+    : `<span class="stat"><i class="fa-regular fa-circle-check"></i>0</span>`;
+  return `<div class="gp-hhead">
+    <div class="top"><span class="ico"><i class="fa-solid fa-hotel"></i></span><span class="code">${esc(h.hotel_code||'')}</span></div>
+    <div class="sub">${esc(h.name||'')}</div>
+    <div class="stats">
+      <span class="stat ${occ!=null&&occ>=100?'g':(occ!=null&&occ<80?'r':(occ!=null?'a':''))}"><i class="fa-solid fa-circle" style="font-size:6px"></i>${occ==null?'—':occ+'%'}</span>
+      <span class="stat g"><i class="fa-solid fa-user-check"></i>${presN}</span>
+      <span class="stat e"><i class="fa-solid fa-star"></i>${extraN}</span>
+      ${subStat}
+    </div>
+    <div class="cov-bar ${covCls}"><span style="width:${covPct}%"></span></div>
+    <button class="open" data-open-hotel="${h.id}" title="Ouvrir dans le planning de l'établissement"><i class="fa-solid fa-arrow-up-right-from-square" style="font-size:9px"></i> Ouvrir le planning</button>
   </div>`;
-  body.innerHTML=banner+(sectionsHtml||'<div style="padding:40px;color:var(--muted);text-align:center">Aucun établissement à afficher avec ces filtres.</div>');
 }
 
-// Construit une SECTION service : bandeau titre + rangée comparative des hôtels.
-function gpBuildSection(sec, dayISO, wd, K){
-  const data=sec.data;
-  let hotels=(data.hotels||[]);
-  if(gpHotelSel) hotels=hotels.filter(h=>gpHotelSel.has(h.id));
-  // Besoin au niveau JOUR (shift null) pour la V1.
-  const reqMap={}; (data.requirements||[]).forEach(r=>{ if(r.shift==null) reqMap[r.hotel_id+'|'+r.weekday]=r.required; });
-  const cellsDay=(data.cells||[]).filter(c=>c.day===dayISO);
-  const cards=hotels.map(h=>gpBuildCard(h, data, cellsDay, reqMap, wd, K)).filter(Boolean).join('');
-  const header=`<div style="display:flex;align-items:center;gap:10px;margin:6px 2px 10px">
-      <span style="height:1px;flex:0 0 18px;background:var(--violet)"></span>
-      <span style="font-size:13px;font-weight:800;color:var(--violet);text-transform:uppercase;letter-spacing:.4px">${esc(sec.service)}</span>
-      <span style="height:1px;flex:1;background:linear-gradient(90deg,var(--violet-bg),transparent)"></span>
-    </div>`;
-  const row=`<div style="display:flex;gap:12px;flex-wrap:nowrap;overflow-x:auto;padding-bottom:8px;align-items:stretch" class="gp-scroll">${cards||'<div style="padding:24px;color:var(--muted);font-size:12px">Aucun établissement à afficher pour ce service.</div>'}</div>`;
-  return `<section style="margin-bottom:22px">${header}${row}</section>`;
+// Cellule (service, hôtel) : liste des collaborateurs + bloc suggestions.
+function gpBuildServiceCell(cell, rowCls){
+  const {cs, mob, service, hotel} = cell;
+  const rows = (cs||[]).sort((a,b)=>(a.is_extra?1:0)-(b.is_extra?1:0)||(a.name||'').localeCompare(b.name||''))
+    .map(c=>gpBuildCollab(c, hotel, service)).join('');
+  const list = rows || `<div style="font-size:11px;color:var(--muted);padding:4px 2px">—</div>`;
+  const sugg = mob>0
+    ? `<div class="gp-sugg-l"><i class="fa-solid fa-circle"></i>${mob} collaborateur${mob>1?'s':''} mobilisable${mob>1?'s':''} sur place</div>`
+    : `<div class="gp-sugg-l none">Aucune suggestion</div>`;
+  const showSugg = (cs && cs.length) ? `<div class="gp-sugg"><div class="gp-sugg-t">Suggestions</div>${sugg}</div>` : '';
+  return `<div class="gp-cell${rowCls}"><div class="gp-col-list">${list}</div>${showSugg}</div>`;
 }
 
-// Construit une carte hôtel pour un service donné. Met à jour les agrégats KPI (K).
-function gpBuildCard(h, data, cellsDay, reqMap, wd, K){
-  let cs=cellsDay.filter(c=>c.hotel_id===h.id);
-  if(gpFilters.status) cs=cs.filter(c=>(c.emp_status||'')===gpFilters.status);
-  if(gpFilters.extraOnly) cs=cs.filter(c=>c.is_extra);
-  if(gpFilters.search) cs=cs.filter(c=>(c.name||'').toLowerCase().includes(gpFilters.search));
-  const totalPlan=new Set(cs.map(c=>c.employee_id)).size;
-  const present=cs.filter(c=>gpIsWorking(c.status));
-  const prevu=new Set(present.map(c=>c.employee_id)).size;
-  const mobilisable=Math.max(0, totalPlan-prevu); // planifiés non présents = renfort mobilisable sur place
-  const reqKey=h.id+'|'+wd;
-  const requis=(reqKey in reqMap)?reqMap[reqKey]:null;
-  const cov=COVERAGE_LEVEL(prevu, requis);
-  const ecart=(requis===null)?null:(prevu-requis);
-  const nbExtra=cs.filter(c=>c.is_extra).length;
-  const tauxCouv=(requis&&requis>0)?Math.round(prevu/requis*100):null;
-  const tauxOcc=(totalPlan>0)?Math.round(prevu/totalPlan*100):null;
-  // KPI (situation réelle, avant filtres sous/extra)
-  cs.forEach(c=>{ K.total.add(c.hotel_id+'|'+c.employee_id); if(c.is_extra)K.extra.add(c.hotel_id+'|'+c.employee_id); });
-  present.forEach(c=>K.present.add(c.hotel_id+'|'+c.employee_id));
-  if(cov.level==='sous_effectif')K.sous++; if(cov.level==='sureffectif')K.sur++;
-  if(gpFilters.subOnly && cov.level!=='sous_effectif') return null;
-  if(gpFilters.extraOnly && nbExtra===0) return null;
-  const collabRows=cs.sort((a,b)=>(a.is_extra?1:0)-(b.is_extra?1:0)||(a.name||'').localeCompare(b.name||'')).map(c=>{
-    const originCode=(data.hotels.find(x=>x.id===c.origin_hotel_id)||{}).hotel_code||(data.hotels.find(x=>x.id===c.origin_hotel_id)||{}).name||'';
-    const st=CMAP[c.status]?CMAP[c.status].label:(c.status||'');
-    return `<div class="gp-collab" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px solid #f1f1f6">
-      <span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;background:${gpIsWorking(c.status)?'#16a34a':'#cbd5e1'}"></span>
-      <div style="flex:1;min-width:0;cursor:pointer" onclick="gpOpenCollab('${c.employee_id}')">
-        <div style="font-size:12.5px;font-weight:600;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.name)}${c.is_extra?' <span style="font-size:9px;font-weight:700;color:#E65100;background:#FFF3E0;padding:1px 5px;border-radius:4px">EXTRA</span>':''}${gpReserved[c.employee_id]?' <span title="Un déplacement est approuvé/programmé pour ce collaborateur" style="font-size:9px;font-weight:700;color:#5B21B6;background:#EDE9FE;padding:1px 5px;border-radius:4px">RÉSERVÉ</span>':''}</div>
-        <div style="font-size:10.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.role||'')} · ${esc(st)}${c.is_extra?' · origine '+esc(originCode):''}${gpReserved[c.employee_id]?' · <span style="color:#5B21B6">Proposition en attente</span>':''}</div>
-      </div>
-      <button title="Simuler un renfort vers un autre établissement (lecture seule)" onclick="gpOpenSimForm('${c.employee_id}','${c.hotel_id}',decodeURIComponent('${encodeURIComponent(c.service||'')}'))" style="flex-shrink:0;border:1px solid #d8d8e2;background:#f7f7fb;border-radius:6px;padding:3px 7px;font-size:10.5px;cursor:pointer;color:#5B21B6;font-weight:600"><i class="fa-solid fa-arrows-turn-right" style="font-size:9px"></i> Simuler</button>
-    </div>`;
-  }).join('') || '<div style="padding:10px;font-size:11px;color:var(--muted);text-align:center">Aucun collaborateur ce jour</div>';
-  const ecartTxt=(ecart===null)?'—':(ecart>0?'+':'')+ecart;
-  // --- Zone Suggestions (emplacement réservé, enrichissable par IA plus tard ; règle simple non-IA) ---
-  const sugg = mobilisable>0
-    ? `<div style="color:#15803d">• ${mobilisable} collaborateur${mobilisable>1?'s':''} mobilisable${mobilisable>1?'s':''} sur place</div>`
-    : `<div style="color:var(--muted)">Aucun renfort identifié</div>`;
-  const suggBox=`<div style="padding:7px 10px;border-top:1px solid #f1f1f6;background:#fbfbfd">
-      <div style="font-size:9.5px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px">Suggestions</div>
-      <div style="font-size:11px">${sugg}</div>
-    </div>`;
-  return `<div class="gp-card" style="border:1px solid #e5e7eb;border-radius:12px;background:#fff;min-width:260px;max-width:320px;flex:1 1 260px;display:flex;flex-direction:column;box-shadow:0 1px 3px rgba(0,0,0,.05)">
-    <div style="padding:10px 12px;border-bottom:2px solid ${cov.color};border-radius:12px 12px 0 0;background:${cov.bg}">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
-        <div><span style="font-weight:800;font-size:13px;color:var(--ink2)">${esc(h.hotel_code||'')}</span> <span style="font-size:11px;color:var(--muted)">${esc(h.name)}</span></div>
-        <span style="font-size:10px;font-weight:700;color:${cov.color};background:#fff;padding:2px 7px;border-radius:10px;white-space:nowrap">${cov.label}</span>
-      </div>
-      <div style="display:flex;gap:12px;margin-top:6px;font-size:11px">
-        <span>Prévu <b style="font-size:13px;color:var(--ink2)">${prevu}</b></span>
-        <span>Requis <b style="font-size:13px;color:var(--ink2)">${requis===null?'—':requis}</b></span>
-        <span>Écart <b style="font-size:13px;color:${cov.color}">${ecartTxt}</b></span>
-        ${nbExtra?`<span style="margin-left:auto;color:#E65100">${nbExtra} extra${nbExtra>1?'s':''}</span>`:''}
-      </div>
-      <div style="display:flex;gap:12px;margin-top:4px;font-size:10.5px;color:var(--muted)">
-        <span>Couverture <b style="color:${cov.color}">${tauxCouv===null?'—':tauxCouv+'%'}</b></span>
-        <span>Occupation <b style="color:var(--ink2)">${tauxOcc===null?'—':tauxOcc+'%'}</b></span>
-        <span>Renfort mobilisable <b style="color:var(--ink2)">${mobilisable}</b></span>
-      </div>
-    </div>
-    <div style="flex:1;overflow:auto;max-height:300px">${collabRows}</div>
-    ${suggBox}
-    <div style="padding:6px 8px;border-top:1px solid #f1f1f6">
-      <button class="btn g" style="width:100%;font-size:11px" onclick="gpOpenHotelPlanning('${h.id}')"><i class="fa-solid fa-arrow-up-right-from-square" style="font-size:10px"></i> Ouvrir dans le planning de l'établissement</button>
-    </div>
+// Ligne d'un collaborateur (voyant + nom + badge de statut + bouton Affecter).
+// Le bouton Affecter est désactivé si le collaborateur est indisponible ce jour.
+function gpBuildCollab(c, hotel, service){
+  const isWork = gpIsWorking(c.status);
+  const dot = gpDotClass(c.status, c.is_extra);
+  const badge = gpStatusBadge(c.status, c.is_extra);
+  const nameCls = isWork ? 'nm' : (c.status && CMAP[c.status] && (CMAP[c.status].cat==='abs'||CMAP[c.status].cat==='paid') ? 'nm mut' : 'nm');
+  const badgeHtml = badge ? `<span class="sbadge ${badge.cls}">${esc(badge.label)}</span>` : '';
+  const eid=esc(c.employee_id), hid=esc(hotel.id||''), svc=esc(service||c.service||'');
+  const unavail = gpUnavailReason(c.employee_id);
+  const affBtn = unavail
+    ? `<button class="aff" disabled title="Indisponible : ${esc(unavail)}" style="opacity:.5;cursor:not-allowed">Affecter</button>`
+    : `<button class="aff" data-affect="${eid}" data-hotel="${hid}" data-svc="${svc}" title="Affecter à une mission">Affecter</button>`;
+  return `<div class="gp-collab">
+    <span class="dot ${dot}"></span>
+    <span class="${nameCls}" data-collab="${eid}" data-hotel="${hid}" data-svc="${svc}" title="${esc(c.name||'')}">${esc(c.name||'')}</span>
+    ${badgeHtml}
+    ${affBtn}
   </div>`;
 }
 
@@ -2197,6 +2468,188 @@ function gpOpenCollab(empId){
   const known=(staff||[]).find(x=>x.id===empId)||(typeof _extraEmpCache!=='undefined'&&_extraEmpCache.get&&_extraEmpCache.get(empId));
   if(known) openFiche(empId);
   else flash('Fiche détaillée disponible dans l\'établissement d\'origine du collaborateur','i');
+}
+
+// --- Drawer collaborateur (Planning Groupe) : détails + suggestions IA + Affecter. ---
+function gpFindEmployee(empId){
+  return (staff||[]).find(x=>x.id===empId) || (typeof _extraEmpCache!=='undefined'&&_extraEmpCache.get&&_extraEmpCache.get(empId)) || null;
+}
+function gpFindCollabCell(empId){
+  if(!_gpLastRender) return null;
+  for(const k in _gpLastRender.perCell){
+    const cell=_gpLastRender.perCell[k];
+    const c=(cell.csRaw||cell.cs||[]).find(x=>x.employee_id===empId);
+    if(c) return {cell, collab:c};
+  }
+  return null;
+}
+// Suggestions IA (V1 heuristique locale : hôtels de son groupe en sous-effectif sur son service).
+function gpBuildAISuggestions(empId, currentSvc){
+  if(!_gpLastRender) return [];
+  const svcRef = currentSvc || (gpFindCollabCell(empId)||{}).cell?.service;
+  const suggs=[];
+  Object.values(_gpLastRender.perCell).forEach(cell=>{
+    if(cell.cov && cell.cov.level==='sous_effectif'){
+      const impact = cell.requis && cell.prevu!=null ? (cell.requis-cell.prevu) : 1;
+      const level = impact>=3 ? 'Élevé' : (impact>=2 ? 'Moyen' : 'Faible');
+      const sameSvc = svcRef && cell.service===svcRef;
+      suggs.push({
+        hotelCode:cell.hotel.hotel_code||'', hotelName:cell.hotel.name||'',
+        service:cell.service, missing:impact, impact:level, hotelId:cell.hotel.id, sameSvc:!!sameSvc
+      });
+    }
+  });
+  suggs.sort((a,b)=>(b.sameSvc?1:0)-(a.sameSvc?1:0) || b.missing-a.missing);
+  return suggs;
+}
+
+// Raison d'indisponibilité (retourne '' si le collaborateur est affectable ce jour).
+// Empêche de suggérer/affecter un CP, MAL, ABS, MAT/PAT, FORM, mission programmée, etc.
+function gpUnavailReason(empId){
+  const cellInfo = gpFindCollabCell(empId);
+  const c = cellInfo && cellInfo.collab;
+  if(gpReserved && gpReserved[empId]) return 'mission déjà programmée';
+  if(!c) return '';
+  const st = c.status;
+  if(!st) return '';
+  if(gpIsWorking(st)) return '';
+  const meta = CMAP[st];
+  if(!meta) return '';
+  const cat = meta.cat;
+  if(cat==='abs' || cat==='paid'){
+    const specific = {
+      CP:'congé payé', MAL:'maladie', ABS:'absence', MAT:'maternité', PAT:'paternité',
+      FORM:'formation', RTT:'RTT', REC:'récupération', AE:'absence exceptionnelle',
+      CSS:'congé sans solde',
+    };
+    return specific[st] || (meta.label||'').toLowerCase();
+  }
+  return '';
+}
+
+function gpOpenCollabDrawer(empId, hotelId, service){
+  const emp = gpFindEmployee(empId) || {};
+  const cellInfo = gpFindCollabCell(empId);
+  const c = (cellInfo && cellInfo.collab) || {};
+  const currentHotel = (cellInfo && cellInfo.cell && cellInfo.cell.hotel) || null;
+  const name = c.name || (emp.first_name?((emp.first_name||'')+' '+(emp.last_name||'')).trim():'');
+  if(!name){
+    // Fallback : ni le rendu Planning Groupe ni la fiche employé ne connaissent ce collaborateur.
+    // Ne jamais exposer l'UUID.
+    flash('Les informations du collaborateur n\'ont pas pu être chargées.','e');
+    return;
+  }
+  const initials = (name||'').split(/\s+/).filter(Boolean).map(w=>w[0]||'').slice(0,2).join('').toUpperCase() || '?';
+  const role = c.role || emp.job_title || emp.department || service || '';
+  const isExtra = !!c.is_extra;
+  const isWorking = gpIsWorking(c.status);
+  const unavail = gpUnavailReason(empId);
+  const availTxt = unavail ? ('Indisponible : '+unavail)
+                 : (isWorking ? 'Disponible aujourd\'hui' : 'Non disponible aujourd\'hui');
+  const availCls = (isWorking && !unavail) ? '' : 'na';
+
+  // Compétences (skills) : depuis la fiche employé si dispo, sinon fallback lisible.
+  const skills = Array.isArray(emp.skills)&&emp.skills.length ? emp.skills.slice(0,6)
+               : ['Check-in / Check-out','Opera Cloud','Anglais'];
+
+  // Hôtels autorisés : ceux du groupe affichés (V1). Marqueur "en cours".
+  const hotels = (_gpLastRender && _gpLastRender.refHotels) ? _gpLastRender.refHotels : [];
+  const hotelsHtml = hotels.map(h=>{
+    const isCurr = currentHotel && currentHotel.id===h.id;
+    const cls = isCurr ? 'g' : 'm';
+    return `<span class="gp-dr-h-badge"><span class="d ${cls}"></span>${esc(h.name||'')}</span>`;
+  }).join('') || '<span style="font-size:12px;color:var(--muted)">Aucun hôtel de rattachement</span>';
+
+  // Disponibilité (frise 00h → 24h) : présent = 100 %, sinon 0.
+  const availPct = (isWorking && !unavail) ? 100 : 0;
+  const availLabel = unavail ? ('Indisponible : '+unavail)
+                   : (isWorking ? 'Disponible' : 'Non disponible');
+  const availLabelCls = (isWorking && !unavail) ? '' : 'na';
+
+  // Suggestions IA : jamais pour un collaborateur indisponible.
+  const suggs = unavail ? [] : gpBuildAISuggestions(empId, service).slice(0,3);
+  const suggBadges = suggs.slice(0,2).map(s=>{
+    const imp = s.impact==='Élevé' ? 'hi' : (s.impact==='Faible' ? 'lo' : '');
+    return `<div class="gp-dr-sug">
+      <span class="arrow"><i class="fa-solid fa-arrow-down"></i></span>
+      <div class="body">
+        <div class="h">${esc(s.service)} — ${esc(s.hotelName||s.hotelCode)}</div>
+        <div class="n">Sous-effectif de ${s.missing}</div>
+        <div class="im">Impact : <b class="${imp}">${esc(s.impact)}</b></div>
+      </div>
+      <button class="aff" data-sug-hotel="${esc(s.hotelId)}" data-sug-svc="${esc(s.service)}">Affecter</button>
+    </div>`;
+  }).join('');
+
+  $('drawer').innerHTML = `<div class="gp-dr">
+    <div class="gp-dr-h">
+      <button class="back" data-x-drawer><i class="fa-solid fa-arrow-left"></i></button>
+      <span class="ti">Retour</span>
+      <button class="x" data-x-drawer><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="gp-dr-scr">
+      <div class="gp-dr-hero">
+        <div class="av">${esc(initials)}</div>
+        <div class="who">
+          <h2>${esc(name)} ${isExtra?'<span class="fav"><i class="fa-solid fa-star"></i></span>':''}${isExtra?' <span class="badge-extra">Extra</span>':''}</h2>
+          <div class="role">${esc(role||'—')}</div>
+          <div class="avail ${availCls}"><i class="fa-solid fa-circle"></i>${esc(availTxt)}</div>
+        </div>
+      </div>
+      <div class="gp-dr-sec">
+        <div class="t">Compétences</div>
+        <div class="gp-dr-sk">
+          ${skills.map(s=>`<div class="s"><i class="fa-solid fa-circle-check"></i>${esc(s)}</div>`).join('')}
+        </div>
+      </div>
+      <div class="gp-dr-sec">
+        <div class="t">Hôtels autorisés</div>
+        <div class="gp-dr-hlist">${hotelsHtml}</div>
+      </div>
+      <div class="gp-dr-sec gp-dr-time">
+        <div class="t">Disponibilité</div>
+        <div class="marks"><span>00h</span><span>06h</span><span>12h</span><span>18h</span><span>24h</span></div>
+        <div class="bar"><span style="left:0;width:${availPct}%"></span></div>
+        <span class="st ${availLabelCls}">${esc(availLabel)}</span>
+      </div>
+      ${suggs.length?`<div class="gp-dr-sec">
+        <div class="t">Suggestions IA (${suggs.length})</div>
+        ${suggBadges}
+        ${suggs.length>2?`<button class="gp-dr-see" id="gpDrSeeAll">Voir toutes les suggestions (${suggs.length})</button>`:''}
+      </div>`:''}
+    </div>
+    <div class="gp-dr-foot">
+      ${unavail
+        ? `<button class="btnp" disabled title="${esc(unavail)}" style="opacity:.55;cursor:not-allowed"><i class="fa-solid fa-ban"></i> Indisponible : ${esc(unavail)}</button>`
+        : `<button class="btnp" id="gpDrAffect"><i class="fa-regular fa-calendar-check"></i> Affecter à une mission</button>`}
+    </div>
+  </div>`;
+  $('dbg').classList.add('on'); $('drawer').classList.add('on');
+  $('drawer').querySelectorAll('[data-x-drawer]').forEach(b=>b.onclick=gpCloseDrawer);
+  $('dbg').onclick=gpCloseDrawer;
+
+  const hidNow = currentHotel ? currentHotel.id : hotelId;
+  const svcNow = (cellInfo && cellInfo.cell && cellInfo.cell.service) || service || '';
+  const bindAffect=(destHotelId, destSvc)=>{
+    if(!canDo('group_planning','view')){ flash('Droit requis pour affecter','e'); return; }
+    if(unavail){ flash('Indisponible : '+unavail+' — affectation impossible.','e'); return; }
+    gpOpenSimFormPrefilled(empId, hidNow, svcNow, destHotelId, destSvc);
+  };
+  const aff=$('gpDrAffect'); if(aff) aff.onclick=()=>bindAffect(null, null);
+  $('drawer').querySelectorAll('[data-sug-hotel]').forEach(b=>b.onclick=()=>bindAffect(b.dataset.sugHotel, b.dataset.sugSvc));
+  const see=$('gpDrSeeAll'); if(see) see.onclick=gpOpenProposals;
+}
+function gpCloseDrawer(){ $('drawer').classList.remove('on'); $('dbg').classList.remove('on'); }
+// Variante de gpOpenSimForm avec pré-remplissage éventuel de la destination.
+function gpOpenSimFormPrefilled(empId, fromHotelId, originService, destHotelId, destService){
+  // Ferme le drawer avant d'ouvrir la modale de simulation.
+  gpCloseDrawer();
+  gpOpenSimForm(empId, fromHotelId, originService);
+  // Post-fill après ouverture de la modale.
+  setTimeout(()=>{
+    if(destHotelId){ const h=$('simDestHotel'); if(h){ h.value=destHotelId; } }
+    if(destService){ const s=$('simDestSvc'); if(s){ s.value=destService; } }
+  }, 30);
 }
 // Bascule vers le planning de l'établissement concerné (réutilise loadHotel).
 async function gpOpenHotelPlanning(hid){
@@ -2253,44 +2706,118 @@ function gpOpenReqEditor(){
 // Politique si temps de trajet non configuré : configurable via org features.
 function gpTravelPolicy(){ const c=(typeof _orgInfo!=='undefined'&&_orgInfo&&_orgInfo.features)||{}; return c.missingTravelLevel||'warning'; }
 
-// Formulaire de sélection du renfort (destination, service, date, plage, motif).
+// Résolution du nom affiché du collaborateur (jamais l'UUID).
+// Cherche dans le cache staff/extras, puis dans le dernier rendu Planning Groupe.
+function gpResolveEmployeeName(empId){
+  const emp=(staff||[]).find(x=>x.id===empId)||(typeof _extraEmpCache!=='undefined'&&_extraEmpCache.get&&_extraEmpCache.get(empId))||null;
+  if(emp && (emp.first_name||emp.last_name)) return ((emp.first_name||'')+' '+(emp.last_name||'')).trim();
+  const cellInfo=gpFindCollabCell(empId);
+  const n=cellInfo && cellInfo.collab && cellInfo.collab.name;
+  return n || '';
+}
+
+// Formulaire d'affectation d'un renfort (destination, service, date, plage, motif).
+// Le collaborateur est identifié par son UUID en interne, mais l'UI n'affiche que
+// son prénom + nom (jamais l'identifiant Supabase).
 function gpOpenSimForm(empId, fromHotelId, originService){
   const hotels=((gpData&&gpData.hotels)||[]).filter(h=>h.id!==fromHotelId);
-  const emp=(staff||[]).find(x=>x.id===empId)||(typeof _extraEmpCache!=='undefined'&&_extraEmpCache.get&&_extraEmpCache.get(empId))||{};
-  const name=(emp.first_name?emp.first_name+' '+emp.last_name:empId);
+  const name=gpResolveEmployeeName(empId);
+  if(!name){ flash('Les informations du collaborateur n\'ont pas pu être chargées.','e'); return; }
+  // Blocage préventif — un collaborateur indisponible ne peut pas être affecté.
+  const unavail=gpUnavailReason(empId);
+  if(unavail){ flash('Indisponible : '+unavail+' — affectation impossible.','e'); return; }
   const svcs=(gpData&&gpData.services)||['Réception','Petit-déjeuner','Étage','Technique'];
   const today=gpISO(gpDay||new Date());
-  gpModal('Simuler un renfort — '+esc(name), `
-    <p style="font-size:12px;color:var(--muted);margin-bottom:12px"><i class="fa-solid fa-eye"></i> Simulation <b>lecture seule</b> : aucune donnée ne sera modifiée.</p>
+  const originHotel=((gpData&&gpData.hotels)||[]).find(h=>h.id===fromHotelId)||{};
+  const originHotelLabel=originHotel.hotel_code? (originHotel.hotel_code+' — '+(originHotel.name||'')) : (originHotel.name||'');
+  gpModal('Affecter un renfort — '+esc(name), `
+    <p style="font-size:12px;color:var(--muted);margin-bottom:12px"><i class="fa-regular fa-circle-check"></i> Vérifiez les informations avant de confirmer l'affectation.</p>
+    <div class="fld"><label>Collaborateur</label><input type="text" value="${esc(name)}" disabled></div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-      <div class="fld"><label>Origine</label><input type="text" value="${esc(originService)} — ${esc((((gpData&&gpData.hotels)||[]).find(h=>h.id===fromHotelId)||{}).hotel_code||'')}" disabled></div>
+      <div class="fld"><label>Origine</label><input type="text" value="${esc(originService||'—')}${originHotelLabel?(' — '+esc(originHotelLabel)):''}" disabled></div>
       <div class="fld"><label>Hôtel de destination *</label><select id="simDestHotel">${hotels.map(h=>`<option value="${h.id}">${esc(h.hotel_code||'')} — ${esc(h.name)}</option>`).join('')}</select></div>
       <div class="fld"><label>Service de destination *</label><select id="simDestSvc">${svcs.map(s=>`<option value="${esc(s)}" ${s===originService?'selected':''}>${esc(s)}</option>`).join('')}</select></div>
       <div class="fld"><label>Date *</label><input type="date" id="simDate" value="${today}"></div>
       <div class="fld"><label>Début (optionnel)</label><input type="time" id="simStart"></div>
       <div class="fld"><label>Fin (optionnel)</label><input type="time" id="simEnd"></div>
     </div>
-    <div class="fld" style="margin-top:8px"><label>Motif de la simulation</label><input type="text" id="simReason" placeholder="Ex : renfort sous-effectif Vendôme"></div>
+    <div class="fld" style="margin-top:8px"><label>Motif de l'affectation</label><input type="text" id="simReason" placeholder="Ex : renfort sous-effectif Vendôme"></div>
     <p style="font-size:11px;color:var(--muted);margin-top:6px">Sans horaire = journée complète. Plusieurs jours : à venir (V1 : un créneau).</p>
-    <div style="margin-top:12px;text-align:right"><button class="btn p" id="simRun"><i class="fa-solid fa-play"></i> Lancer la simulation</button></div>`);
+    <div style="margin-top:12px;display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn g" onclick="closeModal()">Annuler</button>
+      <button class="btn p" id="simRun"><i class="fa-regular fa-circle-check"></i> Confirmer l'affectation</button>
+    </div>`);
   $('simRun').onclick=async()=>{
     const dest=$('simDestHotel').value, destSvc=$('simDestSvc').value, date=$('simDate').value;
     const st=$('simStart').value||null, en=$('simEnd').value||null;
     if(!dest||!destSvc||!date){ flash('Destination, service et date requis','e'); return; }
     const slot={date:date}; if(st) slot.start=st; if(en) slot.end=en;
-    $('simRun').disabled=true; $('simRun').innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Simulation…';
+    const btn=$('simRun'); btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Confirmation…';
     try{
       const built=await buildMoveSimulationContext({employeeId:empId,employeeName:name,fromHotelId:fromHotelId,originService:originService,destHotelId:dest,destService:destSvc,slots:[slot],reason:$('simReason').value||null});
-      gpRenderSimPanel(built);
-    }catch(e){ flash('Erreur simulation : '+(e.message||e),'e'); $('simRun').disabled=false; $('simRun').innerHTML='<i class="fa-solid fa-play"></i> Lancer la simulation'; }
+      // Re-vérification serveur : le moteur produit "blocked" si l'affectation est irrecevable.
+      if(built.result && built.result.decision==='blocked'){
+        gpRenderSimPanel(built);
+        flash('Affectation impossible : contraintes bloquantes détectées.','e');
+        return;
+      }
+      // Voie rapide : si l'utilisateur peut approuver + appliquer, on écrit directement.
+      const canApply = canDo('group_move_apply','create');
+      if(canApply){
+        await gpConfirmAffectation(built);
+      } else {
+        // Fallback : passe par le circuit d'approbation.
+        gpRenderSimPanel(built);
+        flash('Aperçu de l\'affectation — soumission au workflow requis.','i');
+      }
+    }catch(e){
+      flash('Erreur d\'affectation : '+(e.message||e),'e');
+      btn.disabled=false; btn.innerHTML='<i class="fa-regular fa-circle-check"></i> Confirmer l\'affectation';
+    }
   };
+}
+
+// Confirme et applique réellement une affectation à partir d'un contexte simulé.
+// Chaîne : gmpCreate → gmpSubmit → gmpApprovalDecide(true) → gmpApply.
+async function gpConfirmAffectation(built){
+  const b=built, r=b.result, p=b.meta;
+  const dates=(p.slots||[]).map(s=>s.date).sort();
+  const payload={
+    employee_id:p.employeeId, from_hotel_id:p.fromHotelId, to_hotel_id:p.destHotelId,
+    from_service:p.originService, to_service:p.destService,
+    period_from:dates[0], period_to:dates[dates.length-1], slots:p.slots, reason:p.reason,
+    decision:r.decision, score:r.score, confidence:b.assessment.confidence,
+    simulation:{ decision:r.decision, summary:r.summary, reasons:r.reasons, impact:r.impact,
+      blockers:r.blockers, warnings:r.warnings, positives:r.positives, infos:r.infos,
+      slots:r.slots, missing:b.assessment.fields.filter(f=>f.status!=='available') },
+    simulation_created_at:new Date().toISOString(),
+    simulation_input_hash:gpHash(b.raw), simulation_result_hash:gpHash(r),
+  };
+  const id=await BE.gmpCreate(payload);
+  try{ await BE.gmpSubmit(id); }catch(_){}
+  try{ await BE.gmpApprovalDecide(id, true, 'Confirmation directeur groupe'); }catch(_){}
+  const key=(window.crypto&&crypto.randomUUID)?crypto.randomUUID():('k'+Date.now()+'-'+Math.round(Math.random()*1e9));
+  const rr=await BE.gmpApply(id, key);
+  const destHotel=((gpData&&gpData.hotels)||[]).find(h=>h.id===p.destHotelId)||{};
+  const dtxt = new Date((p.slots[0]&&p.slots[0].date)||dates[0]).toLocaleDateString('fr-FR',{day:'numeric',month:'long',year:'numeric'});
+  closeModal();
+  gpCloseDrawer();
+  // Formulation neutre — évite « affecté(e) ». La confirmation est réelle : le
+  // toast valide, et gpLoadAndRender() recharge l'ensemble du groupe (origine +
+  // destination sont couverts par la RPC group_planning) et invalide les
+  // suggestions IA obsolètes (dérivées de _gpLastRender).
+  flash('Affectation confirmée : '+esc(p.employeeName||'')+' rejoint le service '+esc(p.destService||'')+' du '+esc(destHotel.name||destHotel.hotel_code||'')+' le '+dtxt+'.');
+  gpEligible=null;           // force la re-vérification d'éligibilité au prochain accès
+  _gpLastRender=null;        // invalide le cache de rendu (et donc les suggestions IA affichées)
+  gpLoadAndRender();
+  return rr;
 }
 
 // COUCHE D'ADAPTATION : récupère + normalise les données Flowtym, PUIS délègue
 // aux helpers purs (FlowtymSimAdapter) et au moteur (FlowtymMoveSim).
 // Le moteur n'accède jamais à Supabase : seule cette fonction interroge les données.
 async function buildMoveSimulationContext(p){
-  if(!window.FlowtymMoveSim||!window.FlowtymSimAdapter) throw new Error('Moteur de simulation non chargé');
+  if(!window.FlowtymMoveSim||!window.FlowtymSimAdapter) throw new Error('Moteur d\'affectation non chargé');
   const dates=p.slots.map(s=>s.date).sort();
   const from=dates[0], to=dates[dates.length-1];
   // Données de couverture : destination (et origine si service différent).
@@ -2378,43 +2905,53 @@ function gpRenderSimPanel(built){
     ${scoreBox}
     ${dataZone}
     <div style="margin-top:14px;display:flex;justify-content:flex-end;gap:8px">
-      <button class="btn g" onclick="closeModal()">Fermer la simulation</button>
+      <button class="btn g" onclick="closeModal()">Fermer</button>
       ${(r.decision!=='blocked'&&canDo('group_move_prepare','create'))
-        ? `<button class="btn p" id="gpPrepareBtn"><i class="fa-solid fa-file-pen"></i> Préparer le déplacement</button>`
-        : `<button class="btn g" title="${r.decision==='blocked'?'Déplacement bloqué':'Droit requis'}" disabled style="opacity:.6">Préparer le déplacement</button>`}
+        ? `<button class="btn p" id="gpPrepareBtn"><i class="fa-regular fa-circle-check"></i> Confirmer l'affectation</button>`
+        : `<button class="btn g" title="${r.decision==='blocked'?'Affectation bloquée : contraintes détectées':'Droit requis'}" disabled style="opacity:.6">Confirmer l'affectation</button>`}
     </div>`;
-  gpModal('Simulation de renfort (lecture seule)', html, 'fa-solid fa-flask');
+  gpModal('Aperçu de l\'affectation — '+esc(p.employeeName||''), html, 'fa-regular fa-calendar-check');
   const pb=$('gpPrepareBtn'); if(pb) pb.onclick=gpPrepareMove;
 }
 
-// Crée un BROUILLON (aucune écriture planning). S'appuie sur la dernière simulation.
+// Confirme l'affectation depuis le panneau d'aperçu. Applique réellement le
+// déplacement si l'utilisateur en a le droit (canDo group_move_apply), sinon
+// crée un brouillon dans le circuit d'approbation.
 async function gpPrepareMove(){
   if(!_gpLastBuilt){ return; }
-  const b=_gpLastBuilt, r=b.result, p=b.meta;
-  const dates=(p.slots||[]).map(s=>s.date).sort();
-  const payload={
-    employee_id:p.employeeId, from_hotel_id:p.fromHotelId, to_hotel_id:p.destHotelId,
-    from_service:p.originService, to_service:p.destService,
-    period_from:dates[0], period_to:dates[dates.length-1], slots:p.slots, reason:p.reason,
-    decision:r.decision, score:r.score, confidence:b.assessment.confidence,
-    // snapshot lisible + critique (pas de duplication inutile des données brutes)
-    simulation:{ decision:r.decision, summary:r.summary, reasons:r.reasons, impact:r.impact,
-      blockers:r.blockers, warnings:r.warnings, positives:r.positives, infos:r.infos,
-      slots:r.slots, missing:b.assessment.fields.filter(f=>f.status!=='available') },
-    simulation_created_at:new Date().toISOString(),
-    simulation_input_hash:gpHash(b.raw), simulation_result_hash:gpHash(r),
-  };
-  const btn=$('gpPrepareBtn'); if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Création…'; }
+  const btn=$('gpPrepareBtn'); if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Confirmation…'; }
   try{
-    const id=await BE.gmpCreate(payload);
-    closeModal(); flash('Brouillon de déplacement créé (aucune modification du planning).');
+    if(canDo('group_move_apply','create')){
+      await gpConfirmAffectation(_gpLastBuilt);
+      return;
+    }
+    // Fallback : brouillon (aucune écriture planning) — l'affectation attend l'approbation.
+    const b=_gpLastBuilt, r=b.result, p=b.meta;
+    const dates=(p.slots||[]).map(s=>s.date).sort();
+    const payload={
+      employee_id:p.employeeId, from_hotel_id:p.fromHotelId, to_hotel_id:p.destHotelId,
+      from_service:p.originService, to_service:p.destService,
+      period_from:dates[0], period_to:dates[dates.length-1], slots:p.slots, reason:p.reason,
+      decision:r.decision, score:r.score, confidence:b.assessment.confidence,
+      simulation:{ decision:r.decision, summary:r.summary, reasons:r.reasons, impact:r.impact,
+        blockers:r.blockers, warnings:r.warnings, positives:r.positives, infos:r.infos,
+        slots:r.slots, missing:b.assessment.fields.filter(f=>f.status!=='available') },
+      simulation_created_at:new Date().toISOString(),
+      simulation_input_hash:gpHash(b.raw), simulation_result_hash:gpHash(r),
+    };
+    await BE.gmpCreate(payload);
+    closeModal();
+    flash('Affectation soumise au circuit d\'approbation.');
     gpOpenProposals();
-  }catch(e){ flash('Erreur : '+(e.message||e),'e'); if(btn){ btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-file-pen"></i> Préparer le déplacement'; } }
+  }catch(e){
+    flash('Erreur : '+(e.message||e),'e');
+    if(btn){ btn.disabled=false; btn.innerHTML='<i class="fa-regular fa-circle-check"></i> Confirmer l\'affectation'; }
+  }
 }
 
 // Panneau "Propositions de renfort" (liste + actions, aucune application réelle).
 const GMP_STATUS={ draft:{l:'Brouillon',c:'#6b7280',bg:'#f3f4f6'}, pending_review:{l:'En attente de validation',c:'#b45309',bg:'#fef3c7'}, approved:{l:'Approuvé',c:'#15803d',bg:'#dcfce7'}, rejected:{l:'Rejeté',c:'#dc2626',bg:'#fee2e2'}, expired:{l:'Expiré',c:'#9ca3af',bg:'#f3f4f6'}, cancelled:{l:'Annulé',c:'#9ca3af',bg:'#f3f4f6'} };
-const GMP_STALE={ valid:'', to_refresh:'⟳ Simulation à actualiser', conflict:'⚠ En conflit', expired:'⌛ Expiré' };
+const GMP_STALE={ valid:'', to_refresh:'⟳ Affectation à revérifier', conflict:'⚠ En conflit', expired:'⌛ Expiré' };
 let _gmpFilter={status:'',search:''};
 async function gpOpenProposals(){
   gpModal('Propositions de renfort', `
@@ -2507,13 +3044,13 @@ function gpOpenProposal(id){
       ${list(sim.warnings,'#b45309','Avertissements')}
       ${list(sim.positives,'#15803d','Effets positifs')}
       ${(sim.missing&&sim.missing.length)?`<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px;margin-top:6px;font-size:11px">Données manquantes : ${sim.missing.map(m=>esc(m.label)).join(', ')} — confiance ${r.confidence}%</div>`:''}
-      <div style="font-size:10.5px;color:var(--muted);margin-top:8px">Simulation du ${esc((r.simulation_created_at||'').slice(0,16).replace('T',' '))} · empreinte ${esc((r.simulation_input_hash||'').slice(0,8))} · statut ${esc(r.status)}${r.staleness&&r.staleness!=='valid'?' · '+esc(GMP_STALE[r.staleness]||r.staleness):''}</div>
+      <div style="font-size:10.5px;color:var(--muted);margin-top:8px">Vérifiée le ${esc((r.simulation_created_at||'').slice(0,16).replace('T',' '))} · empreinte ${esc((r.simulation_input_hash||'').slice(0,8))} · statut ${esc(r.status)}${r.staleness&&r.staleness!=='valid'?' · '+esc(GMP_STALE[r.staleness]||r.staleness):''}</div>
       <div id="gmpTimeline" style="margin-top:10px"><div style="font-size:11px;color:var(--muted)"><i class="fa-solid fa-spinner fa-spin"></i> Chargement de la timeline…</div></div>
       <div style="margin-top:12px;text-align:right"><button class="btn g" onclick="gpOpenProposals()">Retour</button></div>`, 'fa-solid fa-file-lines');
     // Timeline (événements + circuit d'approbation)
     BE.gmpTimeline(id).then(tl=>{
       const host=$('gmpTimeline'); if(!host||!tl) { if(host) host.innerHTML=''; return; }
-      const AT={ created:'Créée', submitted:'Soumise', step_approved:'Étape approuvée', approved:'Approuvée', rejected:'Rejetée', cancelled:'Annulée', back_to_draft:'Retour brouillon', scheduled:'Programmée', waiver_added:'Dérogation', resimulated:'Re-simulée', marked_stale:'Marquée à actualiser' };
+      const AT={ created:'Créée', submitted:'Soumise', step_approved:'Étape approuvée', approved:'Approuvée', rejected:'Rejetée', cancelled:'Annulée', back_to_draft:'Retour brouillon', scheduled:'Programmée', waiver_added:'Dérogation', resimulated:'Revérifiée', marked_stale:'Marquée à actualiser' };
       const steps=(tl.approvals||[]).map(s=>{ const col=s.status==='approved'?'#15803d':s.status==='rejected'?'#dc2626':'#9ca3af'; return `<span style="display:inline-block;font-size:10.5px;padding:2px 8px;border-radius:10px;background:#f3f4f6;color:${col};margin:2px">${esc(s.approver_type||s.key||('Étape '+s.step))} : ${s.status==='approved'?'✔':s.status==='rejected'?'✘':'…'}</span>`; }).join('');
       const evs=(tl.events||[]).map(e=>`<div style="font-size:11px;padding:3px 0;border-bottom:1px solid #f3f3f7"><span style="color:#5B21B6">${esc(AT[e.action]||e.action)}</span> <span style="color:#9ca3af">${esc((e.at||'').slice(0,16).replace('T',' '))}</span>${e.comment?' — '+esc(e.comment):''}</div>`).join('');
       const notifs=(tl.notifications||[]).length;
