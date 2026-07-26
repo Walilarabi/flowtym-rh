@@ -3013,59 +3013,27 @@ async function gpConfirmAffectation(built){
   try{ await BE.gmpSubmit(id); }catch(_){}
   try{ await BE.gmpApprovalDecide(id, true, 'Confirmation directeur groupe'); }catch(_){}
   const key=(window.crypto&&crypto.randomUUID)?crypto.randomUUID():('k'+Date.now()+'-'+Math.round(Math.random()*1e9));
+  // gmpApply est atomique : écriture staff_planning + upsert visibilité extra
+  // (employee_hotel_assignments + employee_extra_activations) dans la MÊME
+  // transaction PostgreSQL — cf. sql/57_group_move_apply_visibility.sql et
+  // db/reconstruct/30_functions.sql. Toute défaillance rollback l'intégralité
+  // côté serveur ; le front n'a plus à réparer les incohérences.
   const rr=await BE.gmpApply(id, key);
-
-  // ── Visibilité extra dans le planning de destination ──────────────────────
-  // group_move_apply écrit dans staff_planning (source de vérité). Mais le
-  // rendu du planning établissement (index.html:render()) ne montre que les
-  // employés présents dans `staff` (titulaires de l'hôtel affiché) ou dans
-  // `monthExtras`. `monthExtras` est l'intersection de
-  //   employee_hotel_assignments(target_hotel_id, active)   [autorisation]
-  //   employee_extra_activations(hotel_id, year, month, active)   [activation]
-  // Sans ces deux entrées, la ligne staff_planning existe mais reste invisible
-  // dans le planning établissement. On complète donc la visibilité en
-  // enregistrant les deux dans la même transaction utilisateur, en réutilisant
-  // le même parcours technique que l'ajout manuel d'extra (aucun système
-  // parallèle : c'est la convention existante pour un collaborateur
-  // inter-hôtels).
-  const visibilityErrors=[];
-  try{
-    await BE.addHotelAssignment(p.employeeId, p.fromHotelId, p.destHotelId,
-      'Renfort inter-hôtels — Planning Groupe', null);
-  }catch(e){ visibilityErrors.push('autorisation extra : '+(e.message||e)); }
-  const months=new Set();
-  (p.slots||[]).forEach(s=>{ const d=new Date(s.date); months.add(d.getFullYear()+'-'+(d.getMonth()+1)); });
-  for(const ym of months){
-    const [y,m]=ym.split('-').map(Number);
-    try{
-      await BE.setExtraActivation(p.destHotelId, p.employeeId, y, m, null, null, true,
-        'Renfort inter-hôtels appliqué depuis le Planning Groupe');
-    }catch(e){ visibilityErrors.push('activation '+y+'-'+String(m).padStart(2,'0')+' : '+(e.message||e)); }
-  }
 
   const destHotel=((gpData&&gpData.hotels)||[]).find(h=>h.id===p.destHotelId)||{};
   const dtxt = new Date((p.slots[0]&&p.slots[0].date)||dates[0]).toLocaleDateString('fr-FR',{day:'numeric',month:'long',year:'numeric'});
   closeModal();
   gpCloseDrawer();
-
-  if(visibilityErrors.length){
-    // La mission est bien écrite dans staff_planning, mais la couche de
-    // visibilité extra a échoué : signaler pour intervention, sans masquer
-    // le succès partiel (les autres refresh restent utiles).
-    flash('Mission enregistrée mais visibilité extra à revérifier : '+visibilityErrors.join(' ; '), 'e');
-  } else {
-    flash('Affectation confirmée : '+esc(p.employeeName||'')+' rejoint le service '+esc(p.destService||'')+' du '+esc(destHotel.name||destHotel.hotel_code||'')+' le '+dtxt+'.');
-  }
+  flash('Affectation confirmée : '+esc(p.employeeName||'')+' rejoint le service '+esc(p.destService||'')+' du '+esc(destHotel.name||destHotel.hotel_code||'')+' le '+dtxt+'.');
 
   gpEligible=null;
   _gpLastRender=null;
-  // Rafraîchit le Planning Groupe : la RPC group_planning couvre l'origine
-  // ET la destination (tous les hôtels du groupe sont chargés simultanément).
+  // Rafraîchit le Planning Groupe : la RPC group_planning couvre l'origine ET
+  // la destination (tous les hôtels du groupe sont chargés simultanément).
   gpLoadAndRender();
-  // Si l'utilisateur revient au planning établissement de l'hôtel affiché
-  // (origine ou destination), les extras sont maintenant activés — un
-  // rechargement propre sera fait à l'ouverture. On invalide aussi le
-  // cache mois en cours si l'utilisateur est déjà positionné sur cet hôtel.
+  // Si l'utilisateur est déjà positionné sur l'hôtel d'origine ou de
+  // destination, on relance loadMonth() pour prendre en compte immédiatement
+  // le nouvel extra activé côté serveur.
   if(typeof loadMonth==='function' && (hotelId===p.destHotelId || hotelId===p.fromHotelId)){
     try{ await loadMonth(); }catch(_){}
   }

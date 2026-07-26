@@ -221,7 +221,7 @@ BEGIN
 
   v_validation := jsonb_build_object(
     'level', CASE WHEN jsonb_array_length(coalesce(r.simulation->'missing','[]'::jsonb)) > 0 THEN 'validation_partielle' ELSE 'valide_sur_donnees_disponibles' END,
-    'checks_run', jsonb_build_array('planning','couverture','absences','trajet','chevauchement','expiration','concurrence','derogations'),
+    'checks_run', jsonb_build_array('planning','couverture','absences','trajet','chevauchement','expiration','concurrence','derogations','visibilite_extra'),
     'checks_unavailable', jsonb_build_array('competences','disponibilites','regles_rh_variables'),
     'missing', coalesce(r.simulation->'missing','[]'::jsonb)
   );
@@ -273,6 +273,13 @@ BEGIN
       shift_label=EXCLUDED.shift_label, source_proposal_id=EXCLUDED.source_proposal_id, origin_hotel_id=EXCLUDED.origin_hotel_id, updated_by=EXCLUDED.updated_by, updated_at=now();
     v_applied := v_applied + 1;
   END LOOP;
+
+  -- Visibilité extra (cf. sql/57_group_move_apply_visibility.sql) — même
+  -- transaction : toute exception rollback l'intégralité (atomicité plpgsql).
+  PERFORM public._gmp_ensure_visibility(
+    r.employee_id, r.from_hotel_id, r.to_hotel_id, v_days,
+    'group_move:' || p_id::text
+  );
 
   UPDATE group_move_proposals SET status='applied', applied_at=now(), applied_operation_id=v_op, staleness='valid', updated_at=now() WHERE id=p_id;
   INSERT INTO group_move_proposal_events(proposal_id, actor, action, old_status, new_status, metadata)
