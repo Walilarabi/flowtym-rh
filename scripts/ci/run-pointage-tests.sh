@@ -32,9 +32,17 @@ Q -d $DB -f "$ROOT/sql/62_pointage_terminals.sql"
 echo "== 3. Migration 63 — pointage_terminals_hardening =="
 Q -d $DB -f "$ROOT/sql/63_pointage_terminals_hardening.sql"
 
-echo "== 4. Idempotence — réappliquer 62 puis 63 (doit passer sans erreur) =="
+echo "== 3b. Migration 64 — remediation log =="
+Q -d $DB -f "$ROOT/sql/64_pointage_remediation_log.sql"
+
+echo "== 3c. Migration 65 — record_clocking column alignment + anomaly_flags safe =="
+Q -d $DB -f "$ROOT/sql/65_pointage_record_clocking_column_alignment.sql"
+
+echo "== 4. Idempotence — réappliquer 62 → 65 (doit passer sans erreur) =="
 Q -d $DB -f "$ROOT/sql/62_pointage_terminals.sql"
 Q -d $DB -f "$ROOT/sql/63_pointage_terminals_hardening.sql"
+Q -d $DB -f "$ROOT/sql/64_pointage_remediation_log.sql"
+Q -d $DB -f "$ROOT/sql/65_pointage_record_clocking_column_alignment.sql"
 
 echo "== 5. Suite de tests SQL (assertions + signatures + RLS + grants) =="
 # On désactive temporairement `set -e` pour capturer le code de sortie ET la sortie.
@@ -50,7 +58,7 @@ fi
 grep -E "NOTICE:  OK [0-9]+" /tmp/ptg_tests.log || { echo "AUCUN test SQL n'a émis d'OK — sortie :"; cat /tmp/ptg_tests.log; exit 1; }
 NB_OK=$(grep -c "NOTICE:  OK " /tmp/ptg_tests.log)
 echo "   → $NB_OK tests SQL OK"
-[ "$NB_OK" -ge "17" ] || { echo "ECHEC : $NB_OK tests OK détectés, attendu >= 17"; cat /tmp/ptg_tests.log; exit 1; }
+[ "$NB_OK" -ge "18" ] || { echo "ECHEC : $NB_OK tests OK détectés, attendu >= 18"; cat /tmp/ptg_tests.log; exit 1; }
 
 echo "== 6. Fixtures pour la suite de concurrence =="
 Q -d $DB -f "$ROOT/sql/tests/pointage_concurrency.sql"

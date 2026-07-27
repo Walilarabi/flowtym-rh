@@ -214,7 +214,10 @@ Deno.serve(async (req) => {
     // 8. Enregistrement ATOMIQUE via RPC (advisory lock + unique partiel +
     //    idempotency table). Résiste au double-clic, deux onglets, retry
     //    réseau, deux terminaux scannés simultanément, poste de nuit.
-    const auditPayload = {
+    // IMPORTANT : ne PAS envoyer `anomaly_flags: null`. La RPC teste
+    // jsonb_typeof(...) = 'array' pour être robuste, mais on garde le
+    // contrat côté client propre — la clé est OMISE quand le tableau est vide.
+    const auditPayload: Record<string, unknown> = {
       gps_lat: gps_lat ?? null,
       gps_lng: gps_lng ?? null,
       gps_accuracy: gps_accuracy ?? null,
@@ -222,7 +225,7 @@ Deno.serve(async (req) => {
       device_info: device_info ?? null,
       ip_address: ip,
       clock_status: anomalies.length > 0 ? 'suspicious' : 'valid',
-      anomaly_flags: anomalies.length > 0 ? anomalies : null,
+      ...(anomalies.length > 0 ? { anomaly_flags: anomalies } : {}),
     };
 
     const { data: rec, error: recErr } = await admin.rpc('record_clocking', {

@@ -134,7 +134,23 @@ CREATE TABLE IF NOT EXISTS public.staff_clockings (
   source text NOT NULL DEFAULT 'manual',
   created_by uuid,
   created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  -- Aligné sur la disposition production (types RÉELS des colonnes
+  -- ajoutées historiquement hors migration versionnée).
+  gps_lat double precision,
+  gps_lng double precision,
+  gps_accuracy double precision,
+  distance_meters double precision,
+  device_info text,
+  ip_address text,
+  clock_status text,
+  anomaly_flags text[],
+  qr_token_id uuid
+  -- Note : la contrainte prod `clock_out_after_in` (clock_out_ts > clock_in_ts)
+  -- n'est PAS reproduite ici car les tests enchaînent in+out dans un même
+  -- DO block où now() est stable ; en prod chaque scan est une transaction
+  -- HTTP séparée → now() avance → pas de collision. La contrainte reste
+  -- active en production via la migration 06.
 );
 
 CREATE TABLE IF NOT EXISTS public.hotel_qr_tokens (
