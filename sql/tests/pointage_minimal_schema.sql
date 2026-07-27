@@ -21,7 +21,15 @@
 --   • le job CI « DB — pointage terminals + hardening ».
 -- =============================================================================
 
+-- pgcrypto : installé dans public pour les tests unitaires (search_path par
+-- défaut). En production Supabase, pgcrypto vit dans le schéma `extensions` ;
+-- les fonctions qui référencent gen_random_bytes utilisent
+-- SET search_path = public, extensions pour couvrir les deux dispositions.
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+-- Alias pour que les migrations qualifiées `extensions.gen_random_bytes(...)`
+-- fonctionnent aussi ici (ex : la RPC generate_terminal_token appliquée sur
+-- une prod Supabase où pgcrypto vit dans `extensions`).
+CREATE SCHEMA IF NOT EXISTS extensions;
 
 -- Simule auth.uid() en variable de session (mimique Supabase).
 CREATE SCHEMA IF NOT EXISTS auth;

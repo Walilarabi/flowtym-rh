@@ -50,7 +50,7 @@ fi
 grep -E "NOTICE:  OK [0-9]+" /tmp/ptg_tests.log || { echo "AUCUN test SQL n'a émis d'OK — sortie :"; cat /tmp/ptg_tests.log; exit 1; }
 NB_OK=$(grep -c "NOTICE:  OK " /tmp/ptg_tests.log)
 echo "   → $NB_OK tests SQL OK"
-[ "$NB_OK" -ge "16" ] || { echo "ECHEC : $NB_OK tests OK détectés, attendu >= 16"; cat /tmp/ptg_tests.log; exit 1; }
+[ "$NB_OK" -ge "17" ] || { echo "ECHEC : $NB_OK tests OK détectés, attendu >= 17"; cat /tmp/ptg_tests.log; exit 1; }
 
 echo "== 6. Fixtures pour la suite de concurrence =="
 Q -d $DB -f "$ROOT/sql/tests/pointage_concurrency.sql"

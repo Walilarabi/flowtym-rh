@@ -73,9 +73,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_pointage_terminals_hotel_name_active
   WHERE is_active AND archived_at IS NULL;
 
 -- ── 2. Blocage du DELETE si le terminal a servi ──────────────────────────────
+-- search_path fixe (advisor Supabase function_search_path_mutable).
 CREATE OR REPLACE FUNCTION public.pointage_terminals_prevent_delete_if_used()
 RETURNS trigger
 LANGUAGE plpgsql
+SET search_path = public
 AS $$
 BEGIN
   IF EXISTS (SELECT 1 FROM public.staff_clockings WHERE terminal_id = OLD.id LIMIT 1) THEN
@@ -120,17 +122,21 @@ COMMENT ON TABLE public.pointage_terminal_events IS
   'Journal d''audit des opérations sur les terminaux de pointage : création, renommage, régénération de token, activation, archivage. Aucun droit INSERT/UPDATE aux clients — alimenté uniquement par les RPC SECURITY DEFINER de ce module.';
 
 -- ── 4. Générateur de token cryptographique ──────────────────────────────────
+-- IMPORTANT : sur Supabase managé, l'extension pgcrypto est installée dans
+-- le schéma `extensions` (pas `public`). Sur un PG vierge (CI, tests locaux),
+-- CREATE EXTENSION la met dans `public` par défaut. Le SET search_path ci-
+-- dessous couvre les deux cas ; on garde donc l'appel non qualifié.
 CREATE OR REPLACE FUNCTION public.generate_terminal_token()
 RETURNS text
 LANGUAGE sql
 VOLATILE
+SET search_path = public, extensions
 AS $$
-  SELECT 'ftt_' || encode(public.gen_random_bytes(24), 'hex')
+  SELECT 'ftt_' || encode(gen_random_bytes(24), 'hex')
 $$;
 
--- gen_random_bytes vient de pgcrypto (déjà activé). 24 octets = 192 bits
--- d''entropie, encodés hex → 48 caractères. La probabilité de collision
--- est négligeable ; l''unicité est en plus garantie par l''index UNIQUE
+-- 24 octets = 192 bits d'entropie, encodés hex → 48 caractères. Probabilité
+-- de collision négligeable ; unicité garantie en plus par l'index UNIQUE
 -- pointage_terminals(token).
 
 -- ── 5. RPC : création d'un terminal (SECURITY DEFINER + audit) ──────────────
@@ -175,7 +181,8 @@ BEGIN
 
   RETURN jsonb_build_object('id', v_id, 'token', v_token);
 END $$;
-GRANT EXECUTE ON FUNCTION public.create_pointage_terminal(uuid, text, text) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.create_pointage_terminal(uuid, text, text) FROM PUBLIC, anon;
+GRANT  EXECUTE ON FUNCTION public.create_pointage_terminal(uuid, text, text) TO authenticated;
 
 -- ── 6. RPC : renommer ───────────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION public.rename_pointage_terminal(
@@ -201,7 +208,8 @@ BEGIN
   VALUES (p_terminal_id, v_t.hotel_id, 'rename', v_uid, auth.uid(), v_email,
           jsonb_build_object('old_name', v_t.name, 'new_name', p_name, 'location', p_location));
 END $$;
-GRANT EXECUTE ON FUNCTION public.rename_pointage_terminal(uuid, text, text) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.rename_pointage_terminal(uuid, text, text) FROM PUBLIC, anon;
+GRANT  EXECUTE ON FUNCTION public.rename_pointage_terminal(uuid, text, text) TO authenticated;
 
 -- ── 7. RPC : régénération de token (atomique, audité) ───────────────────────
 CREATE OR REPLACE FUNCTION public.regenerate_pointage_terminal_token(
@@ -238,7 +246,8 @@ BEGIN
 
   RETURN jsonb_build_object('id', p_terminal_id, 'token', v_new_token);
 END $$;
-GRANT EXECUTE ON FUNCTION public.regenerate_pointage_terminal_token(uuid) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.regenerate_pointage_terminal_token(uuid) FROM PUBLIC, anon;
+GRANT  EXECUTE ON FUNCTION public.regenerate_pointage_terminal_token(uuid) TO authenticated;
 
 -- ── 8. RPC : activer / désactiver / archiver ────────────────────────────────
 CREATE OR REPLACE FUNCTION public.set_pointage_terminal_active(
@@ -264,7 +273,8 @@ BEGIN
   VALUES (p_terminal_id, v_t.hotel_id, CASE WHEN p_active THEN 'enable' ELSE 'disable' END,
           v_uid, auth.uid(), v_email, jsonb_build_object('previous', v_t.is_active));
 END $$;
-GRANT EXECUTE ON FUNCTION public.set_pointage_terminal_active(uuid, boolean) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.set_pointage_terminal_active(uuid, boolean) FROM PUBLIC, anon;
+GRANT  EXECUTE ON FUNCTION public.set_pointage_terminal_active(uuid, boolean) TO authenticated;
 
 CREATE OR REPLACE FUNCTION public.archive_pointage_terminal(p_terminal_id uuid)
 RETURNS void
@@ -291,7 +301,8 @@ BEGIN
   VALUES (p_terminal_id, v_t.hotel_id, 'archive', v_uid, auth.uid(), v_email,
           jsonb_build_object('previous_active', v_t.is_active));
 END $$;
-GRANT EXECUTE ON FUNCTION public.archive_pointage_terminal(uuid) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.archive_pointage_terminal(uuid) FROM PUBLIC, anon;
+GRANT  EXECUTE ON FUNCTION public.archive_pointage_terminal(uuid) TO authenticated;
 
 CREATE OR REPLACE FUNCTION public.set_pointage_terminal_security(
   p_terminal_id uuid,
@@ -322,7 +333,8 @@ BEGIN
                              'active_from_minute', p_active_from_minute,
                              'active_to_minute', p_active_to_minute));
 END $$;
-GRANT EXECUTE ON FUNCTION public.set_pointage_terminal_security(uuid, int, int, int) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.set_pointage_terminal_security(uuid, int, int, int) FROM PUBLIC, anon;
+GRANT  EXECUTE ON FUNCTION public.set_pointage_terminal_security(uuid, int, int, int) TO authenticated;
 
 -- ── 9. Autorisation multi-hôtel STRICTE — sans historique ───────────────────
 -- Règle (chaque OU indépendant, un seul suffit) :
@@ -391,7 +403,8 @@ AS $$
     false
   )
 $$;
-GRANT EXECUTE ON FUNCTION public.employee_can_clock_at(uuid, uuid, date) TO authenticated, service_role;
+REVOKE EXECUTE ON FUNCTION public.employee_can_clock_at(uuid, uuid, date) FROM PUBLIC, anon;
+GRANT  EXECUTE ON FUNCTION public.employee_can_clock_at(uuid, uuid, date) TO authenticated, service_role;
 
 COMMENT ON FUNCTION public.employee_can_clock_at(uuid, uuid, date) IS
   'Renvoie true si le salarié est actuellement autorisé à pointer dans l''hôtel du terminal à la date donnée. Ne prend PAS en compte l''historique de pointage : seuls comptent l''hôtel principal actif, une affectation ou activation Extra active, ou un shift planifié. Utilisé par la RPC record_clocking et par clock-portal.';
@@ -410,8 +423,13 @@ CREATE TABLE IF NOT EXISTS public.staff_clocking_idempotency (
 CREATE INDEX IF NOT EXISTS staff_clocking_idempotency_clocking
   ON public.staff_clocking_idempotency(clocking_id);
 
+-- RLS obligatoire : la table est manipulée UNIQUEMENT par record_clocking
+-- (service_role, bypass RLS). Toute lecture/écriture directe par un client
+-- doit être refusée.
+ALTER TABLE public.staff_clocking_idempotency ENABLE ROW LEVEL SECURITY;
+
 COMMENT ON TABLE public.staff_clocking_idempotency IS
-  'Registre des clés d''idempotence par pointage. Un retry réseau avec la même clé retourne la même écriture. Purge conseillée après 24 h.';
+  'Registre des clés d''idempotence par pointage. Un retry réseau avec la même clé retourne la même écriture. Purge conseillée après 24 h. RLS active, aucune policy — accès service_role uniquement.';
 
 -- Colonne informative sur staff_clockings pour retrouver la clé la plus
 -- récente sans jointure (utile pour l''export/audit).
@@ -602,7 +620,11 @@ END $$;
 -- record_clocking n'est jamais appelée par un client anonyme : elle est
 -- invoquée par l'edge function clock-portal (rôle service_role) une fois
 -- l'employé authentifié et l'autorisation employee_can_clock_at() validée.
-REVOKE ALL ON FUNCTION public.record_clocking(uuid,uuid,uuid,text,text,jsonb) FROM PUBLIC;
+-- Supabase applique un GRANT EXECUTE par défaut à anon+authenticated sur
+-- toute fonction du schéma public. REVOKE FROM PUBLIC ne suffit PAS —
+-- il faut révoquer explicitement de anon ET authenticated pour que
+-- record_clocking reste strictement réservé à service_role (edge fn).
+REVOKE ALL ON FUNCTION public.record_clocking(uuid,uuid,uuid,text,text,jsonb) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.record_clocking(uuid,uuid,uuid,text,text,jsonb) TO service_role;
 
 -- ── 13. TODO daté : retrait complet du fallback hotel_qr_tokens ─────────────

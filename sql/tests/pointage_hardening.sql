@@ -520,4 +520,21 @@ BEGIN
   RAISE NOTICE 'OK 16 · grants stricts (record_clocking réservé service_role)';
 END $$;
 
+-- ── Test 17 : RLS sur staff_clocking_idempotency + RPC admin non exécutables par anon ──
+DO $$
+DECLARE v_rls boolean;
+BEGIN
+  SELECT relrowsecurity INTO v_rls FROM pg_class WHERE oid='public.staff_clocking_idempotency'::regclass;
+  ASSERT v_rls = true, '17a. RLS active sur staff_clocking_idempotency';
+
+  ASSERT NOT has_function_privilege('anon', 'public.create_pointage_terminal(uuid,text,text)',    'EXECUTE'), '17b. anon ne peut PAS create_pointage_terminal';
+  ASSERT NOT has_function_privilege('anon', 'public.regenerate_pointage_terminal_token(uuid)',    'EXECUTE'), '17c. anon ne peut PAS regenerate_pointage_terminal_token';
+  ASSERT NOT has_function_privilege('anon', 'public.archive_pointage_terminal(uuid)',             'EXECUTE'), '17d. anon ne peut PAS archive_pointage_terminal';
+  ASSERT NOT has_function_privilege('anon', 'public.employee_can_clock_at(uuid,uuid,date)',       'EXECUTE'), '17e. anon ne peut PAS employee_can_clock_at';
+
+  ASSERT has_function_privilege('authenticated','public.create_pointage_terminal(uuid,text,text)','EXECUTE'), '17f. authenticated peut create';
+  ASSERT has_function_privilege('authenticated','public.regenerate_pointage_terminal_token(uuid)','EXECUTE'), '17g. authenticated peut regenerate';
+  RAISE NOTICE 'OK 17 · RLS idempotency + RPC admin verrouillées vs anon';
+END $$;
+
 DO $$ BEGIN RAISE NOTICE '========================================'; RAISE NOTICE 'TOUS LES TESTS SQL SONT PASSÉS'; RAISE NOTICE '========================================'; END $$;
