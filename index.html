@@ -17002,8 +17002,8 @@ function computeCodeForDate(emp, dateStr, pattern){
   };
   // Test cycle continu : vérifier aussi octobre (le cycle traverse deux mois)
   const EXP_OCT={
-    '2026-10-01':'','2026-10-02':'P','2026-10-03':'P','2026-10-04':'',
-    '2026-10-05':'','2026-10-06':'P','2026-10-07':'P','2026-10-08':'P',
+    '2026-10-01':'P','2026-10-02':'P','2026-10-03':'','2026-10-04':'',
+    '2026-10-05':'','2026-10-06':'P','2026-10-07':'P','2026-10-08':'',
   };
   let ok=true;
   [...Object.entries(EXP),...Object.entries(EXP_OCT)].forEach(([ds,exp])=>{
@@ -17016,7 +17016,7 @@ function computeCodeForDate(emp, dateStr, pattern){
                 {day:4,status:'off'},{day:5,status:'work'},{day:6,status:'work'},{day:7,status:'work'}]};
   const EXP2={'2026-11-15':'P','2026-11-16':'P','2026-11-17':'','2026-11-18':'',
     '2026-11-19':'P','2026-11-20':'P','2026-11-21':'P',
-    '2026-11-22':'P','2026-12-31':'','2027-01-01':'P'}; // traversée mois/année
+    '2026-11-22':'P','2026-12-31':'P','2027-01-01':'P'}; // traversée mois/année
   Object.entries(EXP2).forEach(([ds,exp])=>{
     const got=computeCodeForDate(null,ds,PAT2)?.code??null;
     if(got!==exp){console.error(`[cycle-test2] FAIL ${ds}: attendu="${exp}" obtenu="${got}"`);ok=false;}
@@ -17278,15 +17278,22 @@ async function computeAutoFill(){
         continue;
       }
 
-      // Mode sécurisé : ne toucher que les vides
-      if(safeOnly&&existing!==undefined&&existing!==''){
-        skipped.push({emp,date:ds,existing,reason:'Cellule déjà renseignée'});
-        continue;
-      }
-
       const result=computeCodeForDate(emp, ds, pat); // passe la string, pas un Date
       if(result===null){
         // Avant le cycle — ignorer silencieusement
+        continue;
+      }
+
+      // Mode sécurisé : ne toucher que les vides
+      if(safeOnly&&existing!==undefined&&existing!==''){
+        // Une cellule 'P' déjà en base sur un jour que le rythme actuel
+        // considère désormais comme repos fixe est un résidu (génération
+        // antérieure à la configuration du rythme, ou rythme modifié depuis) :
+        // on le signale au lieu de le préserver silencieusement.
+        if(existing==='P'&&result.code===''){
+          conflicts.push({emp,date:ds,existing,expected:result.code,reason:result.reason});
+        }
+        skipped.push({emp,date:ds,existing,reason:'Cellule déjà renseignée'});
         continue;
       }
 
@@ -17312,8 +17319,46 @@ function renderAutoFillSummary(r){
       <div style="background:#fce7f3;border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:700;color:#9d174d">${r.protected_.length}</div><div style="color:#831843">Protégées (absences)</div></div>
     </div>
     ${noRuleNames.length?`<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:10px;font-size:12px;color:#9a3412"><i class="fa-solid fa-triangle-exclamation"></i> <b>Sans règle paramétrée (ignorés) :</b> ${noRuleNames.join(', ')}</div>`:''}
+    ${r.conflicts.length?`<div style="background:#fee2e2;border:1px solid #fecaca;border-radius:8px;padding:10px;font-size:12px;color:#991b1b;margin-top:${noRuleNames.length?'8px':'0'}">
+      <i class="fa-solid fa-triangle-exclamation"></i> <b>${r.conflicts.length} cellule(s) marquée(s) « travaillé » sur un jour de repos fixe désormais configuré</b> (généré avant paramétrage du rythme, ou rythme modifié depuis) :
+      ${[...new Set(r.conflicts.map(x=>`${x.emp.last_name} ${x.emp.first_name}`))].join(', ')}
+      <div style="margin-top:8px"><button type="button" class="btn g" id="afFixConflictsBtn" style="font-size:11px;padding:4px 10px;background:#fff"><i class="fa-solid fa-broom"></i> Corriger ces ${r.conflicts.length} cellule(s)</button></div>
+    </div>`:''}
     ${r.toCreate.length===0?'<div style="color:#dc2626;font-size:12px;margin-top:8px;font-weight:600">Aucune cellule à générer. Vérifiez que les rythmes sont bien paramétrés.</div>':''}
   `;
+  if(r.conflicts.length){
+    $('afFixConflictsBtn').onclick=async()=>{
+      $('afFixConflictsBtn').disabled=true;
+      $('afFixConflictsBtn').textContent='Correction…';
+      try{
+        await applyConflictFixes(r);
+        await loadMonth();
+        closeModal();
+        flash(`${r.conflicts.length} cellule(s) corrigée(s) (repos rétabli)`);
+      }catch(e){flash('Erreur correction : '+e.message);console.error(e);}
+      finally{$('afFixConflictsBtn').disabled=false;}
+    };
+  }
+}
+
+// Corrige UNIQUEMENT les cellules en conflit (repos fixe actuel mais 'P' en base) —
+// jamais les autres cellules déjà saisies (manuelles, absences, cycles).
+async function applyConflictFixes(r){
+  if(!r.conflicts.length) return;
+  const toDelete=r.conflicts.map(x=>({hotel_id:hotelId,employee_id:x.emp.id,day:x.date}));
+  await BE.savePlanning(hotelId, [], toDelete);
+  try{
+    const run=await BE.saveGenerationRun(hotelId,{
+      scope_type:'establishment',scope_id:null,
+      period_start:r.fromStr,period_end:r.toStr,
+      mode:'conflict-fix',status:'done',
+      summary_json:{fixed:r.conflicts.length}
+    });
+    if(run?.id){
+      const items=r.conflicts.map(x=>({run_id:run.id,employee_id:x.emp.id,date:x.date,old_value:x.existing,new_value:x.expected,action:'conflict',reason:'Correction : '+x.reason}));
+      await BE.saveGenerationItems(items);
+    }
+  }catch(e){console.warn('Historique correction non sauvegardé:',e);}
 }
 
 async function applyAutoFill(r){
