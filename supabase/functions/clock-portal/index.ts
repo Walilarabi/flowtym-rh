@@ -32,6 +32,79 @@ const cors = (o: string|null) => {
   };
 };
 
+/** Extrait le token brut du contenu QR (URL avec ?token= ou chaîne brute). */
+function extractToken(raw: string): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  try {
+    const u = new URL(trimmed);
+    const t = u.searchParams.get('token');
+    if (t) return t.trim();
+  } catch (_) { /* pas une URL */ }
+  return trimmed || null;
+}
+
+type TerminalRow = {
+  id: string;
+  hotel_id: string;
+  name: string | null;
+  is_active: boolean;
+  legacy: boolean;
+};
+
+/** Résout un token contre pointage_terminals (nouveau), puis hotel_qr_tokens (legacy). */
+async function resolveTerminal(admin: ReturnType<typeof createClient>, token: string): Promise<TerminalRow | null> {
+  const { data: term } = await admin.from('pointage_terminals')
+    .select('id,hotel_id,name,is_active')
+    .eq('token', token)
+    .eq('is_active', true)
+    .maybeSingle();
+  if (term) return { ...term, legacy: false } as TerminalRow;
+
+  // Fallback rétrocompatibilité : ancien QR par hôtel
+  const { data: legacy } = await admin.from('hotel_qr_tokens')
+    .select('id,hotel_id,is_active,expires_at')
+    .eq('token', token)
+    .eq('is_active', true)
+    .maybeSingle();
+  if (!legacy) return null;
+  if (legacy.expires_at && new Date(legacy.expires_at) < new Date()) return null;
+
+  return {
+    id: legacy.id,
+    hotel_id: legacy.hotel_id,
+    name: 'Terminal historique',
+    is_active: true,
+    legacy: true,
+  };
+}
+
+/** Vrai si l'employé est autorisé à pointer dans cet hôtel (principal ou secondaire). */
+async function employeeCanClockAt(
+  admin: ReturnType<typeof createClient>,
+  employeeId: string,
+  primaryHotelId: string,
+  targetHotelId: string,
+): Promise<boolean> {
+  if (primaryHotelId === targetHotelId) return true;
+  // Un salarié multi-hôtel peut être planifié dans un hôtel secondaire :
+  // on considère qu'un shift ou un pointage récent dans l'hôtel cible vaut autorisation.
+  const { data: shift } = await admin.from('staff_planning')
+    .select('id')
+    .eq('employee_id', employeeId)
+    .eq('hotel_id', targetHotelId)
+    .limit(1)
+    .maybeSingle();
+  if (shift) return true;
+  const { data: prev } = await admin.from('staff_clockings')
+    .select('id')
+    .eq('employee_id', employeeId)
+    .eq('hotel_id', targetHotelId)
+    .limit(1)
+    .maybeSingle();
+  return !!prev;
+}
+
 Deno.serve(async (req) => {
   const h = cors(req.headers.get('Origin'));
   if (req.method === 'OPTIONS') return new Response('ok', { headers: h });
@@ -44,7 +117,8 @@ Deno.serve(async (req) => {
 
     const body = await req.json();
     const { qr_token, gps_lat, gps_lng, gps_accuracy, device_info } = body;
-    if (!qr_token) return json({ error: 'qr_token requis' }, 400);
+    const token = extractToken(String(qr_token || ''));
+    if (!token) return json({ error: 'qr_token requis', code: 'MISSING_TOKEN' }, 400);
 
     const admin = createClient(SUPABASE_URL, SERVICE_KEY);
     const anon  = createClient(SUPABASE_URL, ANON_KEY, { global: { headers: { Authorization: authHdr } } });
@@ -54,43 +128,41 @@ Deno.serve(async (req) => {
 
     // 1. Vérifier la session salarié
     const { data: { user }, error: authErr } = await anon.auth.getUser();
-    if (authErr || !user) return json({ error: 'Session invalide' }, 401);
+    if (authErr || !user) return json({ error: 'Session invalide', code: 'AUTH_INVALID' }, 401);
 
     // 2. Récupérer l'employé par portal_auth_id
     const { data: emp } = await admin.from('employees')
       .select('id,hotel_id,first_name,last_name,portal_enabled')
       .eq('portal_auth_id', user.id)
       .maybeSingle();
-    if (!emp)             return json({ error: 'Employé introuvable' }, 403);
-    if (!emp.portal_enabled) return json({ error: 'Accès portail désactivé' }, 403);
+    if (!emp)                return json({ error: 'Employé introuvable', code: 'EMP_NOT_FOUND' }, 403);
+    if (!emp.portal_enabled) return json({ error: 'Accès portail désactivé', code: 'PORTAL_DISABLED' }, 403);
 
-    // 3. Valider le token QR
-    const { data: tokenRow } = await admin.from('hotel_qr_tokens')
-      .select('id,hotel_id,expires_at,is_active')
-      .eq('token', qr_token)
-      .eq('is_active', true)
-      .maybeSingle();
+    // 3. Résoudre le TERMINAL (nouveau modèle) ou l'ancien token hotel
+    const terminal = await resolveTerminal(admin, token);
+    if (!terminal)
+      return json({ error: 'QR Code invalide ou désactivé. Demandez à votre responsable de vérifier le terminal.', code: 'INVALID_TERMINAL' }, 400);
 
-    if (!tokenRow)
-      return json({ error: 'QR Code invalide ou désactivé', code: 'INVALID_TOKEN' }, 400);
-    if (tokenRow.expires_at && new Date(tokenRow.expires_at) < new Date())
-      return json({ error: 'QR Code expiré — demandez à votre manager de le régénérer', code: 'EXPIRED_TOKEN' }, 400);
+    const targetHotelId = terminal.hotel_id;
 
-    // 4. L'employé doit appartenir à l'hôtel du QR
-    if (emp.hotel_id !== tokenRow.hotel_id) {
+    // 4. L'employé doit être autorisé à pointer dans l'hôtel du terminal.
+    //    Compatible multi-hôtels (planning ou historique de pointage).
+    const allowed = await employeeCanClockAt(admin, emp.id, emp.hotel_id, targetHotelId);
+    if (!allowed) {
       await admin.from('time_clock_anomalies').insert({
-        hotel_id: tokenRow.hotel_id, employee_id: emp.id, anomaly_type: 'wrong_hotel',
-        details: { employee_hotel: emp.hotel_id, token_hotel: tokenRow.hotel_id, ip, device_info },
+        hotel_id: targetHotelId, employee_id: emp.id, anomaly_type: 'wrong_hotel',
+        details: { employee_hotel: emp.hotel_id, terminal_hotel: targetHotelId, terminal_id: terminal.id, ip, device_info },
       }).then(null, () => {});
-      return json({ error: "Ce QR Code n'est pas celui de votre hôtel", code: 'WRONG_HOTEL' }, 403);
+      return json({
+        error: "Vous n'êtes pas autorisé à pointer dans cet hôtel. Contactez votre responsable.",
+        code: 'WRONG_HOTEL',
+      }, 403);
     }
 
-    const hotelId = emp.hotel_id;
-
-    // 5. Config hôtel
+    // 5. Config hôtel cible
     const { data: hotel } = await admin.from('hotels')
       .select('name,latitude,longitude,geofence_radius_meters,qr_clocking_enabled')
-      .eq('id', hotelId).single();
+      .eq('id', targetHotelId).single();
 
     if (!hotel?.qr_clocking_enabled)
       return json({ error: 'Le pointage QR est désactivé pour cet hôtel', code: 'QR_DISABLED' }, 400);
@@ -108,8 +180,8 @@ Deno.serve(async (req) => {
 
       if (distanceMeters > radius) {
         await admin.from('time_clock_anomalies').insert({
-          hotel_id: hotelId, employee_id: emp.id, anomaly_type: 'gps_too_far',
-          details: { distance_meters: distanceMeters, radius, gps_lat, gps_lng, gps_accuracy, ip, device_info },
+          hotel_id: targetHotelId, employee_id: emp.id, anomaly_type: 'gps_too_far',
+          details: { distance_meters: distanceMeters, radius, gps_lat, gps_lng, gps_accuracy, ip, device_info, terminal_id: terminal.id },
         }).then(null, () => {});
         return json({
           error: `Vous êtes à ${distanceMeters}m de l'hôtel (limite : ${radius}m). Pointage impossible.`,
@@ -119,11 +191,11 @@ Deno.serve(async (req) => {
       if (gps_accuracy != null && gps_accuracy > 100) anomalies.push('gps_imprecise');
     }
 
-    // 7. Déterminer l'action (auto)
+    // 7. Déterminer l'action (auto) sur l'hôtel du terminal
     const today = new Date().toISOString().slice(0, 10);
     const { data: rows } = await admin.from('staff_clockings')
       .select('id,clock_in_ts,clock_out_ts')
-      .eq('employee_id', emp.id).eq('hotel_id', hotelId).eq('day', today)
+      .eq('employee_id', emp.id).eq('hotel_id', targetHotelId).eq('day', today)
       .order('clock_in_ts', { ascending: false });
 
     const todayRows = rows || [];
@@ -139,21 +211,24 @@ Deno.serve(async (req) => {
     const now   = new Date().toISOString();
     const status = anomalies.length > 0 ? 'suspicious' : 'valid';
 
-    const auditFields = {
+    const auditFields: Record<string, unknown> = {
       gps_lat, gps_lng, gps_accuracy,
       distance_meters: distanceMeters,
       device_info, ip_address: ip,
-      qr_token_id: tokenRow.id,
       clock_status: status,
       anomaly_flags: anomalies.length > 0 ? anomalies : null,
     };
+    // Nouveau modèle : on stocke l'id du terminal.
+    // Legacy : on conserve qr_token_id pour ne pas casser les rapports existants.
+    if (terminal.legacy) auditFields.qr_token_id = terminal.id;
+    else                 auditFields.terminal_id  = terminal.id;
 
     // 8. Enregistrer le pointage
     let clockingId: string | null = null;
 
     if (action === 'clock_in') {
       const { data: newClock, error: insErr } = await admin.from('staff_clockings').insert({
-        hotel_id: hotelId, employee_id: emp.id,
+        hotel_id: targetHotelId, employee_id: emp.id,
         day: today, clock_in_ts: now, source: 'qr', ...auditFields,
       }).select('id').single();
       if (insErr) return json({ error: 'Erreur enregistrement : ' + insErr.message }, 500);
@@ -169,9 +244,9 @@ Deno.serve(async (req) => {
     // 9. Journaliser les anomalies restantes avec référence au pointage
     for (const anom of anomalies) {
       await admin.from('time_clock_anomalies').insert({
-        hotel_id: hotelId, employee_id: emp.id, clocking_id: clockingId,
+        hotel_id: targetHotelId, employee_id: emp.id, clocking_id: clockingId,
         anomaly_type: anom,
-        details: { distance_meters: distanceMeters, gps_accuracy, ip, device_info },
+        details: { distance_meters: distanceMeters, gps_accuracy, ip, device_info, terminal_id: terminal.id },
       }).then(null, () => {});
     }
 
@@ -183,6 +258,10 @@ Deno.serve(async (req) => {
       message: labels[action],
       timestamp: now,
       employee_name: `${emp.first_name} ${emp.last_name}`,
+      hotel_id: targetHotelId,
+      hotel_name: hotel?.name,
+      terminal_id: terminal.legacy ? null : terminal.id,
+      terminal_name: terminal.name,
       distance_meters: distanceMeters,
       anomalies,
       clocking_id: clockingId,

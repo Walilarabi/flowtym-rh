@@ -1,5 +1,44 @@
 # Flowtym RH — Changelog
 
+## v1.4 — Refonte du module Pointage (terminaux)
+
+### Principe
+- Le QR Code n'identifie **plus** un salarié : il identifie **un terminal de pointage**.
+- Un hôtel peut posséder plusieurs terminaux (Réception, Cuisine, Entrée du personnel…), chacun avec son propre QR.
+- Le salarié est identifié via sa session Flowtym au moment du scan.
+- Aucun QR à réimprimer lors des arrivées/départs des collaborateurs.
+
+### Frontend — Portail salarié (`portal.html`)
+- Le bouton principal **Pointer entrée / Pointer sortie** ouvre immédiatement la caméra (getUserMedia).
+- Compatibilité étendue : Safari iOS (playsinline, muted, autoplay), Chrome Android, Chrome/Edge desktop, Firefox.
+- Décodeur natif `BarcodeDetector` avec fallback automatique `jsQR` chargé à la demande.
+- Détection de compatibilité (contexte sécurisé, présence de `mediaDevices.getUserMedia`) avec messages explicites.
+- Gestion fine des erreurs de permission caméra (NotAllowedError, NotFoundError, NotReadableError, OverconstrainedError, SecurityError).
+- La **saisie manuelle du code** est reléguée à un lien secondaire, accessible uniquement depuis l'écran scanner ou son panneau d'erreur.
+- Nouveau design plein écran du scanner avec cadre-guide, feedback tactile (vibrate) à la détection.
+
+### Frontend — Admin (`index.html`, onglet Paramètres › Pointage QR)
+- Nouvelle interface de gestion multi-terminaux : lister, créer, nommer, associer à un hôtel, imprimer/télécharger, désactiver, réactiver, régénérer, supprimer.
+- Chaque terminal affiche son QR en direct, son code, sa date de création.
+- Impression optimisée avec nom d'hôtel + nom de terminal.
+
+### Backend — Base de données (`sql/62_pointage_terminals.sql`)
+- Nouvelle table `pointage_terminals(id, hotel_id, name, location, token, is_active, timestamps)` avec RLS multi-tenant.
+- Colonne `terminal_id` ajoutée à `staff_clockings` (FK, ON DELETE SET NULL).
+- Backfill idempotent : chaque hôtel disposant déjà d'un `hotel_qr_tokens` actif hérite d'un terminal « Réception » reprenant l'ancien token.
+- Rétrocompatibilité totale : la table `hotel_qr_tokens` reste lisible par l'edge function en fallback.
+- Fonction RPC `list_pointage_terminals(uuid)`.
+
+### Backend — Edge function `clock-portal`
+- Résolution du token contre `pointage_terminals` (nouveau) puis `hotel_qr_tokens` (legacy).
+- Vérification que le salarié est autorisé à pointer dans l'hôtel du terminal (compatible multi-hôtels : shift planifié ou historique).
+- Enregistrement de `terminal_id` sur le pointage (ou `qr_token_id` en fallback legacy).
+- Codes d'erreur enrichis : `MISSING_TOKEN`, `AUTH_INVALID`, `EMP_NOT_FOUND`, `PORTAL_DISABLED`, `INVALID_TERMINAL`, `WRONG_HOTEL`, `QR_DISABLED`, `GPS_REQUIRED`, `GPS_TOO_FAR`.
+- Réponse enrichie : `terminal_id`, `terminal_name`, `hotel_name`.
+
+### Tests
+- Nouveau fichier `tests/pointage-terminals.test.js` (19 tests) : extraction du token, décision clock_in/out, détection double-pointage, autorisation multi-hôtel.
+
 ## v1.3 — Contrats & Documents (Phases 1b + 2)
 
 ### Frontend
