@@ -9,24 +9,29 @@
  *   reserved      map { employee_id: { ... } } des propositions déjà réservées
  * @returns {string} raison d'indisponibilité (vide si affectable)
  */
+// Règles métier Planning Groupe :
+//   Présent / PE / MAD  → affectable
+//   Repos (status vide) → affectable
+//   CP                  → affectable (extra possible)
+//   RTT/REC/FORM/AE/CSS → affectable (mobilisables)
+//   MAL / ABS           → BLOQUÉ (maladie, absence)
+//   MAT / PAT           → BLOQUÉ (congés protégés)
+//   mission déjà programmée → BLOQUÉ (indépendant du statut)
+const GP_UNAVAIL_STATUSES = {
+  MAL: 'maladie',
+  ABS: 'absence',
+  MAT: 'maternité',
+  PAT: 'paternité',
+};
 function computeUnavailReason({ employeeId, collabCell, cmap, reserved }) {
   if (reserved && reserved[employeeId]) return 'mission déjà programmée';
   if (!collabCell) return '';
   const st = collabCell.status;
-  if (!st) return '';
+  if (!st) return '';                        // Repos → affectable
   const meta = cmap[st];
   if (!meta) return '';
-  if (meta.cat === 'worked') return '';
-  if (meta.cat === 'abs' || meta.cat === 'paid') {
-    const specific = {
-      CP: 'congé payé', MAL: 'maladie', ABS: 'absence',
-      MAT: 'maternité', PAT: 'paternité', FORM: 'formation',
-      RTT: 'RTT', REC: 'récupération', AE: 'absence exceptionnelle',
-      CSS: 'congé sans solde',
-    };
-    return specific[st] || (meta.label || '').toLowerCase();
-  }
-  return '';
+  if (meta.cat === 'worked') return '';      // P / PE / MAD → affectable
+  return GP_UNAVAIL_STATUSES[st] || '';      // seuls MAL/ABS/MAT/PAT bloquent
 }
 
 /**
