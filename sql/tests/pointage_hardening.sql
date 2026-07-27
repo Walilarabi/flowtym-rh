@@ -520,6 +520,80 @@ BEGIN
   RAISE NOTICE 'OK 16 · grants stricts (record_clocking réservé service_role)';
 END $$;
 
+-- ── Test 18A-F : record_clocking tolère anomaly_flags sous toutes formes ───
+-- Régression : jusqu'au fix 65, `p_audit ? 'anomaly_flags'` matchait la clé
+-- même à valeur null → jsonb_array_elements_text(null::jsonb) → 22023.
+DO $$
+DECLARE
+  v_hotel uuid := '11111111-1111-1111-1111-111111111111';
+  v_term  uuid;
+  v_emp   uuid := 'e0000001-0000-0000-0000-000000000001';
+  v_res   jsonb; v_flags text[]; v_id uuid;
+BEGIN
+  -- Reset fixtures + terminal + user_hotels pour Paris
+  DELETE FROM public.staff_clocking_idempotency;
+  DELETE FROM public.staff_clockings;
+  DELETE FROM public.pointage_terminal_events;
+  DELETE FROM public.pointage_terminals;
+  INSERT INTO public.user_hotels(user_id, hotel_id) VALUES
+    ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','11111111-1111-1111-1111-111111111111')
+  ON CONFLICT DO NOTHING;
+  PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-00000000aaaa', true);
+  v_term := ((public.create_pointage_terminal(v_hotel,'TestFlags'))->>'id')::uuid;
+
+  -- 18A : anomaly_flags = null → clock-in réussit, flags stockés = NULL
+  v_res := public.record_clocking(v_emp,v_hotel,v_term,'qr','k-18a','{"anomaly_flags":null}'::jsonb);
+  v_id := (v_res->>'id')::uuid;
+  SELECT anomaly_flags INTO v_flags FROM public.staff_clockings WHERE id=v_id;
+  ASSERT v_res->>'action'='clock_in', '18A. action=clock_in';
+  ASSERT v_flags IS NULL, '18A. flags stockés = NULL';
+  UPDATE public.staff_clockings SET clock_out_ts=clock_in_ts+interval '1 microsecond' WHERE id=v_id;
+
+  -- 18B : clé absente → flags stockés = NULL
+  v_res := public.record_clocking(v_emp,v_hotel,v_term,'qr','k-18b','{}'::jsonb);
+  v_id := (v_res->>'id')::uuid;
+  SELECT anomaly_flags INTO v_flags FROM public.staff_clockings WHERE id=v_id;
+  ASSERT v_flags IS NULL, '18B. clé absente → NULL';
+  UPDATE public.staff_clockings SET clock_out_ts=clock_in_ts+interval '1 microsecond' WHERE id=v_id;
+
+  -- 18C : tableau valide → flags = {gps_accuracy_low}
+  v_res := public.record_clocking(v_emp,v_hotel,v_term,'qr','k-18c',
+                                  '{"anomaly_flags":["gps_accuracy_low"]}'::jsonb);
+  v_id := (v_res->>'id')::uuid;
+  SELECT anomaly_flags INTO v_flags FROM public.staff_clockings WHERE id=v_id;
+  ASSERT v_flags = ARRAY['gps_accuracy_low']::text[], '18C. array préservé';
+  UPDATE public.staff_clockings SET clock_out_ts=clock_in_ts+interval '1 microsecond' WHERE id=v_id;
+
+  -- 18D : scalaire string → flags stockés = NULL (pas d'exception)
+  v_res := public.record_clocking(v_emp,v_hotel,v_term,'qr','k-18d',
+                                  '{"anomaly_flags":"gps_accuracy_low"}'::jsonb);
+  v_id := (v_res->>'id')::uuid;
+  SELECT anomaly_flags INTO v_flags FROM public.staff_clockings WHERE id=v_id;
+  ASSERT v_flags IS NULL, '18D. string scalaire → NULL sans exception';
+  UPDATE public.staff_clockings SET clock_out_ts=clock_in_ts+interval '1 microsecond' WHERE id=v_id;
+
+  -- 18E : objet JSON → flags stockés = NULL
+  v_res := public.record_clocking(v_emp,v_hotel,v_term,'qr','k-18e',
+                                  '{"anomaly_flags":{}}'::jsonb);
+  v_id := (v_res->>'id')::uuid;
+  SELECT anomaly_flags INTO v_flags FROM public.staff_clockings WHERE id=v_id;
+  ASSERT v_flags IS NULL, '18E. object → NULL sans exception';
+
+  -- 18F : clock-out avec anomaly_flags null CONSERVE les anomalies existantes.
+  -- L'insertion précédente (18E) a stocké NULL car object. On force un array,
+  -- puis on ferme via record_clocking avec anomaly_flags:null : les flags
+  -- doivent rester = {check_conservation}.
+  UPDATE public.staff_clockings SET anomaly_flags=ARRAY['check_conservation']::text[]
+   WHERE id=v_id AND clock_out_ts IS NULL;
+  v_res := public.record_clocking(v_emp,v_hotel,v_term,'qr','k-18f',
+                                  '{"anomaly_flags":null}'::jsonb);
+  SELECT anomaly_flags INTO v_flags FROM public.staff_clockings WHERE id=v_id;
+  ASSERT v_flags = ARRAY['check_conservation']::text[],
+         '18F. clock-out avec flags null conserve les anomalies existantes';
+
+  RAISE NOTICE 'OK 18 · anomaly_flags null/scalar/missing tolérés + conservation clock-out';
+END $$;
+
 -- ── Test 17 : RLS sur staff_clocking_idempotency + RPC admin non exécutables par anon ──
 DO $$
 DECLARE v_rls boolean;

@@ -25,14 +25,17 @@
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- ── 0. Colonnes d'audit sur staff_clockings (défensif : peuvent avoir été
---      ajoutées hors migration versionnée en production). ────────────────────
+--      ajoutées hors migration versionnée en production).
+--      Types alignés sur la production : ip_address text (pas inet),
+--      distance_meters double precision (pas int) — les ADD IF NOT EXISTS
+--      seraient sinon des no-ops silencieux sur prod. ────────────────────────
 ALTER TABLE public.staff_clockings
   ADD COLUMN IF NOT EXISTS gps_lat          double precision,
   ADD COLUMN IF NOT EXISTS gps_lng          double precision,
   ADD COLUMN IF NOT EXISTS gps_accuracy     double precision,
-  ADD COLUMN IF NOT EXISTS distance_meters  integer,
+  ADD COLUMN IF NOT EXISTS distance_meters  double precision,
   ADD COLUMN IF NOT EXISTS device_info      text,
-  ADD COLUMN IF NOT EXISTS ip_address       inet,
+  ADD COLUMN IF NOT EXISTS ip_address       text,
   ADD COLUMN IF NOT EXISTS clock_status     text,
   ADD COLUMN IF NOT EXISTS anomaly_flags    text[],
   ADD COLUMN IF NOT EXISTS qr_token_id      uuid;
@@ -541,19 +544,22 @@ BEGIN
   IF v_open.id IS NOT NULL THEN
     -- 4a. CLOCK-OUT. Deux requêtes concurrentes : celle qui perd n'affecte
     --     aucune ligne (clock_out_ts est déjà non NULL) → succès idempotent.
+    --     anomaly_flags via jsonb_typeof (null/scalar/missing → conserve).
+    --     ip_address text (pas de cast inet), distance_meters float8.
     UPDATE public.staff_clockings
        SET clock_out_ts = v_now,
            updated_at   = v_now,
            gps_lat        = COALESCE((p_audit->>'gps_lat')::float8,    gps_lat),
            gps_lng        = COALESCE((p_audit->>'gps_lng')::float8,    gps_lng),
            gps_accuracy   = COALESCE((p_audit->>'gps_accuracy')::float8, gps_accuracy),
-           distance_meters= COALESCE((p_audit->>'distance_meters')::int, distance_meters),
+           distance_meters= COALESCE((p_audit->>'distance_meters')::float8, distance_meters),
            device_info    = COALESCE(p_audit->>'device_info',    device_info),
-           ip_address     = COALESCE((p_audit->>'ip_address')::inet, ip_address),
+           ip_address     = COALESCE(p_audit->>'ip_address',     ip_address),
            clock_status   = COALESCE(p_audit->>'clock_status',   clock_status),
-           anomaly_flags  = CASE WHEN p_audit ? 'anomaly_flags'
-                                 THEN ARRAY(SELECT jsonb_array_elements_text(p_audit->'anomaly_flags'))
-                                 ELSE anomaly_flags END,
+           anomaly_flags  = CASE jsonb_typeof(p_audit->'anomaly_flags')
+                              WHEN 'array' THEN ARRAY(SELECT jsonb_array_elements_text(p_audit->'anomaly_flags'))
+                              ELSE anomaly_flags
+                            END,
            idempotency_key = COALESCE(idempotency_key, p_idempotency_key)
      WHERE id = v_open.id AND clock_out_ts IS NULL
      RETURNING id INTO v_id;
@@ -585,13 +591,14 @@ BEGIN
         NULLIF(p_audit->>'gps_lat','')::float8,
         NULLIF(p_audit->>'gps_lng','')::float8,
         NULLIF(p_audit->>'gps_accuracy','')::float8,
-        NULLIF(p_audit->>'distance_meters','')::int,
+        NULLIF(p_audit->>'distance_meters','')::float8,
         p_audit->>'device_info',
-        NULLIF(p_audit->>'ip_address','')::inet,
+        p_audit->>'ip_address',
         COALESCE(p_audit->>'clock_status','valid'),
-        CASE WHEN p_audit ? 'anomaly_flags'
-             THEN ARRAY(SELECT jsonb_array_elements_text(p_audit->'anomaly_flags'))
-             ELSE NULL END
+        CASE jsonb_typeof(p_audit->'anomaly_flags')
+          WHEN 'array' THEN ARRAY(SELECT jsonb_array_elements_text(p_audit->'anomaly_flags'))
+          ELSE NULL
+        END
       )
       RETURNING id INTO v_id;
     EXCEPTION WHEN unique_violation THEN

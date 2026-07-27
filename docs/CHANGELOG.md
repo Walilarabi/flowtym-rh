@@ -1,5 +1,62 @@
 # Flowtym RH — Changelog
 
+## v1.4.3 — Pointage v2 : hotfix scan « cannot extract elements from a scalar »
+
+### Cause
+Chaque scan de pointage sans anomalie GPS explosait avec
+`ERROR 22023 cannot extract elements from a scalar`, remonté au frontend
+sous forme de « Erreur enregistrement: cannot extract elements from a scalar ».
+
+Deux bugs latents dans `record_clocking` (migration 63) :
+
+1. **`anomaly_flags` scalar-null non géré** : la RPC utilisait
+   `p_audit ? 'anomaly_flags'` pour tester la présence de la clé. Cet
+   opérateur renvoie `true` même quand la valeur est `null`. L'edge function
+   envoyait systématiquement `anomaly_flags: null` quand aucune anomalie
+   → `jsonb_array_elements_text(null::jsonb)` → 22023.
+2. **Casts colonne incorrects** : les colonnes `ip_address` (texte en prod)
+   et `distance_meters` (double precision en prod) existaient déjà
+   avant la migration 63 avec des types différents de ceux déclarés.
+   Les `ADD COLUMN IF NOT EXISTS ip_address inet / distance_meters int`
+   étaient des no-ops silencieux. Les casts `::inet` et `::int` dans
+   `record_clocking` levaient `42804 COALESCE types inet and text
+   cannot be matched` au clock-out.
+
+### Correctifs
+
+**SQL** (nouveau `sql/65_pointage_record_clocking_column_alignment.sql`,
+appliqué en prod, et fichier consolidé `sql/63` mis à jour pour les
+reconstructions from scratch) :
+- Pattern robuste `CASE jsonb_typeof(p_audit->'anomaly_flags') WHEN 'array' THEN … ELSE … END`
+  sur les deux blocs UPDATE (clock-out : conserve les anomalies existantes)
+  et INSERT (clock-in : NULL par défaut).
+- `distance_meters` cast vers `float8`, `ip_address` sans cast (texte direct).
+- Signature / owner / security / search_path / grants **inchangés**.
+
+**Edge function `clock-portal` v10** :
+- Contrat client propre : la clé `anomaly_flags` est OMISE du payload quand
+  le tableau est vide (au lieu d'envoyer `null`).
+- Le fix SQL reste actif comme filet de sécurité pour tout autre appelant.
+
+**Fixture CI** (`sql/tests/pointage_minimal_schema.sql`) :
+- Types alignés sur la disposition production réelle
+  (`ip_address text`, `distance_meters double precision`).
+
+### Tests
+- 6 nouveaux sous-tests SQL **18A–F** dans `sql/tests/pointage_hardening.sql` :
+  A `null`, B clé absente, C tableau valide, D scalaire texte, E objet,
+  F clock-out avec `null` conserve les anomalies existantes.
+- Nouveaux tests Jest `buildAuditPayload — anomaly_flags omission` (3 tests)
+  vérifiant que la clé n'est pas dans le payload quand `anomalies.length===0`.
+- Runner CI : `NB_OK ≥ 18` obligatoire.
+- Résultats locaux : **292/292 Jest** (+3), **18/18 SQL** (+1), **3/3 concurrence**.
+
+### Vérifications production
+7 cas d'`anomaly_flags` testés en prod contre `record_clocking` (INSERT),
+tous OK (aucune exception 22023) : `{}`, `null`, `[]`, `["gps_accuracy_low"]`,
+`"gps_accuracy_low"`, `{}`, `true`. Nettoyage complet effectué, aucune
+donnée réelle modifiée.
+
 ## v1.4.2 — Pointage v2 : hotfix production (post-déploiement)
 
 ### Corrections DB alignées prod

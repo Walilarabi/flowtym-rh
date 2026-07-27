@@ -240,6 +240,43 @@ describe('newIdempotencyKey', () => {
   });
 });
 
+// ── Construction du payload audit (edge fn clock-portal) ────────────────────
+// La clé anomaly_flags DOIT être ABSENTE quand le tableau est vide — la RPC
+// serveur record_clocking utilisait `p_audit ? 'anomaly_flags'` qui matchait
+// même une valeur null → jsonb_array_elements_text(null) → 22023. Fix client :
+// omettre la clé au lieu d'envoyer null. Fix serveur : jsonb_typeof=array.
+function buildAuditPayload({gps_lat, gps_lng, gps_accuracy, distance_meters, device_info, ip_address, anomalies}){
+  return {
+    gps_lat: gps_lat ?? null,
+    gps_lng: gps_lng ?? null,
+    gps_accuracy: gps_accuracy ?? null,
+    distance_meters,
+    device_info: device_info ?? null,
+    ip_address,
+    clock_status: anomalies.length > 0 ? 'suspicious' : 'valid',
+    ...(anomalies.length > 0 ? { anomaly_flags: anomalies } : {}),
+  };
+}
+
+describe('buildAuditPayload — anomaly_flags omission', () => {
+  test('anomalies vide → clé anomaly_flags ABSENTE (pas null)', () => {
+    const p = buildAuditPayload({anomalies:[], ip_address:'127.0.0.1'});
+    expect('anomaly_flags' in p).toBe(false);
+    expect(p.clock_status).toBe('valid');
+  });
+
+  test('anomalies non vide → clé présente avec tableau', () => {
+    const p = buildAuditPayload({anomalies:['gps_accuracy_low'], ip_address:'127.0.0.1'});
+    expect(p.anomaly_flags).toEqual(['gps_accuracy_low']);
+    expect(p.clock_status).toBe('suspicious');
+  });
+
+  test('sérialisation JSON n\'inclut pas anomaly_flags quand vide', () => {
+    const raw = JSON.stringify(buildAuditPayload({anomalies:[], ip_address:'x'}));
+    expect(raw).not.toContain('anomaly_flags');
+  });
+});
+
 // ── Plage horaire d'un terminal ──────────────────────────────────────────────
 describe('isWithinActiveWindow', () => {
   test('sans plage → toujours actif', () => {
