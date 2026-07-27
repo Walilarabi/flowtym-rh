@@ -1,5 +1,28 @@
 # Flowtym RH — Changelog
 
+## v1.4.2 — Pointage v2 : hotfix production (post-déploiement)
+
+### Corrections DB alignées prod
+- **`generate_terminal_token()`** : appel `gen_random_bytes(24)` non qualifié + `SET search_path = public, extensions`. Corrige l'échec de la migration 63 sur Supabase (pgcrypto vit dans le schéma `extensions`, pas `public`).
+- **`pointage_terminals_prevent_delete_if_used()`** : ajout `SET search_path = public` (advisor Supabase `function_search_path_mutable`).
+- **`staff_clocking_idempotency`** : `ENABLE ROW LEVEL SECURITY` explicite (oubli du 63 initial ; l'advisor security a levé `rls_disabled_in_public`).
+- **RPC admin** (`create/rename/regenerate/set_active/archive/set_security_pointage_terminal`, `employee_can_clock_at`) : `REVOKE EXECUTE ... FROM PUBLIC, anon` explicite après le GRANT à `authenticated`. Supabase ajoute par défaut anon au GRANT sur toute fonction publique — le REVOKE ferme cette voie même si les checks internes `pl_my_hotels()` bloquent déjà anon.
+- **`record_clocking`** : `REVOKE ... FROM PUBLIC, anon, authenticated` (au lieu du seul FROM PUBLIC), preuve directe via `has_function_privilege` : `anon=false, authenticated=false, service_role=true`.
+
+### Table de remédiation `sql/64_pointage_remediation_log.sql`
+- Nouvelle table `staff_clockings_remediation_log(id, clocking_id, hotel_id, employee_id, original_row jsonb, remediation_type, remediation_reason, remediated_at, remediated_by, remediated_by_email)`.
+- RLS active, `SELECT` réservé aux hôtels via `pl_my_hotels()`.
+- Utilisée par l'opération de remédiation atomique des deux pointages orphelins pré-v2 (`2026-06-07`) : `clock_out_ts = clock_in_ts + 1 µs` (contrainte `clock_out_after_in` impose `>`), `clock_status='suspicious'`, `anomaly_flags += 'orphan_open_shift_pre_pointage_v2'`.
+
+### Tests CI
+- Le fixture `sql/tests/pointage_minimal_schema.sql` conserve pgcrypto dans `public` (search_path par défaut) mais crée aussi le schéma `extensions` pour compatibilité avec les migrations qui qualifient `extensions.gen_random_bytes(...)`.
+- Nouveau test **17** dans `sql/tests/pointage_hardening.sql` : RLS `staff_clocking_idempotency` + RPC admin non exécutables par `anon` (create, regenerate, archive, employee_can_clock_at).
+- Le runner CI requiert désormais `NB_OK >= 17`.
+
+### Résultats
+- 289 tests Jest (inchangés) + **17 tests SQL** (+1) + 3 scénarios de concurrence — tous verts localement et en CI.
+- Advisor Supabase : findings du module Pointage passés de **3** (1 ERROR + 2 WARN structurels) à **0**.
+
 ## v1.4.1 — Pointage v2 : durcissement post-audit
 
 ### Autorisation multi-hôtel — plus stricte
