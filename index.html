@@ -1727,7 +1727,11 @@ let gpSections=[];              // [{service, data}] — une section par service
 let gpService='';               // service sélectionné ('' = tous les services)
 let gpDay=null;                 // jour ciblé pour la comparaison (Date)
 let gpHotelSel=null;            // Set d'hotel_id sélectionnés (null = tous)
-let gpFilters={status:'', subOnly:false, extraOnly:false, search:''};
+// dayStatus : filtre par statut du JOUR affiché ('' = tous, 'REPOS' = statut
+// vide, sinon un code CMAP tel que 'CP'/'MAL'/'ABS'/...). Distinct de
+// `status` (emp_status actif/pause/parti, non exposé dans la toolbar
+// actuelle mais conservé pour compatibilité).
+let gpFilters={status:'', dayStatus:'', subOnly:false, extraOnly:false, search:''};
 let gpEligible=null;            // cache éligibilité {ok, hotels}
 let gpReserved={};              // employee_id -> réservation (proposition approuvée/programmée)
 let curWeekStart=null;  // Date : lundi de la semaine affichée en vue hebdo
@@ -2254,6 +2258,21 @@ async function renderGroupPlanning(){
           <button id="gpNext" title="Jour suivant"><i class="fa-solid fa-chevron-right"></i></button>
         </div>
         <select id="gpServiceSel" title="Service" style="padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:#fff;font-size:13px;font-weight:600;color:var(--ink)"></select>
+        <select id="gpDayStatusSel" title="Statut du jour" style="padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:#fff;font-size:13px;font-weight:600;color:var(--ink)">
+          <option value="">Tous les statuts</option>
+          <option value="REPOS" ${gpFilters.dayStatus==='REPOS'?'selected':''}>Repos</option>
+          <option value="P" ${gpFilters.dayStatus==='P'?'selected':''}>Présent</option>
+          <option value="CP" ${gpFilters.dayStatus==='CP'?'selected':''}>CP</option>
+          <option value="MAL" ${gpFilters.dayStatus==='MAL'?'selected':''}>Maladie</option>
+          <option value="ABS" ${gpFilters.dayStatus==='ABS'?'selected':''}>Absence</option>
+          <option value="MAT" ${gpFilters.dayStatus==='MAT'?'selected':''}>Maternité</option>
+          <option value="PAT" ${gpFilters.dayStatus==='PAT'?'selected':''}>Paternité</option>
+          <option value="RTT" ${gpFilters.dayStatus==='RTT'?'selected':''}>RTT</option>
+          <option value="REC" ${gpFilters.dayStatus==='REC'?'selected':''}>Récupération</option>
+          <option value="FORM" ${gpFilters.dayStatus==='FORM'?'selected':''}>Formation</option>
+          <option value="CSS" ${gpFilters.dayStatus==='CSS'?'selected':''}>Sans solde</option>
+          <option value="AE" ${gpFilters.dayStatus==='AE'?'selected':''}>Exceptionnel</option>
+        </select>
         <label class="chip ${gpFilters.subOnly?'on':''}" id="gpSubLbl"><input type="checkbox" id="gpSub" ${gpFilters.subOnly?'checked':''}> Sous-effectifs</label>
         <label class="chip ${gpFilters.extraOnly?'on':''}" id="gpExtraLbl"><input type="checkbox" id="gpExtra" ${gpFilters.extraOnly?'checked':''}> Extras</label>
         <button class="chip" id="gpHotelsBtn" title="Établissements affichés"><i class="fa-solid fa-hotel" style="font-size:11px"></i></button>
@@ -2281,6 +2300,7 @@ async function renderGroupPlanning(){
   const svcs=(e.services&&e.services.length?e.services:['Réception','Petit-déjeuner','Étage','Technique','Maintenance','Direction','Commercial','Revenue','Comptabilité']);
   svcSel.innerHTML=`<option value="" ${gpService===''?'selected':''}>Tous les services</option>`+svcs.map(s=>`<option value="${esc(s)}" ${s===gpService?'selected':''}>${esc(s)}</option>`).join('');
   svcSel.onchange=()=>{ gpService=svcSel.value; gpLoadAndRender(); };
+  $('gpDayStatusSel').onchange=ev=>{ gpFilters.dayStatus=ev.target.value; gpRenderBody(); };
   $('gpPrev').onclick=()=>{ gpDay=new Date(gpDay.getFullYear(),gpDay.getMonth(),gpDay.getDate()-1); gpLoadAndRender(); };
   $('gpNext').onclick=()=>{ gpDay=new Date(gpDay.getFullYear(),gpDay.getMonth(),gpDay.getDate()+1); gpLoadAndRender(); };
   $('gpSearch').oninput=ev=>{ gpFilters.search=ev.target.value.toLowerCase(); gpRenderBody(); };
@@ -2385,6 +2405,12 @@ function gpRenderBody(){
       const filteredForDisplay = (arr)=>{
         let a=arr;
         if(gpFilters.extraOnly) a=a.filter(c=>c.is_extra);
+        // Filtre statut du jour : 'REPOS' = statut vide, sinon code CMAP exact.
+        if(gpFilters.dayStatus){
+          a = gpFilters.dayStatus==='REPOS'
+            ? a.filter(c=>!c.status)
+            : a.filter(c=>c.status===gpFilters.dayStatus);
+        }
         if(gpFilters.search){ const s=gpFilters.search; a=a.filter(c=>(c.name||'').toLowerCase().includes(s)||(h.hotel_code||'').toLowerCase().includes(s)||(h.name||'').toLowerCase().includes(s)||(svc||'').toLowerCase().includes(s)); }
         return a;
       };
@@ -2674,9 +2700,15 @@ function gpBuildCollab(c, hotel, service){
   const dragAttrs = draggable
     ? `draggable="true" role="button" aria-grabbed="false" aria-label="Glisser ${esc(c.name||'')} vers un autre établissement"`
     : (unavail?`title="Indisponible : ${esc(unavail)}"`:'');
-  const affBtn = unavail
+  // Maladie / Absence : aucun bouton Affecter, même désactivé — ces
+  // collaborateurs ne doivent plus pouvoir être sélectionnés pour une
+  // mission depuis le Planning Groupe. Les autres indisponibilités
+  // (maternité/paternité, mission déjà programmée) gardent le bouton
+  // désactivé avec la raison, pour rester informatif.
+  const hideAffectBtn = (c.status==='MAL' || c.status==='ABS');
+  const affBtn = hideAffectBtn ? '' : (unavail
     ? `<button class="aff" disabled title="Indisponible : ${esc(unavail)}" style="opacity:.5;cursor:not-allowed">Affecter</button>`
-    : `<button class="aff" data-affect="${eid}" data-hotel="${hid}" data-svc="${svc}" title="Affecter à une mission">Affecter</button>`;
+    : `<button class="aff" data-affect="${eid}" data-hotel="${hid}" data-svc="${svc}" title="Affecter à une mission">Affecter</button>`);
   return `<div class="gp-collab" ${dragAttrs} data-emp="${eid}" data-hotel="${hid}" data-svc="${svc}">
     <span class="dot ${dot}"></span>
     <span class="${nameCls}" data-collab="${eid}" data-hotel="${hid}" data-svc="${svc}" title="${esc(c.name||'')}">${esc(c.name||'')}</span>

@@ -47,4 +47,25 @@ function dotClass(code, isWorkingFn, cmap) {
   return 'q';
 }
 
-module.exports = { statusBadge, nameClass, dotClass };
+/**
+ * Le bouton Affecter est totalement absent (pas seulement désactivé) pour
+ * les collaborateurs en Maladie ou Absence — ils ne doivent plus pouvoir
+ * être sélectionnés pour une mission depuis le Planning Groupe.
+ * @param {string} status  code CMAP du jour ('' = Repos)
+ */
+function shouldHideAffectButton(status) {
+  return status === 'MAL' || status === 'ABS';
+}
+
+/**
+ * Filtre "statut du jour" de la toolbar Planning Groupe.
+ * @param {string} collabStatus  status du collaborateur ('' = Repos)
+ * @param {string} filterValue   '' (aucun filtre) | 'REPOS' | code CMAP
+ */
+function matchesDayStatusFilter(collabStatus, filterValue) {
+  if (!filterValue) return true;
+  if (filterValue === 'REPOS') return !collabStatus;
+  return collabStatus === filterValue;
+}
+
+module.exports = { statusBadge, nameClass, dotClass, shouldHideAffectButton, matchesDayStatusFilter };
