@@ -10,9 +10,14 @@
 -- =============================================================================
 
 -- ── Setup : hôtels, users, employés, session simulée ───────────────────────
+-- Ordre : d'abord les tables qui référencent (staff_clockings pointe sur
+-- pointage_terminals via terminal_id ; staff_clocking_idempotency pointe
+-- sur staff_clockings), puis les tables référencées. Le trigger BEFORE
+-- DELETE sur pointage_terminals bloquerait sinon.
+DELETE FROM public.staff_clocking_idempotency;
+DELETE FROM public.staff_clockings;
 DELETE FROM public.pointage_terminal_events;
 DELETE FROM public.pointage_terminals;
-DELETE FROM public.staff_clockings;
 DELETE FROM public.staff_planning;
 DELETE FROM public.employee_extra_activations;
 DELETE FROM public.employee_hotel_assignments;
@@ -415,6 +420,104 @@ BEGIN
     '12b. service_role doit avoir EXECUTE sur record_clocking';
 
   RAISE NOTICE 'OK 12 · record_clocking réservé à service_role';
+END $$;
+
+-- ── Test 13 : signatures des RPC / fonctions attendues ─────────────────────
+DO $$
+BEGIN
+  ASSERT to_regprocedure('public.employee_can_clock_at(uuid,uuid,date)') IS NOT NULL,
+    '13a. employee_can_clock_at(uuid,uuid,date) doit exister';
+  ASSERT to_regprocedure('public.record_clocking(uuid,uuid,uuid,text,text,jsonb)') IS NOT NULL,
+    '13b. record_clocking(uuid,uuid,uuid,text,text,jsonb) doit exister';
+  ASSERT to_regprocedure('public.pl_hotel_local_day(uuid,timestamptz)') IS NOT NULL,
+    '13c. pl_hotel_local_day(uuid,timestamptz) doit exister';
+  ASSERT to_regprocedure('public.generate_terminal_token()') IS NOT NULL,
+    '13d. generate_terminal_token() doit exister';
+  ASSERT to_regprocedure('public.create_pointage_terminal(uuid,text,text)') IS NOT NULL,
+    '13e. create_pointage_terminal(uuid,text,text) doit exister';
+  ASSERT to_regprocedure('public.rename_pointage_terminal(uuid,text,text)') IS NOT NULL,
+    '13f. rename_pointage_terminal(uuid,text,text) doit exister';
+  ASSERT to_regprocedure('public.regenerate_pointage_terminal_token(uuid)') IS NOT NULL,
+    '13g. regenerate_pointage_terminal_token(uuid) doit exister';
+  ASSERT to_regprocedure('public.set_pointage_terminal_active(uuid,boolean)') IS NOT NULL,
+    '13h. set_pointage_terminal_active(uuid,boolean) doit exister';
+  ASSERT to_regprocedure('public.archive_pointage_terminal(uuid)') IS NOT NULL,
+    '13i. archive_pointage_terminal(uuid) doit exister';
+  ASSERT to_regprocedure('public.set_pointage_terminal_security(uuid,int,int,int)') IS NOT NULL,
+    '13j. set_pointage_terminal_security(uuid,int,int,int) doit exister';
+
+  RAISE NOTICE 'OK 13 · signatures RPC/fn';
+END $$;
+
+-- ── Test 14 : RLS active + policies présentes ──────────────────────────────
+DO $$
+DECLARE v_rls boolean; v_pols int;
+BEGIN
+  SELECT relrowsecurity INTO v_rls FROM pg_class WHERE relname='pointage_terminals';
+  ASSERT v_rls = true, '14a. RLS active sur pointage_terminals';
+  SELECT count(*) INTO v_pols FROM pg_policies
+   WHERE schemaname='public' AND tablename='pointage_terminals';
+  ASSERT v_pols >= 1, '14b. au moins une policy sur pointage_terminals';
+
+  SELECT relrowsecurity INTO v_rls FROM pg_class WHERE relname='pointage_terminal_events';
+  ASSERT v_rls = true, '14c. RLS active sur pointage_terminal_events';
+  SELECT count(*) INTO v_pols FROM pg_policies
+   WHERE schemaname='public' AND tablename='pointage_terminal_events';
+  ASSERT v_pols >= 1, '14d. au moins une policy sur pointage_terminal_events';
+
+  RAISE NOTICE 'OK 14 · RLS + policies actives';
+END $$;
+
+-- ── Test 15 : index unique partiel + trigger BEFORE DELETE ─────────────────
+DO $$
+BEGIN
+  ASSERT EXISTS (SELECT 1 FROM pg_indexes
+                  WHERE schemaname='public'
+                    AND indexname='staff_clockings_one_open_per_employee'),
+    '15a. index unique partiel staff_clockings_one_open_per_employee présent';
+
+  -- L'idempotence est portée par la PK de staff_clocking_idempotency(key)
+  -- (voir migration 63 §10) — pas par un index sur staff_clockings.
+  ASSERT EXISTS (SELECT 1 FROM pg_indexes
+                  WHERE schemaname='public'
+                    AND tablename='staff_clocking_idempotency'
+                    AND indexdef ILIKE '%(key)%'),
+    '15b. staff_clocking_idempotency porte l''unicité de la clé';
+
+  ASSERT EXISTS (SELECT 1 FROM pg_trigger t
+                  JOIN pg_class c ON c.oid = t.tgrelid
+                 WHERE c.relname='pointage_terminals'
+                   AND t.tgname='trg_pointage_terminals_no_delete_if_used'
+                   AND NOT t.tgisinternal),
+    '15c. trigger trg_pointage_terminals_no_delete_if_used présent';
+
+  RAISE NOTICE 'OK 15 · index unique + trigger no-delete';
+END $$;
+
+-- ── Test 16 : grants — authenticated ne peut PAS exécuter record_clocking ──
+DO $$
+BEGIN
+  ASSERT NOT has_function_privilege('anon',
+    'public.record_clocking(uuid,uuid,uuid,text,text,jsonb)', 'EXECUTE'),
+    '16a. anon ne doit pas exécuter record_clocking';
+  ASSERT NOT has_function_privilege('authenticated',
+    'public.record_clocking(uuid,uuid,uuid,text,text,jsonb)', 'EXECUTE'),
+    '16b. authenticated ne doit pas exécuter record_clocking';
+  ASSERT has_function_privilege('service_role',
+    'public.record_clocking(uuid,uuid,uuid,text,text,jsonb)', 'EXECUTE'),
+    '16c. service_role doit exécuter record_clocking';
+
+  ASSERT has_function_privilege('authenticated',
+    'public.create_pointage_terminal(uuid,text,text)', 'EXECUTE'),
+    '16d. authenticated doit exécuter create_pointage_terminal';
+  ASSERT has_function_privilege('authenticated',
+    'public.regenerate_pointage_terminal_token(uuid)', 'EXECUTE'),
+    '16e. authenticated doit exécuter regenerate_pointage_terminal_token';
+  ASSERT has_function_privilege('authenticated',
+    'public.archive_pointage_terminal(uuid)', 'EXECUTE'),
+    '16f. authenticated doit exécuter archive_pointage_terminal';
+
+  RAISE NOTICE 'OK 16 · grants stricts (record_clocking réservé service_role)';
 END $$;
 
 DO $$ BEGIN RAISE NOTICE '========================================'; RAISE NOTICE 'TOUS LES TESTS SQL SONT PASSÉS'; RAISE NOTICE '========================================'; END $$;
