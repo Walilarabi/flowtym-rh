@@ -27,8 +27,12 @@ const cors = (o: string|null) => {
   ) ? o : ALLOWED[0];
   return {
     'Access-Control-Allow-Origin': allowed,
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, idempotency-key',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    // Laisse le navigateur réutiliser la décision de préflight pendant 10 min :
+    // évite un aller-retour OPTIONS supplémentaire à chaque scan/retry sur un
+    // réseau mobile instable (hall d'hôtel, sous-sol, changement wifi/4G).
+    'Access-Control-Max-Age': '600',
   };
 };
 

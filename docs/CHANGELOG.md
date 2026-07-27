@@ -1,5 +1,53 @@
 # Flowtym RH — Changelog
 
+## v1.4.4 — Pointage v2 : hotfix « Failed to fetch » + retry réseau
+
+### Cause
+Scan QR reproduit en recette réelle (Folkestone opera, 2026-07-27) : la
+requête échoue côté client avec `TypeError: Failed to fetch`, sans jamais
+atteindre les logs de la edge function `clock-portal` (seul le préflight
+`OPTIONS` y apparaît, jamais le `POST` qui suit).
+
+Cause racine : `Access-Control-Allow-Headers` de `clock-portal` ne listait
+pas `idempotency-key`. Ce header personnalisé (ajouté par `portal.html` pour
+rendre chaque scan rejouable sans risque de doublon) force un préflight CORS.
+Quand le navigateur doit revalider ce préflight (cache expiré — l'edge
+function ne renvoyait pas non plus `Access-Control-Max-Age`), la vérification
+échoue silencieusement côté navigateur : la requête réelle n'est jamais
+envoyée, `fetch()` rejette avec une erreur réseau générique, et la connexion
+mobile instable en environnement hôtelier (wifi hall/sous-sol) amplifie le
+phénomène.
+
+### Correctifs
+
+**Edge function `clock-portal`** :
+- `Access-Control-Allow-Headers` inclut désormais `idempotency-key`.
+- `Access-Control-Max-Age: 600` ajouté pour que le navigateur réutilise la
+  décision de préflight 10 minutes au lieu de revalider à chaque scan/retry.
+
+**Portail salarié (`portal.html`)** :
+- `submitQrCode` retente désormais jusqu'à 2 fois (backoff 800 ms / 1600 ms)
+  en cas d'échec **réseau pur** (`isNetworkFetchError` — aucune réponse
+  serveur reçue), avec la **même** `Idempotency-Key` : `record_clocking()`
+  étant idempotente sur cette clé, un nouvel essai ne peut jamais créer un
+  second pointage, même si une tentative précédente avait en réalité atteint
+  le serveur.
+- Une erreur **métier** renvoyée par le serveur (JSON `{error,code}`, ex.
+  `WRONG_HOTEL`, `GPS_TOO_FAR`) n'est **jamais** rejouée — sort immédiatement
+  avec le message d'origine.
+- Message final clarifié si les 3 tentatives échouent toutes en réseau :
+  « Connexion réseau impossible après plusieurs tentatives ».
+
+### Tests
+- Nouveaux tests Jest `isNetworkFetchError` (7 cas : libellés Chrome/Firefox/
+  Safari vs erreurs métier serveur — jamais confondues).
+- Test de contrat sur le fichier source réel de `clock-portal` : garantit que
+  `idempotency-key` reste toujours listé dans `Access-Control-Allow-Headers`
+  et que `Access-Control-Max-Age` est défini.
+- Test de contrat sur `portal.html` : `submitQrCode` ne génère jamais une
+  seconde `Idempotency-Key` pendant ses retries.
+- Résultats locaux : **303/303 Jest** (+8), `check-frontend-syntax.mjs` 0 erreur.
+
 ## v1.4.3 — Pointage v2 : hotfix scan « cannot extract elements from a scalar »
 
 ### Cause
