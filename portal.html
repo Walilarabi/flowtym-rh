@@ -167,10 +167,28 @@ html,body{height:100%;background:var(--bg);font-family:-apple-system,BlinkMacSys
 .clock-history .row:last-child{border-bottom:0}
 
 /* ── QR Scanner ──────────────────────────────────────────────────────────── */
-.qr-wrap{position:relative;border-radius:16px;overflow:hidden;background:#000;aspect-ratio:1;margin-bottom:16px}
-.qr-wrap video{width:100%;height:100%;object-fit:cover;display:block}
+.qr-scan{position:fixed;inset:0;background:#000;z-index:300;display:flex;flex-direction:column;color:#fff}
+.qr-scan header{padding:14px 16px;padding-top:calc(14px + env(safe-area-inset-top,0px));display:flex;align-items:center;gap:12px;background:linear-gradient(180deg,rgba(0,0,0,.85),rgba(0,0,0,0));position:relative;z-index:2}
+.qr-scan header h2{flex:1;font-size:15px;font-weight:700;margin:0}
+.qr-scan header button{background:rgba(255,255,255,.15);color:#fff;border:0;width:36px;height:36px;border-radius:50%;font-size:16px;cursor:pointer;display:grid;place-items:center}
+.qr-scan .stage{flex:1;position:relative;overflow:hidden;background:#000}
+.qr-scan video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 .qr-overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
-.qr-frame{width:220px;height:220px;border:3px solid rgba(255,255,255,.8);border-radius:16px;box-shadow:0 0 0 9999px rgba(0,0,0,.5)}
+.qr-frame{width:min(72vw,320px);aspect-ratio:1;border:3px solid rgba(255,255,255,.9);border-radius:24px;box-shadow:0 0 0 9999px rgba(0,0,0,.55);position:relative}
+.qr-frame::before,.qr-frame::after{content:"";position:absolute;width:24px;height:24px;border:4px solid var(--vi-m);border-radius:6px}
+.qr-frame::before{top:-4px;left:-4px;border-right:0;border-bottom:0}
+.qr-frame::after{bottom:-4px;right:-4px;border-left:0;border-top:0}
+.qr-scan .hint{padding:16px 20px calc(24px + env(safe-area-inset-bottom,0px));background:linear-gradient(0deg,rgba(0,0,0,.85),rgba(0,0,0,0));text-align:center;font-size:13.5px;line-height:1.5;position:relative;z-index:2}
+.qr-scan .hint b{display:block;font-size:15px;font-weight:700;margin-bottom:4px}
+.qr-scan .hint a.manual{display:inline-block;margin-top:10px;color:#fff;font-size:12.5px;text-decoration:underline;opacity:.9;background:transparent;border:0;cursor:pointer}
+.qr-scan .err-panel{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center;background:#0f172a;z-index:3}
+.qr-scan .err-panel i{font-size:44px;color:#f87171;margin-bottom:14px}
+.qr-scan .err-panel h3{font-size:17px;font-weight:800;margin-bottom:8px}
+.qr-scan .err-panel p{font-size:13.5px;line-height:1.55;color:#cbd5e1;max-width:340px;margin-bottom:18px}
+.qr-scan .err-panel .actions{display:flex;flex-direction:column;gap:10px;width:100%;max-width:280px}
+.qr-scan .err-panel .btn-w{background:var(--vi);color:#fff;border:0;padding:12px;border-radius:12px;font-weight:700;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px}
+.qr-scan .err-panel .btn-g{background:transparent;color:#fff;border:1px solid rgba(255,255,255,.3);padding:11px;border-radius:12px;font-weight:600;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px}
+.qr-scan .step-badge{display:inline-block;background:rgba(255,255,255,.15);padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600;margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em}
 
 /* ── Documents ───────────────────────────────────────────────────────────── */
 .doc-row{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}
@@ -810,6 +828,8 @@ function goTo(tab){
   document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('on', b.dataset.tab===tab));
   const v = $('view');
   v.scrollTop = 0;
+  // Toujours fermer un scanner ouvert lors d'un changement de vue
+  if(typeof window.closeQrScan==='function') window.closeQrScan();
   const fn = {
     planning: renderPlanning,
     clock:    renderClock,
@@ -1057,12 +1077,13 @@ async function renderClock(){
       <div id="clockDate" class="clock-date"></div>
       <button class="clock-btn in" id="clockBtn" onclick="handleClockAction()">
         <i class="fa-solid fa-hand-point-up"></i>
-        <span id="clockBtnLbl">Pointer</span>
+        <span id="clockBtnLbl">Pointer entrée</span>
       </button>
       <div id="clockStatus" style="font-size:13px;color:var(--ink2);margin-bottom:16px"></div>
-      <button class="btn btn-g btn-full" onclick="openQrScan()" style="margin-bottom:8px">
-        <i class="fa-solid fa-qrcode"></i> Scanner un QR Code
-      </button>
+      <p style="font-size:12px;color:var(--ink2);margin:0 12px 12px;line-height:1.5">
+        <i class="fa-solid fa-qrcode" style="color:var(--vi)"></i>
+        Scannez le QR Code du terminal de pointage affiché à la réception.
+      </p>
       <button class="btn btn-g btn-full" onclick="openNfcClock()" id="nfcBtn" style="margin-bottom:8px;display:none">
         <i class="fa-solid fa-wifi"></i> Badge NFC
       </button>
@@ -1157,34 +1178,9 @@ function durationStr(inTs,outTs,brk=0){
   return `${Math.floor(m/60)}h${String(m%60).padStart(2,'0')}`;
 }
 
-window.handleClockAction=async()=>{
-  const btn=$('clockBtn'); if(!btn) return;
-  btn.disabled=true;
-  try{
-    if(btn.dataset.openId){
-      // Clock-out
-      const {error}=await sb.from('staff_clockings').update({clock_out_ts:new Date().toISOString()}).eq('id',btn.dataset.openId);
-      if(error) throw error;
-      flash('Sortie pointée ✓');
-      auditLog('clock_out',{clocking_id:btn.dataset.openId});
-    } else {
-      // Clock-in
-      const now=new Date();
-      const {error}=await sb.from('staff_clockings').insert({
-        hotel_id:  employee.hotel_id,
-        employee_id: employee.id,
-        day:       now.toISOString().slice(0,10),
-        clock_in_ts: now.toISOString(),
-        source:    'self',
-      });
-      if(error) throw error;
-      flash('Entrée pointée ✓');
-      auditLog('clock_in');
-    }
-    await loadClockings();
-  }catch(e){flash('Erreur : '+e.message);}
-  finally{btn.disabled=false;}
-};
+// Le bouton principal « Pointer entrée / sortie » ouvre immédiatement la caméra.
+// Le salarié est déjà authentifié ; le QR sert uniquement à identifier le terminal.
+window.handleClockAction=()=>{ openQrScan(); };
 
 // ── NFC Pointage (Web NFC API — Chrome Android 89+) ──────────────────────────
 window.openNfcClock=async()=>{
@@ -1201,7 +1197,7 @@ window.openNfcClock=async()=>{
         if(record.recordType==='text'||record.recordType==='url'){
           const decoder=new TextDecoder(record.encoding||'utf-8');
           const raw=decoder.decode(record.data);
-          await submitQrCode(raw); // même logique que QR
+          await submitQrCode(raw);
           return;
         }
       }
@@ -1215,76 +1211,285 @@ window.openNfcClock=async()=>{
   }
 };
 
-window.openQrScan=async()=>{
-  if(!('BarcodeDetector' in window)){
-    // Fallback : saisie manuelle du code
-    openModal(`
-      <div class="modal-title"><i class="fa-solid fa-qrcode" style="color:var(--vi)"></i>Saisir le code</div>
-      <p style="font-size:13px;color:var(--ink2);margin-bottom:14px">Votre navigateur ne supporte pas le scanner. Saisissez le code affiché sur le terminal de pointage.</p>
-      <div class="field"><label>Code pointage</label><input type="text" id="qrCodeInput" placeholder="Ex: FTY-xxxxx" autocomplete="off"></div>
-      <button class="btn btn-p btn-full" onclick="submitQrCode($('qrCodeInput').value)"><i class="fa-solid fa-check"></i> Valider</button>`);
-    return;
+// ── Détection de compatibilité caméra ────────────────────────────────────────
+// - HTTPS (ou localhost) obligatoire pour getUserMedia
+// - navigator.mediaDevices.getUserMedia requis (Safari iOS 11+, Chrome, Firefox, Edge)
+function detectCameraSupport(){
+  const secure = window.isSecureContext || location.hostname==='localhost' || location.hostname==='127.0.0.1';
+  const hasMD  = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  if(!secure) return {ok:false, code:'INSECURE', message:"Le scanner nécessite une connexion sécurisée (HTTPS)."};
+  if(!hasMD)  return {ok:false, code:'UNSUPPORTED', message:"Votre navigateur ne permet pas d'accéder à la caméra."};
+  return {ok:true};
+}
+
+// Chargeur jsQR pour les navigateurs sans BarcodeDetector (Safari iOS < 17, Firefox…).
+// Chargé UNE seule fois par session ; en cas d'échec on peut retenter au clic suivant.
+let _jsQrLoading=null;
+async function ensureJsQr(){
+  if(window.jsQR) return window.jsQR;
+  if(!_jsQrLoading){
+    _jsQrLoading = new Promise((res,rej)=>{
+      const s=document.createElement('script');
+      s.src='https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js';
+      s.onload=()=>res(window.jsQR);
+      s.onerror=(err)=>{
+        _jsQrLoading=null;               // permet une nouvelle tentative après échec réseau
+        s.remove();
+        rej(new Error('Impossible de charger le décodeur QR'));
+      };
+      document.head.appendChild(s);
+    });
   }
-  openModal(`
-    <div class="modal-title"><i class="fa-solid fa-qrcode" style="color:var(--vi)"></i>Scanner le QR Code</div>
-    <div class="qr-wrap" id="qrWrap">
-      <video id="qrVideo" autoplay playsinline muted></video>
+  return _jsQrLoading;
+}
+
+// ── Ouvre le scanner plein écran ─────────────────────────────────────────────
+let qrStream=null;
+let qrDecoder=null;
+let qrRAF=null;
+let qrOpening=false;      // empêche l'ouverture de deux scanners simultanés (double clic)
+let qrDetected=false;     // empêche 2 handlers d'arrivée sur la même image
+
+// Nettoyage global sur cache-invalidation navigateur (arrière-plan, changement d'onglet…)
+if(!window._qrLifecycleWired){
+  window._qrLifecycleWired = true;
+  document.addEventListener('visibilitychange', ()=>{
+    if(document.hidden){ stopCameraStream(); }
+  });
+  window.addEventListener('pagehide',    ()=>{ stopCameraStream(); });
+  window.addEventListener('beforeunload',()=>{ stopCameraStream(); });
+}
+
+window.openQrScan=async()=>{
+  if(qrOpening) return;      // double-clic sur "Pointer"
+  qrOpening=true;
+  qrDetected=false;
+  // 1) Monter l'UI plein écran (headers + zone vidéo + hint)
+  const supp = detectCameraSupport();
+  let host=document.getElementById('qrScanRoot');
+  if(host) host.remove();
+  host=document.createElement('div');
+  host.id='qrScanRoot';
+  host.className='qr-scan';
+  host.innerHTML=`
+    <header>
+      <button aria-label="Fermer" onclick="closeQrScan()"><i class="fa-solid fa-xmark"></i></button>
+      <h2>Pointer</h2>
+    </header>
+    <div class="stage" id="qrStage">
+      <video id="qrVideo" playsinline muted autoplay></video>
       <div class="qr-overlay"><div class="qr-frame"></div></div>
     </div>
-    <p style="font-size:12px;color:var(--ink2);text-align:center">Placez le QR Code dans le cadre</p>`);
-  startQrScanner();
+    <div class="hint">
+      <span class="step-badge">Étape 1/1</span>
+      <b>Scannez le QR Code affiché au terminal</b>
+      Placez-le dans le cadre — la validation est automatique.
+      <br><button class="manual" type="button" onclick="openManualCode()">Saisir le code manuellement</button>
+    </div>`;
+  document.body.appendChild(host);
+
+  if(!supp.ok){
+    showScanError({icon:'fa-camera-slash', title:'Scanner indisponible', message:supp.message, showManual:true, showRetry:false});
+    qrOpening=false;
+    return;
+  }
+  // 2) Démarrer la caméra (nécessite un geste utilisateur — c'est notre clic sur "Pointer")
+  try{ await startCamera(); }
+  finally{ qrOpening=false; }
 };
 
-let qrStream=null;
-async function startQrScanner(){
+async function startCamera(){
+  const stage=$('qrStage'); if(!stage) return;
+  // Nettoyer un ancien panneau d'erreur ET tout stream/loop précédent
+  stage.querySelector('.err-panel')?.remove();
+  stopCameraStream();               // idempotent : safe même si rien n'est actif
+  const vid=$('qrVideo');
+  if(vid){ vid.style.display=''; }
   try{
-    qrStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
-    const vid=$('qrVideo'); if(!vid) return;
-    vid.srcObject=qrStream;
-    const detector=new BarcodeDetector({formats:['qr_code']});
-    const tick=async()=>{
-      if(!$('qrVideo')){if(qrStream)qrStream.getTracks().forEach(t=>t.stop());return;}
-      try{
-        const codes=await detector.detect(vid);
-        if(codes.length){
-          qrStream.getTracks().forEach(t=>t.stop());
-          closeModal();
-          await submitQrCode(codes[0].rawValue);
-          return;
-        }
-      }catch{}
-      requestAnimationFrame(tick);
-    };
-    vid.addEventListener('loadedmetadata',()=>requestAnimationFrame(tick));
+    // Préférer la caméra arrière. facingMode:{ideal:'environment'} laisse un fallback frontal
+    // ce qui améliore la compatibilité (Safari iOS notamment) si aucune caméra arrière n'est présente.
+    qrStream = await navigator.mediaDevices.getUserMedia({
+      video:{ facingMode:{ ideal:'environment' } },
+      audio:false,
+    });
+    if(vid){
+      vid.srcObject=qrStream;
+      // iOS Safari : play() peut échouer si l'onglet perd le focus — on ignore.
+      try{ await vid.play(); }catch(_){}
+    }
+    await startDetector(vid);
   }catch(e){
-    const w=$('qrWrap');
-    if(w) w.innerHTML=`<div class="err-box" style="margin:16px"><i class="fa-solid fa-camera-slash"></i>Caméra inaccessible : ${esc(e.message)}</div>`;
+    handleCameraError(e);
   }
 }
 
-async function submitQrCode(raw){
-  if(!raw){flash('QR Code vide');return;}
-
-  // Extraire le token (URL: ?action=clock&token=xxx  ou  UUID brut)
-  let qrToken = raw.trim();
+async function startDetector(vid){
+  // Décodeur natif (Chrome, Edge, Safari iOS 17+) sinon jsQR (Safari <17, Firefox).
+  let mode = 'native';
   try{
-    const u=new URL(raw);
+    if('BarcodeDetector' in window){
+      const supported = await BarcodeDetector.getSupportedFormats?.() || ['qr_code'];
+      if(!supported.includes('qr_code')) throw new Error('qr_code non supporté');
+      qrDecoder = new BarcodeDetector({formats:['qr_code']});
+    } else {
+      throw new Error('BarcodeDetector absent');
+    }
+  }catch(_){
+    mode='js';
+    try{ await ensureJsQr(); }
+    catch(err){
+      showScanError({icon:'fa-triangle-exclamation', title:'Décodeur indisponible',
+        message:"Impossible de charger le décodeur QR. Vérifiez votre connexion, puis réessayez ou saisissez le code.",
+        showManual:true, showRetry:true});
+      stopCameraStream();
+      return;
+    }
+  }
+
+  const cvs=document.createElement('canvas');
+  const ctx=cvs.getContext('2d', {willReadFrequently:true});
+
+  const tick=async()=>{
+    if(!document.getElementById('qrScanRoot')) return;
+    if(!vid || vid.readyState < 2){ qrRAF=requestAnimationFrame(tick); return; }
+    try{
+      let raw=null;
+      if(mode==='native'){
+        const codes = await qrDecoder.detect(vid);
+        if(codes && codes.length) raw = codes[0].rawValue;
+      } else {
+        cvs.width = vid.videoWidth || 640;
+        cvs.height= vid.videoHeight|| 480;
+        ctx.drawImage(vid,0,0,cvs.width,cvs.height);
+        const img = ctx.getImageData(0,0,cvs.width,cvs.height);
+        const res = window.jsQR(img.data, img.width, img.height, {inversionAttempts:'dontInvert'});
+        if(res && res.data) raw = res.data;
+      }
+      if(raw && !qrDetected){
+        // Verrou immédiat : deux frames décodées quasi-simultanément ne
+        // doivent produire qu'un seul submit.
+        qrDetected = true;
+        if(qrRAF){ cancelAnimationFrame(qrRAF); qrRAF=null; }
+        await onQrDetected(raw);
+        return;
+      }
+    }catch(_){ /* frame décodage : silencieux */ }
+    qrRAF=requestAnimationFrame(tick);
+  };
+  qrRAF=requestAnimationFrame(tick);
+}
+
+function handleCameraError(e){
+  const name = e?.name || '';
+  const map = {
+    NotAllowedError:      {t:'Accès caméra refusé',       m:"Autorisez l'accès à la caméra dans les paramètres de votre navigateur, puis réessayez."},
+    PermissionDeniedError:{t:'Accès caméra refusé',       m:"Autorisez l'accès à la caméra dans les paramètres de votre navigateur, puis réessayez."},
+    NotFoundError:        {t:'Aucune caméra détectée',    m:"Aucune caméra n'est disponible sur cet appareil."},
+    DevicesNotFoundError: {t:'Aucune caméra détectée',    m:"Aucune caméra n'est disponible sur cet appareil."},
+    NotReadableError:     {t:'Caméra occupée',            m:"Une autre application utilise la caméra. Fermez-la puis réessayez."},
+    TrackStartError:      {t:'Caméra occupée',            m:"Une autre application utilise la caméra. Fermez-la puis réessayez."},
+    OverconstrainedError: {t:'Caméra incompatible',       m:"La caméra arrière est indisponible. Réessayez ou utilisez la saisie manuelle."},
+    SecurityError:        {t:'Contexte non sécurisé',     m:"La caméra n'est accessible qu'en HTTPS. Contactez votre administrateur."},
+    AbortError:           {t:'Démarrage interrompu',      m:"Le démarrage de la caméra a été interrompu. Réessayez."},
+  };
+  const info = map[name] || {t:'Caméra indisponible', m:(e?.message || 'Erreur inconnue')+"."};
+  const showRetry = !['SecurityError','NotFoundError','DevicesNotFoundError'].includes(name);
+  showScanError({icon:'fa-camera-slash', title:info.t, message:info.m, showManual:true, showRetry});
+  stopCameraStream();
+}
+
+function showScanError({icon, title, message, showManual, showRetry}){
+  const stage=$('qrStage'); if(!stage) return;
+  stage.querySelector('.err-panel')?.remove();
+  const vid=$('qrVideo'); if(vid) vid.style.display='none';
+  const panel=document.createElement('div');
+  panel.className='err-panel';
+  panel.innerHTML=`
+    <i class="fa-solid ${icon}"></i>
+    <h3>${esc(title)}</h3>
+    <p>${esc(message)}</p>
+    <div class="actions">
+      ${showRetry?`<button class="btn-w" onclick="retryCamera()"><i class="fa-solid fa-rotate"></i> Réessayer la caméra</button>`:''}
+      ${showManual?`<button class="btn-g" onclick="openManualCode()"><i class="fa-solid fa-keyboard"></i> Saisir le code manuellement</button>`:''}
+    </div>`;
+  stage.appendChild(panel);
+}
+
+window.retryCamera = async ()=>{
+  stopCameraStream();
+  await startCamera();
+};
+
+// Saisie manuelle — accessible uniquement en secours (via lien du scanner)
+window.openManualCode = ()=>{
+  closeQrScan();
+  openModal(`
+    <div class="modal-title"><i class="fa-solid fa-keyboard" style="color:var(--vi)"></i>Saisir le code du terminal</div>
+    <p style="font-size:13px;color:var(--ink2);margin-bottom:14px">Le code figure sous le QR Code au terminal de pointage.</p>
+    <div class="field"><label>Code terminal</label>
+      <input type="text" id="qrCodeInput" placeholder="Ex : ftt_xxxxxxxx" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+    </div>
+    <button class="btn btn-p btn-full" onclick="submitQrCode($('qrCodeInput').value);closeModal()">
+      <i class="fa-solid fa-check"></i> Valider
+    </button>
+    <button class="btn btn-g btn-full" style="margin-top:8px" onclick="closeModal();openQrScan()">
+      <i class="fa-solid fa-camera"></i> Réessayer avec la caméra
+    </button>`);
+  setTimeout(()=>$('qrCodeInput')?.focus(),50);
+};
+
+function stopCameraStream(){
+  if(qrRAF){ cancelAnimationFrame(qrRAF); qrRAF=null; }
+  if(qrStream){ qrStream.getTracks().forEach(t=>t.stop()); qrStream=null; }
+  qrDecoder=null;
+}
+
+window.closeQrScan = ()=>{
+  stopCameraStream();
+  document.getElementById('qrScanRoot')?.remove();
+};
+
+async function onQrDetected(raw){
+  // Petit feedback tactile si dispo
+  try{ navigator.vibrate?.(60); }catch(_){}
+  closeQrScan();
+  await submitQrCode(raw);
+}
+
+// Génère un identifiant opaque adapté à une clé d'idempotence côté serveur.
+// crypto.randomUUID quand dispo, fallback random pour Safari iOS ancien.
+function newIdempotencyKey(){
+  try{ if(crypto?.randomUUID) return 'ptg-'+crypto.randomUUID(); }catch(_){}
+  const buf=new Uint8Array(16);
+  (window.crypto || {getRandomValues:()=>{for(let i=0;i<buf.length;i++) buf[i]=Math.floor(Math.random()*256);}}).getRandomValues?.(buf);
+  return 'ptg-'+Array.from(buf).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+
+async function submitQrCode(raw, opts){
+  if(!raw){ flash('QR Code vide'); return; }
+
+  // Extraire le token (URL: ?action=clock&token=xxx  ou  chaîne brute)
+  let qrToken = String(raw).trim();
+  try{
+    const u=new URL(qrToken);
     const t=u.searchParams.get('token');
-    if(t) qrToken=t;
+    if(t) qrToken=t.trim();
   }catch(_){}
-  if(!qrToken){flash('Format QR Code invalide');return;}
+  if(!qrToken){ flash('Format QR Code invalide'); return; }
 
-  closeModal();
-  flash('Obtention de la position GPS…');
+  // Clé d'idempotence : générée une seule fois par tentative utilisateur.
+  // Un retry réseau (même click) doit renvoyer la MÊME clé pour éviter le doublon.
+  const idempotencyKey = (opts && opts.idempotencyKey) || newIdempotencyKey();
 
-  // Demander la géolocalisation
+  flash('Localisation en cours…');
+
   const getGps=()=>new Promise((resolve,reject)=>{
-    if(!navigator.geolocation){resolve({lat:null,lng:null,accuracy:null});return;}
+    if(!navigator.geolocation){ resolve({lat:null,lng:null,accuracy:null}); return; }
     navigator.geolocation.getCurrentPosition(
       p=>resolve({lat:p.coords.latitude,lng:p.coords.longitude,accuracy:p.coords.accuracy}),
       e=>{
-        if(e.code===1) reject(new Error('Géolocalisation refusée. Autorisez votre position dans les réglages du navigateur.'));
-        else resolve({lat:null,lng:null,accuracy:null}); // timeout/indisponible → on tente quand même
+        if(e.code===1) reject(new Error("Géolocalisation refusée. Autorisez votre position dans les réglages du navigateur, puis réessayez."));
+        else resolve({lat:null,lng:null,accuracy:null});
       },
       {enableHighAccuracy:true,timeout:10000,maximumAge:0}
     );
@@ -1305,9 +1510,11 @@ async function submitQrCode(raw){
         'Authorization':`Bearer ${session.access_token}`,
         'Content-Type':'application/json',
         'apikey':SUPABASE_ANON,
+        'Idempotency-Key': idempotencyKey,
       },
       body:JSON.stringify({
         qr_token:qrToken,
+        idempotency_key: idempotencyKey,
         gps_lat:gps.lat,
         gps_lng:gps.lng,
         gps_accuracy:gps.accuracy,
@@ -1317,9 +1524,9 @@ async function submitQrCode(raw){
     const result=await resp.json();
     if(!resp.ok||!result.success) throw new Error(result.error||'Erreur inconnue');
 
-    flash(result.message);
+    flash(result.message + (result.terminal_name?` — ${result.terminal_name}`:''));
     if(result.anomalies?.length) flash(`⚠️ Anomalie détectée : ${result.anomalies.join(', ')}`);
-    auditLog(result.action+'_qr',{token:qrToken,distance:result.distance_meters});
+    auditLog(result.action+'_qr',{token:qrToken, terminal_id:result.terminal_id, distance:result.distance_meters, idempotency_key:idempotencyKey});
     await loadClockings();
   }catch(e){ flash('Erreur pointage : '+e.message); }
 }

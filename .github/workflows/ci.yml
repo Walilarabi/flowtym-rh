@@ -40,3 +40,32 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - name: Reconstruction depuis le dépôt + suites de tests
         run: bash scripts/ci/run-db-tests.sh
+
+  db-pointage-tests:
+    # Applique réellement les migrations 62 + 63 sur une base propre, vérifie
+    # leur idempotence, puis exécute les suites de tests SQL du module
+    # Pointage (assertions, signatures, RLS, grants, concurrence).
+    # Le job db-tests ci-dessus ne charge que le scope pilote (54-56) et ne
+    # couvre PAS ces migrations : celui-ci est le garde-fou correspondant.
+    name: DB — pointage terminals + hardening
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      PGHOST: localhost
+      PGPORT: '5432'
+      PGUSER: postgres
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - name: Installer le client psql
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Appliquer 62 + 63 + exécuter les tests pointage
+        run: bash scripts/ci/run-pointage-tests.sh
