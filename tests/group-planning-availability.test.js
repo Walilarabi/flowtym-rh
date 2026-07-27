@@ -25,69 +25,35 @@ const CMAP = {
 
 // ── computeUnavailReason ───────────────────────────────────────────────────
 
-describe('Planning Groupe · gpUnavailReason — un collaborateur indisponible est bloqué', () => {
+describe('Planning Groupe · gpUnavailReason — règles métier (Maladie/Absence/Mat/Pat bloquent, autres affectables)', () => {
   const eid = '5848d73d-ddba-4146-870f-219e06d3e4cc';
-
-  test('congé payé → « congé payé »', () => {
-    expect(computeUnavailReason({
-      employeeId: eid, collabCell: { status: 'CP' }, cmap: CMAP, reserved: {},
-    })).toBe('congé payé');
+  const nu = (status, reserved) => computeUnavailReason({
+    employeeId: eid, collabCell: { status }, cmap: CMAP, reserved: reserved || {},
   });
 
-  test('maladie → « maladie »', () => {
-    expect(computeUnavailReason({
-      employeeId: eid, collabCell: { status: 'MAL' }, cmap: CMAP, reserved: {},
-    })).toBe('maladie');
-  });
+  // ── Bloqués : congés médicaux / absences ──────────────────────────────────
+  test('maladie → « maladie »',                 () => expect(nu('MAL')).toBe('maladie'));
+  test('absence injustifiée → « absence »',     () => expect(nu('ABS')).toBe('absence'));
+  test('maternité → « maternité »',             () => expect(nu('MAT')).toBe('maternité'));
+  test('paternité → « paternité »',             () => expect(nu('PAT')).toBe('paternité'));
 
-  test('absence injustifiée → « absence »', () => {
-    expect(computeUnavailReason({
-      employeeId: eid, collabCell: { status: 'ABS' }, cmap: CMAP, reserved: {},
-    })).toBe('absence');
-  });
+  // ── Bloqué indépendamment : mission déjà programmée ───────────────────────
+  test('mission déjà programmée (P + réservé)', () => expect(
+    nu('P', { [eid]: { id: 'prop-42' } })
+  ).toBe('mission déjà programmée'));
 
-  test('maternité → « maternité »', () => {
-    expect(computeUnavailReason({
-      employeeId: eid, collabCell: { status: 'MAT' }, cmap: CMAP, reserved: {},
-    })).toBe('maternité');
-  });
-
-  test('paternité → « paternité »', () => {
-    expect(computeUnavailReason({
-      employeeId: eid, collabCell: { status: 'PAT' }, cmap: CMAP, reserved: {},
-    })).toBe('paternité');
-  });
-
-  test('formation → « formation »', () => {
-    expect(computeUnavailReason({
-      employeeId: eid, collabCell: { status: 'FORM' }, cmap: CMAP, reserved: {},
-    })).toBe('formation');
-  });
-
-  test('RTT → « RTT »', () => {
-    expect(computeUnavailReason({
-      employeeId: eid, collabCell: { status: 'RTT' }, cmap: CMAP, reserved: {},
-    })).toBe('RTT');
-  });
-
-  test('mission déjà réservée → « mission déjà programmée » (prioritaire sur le statut)', () => {
-    expect(computeUnavailReason({
-      employeeId: eid, collabCell: { status: 'P' }, cmap: CMAP,
-      reserved: { [eid]: { id: 'prop-42' } },
-    })).toBe('mission déjà programmée');
-  });
-
-  test('présent (P) → affectable (chaîne vide)', () => {
-    expect(computeUnavailReason({
-      employeeId: eid, collabCell: { status: 'P' }, cmap: CMAP, reserved: {},
-    })).toBe('');
-  });
-
-  test('présent extra (PE) → affectable', () => {
-    expect(computeUnavailReason({
-      employeeId: eid, collabCell: { status: 'PE', is_extra: true }, cmap: CMAP, reserved: {},
-    })).toBe('');
-  });
+  // ── Affectables : présents, repos, CP, mobilisables ───────────────────────
+  test('présent (P) → affectable',              () => expect(nu('P')).toBe(''));
+  test('présent extra (PE) → affectable',       () => expect(nu('PE')).toBe(''));
+  test('mise à disposition (MAD) → affectable', () => expect(nu('MAD')).toBe(''));
+  test('repos (status vide) → affectable',      () => expect(nu('')).toBe(''));
+  test('CP → affectable (peut faire un extra)', () => expect(nu('CP')).toBe(''));
+  test('RTT → affectable (mobilisable)',        () => expect(nu('RTT')).toBe(''));
+  test('récupération (REC) → affectable',       () => expect(nu('REC')).toBe(''));
+  test('formation (FORM) → affectable',         () => expect(nu('FORM')).toBe(''));
+  test('congé exceptionnel (AE) → affectable',  () => expect(nu('AE')).toBe(''));
+  test('congé sans solde (CSS) → affectable',   () => expect(nu('CSS')).toBe(''));
+  test('férié (F) → affectable',                () => expect(nu('F')).toBe(''));
 
   test('collaborateur sans cellule → affectable (silencieusement)', () => {
     expect(computeUnavailReason({

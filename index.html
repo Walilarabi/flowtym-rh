@@ -489,6 +489,20 @@ tr.dept-sep td{pointer-events:none}
 .gp-kpi .sub.wa{color:#d97706}
 
 .gp-body{flex:1;overflow:auto;padding:14px 22px 22px}
+.gp-legend{padding:10px 22px 14px;background:#fff;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;gap:16px;align-items:center;font-size:11.5px;color:var(--ink2);flex-shrink:0}
+.gp-legend .lg{display:inline-flex;align-items:center;gap:6px;font-weight:500}
+.gp-legend .lg .d{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.gp-legend .lg .d.g{background:#16a34a}
+.gp-legend .lg .d.v{background:#8b5cf6}
+.gp-legend .lg .d.y{background:#f59e0b}
+.gp-legend .lg .d.q{background:#cbd5e1}
+.gp-legend .lg .d.r{background:#f87171}
+.gp-legend .lg .d.rp{background:#fca5a5}
+.gp-legend .lg .d.pk{background:#f9a8d4}
+.gp-legend .lg .d.b{background:#3b82f6}
+.gp-legend .lg-hint{margin-left:auto;color:var(--muted);font-size:11px;display:inline-flex;align-items:center;gap:5px}
+.gp-legend .lg-hint i{font-size:10px}
+@media(max-width:900px){.gp-legend .lg-hint{margin-left:0;flex-basis:100%}}
 .gp-empty{padding:60px 30px;text-align:center;color:var(--muted);font-size:13px}
 
 /* Grid : lignes = services, colonnes = hôtels */
@@ -1713,7 +1727,11 @@ let gpSections=[];              // [{service, data}] — une section par service
 let gpService='';               // service sélectionné ('' = tous les services)
 let gpDay=null;                 // jour ciblé pour la comparaison (Date)
 let gpHotelSel=null;            // Set d'hotel_id sélectionnés (null = tous)
-let gpFilters={status:'', subOnly:false, extraOnly:false, search:''};
+// dayStatus : filtre par statut du JOUR affiché ('' = tous, 'REPOS' = statut
+// vide, sinon un code CMAP tel que 'CP'/'MAL'/'ABS'/...). Distinct de
+// `status` (emp_status actif/pause/parti, non exposé dans la toolbar
+// actuelle mais conservé pour compatibilité).
+let gpFilters={status:'', dayStatus:'', subOnly:false, extraOnly:false, search:''};
 let gpEligible=null;            // cache éligibilité {ok, hotels}
 let gpReserved={};              // employee_id -> réservation (proposition approuvée/programmée)
 let curWeekStart=null;  // Date : lundi de la semaine affichée en vue hebdo
@@ -2240,6 +2258,21 @@ async function renderGroupPlanning(){
           <button id="gpNext" title="Jour suivant"><i class="fa-solid fa-chevron-right"></i></button>
         </div>
         <select id="gpServiceSel" title="Service" style="padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:#fff;font-size:13px;font-weight:600;color:var(--ink)"></select>
+        <select id="gpDayStatusSel" title="Statut du jour" style="padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:#fff;font-size:13px;font-weight:600;color:var(--ink)">
+          <option value="">Tous les statuts</option>
+          <option value="REPOS" ${gpFilters.dayStatus==='REPOS'?'selected':''}>Repos</option>
+          <option value="P" ${gpFilters.dayStatus==='P'?'selected':''}>Présent</option>
+          <option value="CP" ${gpFilters.dayStatus==='CP'?'selected':''}>CP</option>
+          <option value="MAL" ${gpFilters.dayStatus==='MAL'?'selected':''}>Maladie</option>
+          <option value="ABS" ${gpFilters.dayStatus==='ABS'?'selected':''}>Absence</option>
+          <option value="MAT" ${gpFilters.dayStatus==='MAT'?'selected':''}>Maternité</option>
+          <option value="PAT" ${gpFilters.dayStatus==='PAT'?'selected':''}>Paternité</option>
+          <option value="RTT" ${gpFilters.dayStatus==='RTT'?'selected':''}>RTT</option>
+          <option value="REC" ${gpFilters.dayStatus==='REC'?'selected':''}>Récupération</option>
+          <option value="FORM" ${gpFilters.dayStatus==='FORM'?'selected':''}>Formation</option>
+          <option value="CSS" ${gpFilters.dayStatus==='CSS'?'selected':''}>Sans solde</option>
+          <option value="AE" ${gpFilters.dayStatus==='AE'?'selected':''}>Exceptionnel</option>
+        </select>
         <label class="chip ${gpFilters.subOnly?'on':''}" id="gpSubLbl"><input type="checkbox" id="gpSub" ${gpFilters.subOnly?'checked':''}> Sous-effectifs</label>
         <label class="chip ${gpFilters.extraOnly?'on':''}" id="gpExtraLbl"><input type="checkbox" id="gpExtra" ${gpFilters.extraOnly?'checked':''}> Extras</label>
         <button class="chip" id="gpHotelsBtn" title="Établissements affichés"><i class="fa-solid fa-hotel" style="font-size:11px"></i></button>
@@ -2248,6 +2281,18 @@ async function renderGroupPlanning(){
       </div>
       <div class="gp-kpis" id="gpKpis"></div>
       <div class="gp-body" id="gpBody"></div>
+      <div class="gp-legend">
+        <span class="lg"><span class="d g"></span>Disponible</span>
+        <span class="lg"><span class="d v"></span>Extra (hors hôtel)</span>
+        <span class="lg"><span class="d y"></span>Formation</span>
+        <span class="lg"><span class="d q"></span>Repos</span>
+        <span class="lg"><span class="d r"></span>Maladie</span>
+        <span class="lg"><span class="d rp"></span>Congé payé (CP)</span>
+        <span class="lg"><span class="d pk"></span>Maternité / Paternité</span>
+        <span class="lg"><span class="d b"></span>RTT</span>
+        <span class="lg"><span class="d r"></span>Absence</span>
+        <span class="lg-hint"><i class="fa-solid fa-circle-info"></i> Les collaborateurs en repos, en CP et mobilisables sont éligibles à une affectation.</span>
+      </div>
     </div>`;
   renderGroupModeSwitch();
   const e=await gpCheckEligible();
@@ -2255,6 +2300,7 @@ async function renderGroupPlanning(){
   const svcs=(e.services&&e.services.length?e.services:['Réception','Petit-déjeuner','Étage','Technique','Maintenance','Direction','Commercial','Revenue','Comptabilité']);
   svcSel.innerHTML=`<option value="" ${gpService===''?'selected':''}>Tous les services</option>`+svcs.map(s=>`<option value="${esc(s)}" ${s===gpService?'selected':''}>${esc(s)}</option>`).join('');
   svcSel.onchange=()=>{ gpService=svcSel.value; gpLoadAndRender(); };
+  $('gpDayStatusSel').onchange=ev=>{ gpFilters.dayStatus=ev.target.value; gpRenderBody(); };
   $('gpPrev').onclick=()=>{ gpDay=new Date(gpDay.getFullYear(),gpDay.getMonth(),gpDay.getDate()-1); gpLoadAndRender(); };
   $('gpNext').onclick=()=>{ gpDay=new Date(gpDay.getFullYear(),gpDay.getMonth(),gpDay.getDate()+1); gpLoadAndRender(); };
   $('gpSearch').oninput=ev=>{ gpFilters.search=ev.target.value.toLowerCase(); gpRenderBody(); };
@@ -2271,11 +2317,16 @@ function _gpKeydown(ev){
   if((ev.metaKey||ev.ctrlKey) && (ev.key==='k'||ev.key==='K')){ const s=$('gpSearch'); if(s){ ev.preventDefault(); s.focus(); s.select(); } }
 }
 
-// Charge le mois du jour ciblé. Une requête agrégée PAR SERVICE affiché
-// (1 si un service est sélectionné, sinon tous — borné au nb de services).
+// Charge le JOUR ciblé (pas le mois entier). Une requête agrégée PAR SERVICE
+// affiché (1 si un service est sélectionné, sinon tous — borné au nb de
+// services). Le rendu (gpRenderBody) ne consomme que dayISO=gpDay ; élargir
+// la période gonflerait inutilement le payload — chaque salarié actif du
+// service produit désormais une ligne PAR JOUR (y compris Repos = statut
+// vide, cf. sql/62_group_planning_repos_visibility.sql), donc une requête
+// mensuelle multiplierait le volume par ~30 sans bénéfice pour l'affichage.
 async function gpLoadAndRender(){
   const body=$('gpBody'); if(body) body.innerHTML='<div style="padding:40px;text-align:center;color:var(--muted)"><i class="fa-solid fa-spinner fa-spin"></i> Chargement…</div>';
-  const from=new Date(gpDay.getFullYear(),gpDay.getMonth(),1), to=new Date(gpDay.getFullYear(),gpDay.getMonth()+1,0);
+  const from=new Date(gpDay.getFullYear(),gpDay.getMonth(),gpDay.getDate()), to=from;
   const e=await gpCheckEligible();
   const allSvcs=(e.services&&e.services.length?e.services:['Réception','Petit-déjeuner','Étage','Technique','Maintenance','Direction','Commercial','Revenue','Comptabilité']);
   const svcs=gpService?[gpService]:allSvcs;
@@ -2303,7 +2354,7 @@ function gpSvcIcon(name){ return GP_SVC_ICONS[name] || 'fa-people-group'; }
 // Classe du badge de statut par code (ou null si le statut est actif « présent »).
 function gpStatusBadge(code, isExtra){
   if(isExtra) return {cls:'extra', label:'Extra'};
-  if(!code) return null;
+  if(!code) return {cls:'rest', label:'Repos'};  // absence de ligne staff_planning = Repos, affectable
   const map={
     'CP':{cls:'cp',label:'CP'}, 'MAL':{cls:'mal',label:'Maladie'},
     'ABS':{cls:'abs',label:'Abs.'}, 'MAT':{cls:'mat',label:'Mat.'},
@@ -2354,6 +2405,12 @@ function gpRenderBody(){
       const filteredForDisplay = (arr)=>{
         let a=arr;
         if(gpFilters.extraOnly) a=a.filter(c=>c.is_extra);
+        // Filtre statut du jour : 'REPOS' = statut vide, sinon code CMAP exact.
+        if(gpFilters.dayStatus){
+          a = gpFilters.dayStatus==='REPOS'
+            ? a.filter(c=>!c.status)
+            : a.filter(c=>c.status===gpFilters.dayStatus);
+        }
         if(gpFilters.search){ const s=gpFilters.search; a=a.filter(c=>(c.name||'').toLowerCase().includes(s)||(h.hotel_code||'').toLowerCase().includes(s)||(h.name||'').toLowerCase().includes(s)||(svc||'').toLowerCase().includes(s)); }
         return a;
       };
@@ -2633,7 +2690,9 @@ function gpBuildCollab(c, hotel, service){
   const isWork = gpIsWorking(c.status);
   const dot = gpDotClass(c.status, c.is_extra);
   const badge = gpStatusBadge(c.status, c.is_extra);
-  const nameCls = isWork ? 'nm' : (c.status && CMAP[c.status] && (CMAP[c.status].cat==='abs'||CMAP[c.status].cat==='paid') ? 'nm mut' : 'nm');
+  // Grisé pour tout statut non travaillé — Repos (statut vide), CP, Maladie,
+  // Absence, RTT, etc. Seul un statut « travaillé » (P/PE/MAD) reste en noir.
+  const nameCls = isWork ? 'nm' : 'nm mut';
   const badgeHtml = badge ? `<span class="sbadge ${badge.cls}">${esc(badge.label)}</span>` : '';
   const eid=esc(c.employee_id), hid=esc(hotel.id||''), svc=esc(service||c.service||'');
   const unavail = gpUnavailReason(c.employee_id);
@@ -2641,9 +2700,15 @@ function gpBuildCollab(c, hotel, service){
   const dragAttrs = draggable
     ? `draggable="true" role="button" aria-grabbed="false" aria-label="Glisser ${esc(c.name||'')} vers un autre établissement"`
     : (unavail?`title="Indisponible : ${esc(unavail)}"`:'');
-  const affBtn = unavail
+  // Maladie / Absence : aucun bouton Affecter, même désactivé — ces
+  // collaborateurs ne doivent plus pouvoir être sélectionnés pour une
+  // mission depuis le Planning Groupe. Les autres indisponibilités
+  // (maternité/paternité, mission déjà programmée) gardent le bouton
+  // désactivé avec la raison, pour rester informatif.
+  const hideAffectBtn = (c.status==='MAL' || c.status==='ABS');
+  const affBtn = hideAffectBtn ? '' : (unavail
     ? `<button class="aff" disabled title="Indisponible : ${esc(unavail)}" style="opacity:.5;cursor:not-allowed">Affecter</button>`
-    : `<button class="aff" data-affect="${eid}" data-hotel="${hid}" data-svc="${svc}" title="Affecter à une mission">Affecter</button>`;
+    : `<button class="aff" data-affect="${eid}" data-hotel="${hid}" data-svc="${svc}" title="Affecter à une mission">Affecter</button>`);
   return `<div class="gp-collab" ${dragAttrs} data-emp="${eid}" data-hotel="${hid}" data-svc="${svc}">
     <span class="dot ${dot}"></span>
     <span class="${nameCls}" data-collab="${eid}" data-hotel="${hid}" data-svc="${svc}" title="${esc(c.name||'')}">${esc(c.name||'')}</span>
@@ -2727,26 +2792,30 @@ function gpDndAutoScrollAmount(clientX, bLeft, bRight, edge, maxSpeed){
 
 // Raison d'indisponibilité (retourne '' si le collaborateur est affectable ce jour).
 // Empêche de suggérer/affecter un CP, MAL, ABS, MAT/PAT, FORM, mission programmée, etc.
+// Règles métier Planning Groupe (voir tableau utilisateur) :
+//   Présent        → affectable (aucun blocage)
+//   Repos (vide)   → affectable (peut faire un extra)
+//   CP             → affectable (peut accepter une mission)
+//   RTT/REC/FORM/AE/CSS → affectable (mobilisables)
+//   Maladie (MAL)  → BLOQUÉ
+//   Absence (ABS)  → BLOQUÉ
+//   Maternité/Paternité → BLOQUÉ (congés protégés)
+//   Mission déjà programmée → BLOQUÉ (indépendant du statut)
+const GP_UNAVAIL_STATUSES = {
+  MAL: 'maladie',
+  ABS: 'absence',
+  MAT: 'maternité',
+  PAT: 'paternité',
+};
 function gpUnavailReason(empId){
+  if(gpReserved && gpReserved[empId]) return 'mission déjà programmée';
   const cellInfo = gpFindCollabCell(empId);
   const c = cellInfo && cellInfo.collab;
-  if(gpReserved && gpReserved[empId]) return 'mission déjà programmée';
   if(!c) return '';
   const st = c.status;
-  if(!st) return '';
-  if(gpIsWorking(st)) return '';
-  const meta = CMAP[st];
-  if(!meta) return '';
-  const cat = meta.cat;
-  if(cat==='abs' || cat==='paid'){
-    const specific = {
-      CP:'congé payé', MAL:'maladie', ABS:'absence', MAT:'maternité', PAT:'paternité',
-      FORM:'formation', RTT:'RTT', REC:'récupération', AE:'absence exceptionnelle',
-      CSS:'congé sans solde',
-    };
-    return specific[st] || (meta.label||'').toLowerCase();
-  }
-  return '';
+  if(!st) return '';               // Repos → affectable
+  if(gpIsWorking(st)) return '';   // P / PE / MAD → affectable
+  return GP_UNAVAIL_STATUSES[st] || '';  // seuls MAL/ABS/MAT/PAT bloquent
 }
 
 function gpOpenCollabDrawer(empId, hotelId, service){
