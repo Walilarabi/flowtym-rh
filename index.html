@@ -2297,11 +2297,16 @@ function _gpKeydown(ev){
   if((ev.metaKey||ev.ctrlKey) && (ev.key==='k'||ev.key==='K')){ const s=$('gpSearch'); if(s){ ev.preventDefault(); s.focus(); s.select(); } }
 }
 
-// Charge le mois du jour ciblé. Une requête agrégée PAR SERVICE affiché
-// (1 si un service est sélectionné, sinon tous — borné au nb de services).
+// Charge le JOUR ciblé (pas le mois entier). Une requête agrégée PAR SERVICE
+// affiché (1 si un service est sélectionné, sinon tous — borné au nb de
+// services). Le rendu (gpRenderBody) ne consomme que dayISO=gpDay ; élargir
+// la période gonflerait inutilement le payload — chaque salarié actif du
+// service produit désormais une ligne PAR JOUR (y compris Repos = statut
+// vide, cf. sql/62_group_planning_repos_visibility.sql), donc une requête
+// mensuelle multiplierait le volume par ~30 sans bénéfice pour l'affichage.
 async function gpLoadAndRender(){
   const body=$('gpBody'); if(body) body.innerHTML='<div style="padding:40px;text-align:center;color:var(--muted)"><i class="fa-solid fa-spinner fa-spin"></i> Chargement…</div>';
-  const from=new Date(gpDay.getFullYear(),gpDay.getMonth(),1), to=new Date(gpDay.getFullYear(),gpDay.getMonth()+1,0);
+  const from=new Date(gpDay.getFullYear(),gpDay.getMonth(),gpDay.getDate()), to=from;
   const e=await gpCheckEligible();
   const allSvcs=(e.services&&e.services.length?e.services:['Réception','Petit-déjeuner','Étage','Technique','Maintenance','Direction','Commercial','Revenue','Comptabilité']);
   const svcs=gpService?[gpService]:allSvcs;
@@ -2329,7 +2334,7 @@ function gpSvcIcon(name){ return GP_SVC_ICONS[name] || 'fa-people-group'; }
 // Classe du badge de statut par code (ou null si le statut est actif « présent »).
 function gpStatusBadge(code, isExtra){
   if(isExtra) return {cls:'extra', label:'Extra'};
-  if(!code) return null;
+  if(!code) return {cls:'rest', label:'Repos'};  // absence de ligne staff_planning = Repos, affectable
   const map={
     'CP':{cls:'cp',label:'CP'}, 'MAL':{cls:'mal',label:'Maladie'},
     'ABS':{cls:'abs',label:'Abs.'}, 'MAT':{cls:'mat',label:'Mat.'},
@@ -2659,7 +2664,9 @@ function gpBuildCollab(c, hotel, service){
   const isWork = gpIsWorking(c.status);
   const dot = gpDotClass(c.status, c.is_extra);
   const badge = gpStatusBadge(c.status, c.is_extra);
-  const nameCls = isWork ? 'nm' : (c.status && CMAP[c.status] && (CMAP[c.status].cat==='abs'||CMAP[c.status].cat==='paid') ? 'nm mut' : 'nm');
+  // Grisé pour tout statut non travaillé — Repos (statut vide), CP, Maladie,
+  // Absence, RTT, etc. Seul un statut « travaillé » (P/PE/MAD) reste en noir.
+  const nameCls = isWork ? 'nm' : 'nm mut';
   const badgeHtml = badge ? `<span class="sbadge ${badge.cls}">${esc(badge.label)}</span>` : '';
   const eid=esc(c.employee_id), hid=esc(hotel.id||''), svc=esc(service||c.service||'');
   const unavail = gpUnavailReason(c.employee_id);
