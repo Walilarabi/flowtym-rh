@@ -303,3 +303,94 @@ describe('isWithinActiveWindow', () => {
     expect(isWithinActiveWindow(22*60, 6*60, 12*60)).toBe(false);
   });
 });
+
+// ── Détection d'échec réseau pur vs erreur métier ────────────────────────────
+// Bug réel constaté en recette (Folkestone opera, 2026-07-27) : "Failed to
+// fetch" lors d'un scan QR. Cause racine identifiée : Access-Control-Allow-
+// Headers de clock-portal n'incluait pas "idempotency-key", un header
+// personnalisé et donc soumis à préflight CORS. Corrigé côté edge function
+// (§ CORS). Corrigé côté client : un nouvel essai borné (même
+// Idempotency-Key, donc sûr) est tenté UNIQUEMENT sur un échec réseau pur —
+// jamais sur une erreur métier renvoyée par le serveur (JSON {error,code}).
+function isNetworkFetchError(e){
+  return e instanceof TypeError && /fetch|network|load failed/i.test(e.message||'');
+}
+
+describe('isNetworkFetchError', () => {
+  test('Chrome/Edge/Android — "Failed to fetch" → réseau', () => {
+    expect(isNetworkFetchError(new TypeError('Failed to fetch'))).toBe(true);
+  });
+
+  test('Firefox — "NetworkError when attempting to fetch resource." → réseau', () => {
+    expect(isNetworkFetchError(new TypeError('NetworkError when attempting to fetch resource.'))).toBe(true);
+  });
+
+  test('Safari — "Load failed" → réseau', () => {
+    expect(isNetworkFetchError(new TypeError('Load failed'))).toBe(true);
+  });
+
+  test('erreur métier serveur (ex. WRONG_HOTEL) → PAS réseau, jamais rejouée', () => {
+    expect(isNetworkFetchError(new Error("Vous n'êtes pas autorisé à pointer dans cet hôtel aujourd'hui."))).toBe(false);
+  });
+
+  test('erreur métier GPS_TOO_FAR → PAS réseau', () => {
+    expect(isNetworkFetchError(new Error('Vous êtes à 320m de l\'hôtel (limite : 150m).'))).toBe(false);
+  });
+
+  test('session expirée (Error applicatif, pas TypeError) → PAS réseau', () => {
+    expect(isNetworkFetchError(new Error('Session expirée, reconnectez-vous'))).toBe(false);
+  });
+
+  test('TypeError sans rapport (bug JS) → PAS traité comme réseau', () => {
+    expect(isNetworkFetchError(new TypeError("Cannot read properties of undefined (reading 'foo')"))).toBe(false);
+  });
+});
+
+// ── Contrat CORS clock-portal : régression "Failed to fetch" ────────────────
+// Test de contrat sur le VRAI fichier source (pas une copie) : garantit que
+// idempotency-key reste toujours listé, quel que soit le futur refactor de
+// la fonction cors().
+describe('clock-portal · contrat CORS', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const src = fs.readFileSync(
+    path.join(__dirname, '..', 'supabase', 'functions', 'clock-portal', 'index.ts'),
+    'utf8'
+  );
+
+  test('Access-Control-Allow-Headers inclut idempotency-key', () => {
+    const m = src.match(/'Access-Control-Allow-Headers':\s*'([^']+)'/);
+    expect(m).not.toBeNull();
+    const headers = m[1].split(',').map(h => h.trim().toLowerCase());
+    expect(headers).toContain('idempotency-key');
+    expect(headers).toEqual(expect.arrayContaining(['authorization', 'apikey', 'content-type']));
+  });
+
+  test('Access-Control-Max-Age défini (limite les préflights répétés)', () => {
+    expect(src).toMatch(/'Access-Control-Max-Age':\s*'\d+'/);
+  });
+});
+
+// ── Contrat portail : retry réseau borné sur la même Idempotency-Key ────────
+describe('portal.html · contrat retry réseau', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'portal.html'), 'utf8');
+
+  test('submitQrCode ne génère jamais une 2e Idempotency-Key pendant ses retries', () => {
+    const start = html.indexOf('async function submitQrCode');
+    expect(start).toBeGreaterThan(-1);
+    const end = html.indexOf('\n}', start);
+    const body = html.slice(start, end);
+    // Une seule affectation de idempotencyKey (au tout début), jamais recalculée
+    // dans la boucle de retry.
+    const assignments = body.match(/const idempotencyKey\s*=/g) || [];
+    expect(assignments.length).toBe(1);
+    expect(body).toMatch(/isNetworkFetchError/);
+  });
+
+  test('isNetworkFetchError et sleep sont définis avant submitQrCode', () => {
+    expect(html.indexOf('function isNetworkFetchError')).toBeGreaterThan(-1);
+    expect(html.indexOf('function isNetworkFetchError')).toBeLessThan(html.indexOf('async function submitQrCode'));
+  });
+});

@@ -1465,6 +1465,15 @@ function newIdempotencyKey(){
   return 'ptg-'+Array.from(buf).map(b=>b.toString(16).padStart(2,'0')).join('');
 }
 
+// Détecte un échec RÉSEAU pur de fetch() (aucune réponse serveur reçue),
+// à distinguer d'une erreur MÉTIER (le serveur a répondu avec un JSON
+// {error,code}). Chrome/Edge/Android : "Failed to fetch". Firefox :
+// "NetworkError when attempting to fetch resource.". Safari : "Load failed".
+function isNetworkFetchError(e){
+  return e instanceof TypeError && /fetch|network|load failed/i.test(e.message||'');
+}
+function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+
 async function submitQrCode(raw, opts){
   if(!raw){ flash('QR Code vide'); return; }
 
@@ -1504,7 +1513,7 @@ async function submitQrCode(raw, opts){
     const {data:{session}}=await sb.auth.getSession();
     if(!session) throw new Error('Session expirée, reconnectez-vous');
 
-    const resp=await fetch(`${FUNCTIONS_URL}/clock-portal`,{
+    const doFetch = ()=>fetch(`${FUNCTIONS_URL}/clock-portal`,{
       method:'POST',
       headers:{
         'Authorization':`Bearer ${session.access_token}`,
@@ -1521,6 +1530,25 @@ async function submitQrCode(raw, opts){
         device_info:navigator.userAgent,
       }),
     });
+
+    // Nouvel essai borné UNIQUEMENT sur échec réseau pur (aucune réponse
+    // serveur reçue, ex. wifi hôtel instable). La MÊME Idempotency-Key est
+    // réutilisée à chaque tentative : même si un essai précédent avait en
+    // réalité atteint le serveur, record_clocking() est idempotente sur
+    // cette clé — jamais de double pointage. Une erreur métier renvoyée par
+    // le serveur (JSON {error,code}, ex. WRONG_HOTEL, GPS_TOO_FAR) sort
+    // immédiatement de la boucle et n'est jamais rejouée.
+    const RETRY_DELAYS_MS = [800, 1600];
+    let resp;
+    for(let attempt=0; ; attempt++){
+      try{ resp = await doFetch(); break; }
+      catch(networkErr){
+        if(attempt >= RETRY_DELAYS_MS.length || !isNetworkFetchError(networkErr)) throw networkErr;
+        flash('Connexion instable, nouvelle tentative…');
+        await sleep(RETRY_DELAYS_MS[attempt]);
+      }
+    }
+
     const result=await resp.json();
     if(!resp.ok||!result.success) throw new Error(result.error||'Erreur inconnue');
 
@@ -1528,7 +1556,12 @@ async function submitQrCode(raw, opts){
     if(result.anomalies?.length) flash(`⚠️ Anomalie détectée : ${result.anomalies.join(', ')}`);
     auditLog(result.action+'_qr',{token:qrToken, terminal_id:result.terminal_id, distance:result.distance_meters, idempotency_key:idempotencyKey});
     await loadClockings();
-  }catch(e){ flash('Erreur pointage : '+e.message); }
+  }catch(e){
+    const msg = isNetworkFetchError(e)
+      ? 'Connexion réseau impossible après plusieurs tentatives. Vérifiez votre wifi/4G puis réessayez.'
+      : e.message;
+    flash('Erreur pointage : '+msg);
+  }
 }
 
 // ── Coffre-fort documents ─────────────────────────────────────────────────────
