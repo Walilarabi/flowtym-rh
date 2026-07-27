@@ -36,9 +36,38 @@ function detectDoubleClocking(todayRows, nowMs, thresholdMs=3*60*1000){
   return gap < thresholdMs;
 }
 
-function canEmployeeClockAtHotel({primaryHotelId, targetHotelId, hasShiftAtTarget, hasPastClockingAtTarget}){
-  if(primaryHotelId === targetHotelId) return true;
-  return !!(hasShiftAtTarget || hasPastClockingAtTarget);
+// Version STRICTE de l'autorisation (post-audit). L'historique de pointage
+// n'est plus un critère. Cette fonction reflète en pur JS la logique de la
+// SQL fn employee_can_clock_at(uuid,uuid,date) définie en
+// sql/63_pointage_terminals_hardening.sql § 9.
+function canEmployeeClockAtHotel({
+  employeeActive, primaryHotelId, targetHotelId, day,
+  hasActivePermanentAssignment, hasActiveExtraForMonth, hasPShiftOnDay,
+}){
+  if(!employeeActive) return false;                    // salarié désactivé
+  if(primaryHotelId === targetHotelId) return true;    // (a) principal + actif
+  if(hasActivePermanentAssignment)     return true;    // (b) affectation permanente
+  if(hasActiveExtraForMonth)           return true;    // (c) extra ce mois-ci
+  if(hasPShiftOnDay)                   return true;    // (d) shift P planifié ce jour
+  return false;
+}
+
+// Générateur de clé d'idempotence : réplique la logique de portal.html
+// (crypto.randomUUID préféré, fallback tableau random). Sert à vérifier
+// que la clé est stable, opaque et suffisamment unique.
+function newIdempotencyKey(){
+  try{ if(globalThis.crypto?.randomUUID) return 'ptg-'+globalThis.crypto.randomUUID(); }catch(_){}
+  const buf=new Uint8Array(16);
+  (globalThis.crypto || {getRandomValues:()=>{for(let i=0;i<buf.length;i++) buf[i]=Math.floor(Math.random()*256);}}).getRandomValues?.(buf);
+  return 'ptg-'+Array.from(buf).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+
+// Plage horaire d'un terminal (minute locale hôtel).
+function isWithinActiveWindow(activeFrom, activeTo, nowMinuteLocal){
+  if(activeFrom == null && activeTo == null) return true;
+  if(activeFrom == null || activeTo == null) return true;
+  if(activeFrom <= activeTo) return nowMinuteLocal >= activeFrom && nowMinuteLocal <= activeTo;
+  return nowMinuteLocal >= activeFrom || nowMinuteLocal <= activeTo; // traverse minuit
 }
 
 // ── Extraction du token ──────────────────────────────────────────────────────
@@ -130,33 +159,110 @@ describe('detectDoubleClocking', () => {
   });
 });
 
-// ── Autorisation multi-hôtel ─────────────────────────────────────────────────
-describe('canEmployeeClockAtHotel', () => {
-  test('hôtel principal → autorisé', () => {
-    expect(canEmployeeClockAtHotel({
-      primaryHotelId:'h1', targetHotelId:'h1',
-      hasShiftAtTarget:false, hasPastClockingAtTarget:false,
-    })).toBe(true);
+// ── Autorisation multi-hôtel STRICTE ─────────────────────────────────────────
+// Ces tests miroir des cas SQL — voir sql/tests/pointage_hardening.sql tests 1-5.
+describe('canEmployeeClockAtHotel (règles actuelles uniquement)', () => {
+  const base = {
+    employeeActive:true, primaryHotelId:'h1', targetHotelId:'h1',
+    day:'2026-07-27',
+    hasActivePermanentAssignment:false, hasActiveExtraForMonth:false, hasPShiftOnDay:false,
+  };
+
+  test('hôtel principal + employé actif → autorisé', () => {
+    expect(canEmployeeClockAtHotel(base)).toBe(true);
   });
 
-  test('hôtel secondaire avec shift planifié → autorisé', () => {
-    expect(canEmployeeClockAtHotel({
-      primaryHotelId:'h1', targetHotelId:'h2',
-      hasShiftAtTarget:true, hasPastClockingAtTarget:false,
-    })).toBe(true);
+  test('salarié désactivé → refusé même dans son hôtel principal', () => {
+    expect(canEmployeeClockAtHotel({...base, employeeActive:false})).toBe(false);
   });
 
-  test('hôtel secondaire avec historique de pointage → autorisé', () => {
-    expect(canEmployeeClockAtHotel({
-      primaryHotelId:'h1', targetHotelId:'h2',
-      hasShiftAtTarget:false, hasPastClockingAtTarget:true,
-    })).toBe(true);
+  test('hôtel étranger sans aucun droit → refusé', () => {
+    expect(canEmployeeClockAtHotel({...base, targetHotelId:'h2'})).toBe(false);
   });
 
-  test('hôtel étranger sans rattachement → refusé', () => {
+  test('affectation permanente active → autorisé', () => {
+    expect(canEmployeeClockAtHotel({...base, targetHotelId:'h2', hasActivePermanentAssignment:true})).toBe(true);
+  });
+
+  test('activation extra active ce mois-ci → autorisé', () => {
+    expect(canEmployeeClockAtHotel({...base, targetHotelId:'h2', hasActiveExtraForMonth:true})).toBe(true);
+  });
+
+  test('shift P planifié ce jour dans cet hôtel → autorisé', () => {
+    expect(canEmployeeClockAtHotel({...base, targetHotelId:'h2', hasPShiftOnDay:true})).toBe(true);
+  });
+
+  test('shift planifié dans un AUTRE hôtel → refusé pour l\'hôtel cible', () => {
+    // Le caller passe hasPShiftOnDay=false pour l'hôtel cible.
+    expect(canEmployeeClockAtHotel({...base, targetHotelId:'h2', hasPShiftOnDay:false})).toBe(false);
+  });
+
+  test('extra expiré ou hors mois → refusé', () => {
+    expect(canEmployeeClockAtHotel({...base, targetHotelId:'h2', hasActiveExtraForMonth:false})).toBe(false);
+  });
+
+  test('affectation permanente désactivée → refusé', () => {
+    expect(canEmployeeClockAtHotel({...base, targetHotelId:'h2', hasActivePermanentAssignment:false})).toBe(false);
+  });
+
+  test('ANCIEN salarié ayant déjà pointé mais désactivé → refusé', () => {
+    // Historique de pointage n'est plus un critère.
     expect(canEmployeeClockAtHotel({
-      primaryHotelId:'h1', targetHotelId:'h3',
-      hasShiftAtTarget:false, hasPastClockingAtTarget:false,
+      ...base, targetHotelId:'h2', employeeActive:false,
     })).toBe(false);
+  });
+
+  test('ancien salarié actif MAIS sans droit actuel → refusé', () => {
+    // La règle audit refuse même si l'employé a un historique dans l'hôtel.
+    expect(canEmployeeClockAtHotel({
+      ...base, targetHotelId:'h2',   // aucun droit actuel
+    })).toBe(false);
+  });
+});
+
+// ── Idempotency key ──────────────────────────────────────────────────────────
+describe('newIdempotencyKey', () => {
+  test('préfixe ptg- + valeur non vide', () => {
+    const k = newIdempotencyKey();
+    expect(k.startsWith('ptg-')).toBe(true);
+    expect(k.length).toBeGreaterThan(10);
+  });
+
+  test('deux appels successifs produisent 2 clés distinctes', () => {
+    const a = newIdempotencyKey();
+    const b = newIdempotencyKey();
+    expect(a).not.toBe(b);
+  });
+
+  test('n\'utilise que caractères sûrs pour HTTP header', () => {
+    const k = newIdempotencyKey();
+    expect(k).toMatch(/^ptg-[a-f0-9-]{16,}$/);
+  });
+});
+
+// ── Plage horaire d'un terminal ──────────────────────────────────────────────
+describe('isWithinActiveWindow', () => {
+  test('sans plage → toujours actif', () => {
+    expect(isWithinActiveWindow(null,null,600)).toBe(true);
+  });
+
+  test('plage 06:00-14:00, midi → actif', () => {
+    expect(isWithinActiveWindow(6*60, 14*60, 12*60)).toBe(true);
+  });
+
+  test('plage 06:00-14:00, 22:00 → inactif', () => {
+    expect(isWithinActiveWindow(6*60, 14*60, 22*60)).toBe(false);
+  });
+
+  test('plage traversant minuit 22:00-06:00, 23:30 → actif', () => {
+    expect(isWithinActiveWindow(22*60, 6*60, 23*60+30)).toBe(true);
+  });
+
+  test('plage traversant minuit 22:00-06:00, 04:00 → actif', () => {
+    expect(isWithinActiveWindow(22*60, 6*60, 4*60)).toBe(true);
+  });
+
+  test('plage traversant minuit 22:00-06:00, 12:00 → inactif', () => {
+    expect(isWithinActiveWindow(22*60, 6*60, 12*60)).toBe(false);
   });
 });

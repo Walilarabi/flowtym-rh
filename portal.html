@@ -1222,7 +1222,8 @@ function detectCameraSupport(){
   return {ok:true};
 }
 
-// Chargeur jsQR pour les navigateurs sans BarcodeDetector (Safari iOS < 17, Firefox…)
+// Chargeur jsQR pour les navigateurs sans BarcodeDetector (Safari iOS < 17, Firefox…).
+// Chargé UNE seule fois par session ; en cas d'échec on peut retenter au clic suivant.
 let _jsQrLoading=null;
 async function ensureJsQr(){
   if(window.jsQR) return window.jsQR;
@@ -1231,7 +1232,11 @@ async function ensureJsQr(){
       const s=document.createElement('script');
       s.src='https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js';
       s.onload=()=>res(window.jsQR);
-      s.onerror=()=>rej(new Error('Impossible de charger le décodeur QR'));
+      s.onerror=(err)=>{
+        _jsQrLoading=null;               // permet une nouvelle tentative après échec réseau
+        s.remove();
+        rej(new Error('Impossible de charger le décodeur QR'));
+      };
       document.head.appendChild(s);
     });
   }
@@ -1242,8 +1247,23 @@ async function ensureJsQr(){
 let qrStream=null;
 let qrDecoder=null;
 let qrRAF=null;
+let qrOpening=false;      // empêche l'ouverture de deux scanners simultanés (double clic)
+let qrDetected=false;     // empêche 2 handlers d'arrivée sur la même image
+
+// Nettoyage global sur cache-invalidation navigateur (arrière-plan, changement d'onglet…)
+if(!window._qrLifecycleWired){
+  window._qrLifecycleWired = true;
+  document.addEventListener('visibilitychange', ()=>{
+    if(document.hidden){ stopCameraStream(); }
+  });
+  window.addEventListener('pagehide',    ()=>{ stopCameraStream(); });
+  window.addEventListener('beforeunload',()=>{ stopCameraStream(); });
+}
 
 window.openQrScan=async()=>{
+  if(qrOpening) return;      // double-clic sur "Pointer"
+  qrOpening=true;
+  qrDetected=false;
   // 1) Monter l'UI plein écran (headers + zone vidéo + hint)
   const supp = detectCameraSupport();
   let host=document.getElementById('qrScanRoot');
@@ -1270,16 +1290,19 @@ window.openQrScan=async()=>{
 
   if(!supp.ok){
     showScanError({icon:'fa-camera-slash', title:'Scanner indisponible', message:supp.message, showManual:true, showRetry:false});
+    qrOpening=false;
     return;
   }
   // 2) Démarrer la caméra (nécessite un geste utilisateur — c'est notre clic sur "Pointer")
-  await startCamera();
+  try{ await startCamera(); }
+  finally{ qrOpening=false; }
 };
 
 async function startCamera(){
   const stage=$('qrStage'); if(!stage) return;
-  // Nettoyer un ancien panneau d'erreur s'il existe
+  // Nettoyer un ancien panneau d'erreur ET tout stream/loop précédent
   stage.querySelector('.err-panel')?.remove();
+  stopCameraStream();               // idempotent : safe même si rien n'est actif
   const vid=$('qrVideo');
   if(vid){ vid.style.display=''; }
   try{
@@ -1342,9 +1365,11 @@ async function startDetector(vid){
         const res = window.jsQR(img.data, img.width, img.height, {inversionAttempts:'dontInvert'});
         if(res && res.data) raw = res.data;
       }
-      if(raw){
-        // Éviter les doubles scans successifs
-        cancelAnimationFrame(qrRAF); qrRAF=null;
+      if(raw && !qrDetected){
+        // Verrou immédiat : deux frames décodées quasi-simultanément ne
+        // doivent produire qu'un seul submit.
+        qrDetected = true;
+        if(qrRAF){ cancelAnimationFrame(qrRAF); qrRAF=null; }
         await onQrDetected(raw);
         return;
       }
@@ -1431,7 +1456,16 @@ async function onQrDetected(raw){
   await submitQrCode(raw);
 }
 
-async function submitQrCode(raw){
+// Génère un identifiant opaque adapté à une clé d'idempotence côté serveur.
+// crypto.randomUUID quand dispo, fallback random pour Safari iOS ancien.
+function newIdempotencyKey(){
+  try{ if(crypto?.randomUUID) return 'ptg-'+crypto.randomUUID(); }catch(_){}
+  const buf=new Uint8Array(16);
+  (window.crypto || {getRandomValues:()=>{for(let i=0;i<buf.length;i++) buf[i]=Math.floor(Math.random()*256);}}).getRandomValues?.(buf);
+  return 'ptg-'+Array.from(buf).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+
+async function submitQrCode(raw, opts){
   if(!raw){ flash('QR Code vide'); return; }
 
   // Extraire le token (URL: ?action=clock&token=xxx  ou  chaîne brute)
@@ -1442,6 +1476,10 @@ async function submitQrCode(raw){
     if(t) qrToken=t.trim();
   }catch(_){}
   if(!qrToken){ flash('Format QR Code invalide'); return; }
+
+  // Clé d'idempotence : générée une seule fois par tentative utilisateur.
+  // Un retry réseau (même click) doit renvoyer la MÊME clé pour éviter le doublon.
+  const idempotencyKey = (opts && opts.idempotencyKey) || newIdempotencyKey();
 
   flash('Localisation en cours…');
 
@@ -1472,9 +1510,11 @@ async function submitQrCode(raw){
         'Authorization':`Bearer ${session.access_token}`,
         'Content-Type':'application/json',
         'apikey':SUPABASE_ANON,
+        'Idempotency-Key': idempotencyKey,
       },
       body:JSON.stringify({
         qr_token:qrToken,
+        idempotency_key: idempotencyKey,
         gps_lat:gps.lat,
         gps_lng:gps.lng,
         gps_accuracy:gps.accuracy,
@@ -1486,7 +1526,7 @@ async function submitQrCode(raw){
 
     flash(result.message + (result.terminal_name?` — ${result.terminal_name}`:''));
     if(result.anomalies?.length) flash(`⚠️ Anomalie détectée : ${result.anomalies.join(', ')}`);
-    auditLog(result.action+'_qr',{token:qrToken, terminal_id:result.terminal_id, distance:result.distance_meters});
+    auditLog(result.action+'_qr',{token:qrToken, terminal_id:result.terminal_id, distance:result.distance_meters, idempotency_key:idempotencyKey});
     await loadClockings();
   }catch(e){ flash('Erreur pointage : '+e.message); }
 }

@@ -11643,49 +11643,73 @@ async function _cfgPointage(hotel, isAdmin){
   async function loadTerminals(){
     const box=$('terminalsList'); if(!box) return;
     const {data,error}=await BE.sb.from('pointage_terminals')
-      .select('id,name,location,token,is_active,created_at,deactivated_at')
+      .select('id,name,location,token,is_active,archived_at,created_at,deactivated_at')
       .eq('hotel_id',hotelId)
+      .order('archived_at',{ascending:true,nullsFirst:true})
       .order('is_active',{ascending:false})
       .order('created_at',{ascending:false});
     if(error){ box.innerHTML=`<div style="color:var(--red);padding:12px;font-size:13px">${esc(error.message)}</div>`; return; }
     const rows=data||[];
+    // Précharger l'info "a déjà servi" pour arbitrer entre Supprimer et Archiver
+    const ids=rows.filter(r=>!r.archived_at).map(r=>r.id);
+    const usedMap=new Map();
+    if(ids.length){
+      const {data:cks}=await BE.sb.from('staff_clockings').select('terminal_id').in('terminal_id',ids);
+      (cks||[]).forEach(c=>usedMap.set(c.terminal_id, true));
+    }
     if(!rows.length){
       box.innerHTML=`<div style="padding:22px;text-align:center;color:var(--muted);font-size:13px;border:1px dashed var(--line);border-radius:12px">
         Aucun terminal de pointage.${isAdmin?' Créez-en un pour permettre à vos équipes de pointer.':''}</div>`;
       return;
     }
-    box.innerHTML=rows.map(t=>`
-      <div class="terminal-card" data-id="${t.id}" style="border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px;background:${t.is_active?'var(--white)':'#fafafa'};opacity:${t.is_active?'1':'.7'}">
+    box.innerHTML=rows.map(t=>{
+      const isArchived = !!t.archived_at;
+      const wasUsed = usedMap.get(t.id) === true;
+      const statusBadge = isArchived
+        ? '<span style="font-size:10.5px;background:#fee2e2;color:#991b1b;padding:2px 7px;border-radius:6px;font-weight:700">ARCHIVÉ</span>'
+        : (t.is_active
+          ? '<span style="font-size:10.5px;background:#dcfce7;color:#166534;padding:2px 7px;border-radius:6px;font-weight:700">ACTIF</span>'
+          : '<span style="font-size:10.5px;background:#f1f5f9;color:#64748b;padding:2px 7px;border-radius:6px;font-weight:700">DÉSACTIVÉ</span>');
+      let actions='';
+      if(isAdmin){
+        actions = `
+          <button class="btn g" data-act="print" data-tid="${t.id}" style="font-size:11.5px;padding:5px 10px"><i class="fa-solid fa-print"></i> Imprimer</button>
+          <button class="btn g" data-act="download" data-tid="${t.id}" style="font-size:11.5px;padding:5px 10px"><i class="fa-solid fa-download"></i> Télécharger</button>`;
+        if(!isArchived && t.is_active){
+          actions += `
+            <button class="btn g" data-act="regen"   data-tid="${t.id}" style="font-size:11.5px;padding:5px 10px"><i class="fa-solid fa-rotate"></i> Régénérer</button>
+            <button class="btn g" data-act="rename"  data-tid="${t.id}" style="font-size:11.5px;padding:5px 10px"><i class="fa-solid fa-pen"></i> Renommer</button>
+            <button class="btn g" data-act="disable" data-tid="${t.id}" style="font-size:11.5px;padding:5px 10px;color:var(--red)"><i class="fa-solid fa-power-off"></i> Désactiver</button>
+            <button class="btn g" data-act="archive" data-tid="${t.id}" style="font-size:11.5px;padding:5px 10px;color:var(--red)"><i class="fa-solid fa-box-archive"></i> Archiver</button>`;
+        } else if(!isArchived && !t.is_active){
+          actions += `
+            <button class="btn g" data-act="enable"  data-tid="${t.id}" style="font-size:11.5px;padding:5px 10px;color:var(--green)"><i class="fa-solid fa-toggle-on"></i> Réactiver</button>
+            <button class="btn g" data-act="archive" data-tid="${t.id}" style="font-size:11.5px;padding:5px 10px;color:var(--red)"><i class="fa-solid fa-box-archive"></i> Archiver</button>`;
+          if(!wasUsed){
+            actions += `
+            <button class="btn g" data-act="delete"  data-tid="${t.id}" style="font-size:11.5px;padding:5px 10px;color:var(--red)"><i class="fa-solid fa-trash"></i> Supprimer</button>`;
+          }
+        }
+      }
+      return `
+      <div class="terminal-card" data-id="${t.id}" style="border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px;background:${isArchived?'#fafafa':(t.is_active?'var(--white)':'#fafafa')};opacity:${isArchived?'.6':(t.is_active?'1':'.75')}">
         <div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">
           <div style="flex:1;min-width:180px">
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-              <div style="font-weight:700;font-size:14.5px">${esc(t.name)}</div>
-              ${t.is_active
-                ? '<span style="font-size:10.5px;background:#dcfce7;color:#166534;padding:2px 7px;border-radius:6px;font-weight:700">ACTIF</span>'
-                : '<span style="font-size:10.5px;background:#f1f5f9;color:#64748b;padding:2px 7px;border-radius:6px;font-weight:700">DÉSACTIVÉ</span>'}
+              <div style="font-weight:700;font-size:14.5px">${esc(t.name)}</div>${statusBadge}
+              ${wasUsed && !isArchived ? '<span style="font-size:10.5px;background:#eef2ff;color:#4338ca;padding:2px 7px;border-radius:6px;font-weight:600" title="Ce terminal a déjà enregistré des pointages">utilisé</span>':''}
             </div>
             ${t.location?`<div style="font-size:12px;color:var(--muted);margin-top:2px">${esc(t.location)}</div>`:''}
-            <div style="font-size:11px;color:var(--muted);margin-top:6px">Créé le ${new Date(t.created_at).toLocaleDateString('fr-FR')}${t.deactivated_at?` · désactivé le ${new Date(t.deactivated_at).toLocaleDateString('fr-FR')}`:''}</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:6px">Créé le ${new Date(t.created_at).toLocaleDateString('fr-FR')}${isArchived?` · archivé le ${new Date(t.archived_at).toLocaleDateString('fr-FR')}`:(t.deactivated_at?` · désactivé le ${new Date(t.deactivated_at).toLocaleDateString('fr-FR')}`:'')}</div>
             <div style="font-size:11px;color:var(--muted);margin-top:4px;word-break:break-all">Code : <code style="background:#f1f5f9;padding:1px 5px;border-radius:4px">${esc(t.token)}</code></div>
-            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:12px">
-              ${isAdmin?`
-                <button class="btn g" data-act="print" data-tid="${t.id}" style="font-size:11.5px;padding:5px 10px"><i class="fa-solid fa-print"></i> Imprimer</button>
-                <button class="btn g" data-act="download" data-tid="${t.id}" style="font-size:11.5px;padding:5px 10px"><i class="fa-solid fa-download"></i> Télécharger</button>
-                ${t.is_active
-                  ? `<button class="btn g" data-act="regen" data-tid="${t.id}" style="font-size:11.5px;padding:5px 10px"><i class="fa-solid fa-rotate"></i> Régénérer</button>
-                     <button class="btn g" data-act="rename" data-tid="${t.id}" style="font-size:11.5px;padding:5px 10px"><i class="fa-solid fa-pen"></i> Renommer</button>
-                     <button class="btn g" data-act="disable" data-tid="${t.id}" style="font-size:11.5px;padding:5px 10px;color:var(--red)"><i class="fa-solid fa-power-off"></i> Désactiver</button>`
-                  : `<button class="btn g" data-act="enable" data-tid="${t.id}" style="font-size:11.5px;padding:5px 10px;color:var(--green)"><i class="fa-solid fa-toggle-on"></i> Réactiver</button>
-                     <button class="btn g" data-act="delete" data-tid="${t.id}" style="font-size:11.5px;padding:5px 10px;color:var(--red)"><i class="fa-solid fa-trash"></i> Supprimer</button>`}
-              `:''}
-            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:12px">${actions}</div>
           </div>
           <div>
             <div id="qr-${t.id}" style="padding:10px;background:#fff;border:1px solid var(--line);border-radius:10px"></div>
           </div>
         </div>
-      </div>
-    `).join('');
+      </div>`;
+    }).join('');
 
     // Peindre les QR en parallèle
     await Promise.all(rows.map(t=>renderTerminalQr(document.getElementById('qr-'+t.id), t.token, 140)));
@@ -11734,44 +11758,44 @@ async function _cfgPointage(hotel, isAdmin){
       }
       if(act==='rename'){
         const name=prompt('Nouveau nom du terminal :', t.name);
-        if(!name || !name.trim() || name.trim()===t.name) return;
+        if(!name || !name.trim()) return;
         const location=prompt("Emplacement (optionnel) :", t.location||'');
-        const {error}=await BE.sb.from('pointage_terminals')
-          .update({name:name.trim(), location:(location||'').trim()||null})
-          .eq('id',t.id);
+        const {error}=await BE.sb.rpc('rename_pointage_terminal', {
+          p_terminal_id: t.id, p_name: name.trim(), p_location: (location||'').trim()||null,
+        });
         if(error) throw error;
-        flash('Terminal renommé');
-        await loadTerminals();
-        return;
+        flash('Terminal renommé'); await loadTerminals(); return;
       }
       if(act==='regen'){
         if(!confirm(`Régénérer le QR Code de « ${t.name} » ?\nL'ancien QR sera immédiatement invalide et devra être réimprimé.`)) return;
-        const newToken='ftt_'+Array.from(crypto.getRandomValues(new Uint8Array(18))).map(b=>b.toString(16).padStart(2,'0')).join('');
-        const {error}=await BE.sb.from('pointage_terminals').update({token:newToken}).eq('id',t.id);
+        const {error}=await BE.sb.rpc('regenerate_pointage_terminal_token', {p_terminal_id: t.id});
         if(error) throw error;
-        flash('QR Code régénéré');
-        await loadTerminals();
-        return;
+        flash('QR Code régénéré (ancien immédiatement invalide)'); await loadTerminals(); return;
       }
-      if(act==='disable'){
-        if(!confirm(`Désactiver « ${t.name} » ?\nLe QR ne fonctionnera plus jusqu'à sa réactivation.`)) return;
-        const {error}=await BE.sb.from('pointage_terminals')
-          .update({is_active:false, deactivated_at:new Date().toISOString()})
-          .eq('id',t.id);
+      if(act==='disable' || act==='enable'){
+        const p_active = (act==='enable');
+        if(act==='disable' && !confirm(`Désactiver « ${t.name} » ?\nLe QR ne fonctionnera plus jusqu'à sa réactivation.`)) return;
+        const {error}=await BE.sb.rpc('set_pointage_terminal_active', {p_terminal_id: t.id, p_active});
         if(error) throw error;
-        flash('Terminal désactivé'); await loadTerminals(); return;
+        flash(p_active ? 'Terminal réactivé' : 'Terminal désactivé'); await loadTerminals(); return;
       }
-      if(act==='enable'){
-        const {error}=await BE.sb.from('pointage_terminals')
-          .update({is_active:true, deactivated_at:null})
-          .eq('id',t.id);
+      if(act==='archive'){
+        if(!confirm(`Archiver « ${t.name} » ?\nCe terminal a déjà servi : il restera visible dans l'historique mais ne pourra plus être scanné.`)) return;
+        const {error}=await BE.sb.rpc('archive_pointage_terminal', {p_terminal_id: t.id});
         if(error) throw error;
-        flash('Terminal réactivé'); await loadTerminals(); return;
+        flash('Terminal archivé'); await loadTerminals(); return;
       }
       if(act==='delete'){
-        if(!confirm(`Supprimer définitivement « ${t.name} » ?\nLes pointages existants seront conservés mais ne référenceront plus ce terminal.`)) return;
+        // Suppression physique : bloquée en base si des pointages référencent le
+        // terminal. Le trigger renvoie foreign_key_violation → on bascule sur archive.
+        if(!confirm(`Supprimer définitivement « ${t.name} » ? Cette opération n'est possible que si aucun pointage ne l'a jamais utilisé — sinon utilisez Archiver.`)) return;
         const {error}=await BE.sb.from('pointage_terminals').delete().eq('id',t.id);
-        if(error) throw error;
+        if(error){
+          if((error.code||'')==='23503' || /utilisé/i.test(error.message||'')){
+            flash('Terminal déjà utilisé — utilisez Archiver.'); return;
+          }
+          throw error;
+        }
         flash('Terminal supprimé'); await loadTerminals(); return;
       }
     }catch(e){ flash('Erreur : '+(e.message||e)); }
@@ -11781,16 +11805,11 @@ async function _cfgPointage(hotel, isAdmin){
     const name=prompt('Nom du terminal (ex : Réception, Cuisine, Entrée du personnel) :', 'Réception');
     if(!name || !name.trim()) return;
     const location=prompt("Emplacement précis (optionnel) :", '');
-    const {error}=await BE.sb.from('pointage_terminals').insert({
-      hotel_id: hotelId,
-      name: name.trim(),
-      location: (location||'').trim()||null,
-      is_active: true,
-      created_by_email: userEmail,
+    const {error}=await BE.sb.rpc('create_pointage_terminal', {
+      p_hotel_id: hotelId, p_name: name.trim(), p_location: (location||'').trim()||null,
     });
     if(error){ flash('Erreur : '+error.message); return; }
-    flash('Terminal créé');
-    await loadTerminals();
+    flash('Terminal créé'); await loadTerminals();
   }
 
   // ── Anomalies ───────────────────────────────────────────────────────────
