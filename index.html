@@ -950,6 +950,10 @@ async function makeRealBE(){
     },
     async listClockings(h,day){const {data,error}=await sb.from('staff_clockings').select('*').eq('hotel_id',h).eq('day',day).order('clock_in_ts');must(error,"Liste des pointages");return data||[];},
     async listClockingsByRange(h,from,to){const {data,error}=await sb.from('staff_clockings').select('*').eq('hotel_id',h).gte('day',from).lte('day',to).order('day').order('clock_in_ts');must(error,"Pointages période");return data||[];},
+    // Résumé serveur (retard matin, rattrapage soir, solde du jour) — calcul
+    // fait en base (sql/66_pointage_daily_summary.sql) pour rester cohérent
+    // avec les futurs calculs de paie et éviter tout calcul lourd côté client.
+    async pointageRangeSummary(h,from,to){const {data,error}=await sb.rpc('pointage_range_summary',{p_hotel:h,p_from:from,p_to:to});must(error,"Résumé pointage");return data||[];},
     async addClocking(h,payload){const {data,error}=await sb.from('staff_clockings').insert({hotel_id:h,...payload}).select('*').single();must(error,"Ajout pointage");return data;},
     async updateClocking(id,patch){const {data,error}=await sb.from('staff_clockings').update(patch).eq('id',id).select('*').single();must(error,"Mise à jour pointage");return data;},
     async deleteClocking(id){const {error}=await sb.from('staff_clockings').delete().eq('id',id);must(error,"Suppression pointage");},
@@ -1527,6 +1531,50 @@ function makeTestBE(){
     },
     async listClockings(h,day){return clockings.filter(c=>c.hotel_id===h && c.day===day).sort((a,b)=>a.clock_in_ts.localeCompare(b.clock_in_ts));},
     async listClockingsByRange(h,from,to){return clockings.filter(c=>c.hotel_id===h && c.day>=from && c.day<=to).sort((a,b)=>a.day===b.day?a.clock_in_ts.localeCompare(b.clock_in_ts):a.day.localeCompare(b.day));},
+    // Démo (mode test, sans Supabase) : réplique en JS pur la logique de la RPC
+    // SQL pointage_range_summary (sql/66) — simplifiée (pas de repli
+    // department_schedules, hors périmètre du mock de démo).
+    async pointageRangeSummary(h,from,to){
+      const toMinutes=hhmm=>{ if(!hhmm) return null; const [hh,mm]=hhmm.split(':').map(Number); return hh*60+mm; };
+      const tsToLocalMinutes=ts=>{ if(!ts) return null; const d=new Date(ts); return d.getHours()*60+d.getMinutes(); };
+      const normalize=mins=>{ if(mins==null) return null; if(mins>720) return mins-1440; if(mins<-720) return mins+1440; return mins; };
+      const plansByKey=new Map();
+      planning.forEach(p=>{ if(p.hotel_id===h) plansByKey.set(p.employee_id+'|'+p.day,p); });
+      const clocksByKey=new Map();
+      clockings.forEach(c=>{
+        if(c.hotel_id!==h || c.day<from || c.day>to) return;
+        const k=c.employee_id+'|'+c.day;
+        if(!clocksByKey.has(k)) clocksByKey.set(k,[]);
+        clocksByKey.get(k).push(c);
+      });
+      const scopeKeys=new Set();
+      planning.forEach(p=>{
+        if(p.hotel_id===h && p.day>=from && p.day<=to && (p.status==='P'||p.status==='PE')) scopeKeys.add(p.employee_id+'|'+p.day);
+      });
+      clocksByKey.forEach((_,k)=>scopeKeys.add(k));
+      const out=[];
+      scopeKeys.forEach(k=>{
+        const sep=k.indexOf('|'); const eid=k.slice(0,sep), day=k.slice(sep+1);
+        const emp=emps.find(e=>e.id===eid); if(!emp) return;
+        const plan=plansByKey.get(k);
+        const cks=(clocksByKey.get(k)||[]).slice().sort((a,b)=>a.clock_in_ts.localeCompare(b.clock_in_ts));
+        const realInTs=cks[0]?.clock_in_ts||null;
+        const isOpen=cks.some(c=>!c.clock_out_ts);
+        const realOutTs=isOpen?null:(cks.length?cks[cks.length-1].clock_out_ts:null);
+        const plannedIn=plan?.shift_start||null, plannedOut=plan?.shift_end||null;
+        const arrivalDelta=(plannedIn!=null && realInTs)?normalize(tsToLocalMinutes(realInTs)-toMinutes(plannedIn)):null;
+        const departureDelta=(plannedOut!=null && realOutTs)?normalize(tsToLocalMinutes(realOutTs)-toMinutes(plannedOut)):null;
+        out.push({
+          employee_id:eid, first_name:emp.first_name, last_name:emp.last_name, role:emp.role, department:emp.department,
+          day, planning_status:plan?.status||null, is_extra:emp.hotel_id!==h,
+          planned_in:plannedIn, planned_out:plannedOut, real_in:realInTs, real_out:realOutTs, is_open:isOpen,
+          retard_matin_min: arrivalDelta==null?null:Math.max(0,arrivalDelta),
+          rattrapage_soir_min: departureDelta==null?null:Math.max(0,departureDelta),
+          solde_jour_min: (arrivalDelta==null||departureDelta==null)?null:(arrivalDelta-departureDelta),
+        });
+      });
+      return out;
+    },
     async addClocking(h,p){const c={id:'c'+Date.now()+Math.random().toString(36).slice(2,6),hotel_id:h,...p,created_at:new Date().toISOString(),updated_at:new Date().toISOString()};clockings.push(c);return c;},
     async updateClocking(id,patch){const c=clockings.find(x=>x.id===id);if(!c)throw new Error('not found');Object.assign(c,patch,{updated_at:new Date().toISOString()});return c;},
     async deleteClocking(id){const i=clockings.findIndex(x=>x.id===id);if(i>=0)clockings.splice(i,1);},
@@ -12280,11 +12328,43 @@ function _cfgSecurity(hotel){
 /* ===================== VUE POINTAGE ===================== */
 let pDay = new Date().toISOString().slice(0,10);   // jour sélectionné dans Pointage
 let pSearchQ = '';
+let pServiceFilter = '';   // '' = Tous les services
+let pStatusFilter = '';    // '' = Tous | 'pointe' | 'non_pointe'
 
 function isoToday(){ return new Date().toISOString().slice(0,10); }
 function timeOnly(ts){ if(!ts)return ''; const d=new Date(ts); return d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}); }
 function minutesBetween(a,b){ return Math.max(0, Math.round((new Date(b)-new Date(a))/60000)); }
 function hoursLabel(min){ if(min<=0) return '—'; const h=Math.floor(min/60), m=min%60; return m?`${h}h${String(m).padStart(2,'0')}`:`${h}h`; }
+
+// Heure "prévue" renvoyée par pointage_range_summary : type SQL `time`,
+// sérialisé "HH:MM:SS" par PostgREST. Tronque à "HH:MM" pour l'affichage.
+function plannedHHMM(t){ return t ? String(t).slice(0,5) : null; }
+
+// Formatage signé "+18 min" / "-12 min" / "0 min" pour retard/rattrapage/solde.
+function signedMinLabel(min){
+  if(min==null) return '—';
+  if(min===0) return '0 min';
+  return (min>0?'+':'') + min + ' min';
+}
+
+// Couleur du solde du jour : négatif = avance (vert), positif = retard
+// (rouge), nul = neutre, absent = gris. Cf. § 6 du cahier des charges.
+function soldeColorStyle(min){
+  if(min==null) return 'color:var(--muted)';
+  if(min<0)  return 'color:var(--green);font-weight:700';
+  if(min>0)  return 'color:var(--red);font-weight:700';
+  return 'color:var(--ink2);font-weight:600';
+}
+function retardColorStyle(min){
+  if(min==null) return 'color:var(--muted)';
+  if(min>0) return 'color:var(--red);font-weight:700';
+  return 'color:var(--ink2)';
+}
+function rattrapageColorStyle(min){
+  if(min==null) return 'color:var(--muted)';
+  if(min>0) return 'color:var(--green);font-weight:700';
+  return 'color:var(--ink2)';
+}
 function buildTs(day,timeStr){
   // day = 'YYYY-MM-DD', timeStr = 'HH:MM' -> 'YYYY-MM-DDTHH:MM:00' interprété en heure locale
   return new Date(`${day}T${timeStr}:00`).toISOString();
@@ -12302,8 +12382,10 @@ async function renderPointage(){
         <button class="btn p" id="ptAdd"><i class="fa-solid fa-plus"></i> Pointage</button>
       </div>
     </div>
-    <div id="ptStats" class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))"></div>
+    <div id="ptStats" class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))"></div>
+    <div class="box" id="ptFiltersBox" style="display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:16px"></div>
     <div class="box" style="padding:0"><div id="ptList">Chargement…</div></div>
+    <div id="ptLegend"></div>
   </div>`;
   $('ptDay').onchange = e => { pDay = e.target.value; redrawPointage(); };
   $('ptToday').onclick = () => { pDay = isoToday(); $('ptDay').value = pDay; redrawPointage(); };
@@ -12312,98 +12394,241 @@ async function renderPointage(){
   redrawPointage();
 }
 
+// Détermine, pour un employé et un jour, quel staff_clockings modifier au
+// clic (édition) — le plus récent s'il y a eu plusieurs vacations ce jour.
+// N'introduit aucune nouvelle logique : réutilise openClockingForm tel quel.
+function _ptEditableClocking(byEmp, employeeId){
+  const cks = byEmp.get(employeeId) || [];
+  return cks.length ? cks[cks.length-1] : null;
+}
+
 async function redrawPointage(){
   $('ptList').innerHTML = 'Chargement…';
   try{
-    const [clockings] = await Promise.all([ BE.listClockings(hotelId, pDay) ]);
-    // récupérer le planning prévu pour ce jour (depuis committed s'il s'agit du mois courant, sinon refetch)
-    let planMap = new Map(); // employee_id → {status, duration}
-    const [py,pm,pd] = pDay.split('-').map(Number);
-    if(py===cur.getFullYear() && pm-1===cur.getMonth()){
-      committed.forEach((v,k)=>{ const [eid,day]=k.split('|'); if(day===pDay) planMap.set(eid,v); });
-    }else{
-      try{
-        const rows = await BE.listMonthPlanning(hotelId, py, pm-1);
-        rows.filter(r=>r.day===pDay).forEach(r=>planMap.set(r.employee_id, {status:r.status, duration:Number(r.duration)}));
-      }catch(e){ /* tolérant */ }
+    const [py,pm] = pDay.split('-').map(Number);
+    const monthFrom = iso(py, pm-1, 1);
+    const monthTo   = iso(py, pm-1, dim(py, pm-1));
+
+    // Un seul appel serveur pour tout le mois affiché : sert au tableau du
+    // jour, aux KPI, à l'export PDF et au cumul "Total retard (mois)" — le
+    // frontend ne recalcule aucun retard/rattrapage/solde (sql/66).
+    const [monthRows, dayClockings] = await Promise.all([
+      BE.pointageRangeSummary(hotelId, monthFrom, monthTo),
+      BE.listClockings(hotelId, pDay),   // pointages bruts du jour (édition/suppression, inchangé)
+    ]);
+
+    const todayRows = monthRows.filter(r => r.day === pDay);
+
+    // Cumul mensuel = somme des soldes POSITIFS du mois, par salarié.
+    const monthlyTotal = new Map();
+    monthRows.forEach(r => {
+      monthlyTotal.set(r.employee_id, (monthlyTotal.get(r.employee_id) || 0) + Math.max(0, r.solde_jour_min || 0));
+    });
+
+    // Pointages bruts du jour groupés par employé, pour l'édition au clic.
+    const byEmp = new Map();
+    dayClockings.forEach(c => { if(!byEmp.has(c.employee_id)) byEmp.set(c.employee_id, []); byEmp.get(c.employee_id).push(c); });
+
+    // ── KPI — sur l'ensemble des collaborateurs prévus/pointés du jour,
+    //    indépendamment des filtres Service/Statut/recherche.
+    const nPrevus = todayRows.length;
+    const nPointes = todayRows.filter(r => r.real_in).length;
+    const nNonPointes = nPrevus - nPointes;
+    const retardNet = todayRows.reduce((s,r) => s + (r.solde_jour_min || 0), 0);
+    $('ptStats').innerHTML = `
+      <div class="kpi v"><div class="ic"><i class="fa-solid fa-users"></i></div><div class="n">${nPrevus}</div><div class="l">Prévus aujourd'hui</div></div>
+      <div class="kpi g"><div class="ic"><i class="fa-solid fa-user-check"></i></div><div class="n">${nPointes}</div><div class="l">Pointés</div></div>
+      <div class="kpi a"><div class="ic"><i class="fa-solid fa-user-clock"></i></div><div class="n">${nNonPointes}</div><div class="l">Non pointés</div></div>
+      <div class="kpi b"><div class="ic"><i class="fa-solid fa-coins"></i></div><div class="n">${signedMinLabel(retardNet)}</div><div class="l">Retard net total (après rattrapage)</div></div>`;
+
+    // ── Filtres Service / Statut — options dérivées des données du jour,
+    //    appliqués instantanément (aucun aller-retour serveur).
+    const services = Array.from(new Set(todayRows.map(r => r.department).filter(Boolean))).sort((a,b)=>a.localeCompare(b));
+    $('ptFiltersBox').innerHTML = `
+      <div class="fld" style="margin:0;min-width:200px">
+        <label>Service</label>
+        <select id="ptFilterService">
+          <option value="">Tous les services</option>
+          ${services.map(s=>`<option value="${s}" ${pServiceFilter===s?'selected':''}>${s}</option>`).join('')}
+        </select>
+      </div>
+      <div class="fld" style="margin:0;min-width:170px">
+        <label>Statut</label>
+        <select id="ptFilterStatus">
+          <option value="" ${pStatusFilter===''?'selected':''}>Tous</option>
+          <option value="pointe" ${pStatusFilter==='pointe'?'selected':''}>Pointés</option>
+          <option value="non_pointe" ${pStatusFilter==='non_pointe'?'selected':''}>Non pointés</option>
+        </select>
+      </div>
+      <button class="btn g" id="ptExportPdf" style="margin-left:auto"><i class="fa-regular fa-file-pdf"></i> Exporter la feuille de pointage (PDF)</button>`;
+    $('ptFilterService').onchange = e => { pServiceFilter = e.target.value; redrawPointage(); };
+    $('ptFilterStatus').onchange  = e => { pStatusFilter  = e.target.value; redrawPointage(); };
+    $('ptExportPdf').onclick = () => exportPointagePdf(todayRows, monthlyTotal);
+
+    if(!todayRows.length){
+      $('ptList').innerHTML = '<div style="padding:24px;text-align:center;color:var(--muted)">Aucun collaborateur prévu ce jour.</div>';
+      $('ptLegend').innerHTML = '';
+      return;
     }
 
-    // construire la liste : tous les actifs (ou search match) + ceux qui ont pointé
+    // ── Application des filtres (recherche, service, statut) ────────────
     const q = pSearchQ;
-    const employees = staff.filter(s => s.active && (!q || `${s.first_name} ${s.last_name} ${s.role||''}`.toLowerCase().includes(q)))
-      .sort((a,b)=>a.last_name.localeCompare(b.last_name));
+    const visibleRows = todayRows.filter(r => {
+      if(q && !`${r.first_name} ${r.last_name} ${r.role||''}`.toLowerCase().includes(q)) return false;
+      if(pServiceFilter && r.department !== pServiceFilter) return false;
+      const pointed = !!r.real_in;
+      if(pStatusFilter === 'pointe' && !pointed) return false;
+      if(pStatusFilter === 'non_pointe' && pointed) return false;
+      return true;
+    }).sort((a,b) => a.last_name.localeCompare(b.last_name) || a.first_name.localeCompare(b.first_name));
 
-    // grouper les pointages par employé
-    const byEmp = new Map();
-    clockings.forEach(c=>{ if(!byEmp.has(c.employee_id)) byEmp.set(c.employee_id, []); byEmp.get(c.employee_id).push(c); });
+    if(!visibleRows.length){
+      $('ptList').innerHTML = '<div style="padding:24px;text-align:center;color:var(--muted)">Aucun résultat pour ces filtres.</div>';
+    }else{
+      $('ptList').innerHTML = `<div style="overflow-x:auto"><table class="tbl" style="border:0;border-radius:14px;min-width:1300px">
+        <thead>
+          <tr>
+            <th rowspan="2">Collaborateur</th>
+            <th rowspan="2">Service</th>
+            <th rowspan="2">Statut</th>
+            <th colspan="2" style="text-align:center">Arrivée</th>
+            <th colspan="2" style="text-align:center">Départ</th>
+            <th rowspan="2" style="text-align:right">Retard matin<br><span style="font-weight:400;font-size:10.5px">(min)</span></th>
+            <th rowspan="2" style="text-align:right">Rattrapage soir<br><span style="font-weight:400;font-size:10.5px">(min)</span></th>
+            <th rowspan="2" style="text-align:right">Solde du jour<br><span style="font-weight:400;font-size:10.5px">(min)</span></th>
+            <th rowspan="2" style="text-align:right">Total retard<br><span style="font-weight:400;font-size:10.5px">(mois)</span></th>
+            <th rowspan="2" style="text-align:right">Pointage manuel</th>
+          </tr>
+          <tr>
+            <th style="text-align:center;font-size:11px;color:var(--muted)">Prévue</th>
+            <th style="text-align:center;font-size:11px;color:var(--muted)">Réelle</th>
+            <th style="text-align:center;font-size:11px;color:var(--muted)">Prévue</th>
+            <th style="text-align:center;font-size:11px;color:var(--muted)">Réelle</th>
+          </tr>
+        </thead>
+        <tbody>
+        ${visibleRows.map(r => {
+          const editable = _ptEditableClocking(byEmp, r.employee_id);
+          const pointed = !!r.real_in;
+          const statusBadge = pointed
+            ? `<span class="tag" style="background:var(--green-bg);color:var(--green);font-weight:700">Pointé</span>`
+            : `<span class="tag" style="background:#fef3c7;color:#92400e;font-weight:700">Non pointé</span>`;
+          const extraBadge = r.is_extra ? `<span class="tag" style="background:var(--violet-bg);color:var(--violet-d);font-weight:700;margin-left:5px;font-size:10px">Extra</span>` : '';
+          const editAttr = editable ? `data-edit-cid="${editable.id}" style="cursor:pointer;text-align:center"` : `style="text-align:center"`;
+          return `<tr>
+            <td><b>${r.first_name} ${r.last_name}</b>${extraBadge}<div style="font-size:11.5px;color:var(--muted);font-weight:500">${r.role||'—'}</div></td>
+            <td>${r.department || '—'}</td>
+            <td>${statusBadge}</td>
+            <td style="text-align:center;color:var(--muted)">${plannedHHMM(r.planned_in) || '—'}</td>
+            <td ${editAttr}>${r.real_in ? timeOnly(r.real_in) : '—'}</td>
+            <td style="text-align:center;color:var(--muted)">${plannedHHMM(r.planned_out) || '—'}</td>
+            <td ${editAttr}>${r.is_open ? '<i style="color:#92400e">en cours</i>' : (r.real_out ? timeOnly(r.real_out) : '—')}</td>
+            <td style="text-align:right;${retardColorStyle(r.retard_matin_min)}">${r.retard_matin_min!=null ? r.retard_matin_min+' min' : '—'}</td>
+            <td style="text-align:right;${rattrapageColorStyle(r.rattrapage_soir_min)}">${r.rattrapage_soir_min!=null ? r.rattrapage_soir_min+' min' : '—'}</td>
+            <td style="text-align:right;${soldeColorStyle(r.solde_jour_min)}">${signedMinLabel(r.solde_jour_min)}</td>
+            <td style="text-align:right;${(monthlyTotal.get(r.employee_id)||0)>0?'color:var(--red);font-weight:700':'color:var(--muted)'}">${signedMinLabel(monthlyTotal.get(r.employee_id)||0)}</td>
+            <td style="text-align:right"><button class="btn p" data-add-for="${r.employee_id}" style="padding:5px 10px;font-size:11.5px"><i class="fa-solid fa-plus"></i></button></td>
+          </tr>`;
+        }).join('')}
+        </tbody></table></div>`;
+    }
 
-    // KPI du jour
-    let nPresent=0, nAbsent=0, nNoClock=0, totalMin=0, openSessions=0;
-    employees.forEach(s=>{
-      const plan = planMap.get(s.id);
-      const cks  = byEmp.get(s.id) || [];
-      if(cks.length){
-        nPresent++;
-        cks.forEach(c=>{
-          if(c.clock_out_ts){ totalMin += minutesBetween(c.clock_in_ts, c.clock_out_ts) - (c.break_minutes||0); }
-          else openSessions++;
-        });
-      } else if(plan && CMAP[plan.status]?.cat==='paid'){ nAbsent++; }
-        else if(plan && CMAP[plan.status]?.cat==='abs'){ nAbsent++; }
-        else if(plan && plan.status==='P'){ nNoClock++; }
-    });
-
-    $('ptStats').innerHTML = `
-      <div class="kpi v"><div class="ic"><i class="fa-solid fa-user-check"></i></div><div class="n">${nPresent}</div><div class="l">Pointés ce jour</div></div>
-      <div class="kpi a"><div class="ic"><i class="fa-solid fa-user-clock"></i></div><div class="n">${nNoClock}</div><div class="l">Prévus mais non pointés</div></div>
-      <div class="kpi b"><div class="ic"><i class="fa-solid fa-stopwatch"></i></div><div class="n">${openSessions}</div><div class="l">Sessions en cours</div></div>
-      <div class="kpi g"><div class="ic"><i class="fa-regular fa-clock"></i></div><div class="n">${hoursLabel(totalMin)}</div><div class="l">Heures totales du jour</div></div>`;
-
-    if(!employees.length){ $('ptList').innerHTML='<div style="padding:24px;text-align:center;color:var(--muted)">Aucun collaborateur actif.</div>'; return; }
-
-    $('ptList').innerHTML = `<table class="tbl" style="border:0;border-radius:14px">
-      <thead><tr><th>Collaborateur</th><th>Planifié</th><th>Pointages</th><th style="text-align:right">Heures réelles</th><th></th></tr></thead>
-      <tbody>
-      ${employees.map(s=>{
-        const plan = planMap.get(s.id);
-        const cks  = byEmp.get(s.id) || [];
-        let realMin = 0;
-        cks.forEach(c=>{ if(c.clock_out_ts) realMin += minutesBetween(c.clock_in_ts, c.clock_out_ts) - (c.break_minutes||0); });
-        const planStatus = plan ? (CMAP[plan.status]?.lab || plan.status) : 'Repos';
-        const planBg = plan ? CMAP[plan.status]?.bg : '#f4f4f7';
-        const planFg = plan ? CMAP[plan.status]?.fg : '#999';
-        const planExpected = plan && plan.status==='P' ? (plan.duration===0.5 ? '½ jour' : 'Journée') : '';
-        const sessionsHtml = cks.length
-          ? cks.map(c=>{
-              const dur = c.clock_out_ts ? minutesBetween(c.clock_in_ts,c.clock_out_ts)-(c.break_minutes||0) : 0;
-              const open = !c.clock_out_ts;
-              return `<span class="ck" data-cid="${c.id}" style="display:inline-flex;align-items:center;gap:6px;background:${open?'#fef3c7':'#f4f2fd'};color:${open?'#92400e':'var(--violet-d)'};padding:4px 10px;border-radius:8px;font-size:12px;font-weight:600;margin:2px;cursor:pointer">
-                ${timeOnly(c.clock_in_ts)} → ${c.clock_out_ts ? timeOnly(c.clock_out_ts) : '<i>en cours</i>'}
-                ${c.break_minutes ? `<span style="font-weight:500;opacity:.75">pause ${c.break_minutes}min</span>`:''}
-                ${dur ? `<span style="font-weight:700;opacity:.7">· ${hoursLabel(dur)}</span>`:''}
-              </span>`;
-            }).join('')
-          : '<span style="color:var(--muted);font-size:12px;font-style:italic">— Aucun pointage —</span>';
-        return `<tr>
-          <td><b>${s.first_name} ${s.last_name}</b><div style="font-size:11.5px;color:var(--muted);font-weight:500">${s.role||'—'}</div></td>
-          <td><span class="tag" style="background:${planBg};color:${planFg};font-weight:700">${planStatus}</span> ${planExpected?`<span style="font-size:11px;color:var(--muted);margin-left:4px">${planExpected}</span>`:''}</td>
-          <td>${sessionsHtml}</td>
-          <td style="text-align:right"><b style="font-size:14px;color:${realMin>0?'var(--green)':'var(--muted)'}">${realMin>0?hoursLabel(realMin):'—'}</b></td>
-          <td style="text-align:right"><button class="btn p" data-add-for="${s.id}" style="padding:5px 10px;font-size:11.5px"><i class="fa-solid fa-plus"></i></button></td>
-        </tr>`;
-      }).join('')}
-      </tbody></table>`;
-
-    // Click sur un pointage → éditer
-    $('ptList').querySelectorAll('.ck').forEach(el=>el.onclick=()=>{
-      const c = clockings.find(x=>x.id===el.dataset.cid);
+    // Clic sur une heure réelle → éditer le pointage correspondant (inchangé).
+    $('ptList').querySelectorAll('[data-edit-cid]').forEach(el=>el.onclick=()=>{
+      const c = dayClockings.find(x=>x.id===el.dataset.editCid);
       if(c) openClockingForm(c);
     });
-    // Bouton + sur chaque ligne → ajouter pointage pour ce collaborateur
+    // Bouton + en dernière colonne → pointage manuel pour ce collaborateur (inchangé).
     $('ptList').querySelectorAll('[data-add-for]').forEach(b=>b.onclick=()=>{
       openClockingForm(null, b.dataset.addFor);
     });
-  }catch(e){ $('ptList').innerHTML=`<div style="padding:24px;color:var(--red)">Erreur : ${e.message||e}</div>`; }
+
+    $('ptLegend').innerHTML = `<div class="box" style="margin-top:16px;font-size:12.5px;color:var(--ink2);line-height:1.7">
+      <b style="display:block;margin-bottom:6px;color:var(--ink)">Comprendre le solde du jour</b>
+      <div>• Un retard du matin peut être compensé si le salarié termine plus tard.</div>
+      <div>• Si le salarié quitte plus tôt, ce temps non travaillé s'ajoute au retard du matin.</div>
+      <div>• Un solde négatif signifie que le salarié a effectué davantage de temps que prévu.</div>
+      <div style="margin-top:8px;display:flex;gap:20px;flex-wrap:wrap;align-items:center">
+        <span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--green);margin-right:5px"></span>Solde négatif = avance</span>
+        <span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#d8dbe3;margin-right:5px"></span>Solde nul = à l'heure</span>
+        <span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--red);margin-right:5px"></span>Solde positif = retard</span>
+      </div>
+    </div>`;
+  }catch(e){ $('ptList').innerHTML=`<div style="padding:24px;color:var(--red)">Erreur : ${e.message||e}</div>`; $('ptLegend').innerHTML=''; }
+}
+
+/* ── Export PDF de la feuille de pointage (Paramètres identiques à
+   exportPDF() du Planning : jsPDF + autoTable, chargés à la demande). ─── */
+async function exportPointagePdf(rows, monthlyTotal){
+  const btn = $('ptExportPdf');
+  try{
+    if(btn){ btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Export…'; }
+    if(!(window.jspdf && window.jspdf.jsPDF)){
+      await loadScript('https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js');
+    }
+    const { jsPDF } = window.jspdf;
+    if(!jsPDF.API.autoTable){
+      await loadScript('https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js');
+    }
+    const hex2rgb = h => { const v = h.replace('#',''); return [parseInt(v.substr(0,2),16), parseInt(v.substr(2,2),16), parseInt(v.substr(4,2),16)]; };
+    const GREEN='#16a34a', RED='#ef4444', MUTED='#9aa0ad', INK='#1e2330', AMBER='#92400e';
+
+    const hName = hotels.find(h=>h.id===hotelId)?.name || '';
+    const dayLabel = new Date(pDay+'T00:00:00').toLocaleDateString('fr-FR',{weekday:'long',day:'2-digit',month:'long',year:'numeric'});
+
+    const doc = new jsPDF({ orientation:'landscape', unit:'mm', format:'a4' });
+    doc.setFontSize(11); doc.setFont(undefined,'bold');
+    doc.text(`Feuille de pointage — ${hName}`, 14, 12);
+    doc.setFontSize(8); doc.setFont(undefined,'normal');
+    doc.text(dayLabel, 14, 17);
+
+    const sorted = rows.slice().sort((a,b)=>a.last_name.localeCompare(b.last_name) || a.first_name.localeCompare(b.first_name));
+    const body = sorted.map(r => [
+      `${r.first_name} ${r.last_name}${r.is_extra?' (Extra)':''}`,
+      r.department || '—',
+      r.real_in ? 'Pointé' : 'Non pointé',
+      plannedHHMM(r.planned_in) || '—',
+      r.real_in ? timeOnly(r.real_in) : '—',
+      plannedHHMM(r.planned_out) || '—',
+      r.is_open ? 'en cours' : (r.real_out ? timeOnly(r.real_out) : '—'),
+      r.retard_matin_min != null ? String(r.retard_matin_min) : '—',
+      r.rattrapage_soir_min != null ? String(r.rattrapage_soir_min) : '—',
+      signedMinLabel(r.solde_jour_min),
+      signedMinLabel(monthlyTotal.get(r.employee_id) || 0),
+    ]);
+
+    doc.autoTable({
+      startY: 22,
+      head: [['Collaborateur','Service','Statut','Arr. prévue','Arr. réelle','Dép. prévue','Dép. réelle','Retard matin (min)','Rattrapage soir (min)','Solde du jour (min)','Total retard (mois)']],
+      body,
+      styles:{ fontSize:7, cellPadding:1.4, lineWidth:0.1, lineColor:[236,238,243], halign:'center', valign:'middle' },
+      headStyles:{ fillColor:hex2rgb('#f6f7f9'), textColor:hex2rgb(INK), fontStyle:'bold', fontSize:6.5, lineColor:[236,238,243] },
+      columnStyles:{ 0:{halign:'left',fontStyle:'bold'}, 1:{halign:'left'} },
+      didParseCell(data){
+        if(data.section !== 'body') return;
+        const r = sorted[data.row.index]; if(!r) return;
+        if(data.column.index === 2) data.cell.styles.textColor = r.real_in ? hex2rgb(GREEN) : hex2rgb(AMBER);
+        if(data.column.index === 7) data.cell.styles.textColor = (r.retard_matin_min > 0) ? hex2rgb(RED) : hex2rgb(MUTED);
+        if(data.column.index === 8) data.cell.styles.textColor = (r.rattrapage_soir_min > 0) ? hex2rgb(GREEN) : hex2rgb(MUTED);
+        if(data.column.index === 9){
+          const v = r.solde_jour_min;
+          data.cell.styles.textColor = v==null ? hex2rgb(MUTED) : v<0 ? hex2rgb(GREEN) : v>0 ? hex2rgb(RED) : hex2rgb(INK);
+        }
+        if(data.column.index === 10){
+          const total = monthlyTotal.get(r.employee_id) || 0;
+          data.cell.styles.textColor = total > 0 ? hex2rgb(RED) : hex2rgb(MUTED);
+        }
+      },
+      didDrawPage(data){
+        doc.setFontSize(7); doc.setTextColor(150);
+        doc.text(`Page ${doc.internal.getNumberOfPages()}`, doc.internal.pageSize.getWidth()-20, doc.internal.pageSize.getHeight()-6);
+      },
+    });
+
+    doc.save(`pointage_${hName.replace(/[^a-z0-9]+/gi,'_')}_${pDay}.pdf`);
+    flash('PDF exporté');
+  }catch(e){ flash('Erreur export PDF : '+(e.message||e)); console.error(e); }
+  finally{ if(btn){ btn.disabled=false; btn.innerHTML='<i class="fa-regular fa-file-pdf"></i> Exporter la feuille de pointage (PDF)'; } }
 }
 
 function openClockingForm(c, presetEmpId){
