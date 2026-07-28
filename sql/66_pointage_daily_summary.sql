@@ -73,6 +73,7 @@ CREATE OR REPLACE FUNCTION public.pl_pointage_time_delta_minutes(p_planned time,
 RETURNS int
 LANGUAGE sql
 IMMUTABLE
+SET search_path = public
 AS $$
   SELECT CASE WHEN p_planned IS NULL OR p_real IS NULL THEN NULL ELSE
     ROUND(EXTRACT(EPOCH FROM (
