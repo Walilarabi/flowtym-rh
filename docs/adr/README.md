@@ -14,6 +14,7 @@ développeur / PO / QA / CTO comprenne les choix sans l'historique des échanges
 | [ADR-007](ADR-007-rollback-by-feature-flag.md) | Rollback d'abord par feature flag | Accepté |
 | [ADR-008](ADR-008-concurrency-tests-mandatory.md) | Tests de concurrence obligatoires | Accepté |
 | [ADR-009](ADR-009-super-admin-portal-architecture.md) | Architecture et modèle de sécurité du portail Super Admin | Accepté |
+| [ADR-010](ADR-010-phase2a-rights-resolution-architecture.md) | Résolution des droits applicatifs et cycle de vie des abonnements (Phase 2A) | Accepté |
 
 Format : Contexte · Problème · Décision · Alternatives · Avantages · Inconvénients · Impacts futurs.
 (ADR-009 couvre 14 décisions liées — voir le document pour son propre sommaire.)
