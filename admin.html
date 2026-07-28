@@ -761,17 +761,11 @@ function openHotelDrawer(hotel, groupsCache){
     $('dSave').disabled=true;
     try{
       if(isEdit){
-        // admin_update_hotel ne touche pas group_id (délégué aux RPC dédiées attach/detach,
-        // appelées à part ci-dessous si la sélection a changé) — chaque action reste auditée séparément.
-        const {group_id:newGroupId, ...editable}=payload;
-        const {error}=await sb.rpc('admin_update_hotel',{p_hotel:hotel.id,p:editable});
+        // Un seul appel atomique (admin_update_hotel_full) : les champs de l'hôtel et le
+        // rattachement de groupe sont modifiés dans la même transaction SQL — soit les deux
+        // réussissent, soit aucun n'est appliqué. Évite tout état partiel visible côté UI.
+        const {error}=await sb.rpc('admin_update_hotel_full',{p_hotel:hotel.id,p:payload});
         if(error) throw error;
-        if(newGroupId !== (hotel.group_id||'')){
-          const {error:gErr} = newGroupId
-            ? await sb.rpc('admin_attach_hotel_to_group',{p_hotel:hotel.id,p_group:newGroupId})
-            : await sb.rpc('admin_detach_hotel_from_group',{p_hotel:hotel.id});
-          if(gErr) throw gErr;
-        }
       } else {
         const {error}=await sb.rpc('admin_create_hotel',{p:payload});
         if(error) throw error;
