@@ -112,6 +112,99 @@ helper interne doit être **structurellement** inappelable de l'extérieur, pas 
 par convention. Toute nouvelle fonction préfixée `_` doit être auditée avant merge avec
 la question : *si un client l'appelle directement en RPC, que se passe-t-il ?*
 
+## 5bis. Doctrine ACL et garde interne — synthèse en quatre catégories
+
+Cette section consolide et complète §3-§5 et §8 : chaque fonction du portail Super
+Admin appartient à exactement une des quatre catégories suivantes, chacune avec ses
+propres exigences. Principe cible, valable pour les quatre catégories :
+
+> **défense en profondeur = ACL minimales + garde interne + validation serveur + audit**
+
+Aucune fonction ne doit compter sur une seule de ces quatre couches — c'est la
+combinaison qui protège, pas une couche isolée (l'incident `_platform_log` était un
+défaut de la couche ACL, non compensé faute de garde interne à l'époque).
+
+### Catégorie 1 — RPC frontend `admin_*`
+
+Appelées directement par `admin.html` via `sb.rpc(...)`.
+
+- `GRANT EXECUTE` **explicite** au seul rôle client nécessaire (`authenticated` — jamais
+  `anon`, jamais `service_role` sans raison documentée).
+- Garde `is_platform_admin()` **obligatoire**, première instruction du corps (§3, §4a).
+- **Validation de tous les paramètres** avant toute écriture : existence des entités
+  référencées (`HOTEL_INTROUVABLE`, `GROUPE_INTROUVABLE`, `UTILISATEUR_INTROUVABLE`),
+  contraintes métier (ex. nom non vide) — jamais une écriture directe d'un paramètre non
+  vérifié. C'est une exigence de cette catégorie, pas une option laissée à
+  l'implémentation.
+- Journalisation atomique dans la même transaction (§7, §10).
+
+Exemples conformes : `admin_create_hotel`, `admin_update_hotel_full`,
+`admin_set_user_status`.
+
+### Catégorie 2 — Helpers internes
+
+Jamais appelés directement par un client, uniquement via `PERFORM`/appel de fonction
+depuis une autre fonction `SECURITY DEFINER` (préfixe `_` par convention).
+
+- **Aucun droit `EXECUTE` pour `PUBLIC`, `anon` ou `authenticated`** — ni `service_role`
+  (§5). `REVOKE ALL` **explicite**, même quand le `GRANT` par défaut de PostgreSQL
+  semblait ne poser problème à personne : la fermeture est structurelle, pas une
+  question de convention respectée par le code appelant.
+- Garde interne **supplémentaire lorsque le contexte le permet** : `_platform_log` a la
+  garde `is_platform_admin()` car tous ses appelants légitimes sont déjà des RPC
+  Super Admin gardées. `_platform_log_system` n'a **pas** cette garde car son contexte
+  d'appel (triggers déclenchés par un self-service non-admin, §8) ne le permet pas —
+  elle compense uniquement par la fermeture ACL. La règle n'est donc pas "toujours
+  ajouter une garde interne" mais "ajouter une garde interne chaque fois que le contexte
+  d'appel légitime le permet, et documenter explicitement pourquoi si ce n'est pas le
+  cas" (§9).
+- Jamais de logique d'autorisation *supposée* portée par l'appelant — un helper doit
+  rester sûr même appelé dans un contexte inattendu.
+
+Exemples : `_platform_log` (garde interne présente), `_platform_log_system` (garde
+interne absente, compensée par le contexte documenté), `_generate_hotel_code`
+(non sensible, voir catégorie 4).
+
+### Catégorie 3 — Fonctions utilisées par des triggers
+
+Fonctions trigger (`RETURNS trigger`) ou fonctions appelées depuis un trigger.
+
+- **Non exécutables directement par les rôles clients** — même exigence de fermeture ACL
+  que la catégorie 2 quand la fonction est une fonction trigger `SECURITY DEFINER`
+  autonome (PostgreSQL n'expose pas nativement les fonctions trigger en RPC PostgREST,
+  mais la fermeture explicite reste la règle par cohérence et défense en profondeur).
+- **Validation stricte du contexte d'exécution** : ne jamais supposer que l'acteur à
+  l'origine de l'événement déclencheur est un Super Admin, un utilisateur d'un type
+  donné, ou même authentifié de façon prévisible — `grant_superadmin_on_new_hotel`
+  s'exécute aussi bien pour une création d'hôtel Super Admin (`admin_create_hotel`) que
+  pour une création self-service par un directeur (`org_create_hotel`, §8). Le trigger
+  ne doit jamais échouer ni se comporter incorrectement dans l'un ou l'autre cas.
+- **Données d'acteur et de contexte résolues côté serveur**, jamais dérivées d'une
+  hypothèse sur l'appelant : `grant_superadmin_on_new_hotel` résout le Super Admin
+  cible par requête (`platform_admins`), pas par un paramètre ; sa journalisation
+  (`_platform_log_system`) résout l'acteur réel via `public.users`/`auth.uid()` (§9).
+
+Exemple : `grant_superadmin_on_new_hotel`.
+
+### Catégorie 4 — Fonctions de lecture non sensibles
+
+Fonctions sans effet de bord, ne bypassant pas RLS de façon significative (typiquement
+`SECURITY INVOKER`, pas `SECURITY DEFINER`) et ne renvoyant aucune donnée dont la
+divulgation constituerait un risque.
+
+- **Droits explicitement documentés**, même quand la fonction semble anodine — ne pas
+  laisser le silence de la documentation faire office de politique.
+- **Aucun privilège implicite laissé à `PUBLIC`** sans décision consciente : le fait
+  qu'une fonction soit "non sensible" aujourd'hui doit être une conclusion écrite
+  (pourquoi elle est sans risque), pas une absence d'analyse.
+
+Exemple : `_generate_hotel_code(text)` — `SECURITY INVOKER` (pas `DEFINER`), lit
+uniquement `hotels.hotel_code` pour en dériver un code candidat, aucun effet de bord ;
+toute collision reste de toute façon bloquée par la contrainte unique
+`uq_hotels_hotel_code` à l'insertion réelle. Documenté comme non sensible dans le
+rapport d'audit Phase 1 — reste techniquement exécutable par `PUBLIC` par défaut, ce qui
+est un choix assumé (pas un oubli) précisément parce que cette analyse a été faite.
+
 ## 6. Politique RLS
 
 **Décision** : RLS reste une **seconde ligne de défense**, jamais la seule. Elle sert
