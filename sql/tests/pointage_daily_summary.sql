@@ -49,7 +49,11 @@ INSERT INTO public.employees(id, hotel_id, first_name, last_name, active) VALUES
   ('d1e00009-0000-0000-0000-000000000009','d1000000-0000-0000-0000-000000000001','Cas9','TraverseMinuit',true),
   ('d1e00010-0000-0000-0000-000000000010','d1000000-0000-0000-0000-000000000001','Cas10','PlanifieNonPointe',true),
   -- Extra : hôtel principal = Nice, vient pointer/travailler à Paris.
-  ('d2e00011-0000-0000-0000-000000000011','d2000000-0000-0000-0000-000000000002','Cas11','ExtraDepuisNice',true);
+  ('d2e00011-0000-0000-0000-000000000011','d2000000-0000-0000-0000-000000000002','Cas11','ExtraDepuisNice',true),
+  -- Mise à disposition : hôtel principal = Nice, planifiée 'MAD' à Paris,
+  -- n'a PAS ENCORE pointé — cas réel Karima OULSAADA (Grand Hôtel du Havre
+  -- → Folkestone opera, 2026-07-28), absente du menu Pointage avant ce fix.
+  ('d2e00012-0000-0000-0000-000000000012','d2000000-0000-0000-0000-000000000002','Cas12','MiseADisposition',true);
 
 INSERT INTO public.department_schedules(id, hotel_id, name, default_start_time, default_end_time) VALUES
   ('d5c00001-0000-0000-0000-000000000001','d1000000-0000-0000-0000-000000000001','Réception 09h-17h','09:00','17:00');
@@ -124,6 +128,10 @@ INSERT INTO public.staff_planning(hotel_id, employee_id, day, status, shift_star
 INSERT INTO public.staff_clockings(hotel_id, employee_id, day, clock_in_ts, clock_out_ts, source) VALUES
   ('d1000000-0000-0000-0000-000000000001','d2e00011-0000-0000-0000-000000000011','2026-01-12',
    '2026-01-12 10:00:00+01','2026-01-12 18:00:00+01','manual');
+
+-- ── Cas 12 : mise à disposition (MAD) planifiée à Paris, pas encore pointée ─
+INSERT INTO public.staff_planning(hotel_id, employee_id, day, status) VALUES
+  ('d1000000-0000-0000-0000-000000000001','d2e00012-0000-0000-0000-000000000012','2026-01-12','MAD');
 
 -- ── Test 1 : cas 1-5 — formules retard / rattrapage / solde ─────────────────
 DO $$
@@ -254,6 +262,24 @@ BEGIN
   ) WHERE employee_id='d1e00001-0000-0000-0000-000000000001';
   ASSERT r.is_extra = false, '7c. un salarié local doit avoir is_extra=false';
   RAISE NOTICE 'OK 7 · visibilité inter-hôtel (is_extra) — corrige la régression du menu Pointage RH';
+END $$;
+
+-- ── Test 7bis : statut MAD (mise à disposition) visible avant tout pointage ─
+-- Régression réelle (2026-07-28) : Karima OULSAADA, Grand Hôtel du Havre,
+-- mise à disposition de Folkestone opera — absente du menu Pointage tant
+-- que 'MAD' n'était pas dans le filtre de statut planifié (sql/67).
+DO $$
+DECLARE r record;
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000d0a01', true);
+  SELECT * INTO r FROM public.pointage_range_summary(
+    'd1000000-0000-0000-0000-000000000001','2026-01-12','2026-01-12'
+  ) WHERE employee_id='d2e00012-0000-0000-0000-000000000012';
+  ASSERT r.employee_id IS NOT NULL, '7d. un salarié planifié MAD doit apparaître, même sans avoir encore pointé';
+  ASSERT r.planning_status = 'MAD', '7e. le statut planifié remonté doit être MAD';
+  ASSERT r.is_extra = true,         '7f. MAD à un hôtel différent du principal → is_extra=true';
+  ASSERT r.real_in IS NULL,         '7g. pas encore pointée → real_in NULL (Non pointé côté UI)';
+  RAISE NOTICE 'OK 7bis · statut MAD inclus dans le périmètre planifié (régression Karima OULSAADA corrigée)';
 END $$;
 
 -- ── Test 8 : isolation multi-hôtel stricte ──────────────────────────────────

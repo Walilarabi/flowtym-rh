@@ -41,12 +41,16 @@ Q -d $DB -f "$ROOT/sql/65_pointage_record_clocking_column_alignment.sql"
 echo "== 3d. Migration 66 — résumé quotidien (retard/rattrapage/solde) =="
 Q -d $DB -f "$ROOT/sql/66_pointage_daily_summary.sql"
 
-echo "== 4. Idempotence — réappliquer 62 → 66 (doit passer sans erreur) =="
+echo "== 3e. Migration 67 — inclusion du statut MAD (mise à disposition) =="
+Q -d $DB -f "$ROOT/sql/67_pointage_include_mad_status.sql"
+
+echo "== 4. Idempotence — réappliquer 62 → 67 (doit passer sans erreur) =="
 Q -d $DB -f "$ROOT/sql/62_pointage_terminals.sql"
 Q -d $DB -f "$ROOT/sql/63_pointage_terminals_hardening.sql"
 Q -d $DB -f "$ROOT/sql/64_pointage_remediation_log.sql"
 Q -d $DB -f "$ROOT/sql/65_pointage_record_clocking_column_alignment.sql"
 Q -d $DB -f "$ROOT/sql/66_pointage_daily_summary.sql"
+Q -d $DB -f "$ROOT/sql/67_pointage_include_mad_status.sql"
 
 echo "== 5. Suite de tests SQL (assertions + signatures + RLS + grants) =="
 # On désactive temporairement `set -e` pour capturer le code de sortie ET la sortie.
@@ -77,7 +81,7 @@ fi
 grep -E "NOTICE:  OK [0-9]+" /tmp/ptg_daily_tests.log || { echo "AUCUN test SQL n'a émis d'OK — sortie :"; cat /tmp/ptg_daily_tests.log; exit 1; }
 NB_OK_DAILY=$(grep -c "NOTICE:  OK " /tmp/ptg_daily_tests.log)
 echo "   → $NB_OK_DAILY tests SQL OK (pointage_daily_summary.sql)"
-[ "$NB_OK_DAILY" -ge "10" ] || { echo "ECHEC : $NB_OK_DAILY tests OK détectés, attendu >= 10"; cat /tmp/ptg_daily_tests.log; exit 1; }
+[ "$NB_OK_DAILY" -ge "11" ] || { echo "ECHEC : $NB_OK_DAILY tests OK détectés, attendu >= 11"; cat /tmp/ptg_daily_tests.log; exit 1; }
 
 echo "== 6. Fixtures pour la suite de concurrence =="
 Q -d $DB -f "$ROOT/sql/tests/pointage_concurrency.sql"
