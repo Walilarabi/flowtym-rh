@@ -1,5 +1,29 @@
 # Flowtym RH — Changelog
 
+## v1.5.1 — Hotfix : statut MAD absent du menu Pointage RH
+
+### Cause
+Signalé en production le 2026-07-28 : Karima OULSAADA (Grand Hôtel du Havre),
+mise à disposition de Folkestone opera ce jour-là (`staff_planning.status =
+'MAD'` à Folkestone), n'apparaissait pas dans le menu Pointage de Folkestone
+alors qu'elle y travaille réellement. `pointage_range_summary()` (sql/66)
+ne filtrait que `status IN ('P','PE')` — le statut `MAD` (mise à
+disposition), bien que représentant une présence physique attendue, en
+était exclu.
+
+### Correctif
+`sql/67_pointage_include_mad_status.sql` : `CREATE OR REPLACE` de
+`pointage_range_summary()` avec `status IN ('P','PE','MAD')`. `sql/66`
+mis à jour en parallèle pour qu'une reconstruction from-scratch obtienne
+directement la version corrigée.
+
+### Tests
+Nouveau cas 12 dans `sql/tests/pointage_daily_summary.sql` (salarié
+planifié `MAD` à un hôtel différent de son hôtel principal, pas encore
+pointé) : apparaît dans le périmètre, `planning_status='MAD'`,
+`is_extra=true`, `real_in` NULL. **11/11 tests SQL** (pointage_daily_summary),
+**387/387 Jest**, `check-frontend-syntax.mjs` 0 erreur.
+
 ## v1.5.0 — Refonte de la page Pointage RH (retard/rattrapage/solde du jour)
 
 ### Résumé

@@ -95,7 +95,12 @@ COMMENT ON FUNCTION public.pl_pointage_time_delta_minutes(time, time) IS
 --
 -- Salariés inclus pour un jour donné (UNION, un employé peut apparaître par
 -- l'un ou l'autre critère) :
---   (a) planifiés à cet hôtel ce jour (staff_planning.status IN ('P','PE'))
+--   (a) planifiés à cet hôtel ce jour, statut de présence physique :
+--       'P' (présent), 'PE' (présence extra) ou 'MAD' (mise à disposition —
+--       salarié d'un autre hôtel prêté pour la journée, ex. Karima OULSAADA,
+--       Grand Hôtel du Havre → Folkestone opera le 28/07/2026 : sans MAD
+--       dans cette liste elle n'apparaissait jamais dans le menu Pointage
+--       de l'hôtel où elle travaille réellement ce jour-là).
 --   (b) ayant pointé à cet hôtel ce jour (staff_clockings.hotel_id), même
 --       sans plan local — couvre les extras / salariés en renfort inter-
 --       hôtel (cf. module Pointage v2, employee_can_clock_at).
@@ -163,7 +168,7 @@ BEGIN
       FROM public.staff_planning sp
      WHERE sp.hotel_id = p_hotel
        AND sp.day BETWEEN p_from AND p_to
-       AND sp.status IN ('P','PE')
+       AND sp.status IN ('P','PE','MAD')
   ),
   clocked_days AS (
     SELECT DISTINCT sc.employee_id, sc.day
