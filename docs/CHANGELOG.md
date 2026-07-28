@@ -1,5 +1,67 @@
 # Flowtym RH — Changelog
 
+## v1.5.0 — Refonte de la page Pointage RH (retard/rattrapage/solde du jour)
+
+### Résumé
+Refonte complète de la page Pointage RH (`index.html`) pour afficher, par
+salarié et par jour, l'écart entre horaire planifié et horaire réel : retard
+matin, rattrapage soir, solde du jour, cumul mensuel — calculés **côté
+serveur** pour rester cohérents avec les futurs calculs de paie.
+
+### Base de données — `sql/66_pointage_daily_summary.sql`
+- Nouvelle RPC `pointage_range_summary(p_hotel, p_from, p_to)` : un seul
+  appel couvre le tableau du jour, les KPI, l'export PDF et le cumul mensuel.
+  Isolation multi-hôtel stricte (`pl_my_hotels()`), garde-fou de plage
+  (≤ 92 jours).
+- Salariés inclus par jour : planifiés (`staff_planning.status IN ('P','PE')`)
+  **OU** ayant pointé à cet hôtel (couvre les extras/renforts inter-hôtel —
+  corrige au passage le bug où un pointage inter-hôtel restait invisible
+  dans ce menu, cf. diagnostic Folkestone/Mas Provencal du 2026-07-27).
+- Heure planifiée : `staff_planning.shift_start/shift_end` du jour, sinon
+  repli sur l'horaire par défaut du salarié (`department_schedules` via
+  `employees.schedule_id`).
+- Fonction utilitaire `pl_pointage_time_delta_minutes()` : écart en minutes
+  entre heure planifiée et heure réelle, normalisé pour rester correct sur
+  un service traversant minuit (ex. prévu 23:50 / réel 00:10 → +20 min, pas
+  −23h40).
+- Formules : `retard_matin = max(0, delta_arrivée)` ;
+  `rattrapage_soir = max(0, delta_départ)` ;
+  `solde_jour = delta_arrivée − delta_départ` (peut être négatif = avance).
+- Documente en migration versionnée `department_schedules` (table déjà
+  présente en production mais jamais créée par une migration `sql/`).
+- Grants stricts : `authenticated` uniquement, `anon`/`PUBLIC` refusés.
+
+### Frontend — `index.html`, vue Pointage
+- Tableau pleine largeur (plus aucun panneau latéral).
+- Filtres **Service** et **Statut** (Tous/Pointés/Non pointés), instantanés,
+  sans aller-retour serveur.
+- Nouvelles colonnes : Arrivée (prévue/réelle), Départ (prévue/réelle),
+  Retard matin, Rattrapage soir, Solde du jour, Total retard (mois).
+- Export PDF dédié (`Exporter la feuille de pointage (PDF)`, jsPDF +
+  autoTable, même police/style que l'export Planning existant) — uniquement
+  les salariés prévus du jour, mêmes colonnes que le tableau.
+- Bouton de pointage manuel déplacé en dernière colonne (« Pointage
+  manuel ») — logique interne inchangée (`openClockingForm`).
+- Édition d'un pointage existant toujours possible (clic sur l'heure réelle).
+- Légende « Comprendre le solde du jour » sous le tableau.
+- Salariés en renfort inter-hôtel visibles avec un badge « Extra ».
+
+### Tests
+- `sql/tests/pointage_daily_summary.sql` : 10 blocs `DO $$…$$`, dont les 5
+  cas canoniques du cahier des charges (retard rattrapé → solde 0, retard
+  partiel → +10, départ anticipé pur → +20, cumul retard+anticipé → +25,
+  avance → −12), session ouverte (pas de faux 0), absence de plan/horaire
+  (NULL propre, piège `GREATEST(0,NULL)=0` évité), repli horaire par défaut,
+  traversée de minuit, visibilité inter-hôtel (`is_extra`), isolation
+  multi-hôtel, garde-fou de plage, grants.
+- `tests/pointage-daily-view.test.js` : 33 tests — formatage, couleurs
+  (vert/rouge/gris), filtres instantanés, agrégat mensuel, KPI, et contrats
+  sur le fichier source réel garantissant qu'aucune fonctionnalité existante
+  (QR, caméra, terminal, pointage manuel, édition, permissions) n'a régressé.
+- `scripts/ci/run-pointage-tests.sh` : étape 5b ajoutée (≥ 10 tests OK requis).
+- Résultats locaux : **336/336 Jest** (+33), **28/28 SQL** (18+10),
+  **3/3 concurrence**, `check-frontend-syntax.mjs` 0 erreur.
+
 ## v1.4.4 — Pointage v2 : hotfix « Failed to fetch » + retry réseau
 
 ### Cause
