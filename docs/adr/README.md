@@ -13,5 +13,7 @@ développeur / PO / QA / CTO comprenne les choix sans l'historique des échanges
 | [ADR-006](ADR-006-canonical-hours-function.md) | Fonction canonique unique des heures | Accepté |
 | [ADR-007](ADR-007-rollback-by-feature-flag.md) | Rollback d'abord par feature flag | Accepté |
 | [ADR-008](ADR-008-concurrency-tests-mandatory.md) | Tests de concurrence obligatoires | Accepté |
+| [ADR-009](ADR-009-super-admin-portal-architecture.md) | Architecture et modèle de sécurité du portail Super Admin | Accepté |
 
 Format : Contexte · Problème · Décision · Alternatives · Avantages · Inconvénients · Impacts futurs.
+(ADR-009 couvre 14 décisions liées — voir le document pour son propre sommaire.)
