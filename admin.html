@@ -1,0 +1,1014 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flowtym RH — Super Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<style>
+/*
+  Feuille de style dupliquée intentionnellement depuis index.html (variables, sidebar, kpis,
+  tables, drawer, toast, login) plutôt qu'importée : ce fichier doit rester 100% indépendant
+  de l'app hôtel (aucun risque de régression sur index.html, monolithe fragile). À maintenir
+  manuellement en cohérence avec index.html si le design system évolue.
+*/
+:root{
+  --violet:#8B5CF6;--violet-d:#7C3AED;--violet-bg:#ede9fe;
+  --ink:#1e2330;--ink2:#5b6172;--muted:#9aa0ad;--line:#eceef3;--bg:#f6f7f9;--card:#fff;
+  --green:#16a34a;--green-bg:#dcfce7;--red:#ef4444;--red-bg:#fee2e2;
+  --amber:#d97706;--amber-bg:#fef3c7;--blue:#2563eb;--blue-bg:#dbeafe;
+  --shadow:0 2px 8px rgba(0,0,0,.04);--shadow-h:0 12px 32px rgba(124,58,237,.14);--r:16px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--ink);font-size:14px;-webkit-font-smoothing:antialiased}
+button,select,input,textarea{font-family:inherit}
+#root{min-height:100vh;display:flex;flex-direction:column}
+
+/* ---- login ---- */
+.login{height:100vh;display:grid;place-items:center;background:linear-gradient(135deg,#f6f7f9,#ede9fe)}
+.lcard{background:#fff;border-radius:20px;padding:32px;width:380px;box-shadow:0 24px 60px rgba(20,20,40,.08)}
+.lcard .mk{width:46px;height:46px;border-radius:12px;background:linear-gradient(135deg,var(--violet),var(--violet-d));display:grid;place-items:center;color:#fff;font-size:18px;margin-bottom:18px}
+.lcard h1{font-size:20px;font-weight:800;margin-bottom:4px}
+.lcard .sub{color:var(--ink2);font-size:13px;margin-bottom:22px}
+.fld{margin-bottom:13px}.fld label{display:block;font-size:11.5px;font-weight:600;color:var(--ink2);margin-bottom:5px}
+.fld input,.fld select,.fld textarea{width:100%;padding:11px 13px;border:1px solid var(--line);border-radius:10px;font-size:14px;font-family:inherit;color:var(--ink);background:#fff}
+.fld input:focus,.fld select:focus,.fld textarea:focus{outline:none;border-color:var(--violet);box-shadow:0 0 0 3px var(--violet-bg)}
+.fld textarea{resize:vertical;min-height:70px}
+.err{color:var(--red);font-size:12.5px;margin-top:10px;min-height:18px}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+
+/* ---- boutons ---- */
+.btn{border:0;border-radius:10px;padding:8px 13px;font-weight:600;font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:7px;transition:.15s;white-space:nowrap}
+.btn.p{background:var(--violet);color:#fff}.btn.p:hover{background:var(--violet-d)}
+.btn.g{background:#f4f2fd;color:var(--violet-d)}.btn.g:hover{background:var(--violet-bg)}
+.btn.d{background:var(--red-bg);color:var(--red)}.btn.d:hover{background:#fbcaca}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn.sm{padding:5px 10px;font-size:12px;border-radius:8px}
+
+/* ---- structure : topbar + sidebar + contenu ---- */
+.main{flex:1;display:flex;min-height:0}
+.top{background:#fff;border-bottom:1px solid var(--line);flex-shrink:0}
+.top-in{display:flex;align-items:center;gap:14px;padding:12px 22px}
+.logo{display:flex;align-items:center;gap:10px;font-weight:800;font-size:16px}
+.logo .mk{width:32px;height:32px;border-radius:9px;background:linear-gradient(135deg,var(--violet),var(--violet-d));display:grid;place-items:center;color:#fff;font-size:14px}
+.logo small{color:var(--violet-d);font-weight:700;background:var(--violet-bg);padding:2px 7px;border-radius:6px;font-size:10.5px;margin-left:2px}
+.searchbox{flex:1;max-width:420px;position:relative}
+.searchbox i{position:absolute;left:13px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:13px}
+.searchbox input{width:100%;padding:9px 13px 9px 34px;border:1px solid var(--line);border-radius:10px;font-size:13px;background:#fafafe}
+.searchbox input:focus{outline:none;border-color:var(--violet);background:#fff;box-shadow:0 0 0 3px var(--violet-bg)}
+.spacer{flex:1}
+.iconbtn{position:relative;width:36px;height:36px;border-radius:9px;border:0;background:#f4f4f6;color:var(--ink2);cursor:pointer;display:grid;place-items:center;font-size:14px}
+.iconbtn:hover{background:var(--violet-bg);color:var(--violet-d)}
+.popover{display:none;position:absolute;right:0;top:calc(100% + 8px);width:340px;background:#fff;border:1px solid var(--line);border-radius:16px;box-shadow:0 12px 40px rgba(0,0,0,.15);z-index:200;max-height:420px;overflow:auto}
+.popover.on{display:block}
+.popover .ph{padding:12px 16px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px;color:var(--ink2);text-transform:uppercase;letter-spacing:.04em}
+.popitem{padding:11px 16px;border-bottom:1px dashed var(--line);font-size:12.5px}
+.popitem:last-child{border:0}
+.popitem .a{font-weight:600}
+.popitem .t{color:var(--muted);font-size:11px;margin-top:2px}
+.meB{display:flex;align-items:center;gap:9px;border:0;background:transparent;cursor:pointer;padding:4px;border-radius:10px}
+.meB:hover{background:#f4f4f6}
+.av{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;font-weight:700;font-size:12px;color:#fff;flex-shrink:0}
+.meB .nm{text-align:left;font-size:12.5px}
+.meB .nm b{display:block;font-weight:700;color:var(--ink)}
+.meB .nm span{color:var(--muted);font-size:11px}
+
+.sidebar{width:236px;background:#fff;border-right:1px solid var(--line);display:flex;flex-direction:column;flex-shrink:0}
+.sidebar .menu{flex:1;padding:14px 10px;overflow-y:auto}
+.sidebar .menu .grp{font-size:10.5px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:14px 12px 6px}
+.sidebar .menu .grp:first-child{padding-top:4px}
+.sidebar .menu .it{display:flex;align-items:center;gap:11px;padding:10px 12px;border-radius:10px;color:var(--ink2);font-weight:500;cursor:pointer;font-size:13.5px;margin-bottom:2px;border:0;background:transparent;width:100%;text-align:left;font-family:inherit}
+.sidebar .menu .it:hover{background:#f4f2fd;color:var(--violet-d)}
+.sidebar .menu .it.on{background:var(--violet);color:#fff;font-weight:600}
+.sidebar .menu .it .ic{width:20px;text-align:center;font-size:13px;flex-shrink:0}
+.sidebar .menu .it .soon{margin-left:auto;font-size:9px;background:#fef3c7;color:#92400e;padding:2px 6px;border-radius:5px;font-weight:700}
+.sidebar .menu .it.on .soon{background:rgba(255,255,255,.2);color:#fff}
+.content{flex:1;overflow-y:auto;min-width:0}
+.page{padding:22px 26px 60px}
+.phead{display:flex;align-items:center;gap:14px;margin-bottom:18px;flex-wrap:wrap}
+.phead h1{font-size:22px;font-weight:800;letter-spacing:-.01em}
+.phead .sub{color:var(--ink2);font-size:13px}
+.phead .actions{margin-left:auto;display:flex;gap:8px}
+.loading{padding:60px;text-align:center;color:var(--muted)}
+
+/* ---- KPI cards ---- */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-bottom:22px}
+.kpi{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px 20px;box-shadow:var(--shadow);transition:.15s}
+.kpi:hover{box-shadow:var(--shadow-h);transform:translateY(-2px)}
+.kpi .ic{width:42px;height:42px;border-radius:12px;display:grid;place-items:center;font-size:17px;margin-bottom:14px}
+.kpi.v .ic{background:var(--violet-bg);color:var(--violet)}
+.kpi.g .ic{background:var(--green-bg);color:var(--green)}
+.kpi.b .ic{background:var(--blue-bg);color:var(--blue)}
+.kpi.a .ic{background:var(--amber-bg);color:var(--amber)}
+.kpi .n{font-size:28px;font-weight:800;letter-spacing:-.02em}
+.kpi .l{color:var(--ink2);font-size:13px;font-weight:600;margin-top:2px}
+.kpi .sub{color:var(--muted);font-size:11.5px;margin-top:4px}
+
+.cols2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:1100px){.cols2{grid-template-columns:1fr}}
+.box{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px;box-shadow:var(--shadow)}
+.box h3{font-size:14px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+.box h3 i{color:var(--violet)}
+.tlist{font-size:13px}
+.tlist .it{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px dashed var(--line)}
+.tlist .it:last-child{border:0}
+.tlist .it .nm{font-weight:600}.tlist .it .sub{font-size:11.5px;color:var(--muted)}
+.tlist .it .right{margin-left:auto;text-align:right;font-size:11.5px;color:var(--ink2);white-space:nowrap}
+
+.tag{background:#f4f2fd;color:var(--violet-d);padding:3px 9px;border-radius:999px;font-weight:600;font-size:11px;display:inline-block;white-space:nowrap}
+.tag.red{background:var(--red-bg);color:var(--red)}
+.tag.green{background:var(--green-bg);color:var(--green)}
+.tag.amber{background:var(--amber-bg);color:var(--amber)}
+.tag.blue{background:var(--blue-bg);color:var(--blue)}
+.tag.gray{background:#f1f1f5;color:var(--ink2)}
+
+.tbl{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.tbl th,.tbl td{padding:11px 14px;text-align:left;border-bottom:1px solid var(--line);font-size:13px}
+.tbl th{background:#fafafe;font-weight:700;color:var(--ink2);font-size:11px;text-transform:uppercase;letter-spacing:.04em;cursor:pointer;user-select:none}
+.tbl th:hover{color:var(--violet-d)}
+.tbl th i{margin-left:4px;font-size:9px}
+.tbl tr:last-child td{border-bottom:0}
+.tbl tr:hover td{background:#fafaff}
+.tbl button{border:0;background:transparent;cursor:pointer;color:var(--violet);padding:4px 7px;border-radius:6px;font-size:13px}
+.tbl button:hover{background:var(--violet-bg)}
+.tbl .muted{color:var(--muted)}
+.tblwrap{background:#fff;border:1px solid var(--line);border-radius:14px;overflow:auto}
+.tblwrap .tbl{border:0;border-radius:0}
+.filters{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;align-items:center}
+.filters select,.filters input{padding:9px 12px;border:1px solid var(--line);border-radius:10px;font-size:13px;background:#fff}
+.filters select:focus,.filters input:focus{outline:none;border-color:var(--violet)}
+.pager{display:flex;align-items:center;gap:10px;justify-content:flex-end;padding:14px 4px;font-size:12.5px;color:var(--ink2)}
+.pager button{border:1px solid var(--line);background:#fff;border-radius:8px;padding:5px 10px;cursor:pointer}
+.pager button:disabled{opacity:.4;cursor:not-allowed}
+.empty{padding:40px;text-align:center;color:var(--muted)}
+
+/* ---- drawer ---- */
+.drawer{position:fixed;top:0;right:0;height:100%;width:460px;max-width:96vw;background:#fff;z-index:61;transform:translateX(100%);transition:.3s cubic-bezier(.4,0,.2,1);overflow-y:auto;box-shadow:-12px 0 40px rgba(0,0,0,.14)}
+.drawer.on{transform:none}
+.dh{padding:22px 22px 16px;border-bottom:1px solid var(--line);position:relative}
+.dh .close{position:absolute;top:16px;right:16px;width:32px;height:32px;border-radius:9px;border:0;background:#f4f4f6;cursor:pointer;color:var(--ink2)}
+.dh h2{font-size:19px;font-weight:800;padding-right:40px}
+.dh .role{color:var(--ink2);font-size:13px;margin-top:4px}
+.sec{padding:16px 22px;border-bottom:1px solid var(--line)}
+.sec h4{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:11px;font-weight:700}
+.dfoot{padding:16px 22px;display:flex;gap:10px;justify-content:flex-end;position:sticky;bottom:0;background:#fff;border-top:1px solid var(--line)}
+.hchip{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;margin-bottom:6px;font-size:12.5px}
+
+/* ---- modale confirmation ---- */
+.modalbg{position:fixed;inset:0;background:rgba(14,16,28,.48);display:none;z-index:150;align-items:center;justify-content:center;padding:20px}
+.modalbg.on{display:flex}
+.modal{background:#fff;border-radius:18px;width:min(440px,94vw);box-shadow:0 32px 80px rgba(0,0,0,.22);padding:24px}
+.modal h3{font-size:16px;font-weight:800;margin-bottom:8px}
+.modal p{color:var(--ink2);font-size:13.5px;line-height:1.5;margin-bottom:18px}
+.modal .mact{display:flex;gap:10px;justify-content:flex-end}
+
+/* ---- accès refusé ---- */
+.deny{height:100vh;display:grid;place-items:center}
+.deny .card{text-align:center;max-width:380px;padding:20px}
+.deny .ic{width:56px;height:56px;border-radius:16px;background:var(--red-bg);color:var(--red);display:grid;place-items:center;font-size:22px;margin:0 auto 16px}
+.deny h1{font-size:18px;font-weight:800;margin-bottom:8px}
+.deny p{color:var(--ink2);font-size:13.5px;margin-bottom:20px}
+
+/* ---- stub phase 2 ---- */
+.stub{background:#fff;border:1px solid var(--line);border-radius:18px;padding:60px 30px;text-align:center;max-width:520px;margin:40px auto}
+.stub .ic{width:56px;height:56px;border-radius:16px;background:var(--violet-bg);color:var(--violet-d);display:grid;place-items:center;font-size:22px;margin:0 auto 18px}
+.stub h2{font-size:18px;font-weight:800;margin-bottom:8px}
+.stub p{color:var(--ink2);font-size:13.5px;line-height:1.6}
+.stub .note{margin-top:16px;font-size:12px;color:var(--muted);background:#fafafe;border-radius:10px;padding:10px 14px}
+
+.toast{position:fixed;bottom:26px;left:50%;transform:translateX(-50%);background:#15233b;color:#fff;padding:10px 16px;border-radius:10px;font-size:13px;font-weight:600;z-index:300;opacity:0;transition:.25s;pointer-events:none}
+.toast.on{opacity:1}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<aside class="drawer" id="drawer"></aside>
+<div class="modalbg" id="modalbg"><div class="modal" id="modal"></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* =====================================================================
+   Flowtym RH — Super Admin (/admin) — Phase 1
+   Fichier statique indépendant (même approche que portal.html), sans build.
+   Fonctionnel : Tableau de bord, Hôtels, Groupes hôteliers, Utilisateurs, Audit.
+   Le reste du menu (Abonnements, Facturation, Essais, Paiements, Licences,
+   Statistiques, Support, Paramètres) est en préparation Phase 2 : les tables
+   existent déjà côté base mais sans RPC ni donnée réelle — pas d'UI mensongère.
+   ===================================================================== */
+const SUPABASE_URL = "https://hzrzkvdebaadditvbqis.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh6cnprdmRlYmFhZGRpdHZicWlzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxMjEwMTQsImV4cCI6MjA5MjY5NzAxNH0.IDFFWHNNIeBReWRTeVj8RlRpyz5J4XaStFhGVEYEBU8";
+
+function showFatal(err){
+  console.error(err);
+  const r=document.getElementById('root');
+  if(r) r.innerHTML=`<div style="max-width:640px;margin:60px auto;background:#fff;border:1px solid #eceef3;border-radius:16px;padding:28px;font-family:Inter,sans-serif">
+    <h2 style="color:#b23b3b;margin-bottom:8px">Erreur de chargement</h2>
+    <p style="color:#5b6172;margin-bottom:10px">${(err&&err.message)||err}</p></div>`;
+}
+window.addEventListener('error',e=>showFatal(e.error||e.message));
+window.addEventListener('unhandledrejection',e=>showFatal(e.reason));
+
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+let sb=null, me=null, session=null, view='dashboard';
+
+/* =====================================================================
+   Helpers purs (mirror exact de tests/lib/adminHelpers.js — garder synchronisés)
+   ===================================================================== */
+const HOTEL_STATUS_LABEL={draft:'Brouillon',active:'Actif',suspended:'Suspendu',archived:'Archivé'};
+const HOTEL_STATUS_CLASS={draft:'gray',active:'green',suspended:'red',archived:'gray'};
+function hotelStatusBadge(status){
+  return {label:HOTEL_STATUS_LABEL[status]||status||'—', cls:HOTEL_STATUS_CLASS[status]||'gray'};
+}
+const SUB_STATUS_LABEL={trial:'Essai',active:'Actif',suspended:'Suspendu',expired:'Expiré',cancelled:'Résilié'};
+const SUB_STATUS_CLASS={trial:'amber',active:'green',suspended:'red',expired:'gray',cancelled:'gray'};
+function subscriptionStatusBadge(status){
+  return {label:SUB_STATUS_LABEL[status]||status||'—', cls:SUB_STATUS_CLASS[status]||'gray'};
+}
+function trialDaysRemaining(dateStr, nowMs){
+  if(!dateStr) return null;
+  const now = nowMs || Date.now();
+  const end = new Date(dateStr).getTime();
+  if(Number.isNaN(end)) return null;
+  return Math.ceil((end-now)/86400000);
+}
+function fmtMoney(n, cur){
+  const v = Number(n||0);
+  return v.toLocaleString('fr-FR',{minimumFractionDigits:0,maximumFractionDigits:2})+' '+(cur==='EUR'||!cur?'€':cur);
+}
+function fmtNum(n){ return Number(n||0).toLocaleString('fr-FR'); }
+function groupNameOr(name){ return (name&&name.trim())?name:'(sans nom)'; }
+function fmtDate(s){
+  if(!s) return '—';
+  const d=new Date(s);
+  if(Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'});
+}
+function fmtDateTime(s){
+  if(!s) return '—';
+  const d=new Date(s);
+  if(Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'})+' '+d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+}
+function avColor(seed){
+  const colors=['#8B5CF6','#2563eb','#16a34a','#d97706','#dc2626','#0891b2'];
+  let h=0; for(const c of String(seed||'')) h=(h*31+c.charCodeAt(0))>>>0;
+  return colors[h%colors.length];
+}
+function initials(name){
+  const parts=String(name||'?').trim().split(/\s+/).filter(Boolean);
+  if(!parts.length) return '?';
+  return (parts[0][0]+(parts[1]?.[0]||'')).toUpperCase();
+}
+function errorLabel(msg){
+  const map={
+    NOM_VIDE:'Le nom est requis.',
+    CODE_EXISTANT:'Ce code hôtel existe déjà.',
+    HOTEL_INTROUVABLE:'Hôtel introuvable.',
+    GROUPE_INTROUVABLE:'Groupe introuvable.',
+    STATUT_INVALIDE:'Statut invalide.',
+  };
+  const key=String(msg||'').split(' ')[0].replace(/:$/,'');
+  if(map[key]) return map[key];
+  if(String(msg||'').startsWith('GROUPE_NON_VIDE')) return String(msg).replace('GROUPE_NON_VIDE :','').trim();
+  return msg||'Une erreur est survenue.';
+}
+function toCSV(rows, cols){
+  const esc2=v=>{const s=String(v??''); return /[",\n;]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;};
+  const head=cols.map(c=>esc2(c.label)).join(';');
+  const body=rows.map(r=>cols.map(c=>esc2(c.get(r))).join(';')).join('\n');
+  return head+'\n'+body;
+}
+function downloadCSV(filename, rows, cols){
+  const csv='﻿'+toCSV(rows,cols);
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob); a.download=filename;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+function sortRows(rows, key, dir){
+  return [...rows].sort((a,b)=>{
+    const av=a[key], bv=b[key];
+    if(av==null && bv==null) return 0;
+    if(av==null) return 1;
+    if(bv==null) return -1;
+    if(av>bv) return dir==='desc'?-1:1;
+    if(av<bv) return dir==='desc'?1:-1;
+    return 0;
+  });
+}
+
+/* =====================================================================
+   Toast / drawer / confirm
+   ===================================================================== */
+let toastT=null;
+function flash(msg,type){
+  const t=$('toast');
+  t.textContent=msg;
+  t.style.background=type==='e'?'#dc2626':type==='w'?'#d97706':'#15233b';
+  t.classList.add('on');
+  clearTimeout(toastT);
+  toastT=setTimeout(()=>t.classList.remove('on'), type==='e'?3200:1800);
+}
+function openDrawer(html){ $('drawer').innerHTML=html; $('drawer').classList.add('on'); }
+function closeDrawer(){ $('drawer').classList.remove('on'); }
+function confirmAction({title, body, confirmLabel='Confirmer', danger=false, onConfirm}){
+  $('modal').innerHTML=`
+    <h3>${esc(title)}</h3>
+    <p>${body}</p>
+    <div class="mact">
+      <button class="btn g" id="mCancel">Annuler</button>
+      <button class="btn ${danger?'d':'p'}" id="mOk">${esc(confirmLabel)}</button>
+    </div>`;
+  $('modalbg').classList.add('on');
+  $('mCancel').onclick=()=>$('modalbg').classList.remove('on');
+  $('mOk').onclick=async()=>{
+    $('mOk').disabled=true;
+    try{ await onConfirm(); $('modalbg').classList.remove('on'); }
+    catch(e){ flash(errorLabel(e.message),'e'); $('mOk').disabled=false; }
+  };
+}
+$('modalbg').addEventListener('click',e=>{ if(e.target.id==='modalbg') $('modalbg').classList.remove('on'); });
+
+/* =====================================================================
+   Boot / Auth gate
+   ===================================================================== */
+async function boot(){
+  const {createClient}=await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm');
+  sb=createClient(SUPABASE_URL,SUPABASE_ANON_KEY,{auth:{persistSession:true}});
+  await checkAuthAndRender();
+}
+async function checkAuthAndRender(){
+  const {data:sessData}=await sb.auth.getSession();
+  session=sessData?.session||null;
+  if(!session){ renderLogin(); return; }
+  const {data:isAdmin,error}=await sb.rpc('is_platform_admin');
+  if(error){ showFatal(error); return; }
+  if(!isAdmin){ renderAccessDenied(); return; }
+  const {data:meRow}=await sb.from('platform_admins').select('*').eq('auth_id',session.user.id).maybeSingle();
+  me = meRow || {email:session.user.email, role:'super_admin', full_name:null};
+  renderShell();
+}
+
+function renderLogin(err){
+  $('root').innerHTML=`<div class="login"><div class="lcard">
+    <div class="mk"><i class="fa-solid fa-shield-halved"></i></div>
+    <h1>Flowtym RH — Super Admin</h1><div class="sub">Connectez-vous avec votre compte administrateur plateforme.</div>
+    <div class="fld"><label>E-mail</label><input type="email" id="le" autocomplete="email"></div>
+    <div class="fld"><label>Mot de passe</label><input type="password" id="lp" autocomplete="current-password"></div>
+    <button class="btn p" id="lb" style="width:100%;justify-content:center;padding:11px">Se connecter</button>
+    <div style="text-align:center;margin-top:10px">
+      <button id="forgotBtn" style="background:none;border:none;color:var(--violet-d);font-size:12.5px;cursor:pointer;text-decoration:underline;padding:0">Mot de passe oublié ?</button>
+    </div>
+    <div class="err" id="lerr">${esc(err||'')}</div></div></div>`;
+  $('lb').onclick=async()=>{
+    const e=$('le').value.trim(), p=$('lp').value;
+    if(!e||!p){$('lerr').textContent='E-mail et mot de passe requis.';return;}
+    $('lb').disabled=true; $('lerr').textContent='';
+    const {error}=await sb.auth.signInWithPassword({email:e,password:p});
+    $('lb').disabled=false;
+    if(error) $('lerr').textContent=error.message; else checkAuthAndRender();
+  };
+  $('lp').addEventListener('keydown',e=>{if(e.key==='Enter')$('lb').click();});
+  $('forgotBtn').onclick=()=>renderForgotPwd();
+}
+function renderForgotPwd(msg){
+  $('root').innerHTML=`<div class="login"><div class="lcard">
+    <div class="mk"><i class="fa-solid fa-key"></i></div>
+    <h1>Mot de passe oublié</h1>
+    <div class="sub">Saisissez votre adresse email. Vous recevrez un lien pour redéfinir votre mot de passe.</div>
+    ${msg?`<div style="background:#dcfce7;color:#166534;padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:4px">${esc(msg)}</div>`:''}
+    <div class="fld"><label>E-mail</label><input type="email" id="fpe" autocomplete="email"></div>
+    <button class="btn p" id="fpb" style="width:100%;justify-content:center;padding:11px">Envoyer le lien</button>
+    <div style="text-align:center;margin-top:10px">
+      <button id="backLogin" style="background:none;border:none;color:var(--violet-d);font-size:12.5px;cursor:pointer;text-decoration:underline;padding:0">← Retour à la connexion</button>
+    </div>
+    <div class="err" id="fperr"></div></div></div>`;
+  $('fpb').onclick=async()=>{
+    const email=$('fpe').value.trim();
+    if(!email){$('fperr').textContent='E-mail requis.';return;}
+    $('fpb').disabled=true;
+    const {error}=await sb.auth.resetPasswordForEmail(email,{redirectTo:'https://rh.flowtym.com/admin'});
+    $('fpb').disabled=false;
+    if(error) $('fperr').textContent=error.message;
+    else renderForgotPwd('Email envoyé ! Vérifiez votre boîte de réception.');
+  };
+  $('backLogin').onclick=()=>renderLogin();
+}
+function renderAccessDenied(){
+  $('root').innerHTML=`<div class="deny"><div class="card">
+    <div class="ic"><i class="fa-solid fa-ban"></i></div>
+    <h1>Accès refusé</h1>
+    <p>Ce compte n'est pas administrateur plateforme Flowtym. Le portail Super Admin est réservé aux comptes <code>platform_admins</code>.</p>
+    <div style="display:flex;gap:10px;justify-content:center">
+      <a class="btn g" href="/">Retour à l'application</a>
+      <button class="btn d" id="dOut">Se déconnecter</button>
+    </div>
+  </div></div>`;
+  $('dOut').onclick=async()=>{ await sb.auth.signOut(); location.reload(); };
+}
+
+/* =====================================================================
+   Shell (sidebar + header)
+   ===================================================================== */
+const MENU=[
+  ['Pilotage',[
+    ['dashboard','Tableau de bord','fa-solid fa-table-columns',true],
+    ['stats','Statistiques','fa-solid fa-chart-line',false],
+  ]],
+  ['Gestion globale',[
+    ['hotels','Hôtels','fa-solid fa-hotel',true],
+    ['groups','Groupes hôteliers','fa-solid fa-sitemap',true],
+    ['users','Utilisateurs','fa-regular fa-user',true],
+    ['subscriptions','Abonnements','fa-regular fa-calendar-check',false],
+    ['trials','Périodes d\'essai','fa-regular fa-hourglass-half',false],
+    ['licenses','Licences','fa-solid fa-key',false],
+  ]],
+  ['Finance',[
+    ['billing','Facturation','fa-regular fa-file-lines',false],
+    ['payments','Paiements','fa-solid fa-credit-card',false],
+  ]],
+  ['Plateforme',[
+    ['audit','Audit','fa-solid fa-shield-halved',true],
+    ['support','Support','fa-regular fa-life-ring',false],
+    ['settings','Paramètres plateforme','fa-solid fa-gear',false],
+  ]],
+];
+const STUB_INFO={
+  subscriptions:{ic:'fa-regular fa-calendar-check',desc:'5 plans réels sont déjà en base (Flow Starter à Enterprise) ainsi que les abonnements par hôtel. L\'interface de gestion (créer/renouveler/suspendre/résilier) arrive en Phase 2.'},
+  billing:{ic:'fa-regular fa-file-lines',desc:'Les tables de facturation plateforme (platform_invoices, platform_contracts) et la préparation e-invoicing existent déjà côté base, sans RPC ni donnée réelle pour l\'instant.'},
+  trials:{ic:'fa-regular fa-hourglass-half',desc:'Le suivi d\'essai (dates, alertes 30/15/7/3/1 jours) sera construit sur hotel_subscriptions.trial_ends_at en Phase 2.'},
+  payments:{ic:'fa-solid fa-credit-card',desc:'Le moteur de relance (dunning) existe déjà côté base pour la facturation hôtel ; son équivalent plateforme (paiements Flowtym) arrive en Phase 2.'},
+  licenses:{ic:'fa-solid fa-key',desc:'platform_apps, hotel_app_subscriptions et user_app_access existent déjà. Vue de gestion consolidée prévue en Phase 2.'},
+  stats:{ic:'fa-solid fa-chart-line',desc:'MRR/ARR/churn seront calculés sur hotel_subscriptions et platform_invoices une fois la facturation Phase 2 en place.'},
+  support:{ic:'fa-regular fa-life-ring',desc:'La table support_tickets existe déjà (avec triage) et est accessible en lecture aux admins plateforme ; l\'interface dédiée arrive en Phase 2.'},
+  settings:{ic:'fa-solid fa-gear',desc:'platform_settings contient déjà 16 paramètres (devise, essai, relances, objectifs MRR/ARR...). Écran d\'édition prévu en Phase 2.'},
+};
+
+function renderShell(){
+  const displayName = me.full_name || me.email;
+  $('root').innerHTML=`
+    <header class="top"><div class="top-in">
+      <div class="logo"><div class="mk"><i class="fa-solid fa-hotel"></i></div>Flowtym <small>SUPER ADMIN</small></div>
+      <div class="searchbox"><i class="fa-solid fa-magnifying-glass"></i><input id="gsearch" placeholder="Rechercher un hôtel, un utilisateur, un groupe…"></div>
+      <div class="spacer"></div>
+      <button class="btn p" id="quickAddHotel"><i class="fa-solid fa-plus"></i> Ajouter un hôtel</button>
+      <div style="position:relative">
+        <button class="iconbtn" id="bellBtn" title="Activité récente"><i class="fa-solid fa-bell"></i></button>
+        <div class="popover" id="bellPanel"><div class="ph">Activité récente</div><div id="bellBody" class="popitem">Chargement…</div></div>
+      </div>
+      <div style="position:relative">
+        <button class="meB" id="meBtn">
+          <div class="av" style="background:${avColor(me.email)}">${initials(displayName)}</div>
+          <div class="nm"><b>${esc(displayName)}</b><span>${esc(me.role||'super_admin')}</span></div>
+        </button>
+        <div class="popover" id="mePanel" style="width:220px">
+          <div class="popitem" style="font-size:12px;color:var(--muted)">${esc(me.email)}</div>
+          <div class="popitem"><a href="/" style="color:var(--ink);text-decoration:none"><i class="fa-solid fa-arrow-left" style="width:16px"></i> Retour à l'application</a></div>
+          <div class="popitem" id="signOutBtn" style="cursor:pointer;color:var(--red)"><i class="fa-solid fa-arrow-right-from-bracket" style="width:16px"></i> Se déconnecter</div>
+        </div>
+      </div>
+    </div></header>
+    <div class="main">
+      <aside class="sidebar"><nav class="menu" id="nav">
+        ${MENU.map(([grp,items])=>`<div class="grp">${esc(grp)}</div>`+
+          items.map(([k,lab,ic,on])=>`<button class="it ${k===view?'on':''}" data-v="${k}">
+            <i class="ic ${ic}"></i><span>${esc(lab)}</span>${on?'':'<span class="soon">Phase 2</span>'}</button>`).join('')
+        ).join('')}
+      </nav></aside>
+      <section class="content"><div id="view"></div></section>
+    </div>`;
+  $('nav').onclick=e=>{ const b=e.target.closest('.it'); if(!b) return; goView(b.dataset.v); };
+  $('quickAddHotel').onclick=()=>{ goView('hotels'); setTimeout(()=>openHotelDrawer(null),50); };
+  $('signOutBtn').onclick=async()=>{ await sb.auth.signOut(); location.reload(); };
+  $('meBtn').onclick=()=>{ $('mePanel').classList.toggle('on'); $('bellPanel').classList.remove('on'); };
+  $('bellBtn').onclick=async()=>{
+    const wasOn=$('bellPanel').classList.contains('on');
+    $('mePanel').classList.remove('on');
+    $('bellPanel').classList.toggle('on');
+    if(!wasOn) await loadBell();
+  };
+  document.addEventListener('click',e=>{
+    if(!e.target.closest('#meBtn')&&!e.target.closest('#mePanel')) $('mePanel')?.classList.remove('on');
+    if(!e.target.closest('#bellBtn')&&!e.target.closest('#bellPanel')) $('bellPanel')?.classList.remove('on');
+  });
+  let searchT=null;
+  $('gsearch').addEventListener('input',e=>{
+    clearTimeout(searchT);
+    const q=e.target.value;
+    searchT=setTimeout(()=>{ searchQuery=q; renderView(); }, 200);
+  });
+  goView(view);
+}
+async function loadBell(){
+  const {data,error}=await sb.from('platform_logs').select('action,entity,hotel_name,admin_email,created_at').order('created_at',{ascending:false}).limit(6);
+  if(error){ $('bellBody').textContent='Erreur de chargement.'; return; }
+  if(!data||!data.length){ $('bellBody').textContent='Aucune activité récente.'; return; }
+  $('bellBody').innerHTML=data.map(l=>`<div class="popitem"><div class="a">${esc(l.action)}${l.hotel_name?' · '+esc(l.hotel_name):''}</div><div class="t">${esc(l.admin_email||'—')} · ${fmtDateTime(l.created_at)}</div></div>`).join('');
+}
+
+let searchQuery='';
+function goView(v){ view=v; searchQuery=''; document.querySelectorAll('.menu .it').forEach(b=>b.classList.toggle('on', b.dataset.v===v)); renderView(); }
+
+async function renderView(){
+  const el=$('view');
+  el.innerHTML='<div class="loading"><i class="fa-solid fa-circle-notch fa-spin"></i> Chargement…</div>';
+  try{
+    if(view==='dashboard') await renderDashboard(el);
+    else if(view==='hotels') await renderHotels(el);
+    else if(view==='groups') await renderGroups(el);
+    else if(view==='users') await renderUsers(el);
+    else if(view==='audit') await renderAudit(el);
+    else renderStub(el, view);
+  }catch(e){
+    console.error(e);
+    el.innerHTML=`<div class="page"><div class="box" style="color:var(--red)"><i class="fa-solid fa-triangle-exclamation"></i> ${esc(e.message||String(e))}</div></div>`;
+  }
+}
+
+function renderStub(el, key){
+  const info=STUB_INFO[key]||{ic:'fa-solid fa-hourglass-half',desc:''};
+  const label=MENU.flatMap(([,items])=>items).find(([k])=>k===key)?.[1]||key;
+  el.innerHTML=`<div class="page"><div class="stub">
+    <div class="ic"><i class="${info.ic}"></i></div>
+    <h2>${esc(label)}</h2>
+    <p>Module en préparation — Phase 2.</p>
+    ${info.desc?`<div class="note">${esc(info.desc)}</div>`:''}
+  </div></div>`;
+}
+
+/* =====================================================================
+   Tableau de bord
+   ===================================================================== */
+async function renderDashboard(el){
+  const [{data:kpis,error:kErr},{data:activity,error:aErr}]=await Promise.all([
+    sb.rpc('platform_dashboard_kpis'),
+    sb.from('platform_logs').select('*').order('created_at',{ascending:false}).limit(8),
+  ]);
+  if(kErr) throw kErr;
+  const h=kpis.hotels, g=kpis.groups, u=kpis.users, s=kpis.subscriptions;
+  el.innerHTML=`<div class="page">
+    <div class="phead"><div><h1>Tableau de bord</h1><div class="sub">Vue d'ensemble de la plateforme Flowtym RH</div></div></div>
+    <div class="kpis">
+      <div class="kpi v"><div class="ic"><i class="fa-solid fa-hotel"></i></div><div class="n">${fmtNum(h.total)}</div><div class="l">Hôtels totaux</div><div class="sub">${fmtNum(h.active)} actifs · ${fmtNum(h.suspended)} suspendus</div></div>
+      <div class="kpi g"><div class="ic"><i class="fa-solid fa-sitemap"></i></div><div class="n">${fmtNum(g.total)}</div><div class="l">Groupes hôteliers</div></div>
+      <div class="kpi b"><div class="ic"><i class="fa-regular fa-user"></i></div><div class="n">${fmtNum(u.total)}</div><div class="l">Utilisateurs</div><div class="sub">${fmtNum(u.active)} actifs${u.unlinked_auth_accounts?` · ${fmtNum(u.unlinked_auth_accounts)} non liés`:''}</div></div>
+      <div class="kpi a"><div class="ic"><i class="fa-regular fa-hourglass-half"></i></div><div class="n">${fmtNum(h.in_trial)}</div><div class="l">Hôtels en essai</div></div>
+    </div>
+    <div class="kpis">
+      <div class="kpi v"><div class="ic"><i class="fa-regular fa-calendar-check"></i></div><div class="n">${fmtNum(s.active)}</div><div class="l">Abonnements actifs</div></div>
+      <div class="kpi a"><div class="ic"><i class="fa-solid fa-triangle-exclamation"></i></div><div class="n">${fmtNum(s.expiring_30d)}</div><div class="l">Expirant sous 30 jours</div></div>
+      <div class="kpi g"><div class="ic"><i class="fa-solid fa-euro-sign"></i></div><div class="n">${fmtMoney(kpis.mrr_estimate)}</div><div class="l">MRR estimé</div><div class="sub">${fmtMoney(kpis.mrr_estimate*12)} ARR estimé</div></div>
+      <div class="kpi b"><div class="ic"><i class="fa-solid fa-ban"></i></div><div class="n">${fmtNum(s.cancelled)}</div><div class="l">Abonnements résiliés</div></div>
+    </div>
+    <div class="cols2">
+      <div class="box"><h3><i class="fa-solid fa-clock-rotate-left"></i> Activité récente</h3>
+        <div class="tlist">${aErr||!activity?.length?'<div class="empty" style="padding:20px">Aucune activité.</div>':activity.map(l=>`
+          <div class="it"><div><div class="nm">${esc(l.action)}</div><div class="sub">${esc(l.hotel_name||l.entity||'')} · ${esc(l.admin_email||'—')}</div></div><div class="right">${fmtDateTime(l.created_at)}</div></div>
+        `).join('')}</div>
+      </div>
+      <div class="box"><h3><i class="fa-solid fa-hotel"></i> Répartition des hôtels</h3>
+        <div class="tlist">
+          <div class="it"><div class="nm">Actifs</div><div class="right"><span class="tag green">${fmtNum(h.active)}</span></div></div>
+          <div class="it"><div class="nm">En essai</div><div class="right"><span class="tag amber">${fmtNum(h.in_trial)}</span></div></div>
+          <div class="it"><div class="nm">Suspendus</div><div class="right"><span class="tag red">${fmtNum(h.suspended)}</span></div></div>
+          <div class="it"><div class="nm">Brouillon</div><div class="right"><span class="tag gray">${fmtNum(h.draft)}</span></div></div>
+          <div class="it"><div class="nm">Archivés</div><div class="right"><span class="tag gray">${fmtNum(h.archived)}</span></div></div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+/* =====================================================================
+   Hôtels
+   ===================================================================== */
+let hotelsPage=0, hotelsSort={key:'name',dir:'asc'}, hotelsFilterStatus='';
+async function renderHotels(el){
+  const [{data:hotels,error:hErr},{data:groups,error:gErr},{data:subs}]=await Promise.all([
+    sb.from('hotels').select('id,name,city,country,status,group_id,hotel_code,total_rooms,phone,email,siret,tva_number,company,stars,currency,timezone,address,zip,website,created_at'),
+    sb.from('hotel_groups').select('id,name,status'),
+    sb.from('hotel_subscriptions').select('hotel_id,status,trial_ends_at,plan_id'),
+  ]);
+  if(hErr) throw hErr; if(gErr) throw gErr;
+  const groupById=Object.fromEntries((groups||[]).map(g=>[g.id,g]));
+  const subByHotel=Object.fromEntries((subs||[]).map(s=>[s.hotel_id,s]));
+
+  let rows=(hotels||[]).map(h=>({...h, _group:groupById[h.group_id]||null, _sub:subByHotel[h.id]||null}));
+  if(searchQuery.trim()){
+    const q=searchQuery.trim().toLowerCase();
+    rows=rows.filter(h=>[h.name,h.city,h.hotel_code,h.email].filter(Boolean).some(v=>String(v).toLowerCase().includes(q)));
+  }
+  if(hotelsFilterStatus) rows=rows.filter(h=>h.status===hotelsFilterStatus);
+  rows=sortRows(rows,hotelsSort.key,hotelsSort.dir);
+
+  const pageSize=20, pageCount=Math.max(1,Math.ceil(rows.length/pageSize));
+  hotelsPage=Math.min(hotelsPage,pageCount-1);
+  const pageRows=rows.slice(hotelsPage*pageSize,(hotelsPage+1)*pageSize);
+
+  el.innerHTML=`<div class="page">
+    <div class="phead"><div><h1>Hôtels</h1><div class="sub">${fmtNum(rows.length)} hôtel(s)</div></div>
+      <div class="actions">
+        <button class="btn g" id="exportHotels"><i class="fa-solid fa-download"></i> Exporter CSV</button>
+        <button class="btn p" id="addHotel"><i class="fa-solid fa-plus"></i> Nouvel hôtel</button>
+      </div>
+    </div>
+    <div class="filters">
+      <select id="fStatus">
+        <option value="">Tous les statuts</option>
+        ${Object.entries(HOTEL_STATUS_LABEL).map(([k,l])=>`<option value="${k}" ${hotelsFilterStatus===k?'selected':''}>${l}</option>`).join('')}
+      </select>
+    </div>
+    <div class="tblwrap"><table class="tbl">
+      <thead><tr>
+        <th data-k="name">Hôtel</th><th data-k="_group">Groupe</th><th data-k="status">Statut</th><th>Abonnement</th><th data-k="total_rooms">Chambres</th><th>Actions</th>
+      </tr></thead>
+      <tbody>${pageRows.length?pageRows.map(rowHotelHtml).join(''):`<tr><td colspan="6" class="empty">Aucun hôtel${searchQuery?' pour cette recherche':''}.</td></tr>`}</tbody>
+    </table></div>
+    <div class="pager">
+      <span>Page ${hotelsPage+1} / ${pageCount}</span>
+      <button id="hPrev" ${hotelsPage===0?'disabled':''}>‹ Précédent</button>
+      <button id="hNext" ${hotelsPage>=pageCount-1?'disabled':''}>Suivant ›</button>
+    </div>
+  </div>`;
+
+  el.querySelectorAll('th[data-k]').forEach(th=>th.onclick=()=>{
+    const k=th.dataset.k;
+    hotelsSort = hotelsSort.key===k ? {key:k,dir:hotelsSort.dir==='asc'?'desc':'asc'} : {key:k,dir:'asc'};
+    renderHotels(el);
+  });
+  $('fStatus').onchange=e=>{ hotelsFilterStatus=e.target.value; hotelsPage=0; renderHotels(el); };
+  $('hPrev').onclick=()=>{ hotelsPage--; renderHotels(el); };
+  $('hNext').onclick=()=>{ hotelsPage++; renderHotels(el); };
+  $('addHotel').onclick=()=>openHotelDrawer(null,groups);
+  $('exportHotels').onclick=()=>downloadCSV('hotels.csv', rows, [
+    {label:'Nom',get:r=>r.name},{label:'Ville',get:r=>r.city},{label:'Statut',get:r=>hotelStatusBadge(r.status).label},
+    {label:'Groupe',get:r=>r._group?groupNameOr(r._group.name):''},{label:'Chambres',get:r=>r.total_rooms},
+    {label:'Code',get:r=>r.hotel_code},{label:'Email',get:r=>r.email},{label:'Téléphone',get:r=>r.phone},
+  ]);
+  el.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openHotelDrawer(rows.find(r=>r.id===b.dataset.edit),groups));
+  el.querySelectorAll('[data-statussel]').forEach(sel=>sel.onchange=()=>{
+    const id=sel.dataset.statussel, status=sel.value;
+    if(!status) return;
+    const hotel=rows.find(r=>r.id===id);
+    const danger = status==='suspended'||status==='archived';
+    confirmAction({
+      title:`Changer le statut de ${esc(hotel.name)}`,
+      body:`Nouveau statut : <b>${esc(hotelStatusBadge(status).label)}</b>. Cette action est historisée et réversible.`,
+      confirmLabel:'Confirmer', danger,
+      onConfirm: async()=>{
+        const {error}=await sb.rpc('admin_set_hotel_status',{p_hotel:id,p_status:status});
+        if(error) throw error;
+        flash('Statut mis à jour.'); renderHotels(el);
+      }
+    });
+    sel.value='';
+  });
+}
+function rowHotelHtml(h){
+  const sb1=hotelStatusBadge(h.status);
+  let subBadge='';
+  if(h._sub){
+    const s=subscriptionStatusBadge(h._sub.status);
+    let extra='';
+    if(h._sub.status==='trial'){
+      const d=trialDaysRemaining(h._sub.trial_ends_at);
+      if(d!=null) extra = d>=0 ? ` (${d}j)` : ' (expiré)';
+    }
+    subBadge=`<span class="tag ${s.cls}">${esc(s.label)}${extra}</span>`;
+  } else {
+    subBadge='<span class="tag gray">Aucun</span>';
+  }
+  const nextStatuses=Object.keys(HOTEL_STATUS_LABEL).filter(s=>s!==h.status);
+  return `<tr>
+    <td><b>${esc(h.name)}</b><div class="muted" style="font-size:11.5px">${esc(h.city||'')}${h.hotel_code?' · '+esc(h.hotel_code):''}</div></td>
+    <td>${h._group?esc(groupNameOr(h._group.name)):'<span class="muted">—</span>'}</td>
+    <td><span class="tag ${sb1.cls}">${esc(sb1.label)}</span></td>
+    <td>${subBadge}</td>
+    <td>${h.total_rooms??'—'}</td>
+    <td>
+      <button data-edit="${h.id}" title="Modifier"><i class="fa-regular fa-pen-to-square"></i></button>
+      <select data-statussel="${h.id}" style="border:1px solid var(--line);border-radius:8px;font-size:12px;padding:3px 6px">
+        <option value="">Statut…</option>
+        ${nextStatuses.map(s=>`<option value="${s}">${HOTEL_STATUS_LABEL[s]}</option>`).join('')}
+      </select>
+    </td>
+  </tr>`;
+}
+function openHotelDrawer(hotel, groupsCache){
+  const groups = groupsCache || [];
+  const isEdit = !!hotel;
+  openDrawer(`
+    <div class="dh"><button class="close" id="dClose"><i class="fa-solid fa-xmark"></i></button>
+      <h2>${isEdit?'Modifier l\'hôtel':'Nouvel hôtel'}</h2>
+      ${isEdit?`<div class="role">Statut actuel : <span class="tag ${hotelStatusBadge(hotel.status).cls}">${esc(hotelStatusBadge(hotel.status).label)}</span></div>`:''}
+    </div>
+    <div class="sec"><h4>Identité</h4>
+      <div class="fld"><label>Nom *</label><input id="f_name" value="${esc(hotel?.name||'')}"></div>
+      <div class="row2">
+        <div class="fld"><label>Groupe</label><select id="f_group"><option value="">Aucun</option>${groups.map(g=>`<option value="${g.id}" ${hotel?.group_id===g.id?'selected':''}>${esc(groupNameOr(g.name))}</option>`).join('')}</select></div>
+        <div class="fld"><label>Code hôtel</label><input id="f_code" value="${esc(hotel?.hotel_code||'')}" placeholder="Auto si vide" ${isEdit?'disabled title="Le code hôtel ne se modifie pas après création."':''}></div>
+      </div>
+      ${!isEdit?`<div class="fld"><label>Statut initial</label><select id="f_status">${Object.entries(HOTEL_STATUS_LABEL).map(([k,l])=>`<option value="${k}" ${k==='draft'?'selected':''}>${l}</option>`).join('')}</select></div>`:''}
+    </div>
+    <div class="sec"><h4>Coordonnées</h4>
+      <div class="fld"><label>Adresse</label><input id="f_address" value="${esc(hotel?.address||'')}"></div>
+      <div class="row2">
+        <div class="fld"><label>Ville</label><input id="f_city" value="${esc(hotel?.city||'')}"></div>
+        <div class="fld"><label>Code postal</label><input id="f_zip" value="${esc(hotel?.zip||'')}"></div>
+      </div>
+      <div class="row2">
+        <div class="fld"><label>Pays</label><input id="f_country" value="${esc(hotel?.country||'France')}"></div>
+        <div class="fld"><label>Téléphone</label><input id="f_phone" value="${esc(hotel?.phone||'')}"></div>
+      </div>
+      <div class="row2">
+        <div class="fld"><label>Email</label><input id="f_email" type="email" value="${esc(hotel?.email||'')}"></div>
+        <div class="fld"><label>Site web</label><input id="f_website" value="${esc(hotel?.website||'')}"></div>
+      </div>
+    </div>
+    <div class="sec"><h4>Légal & capacité</h4>
+      <div class="row2">
+        <div class="fld"><label>SIRET</label><input id="f_siret" value="${esc(hotel?.siret||'')}"></div>
+        <div class="fld"><label>N° TVA</label><input id="f_tva" value="${esc(hotel?.tva_number||'')}"></div>
+      </div>
+      <div class="fld"><label>Raison sociale</label><input id="f_company" value="${esc(hotel?.company||'')}"></div>
+      <div class="row2">
+        <div class="fld"><label>Chambres</label><input id="f_rooms" type="number" min="0" value="${esc(hotel?.total_rooms??'')}"></div>
+        <div class="fld"><label>Étoiles</label><select id="f_stars"><option value="">—</option>${[1,2,3,4,5].map(n=>`<option value="${n}" ${hotel?.stars===n?'selected':''}>${n}</option>`).join('')}</select></div>
+      </div>
+      <div class="row2">
+        <div class="fld"><label>Devise</label><input id="f_currency" value="${esc(hotel?.currency||'EUR')}"></div>
+        <div class="fld"><label>Fuseau horaire</label><input id="f_timezone" value="${esc(hotel?.timezone||'Europe/Paris')}"></div>
+      </div>
+    </div>
+    <div class="dfoot"><button class="btn g" id="dCancel">Annuler</button><button class="btn p" id="dSave">${isEdit?'Enregistrer':'Créer'}</button></div>
+  `);
+  $('dClose').onclick=closeDrawer; $('dCancel').onclick=closeDrawer;
+  $('dSave').onclick=async()=>{
+    const payload={
+      name:$('f_name').value.trim(), group_id:$('f_group').value||'', hotel_code:$('f_code').value.trim(),
+      address:$('f_address').value, city:$('f_city').value, zip:$('f_zip').value, country:$('f_country').value,
+      phone:$('f_phone').value, email:$('f_email').value, website:$('f_website').value,
+      siret:$('f_siret').value, tva_number:$('f_tva').value, company:$('f_company').value,
+      stars:$('f_stars').value, total_rooms:$('f_rooms').value, currency:$('f_currency').value, timezone:$('f_timezone').value,
+    };
+    if(!isEdit) payload.status=$('f_status').value;
+    if(!payload.name){ flash('Le nom est requis.','e'); return; }
+    $('dSave').disabled=true;
+    try{
+      if(isEdit){
+        // admin_update_hotel ne touche pas group_id (délégué aux RPC dédiées attach/detach,
+        // appelées à part ci-dessous si la sélection a changé) — chaque action reste auditée séparément.
+        const {group_id:newGroupId, ...editable}=payload;
+        const {error}=await sb.rpc('admin_update_hotel',{p_hotel:hotel.id,p:editable});
+        if(error) throw error;
+        if(newGroupId !== (hotel.group_id||'')){
+          const {error:gErr} = newGroupId
+            ? await sb.rpc('admin_attach_hotel_to_group',{p_hotel:hotel.id,p_group:newGroupId})
+            : await sb.rpc('admin_detach_hotel_from_group',{p_hotel:hotel.id});
+          if(gErr) throw gErr;
+        }
+      } else {
+        const {error}=await sb.rpc('admin_create_hotel',{p:payload});
+        if(error) throw error;
+      }
+      flash(isEdit?'Hôtel mis à jour.':'Hôtel créé.'); closeDrawer(); renderView();
+    }catch(e){ flash(errorLabel(e.message),'e'); }
+    finally{ $('dSave').disabled=false; }
+  };
+}
+
+/* =====================================================================
+   Groupes hôteliers
+   ===================================================================== */
+async function renderGroups(el){
+  const [{data:groups,error:gErr},{data:hotels}]=await Promise.all([
+    sb.from('hotel_groups').select('id,name,status,logo_url,created_at').order('created_at',{ascending:false}),
+    sb.from('hotels').select('id,name,group_id'),
+  ]);
+  if(gErr) throw gErr;
+  let rows=(groups||[]).filter(g=>g.status!=='archived').map(g=>({...g,_hotels:(hotels||[]).filter(h=>h.group_id===g.id)}));
+  if(searchQuery.trim()){
+    const q=searchQuery.trim().toLowerCase();
+    rows=rows.filter(g=>(g.name||'').toLowerCase().includes(q));
+  }
+  el.innerHTML=`<div class="page">
+    <div class="phead"><div><h1>Groupes hôteliers</h1><div class="sub">${fmtNum(rows.length)} groupe(s)</div></div>
+      <div class="actions"><button class="btn p" id="addGroup"><i class="fa-solid fa-plus"></i> Nouveau groupe</button></div>
+    </div>
+    <div class="tblwrap"><table class="tbl">
+      <thead><tr><th>Groupe</th><th>Hôtels rattachés</th><th>Statut</th><th>Créé le</th><th>Actions</th></tr></thead>
+      <tbody>${rows.length?rows.map(g=>`
+        <tr>
+          <td><b>${esc(groupNameOr(g.name))}</b></td>
+          <td>${g._hotels.length ? g._hotels.map(h=>esc(h.name)).join(', ') : '<span class="muted">Aucun</span>'}</td>
+          <td><span class="tag ${g.status==='active'?'green':'gray'}">${g.status==='active'?'Actif':esc(g.status)}</span></td>
+          <td>${fmtDate(g.created_at)}</td>
+          <td>
+            <button data-edit-group="${g.id}" title="Modifier"><i class="fa-regular fa-pen-to-square"></i></button>
+            <button data-del-group="${g.id}" title="Archiver" ${g._hotels.length?'disabled':''}><i class="fa-regular fa-trash-can"></i></button>
+          </td>
+        </tr>`).join(''):'<tr><td colspan="5" class="empty">Aucun groupe.</td></tr>'}</tbody>
+    </table></div>
+  </div>`;
+  $('addGroup').onclick=()=>openGroupDrawer(null, hotels||[]);
+  el.querySelectorAll('[data-edit-group]').forEach(b=>b.onclick=()=>openGroupDrawer(rows.find(g=>g.id===b.dataset.editGroup), hotels||[]));
+  el.querySelectorAll('[data-del-group]').forEach(b=>{
+    if(b.disabled) return;
+    b.onclick=()=>{
+      const g=rows.find(x=>x.id===b.dataset.delGroup);
+      confirmAction({
+        title:`Archiver le groupe ${groupNameOr(g.name)}`,
+        body:'Ce groupe sera archivé (suppression logique). Cette action est réversible via la base de données.',
+        confirmLabel:'Archiver', danger:true,
+        onConfirm: async()=>{
+          const {error}=await sb.rpc('admin_delete_group',{p_group:g.id});
+          if(error) throw error;
+          flash('Groupe archivé.'); renderGroups(el);
+        }
+      });
+    };
+  });
+}
+function openGroupDrawer(group, allHotels){
+  const isEdit=!!group;
+  const attached = isEdit ? allHotels.filter(h=>h.group_id===group.id) : [];
+  const unattached = allHotels.filter(h=>!h.group_id || (isEdit && h.group_id!==group.id));
+  openDrawer(`
+    <div class="dh"><button class="close" id="dClose"><i class="fa-solid fa-xmark"></i></button>
+      <h2>${isEdit?'Modifier le groupe':'Nouveau groupe'}</h2></div>
+    <div class="sec"><h4>Identité</h4>
+      <div class="fld"><label>Nom *</label><input id="g_name" value="${esc(group?.name||'')}"></div>
+      <div class="fld"><label>Logo (URL)</label><input id="g_logo" value="${esc(group?.logo_url||'')}"></div>
+    </div>
+    <div class="dfoot"><button class="btn g" id="dCancel">Annuler</button><button class="btn p" id="dSave">${isEdit?'Enregistrer':'Créer'}</button></div>
+    ${isEdit?`
+    <div class="sec"><h4>Hôtels rattachés (${attached.length})</h4>
+      ${attached.length?attached.map(h=>`<div class="hchip"><span>${esc(h.name)}</span><button class="btn sm d" data-detach="${h.id}">Détacher</button></div>`).join(''):'<div class="muted" style="font-size:12.5px">Aucun hôtel rattaché.</div>'}
+    </div>
+    <div class="sec"><h4>Rattacher un hôtel</h4>
+      <div class="fld" style="display:flex;gap:8px">
+        <select id="g_attach" style="flex:1">${unattached.length?unattached.map(h=>`<option value="${h.id}">${esc(h.name)}</option>`).join(''):'<option value="">Aucun hôtel disponible</option>'}</select>
+        <button class="btn g" id="g_attachBtn" ${!unattached.length?'disabled':''}>Rattacher</button>
+      </div>
+    </div>`:''}
+  `);
+  $('dClose').onclick=closeDrawer; $('dCancel').onclick=closeDrawer;
+  $('dSave').onclick=async()=>{
+    const name=$('g_name').value.trim();
+    if(!name){ flash('Le nom est requis.','e'); return; }
+    const payload={name, logo_url:$('g_logo').value};
+    $('dSave').disabled=true;
+    try{
+      const {error}= isEdit
+        ? await sb.rpc('admin_update_group',{p_group:group.id,p:payload})
+        : await sb.rpc('admin_create_group',{p:payload});
+      if(error) throw error;
+      flash(isEdit?'Groupe mis à jour.':'Groupe créé.'); closeDrawer(); renderView();
+    }catch(e){ flash(errorLabel(e.message),'e'); }
+    finally{ $('dSave').disabled=false; }
+  };
+  if(isEdit){
+    document.querySelectorAll('[data-detach]').forEach(b=>b.onclick=async()=>{
+      const {error}=await sb.rpc('admin_detach_hotel_from_group',{p_hotel:b.dataset.detach});
+      if(error){ flash(errorLabel(error.message),'e'); return; }
+      flash('Hôtel détaché.'); closeDrawer(); renderView();
+    });
+    $('g_attachBtn')?.addEventListener('click',async()=>{
+      const hotelId=$('g_attach').value;
+      if(!hotelId) return;
+      const {error}=await sb.rpc('admin_attach_hotel_to_group',{p_hotel:hotelId,p_group:group.id});
+      if(error){ flash(errorLabel(error.message),'e'); return; }
+      flash('Hôtel rattaché.'); closeDrawer(); renderView();
+    });
+  }
+}
+
+/* =====================================================================
+   Utilisateurs
+   ===================================================================== */
+async function renderUsers(el){
+  const [{data:rows,error:uErr},{data:unlinked,error:ulErr}]=await Promise.all([
+    sb.rpc('admin_list_user_access'),
+    sb.rpc('admin_list_unlinked_auth_users'),
+  ]);
+  if(uErr) throw uErr;
+  let list=rows||[];
+  if(searchQuery.trim()){
+    const q=searchQuery.trim().toLowerCase();
+    list=list.filter(u=>[u.email,u.full_name].filter(Boolean).some(v=>String(v).toLowerCase().includes(q)));
+  }
+  el.innerHTML=`<div class="page">
+    <div class="phead"><div><h1>Utilisateurs</h1><div class="sub">${fmtNum(list.length)} utilisateur(s) sur l'ensemble des hôtels</div></div>
+      <div class="actions"><button class="btn g" id="exportUsers"><i class="fa-solid fa-download"></i> Exporter CSV</button></div>
+    </div>
+    <div class="tblwrap"><table class="tbl">
+      <thead><tr><th>Utilisateur</th><th>Rôle global</th><th>Hôtels</th><th>Statut</th><th>Dernière connexion</th><th>Actions</th></tr></thead>
+      <tbody>${list.length?list.map(u=>`
+        <tr>
+          <td><b>${esc(u.full_name||u.email)}</b><div class="muted" style="font-size:11.5px">${esc(u.email)}</div></td>
+          <td>${esc(u.global_role||'—')}</td>
+          <td>${(u.hotels||[]).map(h=>`<span class="tag ${h.is_default?'blue':'gray'}" title="${esc(h.role)}">${esc(h.hotel_name)}</span>`).join(' ')||'<span class="muted">Aucun</span>'}</td>
+          <td><span class="tag ${u.is_active?'green':'red'}">${u.is_active?'Actif':'Suspendu'}</span></td>
+          <td>${fmtDateTime(u.last_login_at)}</td>
+          <td><button data-toggle="${u.user_id}|${!u.is_active}" title="${u.is_active?'Suspendre':'Réactiver'}"><i class="fa-solid ${u.is_active?'fa-user-slash':'fa-user-check'}"></i></button></td>
+        </tr>`).join(''):`<tr><td colspan="6" class="empty">Aucun utilisateur${searchQuery?' pour cette recherche':''}.</td></tr>`}</tbody>
+    </table></div>
+    ${!ulErr && unlinked?.length ? `
+    <div class="box" style="margin-top:18px">
+      <h3><i class="fa-solid fa-user-clock"></i> Comptes non liés (${unlinked.length})</h3>
+      <p class="muted" style="font-size:12.5px;margin-bottom:12px">Comptes ayant créé un accès (auth) mais sans profil applicatif associé — inscriptions incomplètes ou anciens comptes à réconcilier.</p>
+      <div class="tlist">${unlinked.map(a=>`<div class="it"><div><div class="nm">${esc(a.email)}</div><div class="sub">Créé le ${fmtDate(a.created_at)}</div></div><div class="right">Dernière connexion : ${fmtDateTime(a.last_sign_in_at)}</div></div>`).join('')}</div>
+    </div>`:''}
+  </div>`;
+  $('exportUsers').onclick=()=>downloadCSV('utilisateurs.csv', list, [
+    {label:'Nom',get:r=>r.full_name},{label:'Email',get:r=>r.email},{label:'Rôle',get:r=>r.global_role},
+    {label:'Statut',get:r=>r.is_active?'Actif':'Suspendu'},{label:'Hôtels',get:r=>(r.hotels||[]).map(h=>h.hotel_name).join(', ')},
+  ]);
+  el.querySelectorAll('[data-toggle]').forEach(b=>b.onclick=()=>{
+    const [id,nextActiveStr]=b.dataset.toggle.split('|');
+    const nextActive = nextActiveStr==='true';
+    confirmAction({
+      title: nextActive ? 'Réactiver cet utilisateur' : 'Suspendre cet utilisateur',
+      body: nextActive ? 'L\'utilisateur retrouvera son accès immédiatement.' : 'L\'utilisateur perdra son accès immédiatement. Action réversible.',
+      confirmLabel: nextActive?'Réactiver':'Suspendre', danger:!nextActive,
+      onConfirm: async()=>{
+        const {error}=await sb.rpc('admin_set_user_status',{p_user_id:id,p_active:nextActive});
+        if(error) throw error;
+        flash('Statut mis à jour.'); renderUsers(el);
+      }
+    });
+  });
+}
+
+/* =====================================================================
+   Audit
+   ===================================================================== */
+let auditPage=0, auditFilterAction='', auditFilterLevel='';
+async function renderAudit(el){
+  const {data,error}=await sb.from('platform_logs').select('*').order('created_at',{ascending:false}).limit(200);
+  if(error) throw error;
+  let rows=data||[];
+  const actions=[...new Set(rows.map(r=>r.action))].sort();
+  if(searchQuery.trim()){
+    const q=searchQuery.trim().toLowerCase();
+    rows=rows.filter(r=>[r.action,r.entity,r.hotel_name,r.admin_email].filter(Boolean).some(v=>String(v).toLowerCase().includes(q)));
+  }
+  if(auditFilterAction) rows=rows.filter(r=>r.action===auditFilterAction);
+  if(auditFilterLevel) rows=rows.filter(r=>r.level===auditFilterLevel);
+
+  const pageSize=25, pageCount=Math.max(1,Math.ceil(rows.length/pageSize));
+  auditPage=Math.min(auditPage,pageCount-1);
+  const pageRows=rows.slice(auditPage*pageSize,(auditPage+1)*pageSize);
+
+  el.innerHTML=`<div class="page">
+    <div class="phead"><div><h1>Audit</h1><div class="sub">Journal des actions Super Admin — immuable, ${fmtNum(data.length)} derniers événements chargés</div></div>
+      <div class="actions"><button class="btn g" id="exportAudit"><i class="fa-solid fa-download"></i> Exporter CSV</button></div>
+    </div>
+    <div class="filters">
+      <select id="fAction"><option value="">Toutes les actions</option>${actions.map(a=>`<option value="${esc(a)}" ${auditFilterAction===a?'selected':''}>${esc(a)}</option>`).join('')}</select>
+      <select id="fLevel"><option value="">Tous niveaux</option><option value="info" ${auditFilterLevel==='info'?'selected':''}>Info</option><option value="warn" ${auditFilterLevel==='warn'?'selected':''}>Warn</option><option value="error" ${auditFilterLevel==='error'?'selected':''}>Error</option></select>
+    </div>
+    <div class="tblwrap"><table class="tbl">
+      <thead><tr><th>Date</th><th>Admin</th><th>Action</th><th>Entité</th><th>Hôtel</th><th>Niveau</th><th>Détails</th></tr></thead>
+      <tbody>${pageRows.length?pageRows.map(r=>`
+        <tr>
+          <td class="muted">${fmtDateTime(r.created_at)}</td>
+          <td>${esc(r.admin_email||'—')}</td>
+          <td><b>${esc(r.action)}</b></td>
+          <td>${esc(r.entity||'—')}</td>
+          <td>${esc(r.hotel_name||'—')}</td>
+          <td><span class="tag ${r.level==='error'?'red':r.level==='warn'?'amber':'gray'}">${esc(r.level)}</span></td>
+          <td><button data-payload="${r.id}" title="Voir le détail"><i class="fa-regular fa-eye"></i></button></td>
+        </tr>`).join(''):'<tr><td colspan="7" class="empty">Aucun événement.</td></tr>'}</tbody>
+    </table></div>
+    <div class="pager">
+      <span>Page ${auditPage+1} / ${pageCount}</span>
+      <button id="aPrev" ${auditPage===0?'disabled':''}>‹ Précédent</button>
+      <button id="aNext" ${auditPage>=pageCount-1?'disabled':''}>Suivant ›</button>
+    </div>
+  </div>`;
+  $('fAction').onchange=e=>{ auditFilterAction=e.target.value; auditPage=0; renderAudit(el); };
+  $('fLevel').onchange=e=>{ auditFilterLevel=e.target.value; auditPage=0; renderAudit(el); };
+  $('aPrev').onclick=()=>{ auditPage--; renderAudit(el); };
+  $('aNext').onclick=()=>{ auditPage++; renderAudit(el); };
+  $('exportAudit').onclick=()=>downloadCSV('audit.csv', rows, [
+    {label:'Date',get:r=>fmtDateTime(r.created_at)},{label:'Admin',get:r=>r.admin_email},{label:'Action',get:r=>r.action},
+    {label:'Entité',get:r=>r.entity},{label:'Hôtel',get:r=>r.hotel_name},{label:'Niveau',get:r=>r.level},{label:'IP',get:r=>r.ip_address},
+  ]);
+  el.querySelectorAll('[data-payload]').forEach(b=>b.onclick=()=>{
+    const row=rows.find(r=>r.id===b.dataset.payload);
+    $('modal').innerHTML=`<h3>Détail de l'événement</h3><pre style="background:#fafafe;border:1px solid var(--line);border-radius:10px;padding:14px;font-size:12px;white-space:pre-wrap;max-height:340px;overflow:auto">${esc(JSON.stringify(row,null,2))}</pre><div class="mact"><button class="btn g" id="mCancel">Fermer</button></div>`;
+    $('modalbg').classList.add('on');
+    $('mCancel').onclick=()=>$('modalbg').classList.remove('on');
+  });
+}
+
+boot();
+</script>
+</body>
+</html>

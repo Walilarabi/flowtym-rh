@@ -6,6 +6,8 @@
     { "source": "/salarié",               "destination": "/portal.html" },
     { "source": "/aide",                  "destination": "/aide.html" },
     { "source": "/aide/(.*)",             "destination": "/aide.html" },
+    { "source": "/admin",                 "destination": "/admin.html" },
+    { "source": "/admin/(.*)",            "destination": "/admin.html" },
     { "source": "/auth/callback",         "destination": "/index.html" },
     { "source": "/sw.js",                 "destination": "/sw.js" },
     { "source": "/(.*)",                  "destination": "/index.html" }
@@ -20,6 +22,12 @@
     },
     {
       "source": "/portal.html",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store, no-cache, must-revalidate" }
+      ]
+    },
+    {
+      "source": "/admin.html",
       "headers": [
         { "key": "Cache-Control", "value": "no-store, no-cache, must-revalidate" }
       ]
