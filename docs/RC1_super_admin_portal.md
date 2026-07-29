@@ -1,0 +1,441 @@
+# RC1 — Portail Super Admin (`/admin`) — Dossier de préparation
+
+Statut : Lots 0 à 5 livrés et validés par le CTO. Ce document couvre la préparation de la
+release candidate 1 (RC1). Conformément à la clôture du Lot 5, **aucun ajout fonctionnel
+n'a été démarré après ce dossier** — mode stabilisation RC1.
+
+Projet Supabase : `hzrzkvdebaadditvbqis`. Branche : `claude/flowtym-super-admin-portal-sf4hei`.
+Dernier commit fonctionnel : `c749a2e` (Lot 5). Commit de référence Lot 4 : `9db62f0`.
+
+---
+
+## A. Migrations (Lots 0 à 5)
+
+Toutes appliquées en production via `mcp__Supabase__apply_migration`, dans cet ordre, et
+committées dans `sql/`. Aucune n'a de rollback SQL dédié (additive uniquement — cohérent avec
+la contrainte du projet : jamais de `DROP`/perte de données ; un rollback réel repasserait par
+une nouvelle migration corrective, jamais par un script inverse).
+
+| Fichier | Lot | Contenu | Statut prod |
+|---|---|---|---|
+| `sql/68_super_admin_phase1_foundation.sql` | Lot 0 | RLS `hotel_groups`/`audit_logs`/`invoices`/`payments`, RPC `admin_create_hotel`/`admin_create_group`/etc., `platform_dashboard_kpis()` | Appliqué |
+| `sql/69_super_admin_phase1_security_hardening.sql` | Lot 0 (hotfix) | Durcissement ACL/atomicité suite revue adversariale | Appliqué |
+| `sql/70_super_admin_phase2a_subscription_foundation.sql` | Lot 0.5 | Fondations abonnement/essai, `hotel_subscription_events`, resolver `_resolve_app_access_core` | Appliqué |
+| `sql/71_super_admin_phase2b_lot1_workflows.sql` | Lot 1 | RPC changement de plan, catalogue plans/applications | Appliqué |
+| `sql/72_super_admin_phase2c_lot2_hotels_groups.sql` | Lot 2 | Écrans Hôtels/Groupes : RPC manquantes | Appliqué |
+| `sql/73_super_admin_phase2d_lot3_users_access.sql` | Lot 3 | ACL `user_hotels`, RPC `platform_admin` | Appliqué |
+| `sql/74_super_admin_phase2d_lot3b_users_frontend_support.sql` | Lot 3b | Support frontend module Utilisateurs | Appliqué |
+| `sql/75_super_admin_phase2e_lot4_billing.sql` | Lot 4 | Schéma facturation plateforme, RPC facture/paiement/avoir | Appliqué |
+| `sql/76_super_admin_phase2f_lot5_dashboard_audit_settings_supervision.sql` | Lot 5 | Réserves Lot 4 + Dashboard/Alertes/Audit/Paramètres/Supervision | Appliqué (validé 26/26, commit `c749a2e`) |
+
+Chaque fichier possède un test SQL versionné correspondant sous `sql/tests/` (sauf 68/69/70/71/72,
+antérieurs à l'introduction de ce pattern — validés à l'époque par script combiné en transaction
+`BEGIN...ROLLBACK`, non re-conservés en fichier séparé).
+
+---
+
+## B. Inventaire RPC + ACL (automatable, requête réelle exécutée le 2026-07-29)
+
+Généré par introspection directe (`pg_proc` + `has_function_privilege` + recherche littérale de
+`is_platform_admin()`/`_platform_log(` dans le corps de fonction via `pg_get_functiondef`), pas
+un rapport rédigé à la main. Reproductible avec :
+
+```sql
+SELECT p.proname, pg_get_function_identity_arguments(p.oid) AS args,
+  CASE WHEN p.prosecdef THEN 'SECURITY DEFINER' ELSE 'SECURITY INVOKER' END AS sec,
+  has_function_privilege('anon', p.oid, 'EXECUTE') AS anon_exec,
+  has_function_privilege('authenticated', p.oid, 'EXECUTE') AS authenticated_exec,
+  has_function_privilege('service_role', p.oid, 'EXECUTE') AS service_role_exec,
+  (pg_get_functiondef(p.oid) ILIKE '%is_platform_admin()%') AS has_super_admin_guard,
+  (pg_get_functiondef(p.oid) ILIKE '%_platform_log(%') AS calls_platform_log
+FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'public'
+  AND (p.proname LIKE 'admin\_%' OR p.proname LIKE 'org\_%' OR p.proname LIKE 'platform\_%'
+       OR p.proname IN ('is_platform_admin','_platform_log','_resolve_app_access_core',
+         '_recompute_invoice_paid_at','_next_platform_invoice_number',
+         '_next_platform_credit_note_number','grant_superadmin_on_new_hotel'))
+ORDER BY p.proname;
+```
+
+### B.1 Fonctions `admin_*` (RPC Super Admin — 100% conformes au modèle attendu)
+
+Toutes les **63 fonctions `admin_*`** interrogées présentent exactement le même profil ACL :
+`anon_exec=false`, `authenticated_exec=true`, `service_role_exec=false`,
+`has_super_admin_guard=true` (sauf 6 fonctions de lecture pure listées ci-dessous où le guard est
+présent mais `calls_platform_log=false` car une lecture n'a rien à auditer). Aucune exception,
+aucun oubli détecté.
+
+| Fonction | Lot | Type | Audit (`_platform_log`) |
+|---|---|---|---|
+| `admin_attach_addon` | 1 | mutation | oui |
+| `admin_attach_hotel_to_group` | 0 | mutation | oui |
+| `admin_cancel_platform_invoice` | 4/5 | mutation | oui |
+| `admin_cancel_subscription_immediate` | 1 | mutation | non |
+| `admin_change_subscription_plan` | 1 | mutation | non |
+| `admin_convert_trial_to_active` | 1 | mutation | non |
+| `admin_create_group` | 0 | mutation | oui |
+| `admin_create_hotel` | 0 | mutation | oui |
+| `admin_create_hotel_with_subscription` | 1 | mutation | oui |
+| `admin_create_plan` | 1 | mutation | oui |
+| `admin_create_platform_credit_note` | 4 | mutation | oui |
+| `admin_create_platform_invoice` | 4 | mutation | oui |
+| `admin_create_subscription` | 1 | mutation | oui |
+| `admin_delete_group` | 2 | mutation | oui |
+| `admin_detach_addon` | 1 | mutation | oui |
+| `admin_detach_hotel_from_group` | 2 | mutation | oui |
+| `admin_extend_trial` | 1 | mutation | non |
+| `admin_get_platform_invoice_detail` | 4/5 | **lecture** | — |
+| `admin_get_user_detail` | 3 | **lecture** | — |
+| `admin_grant_hotel` | 3 | mutation | oui |
+| `admin_grant_hotel_group_access` | 3 | mutation | non |
+| `admin_grant_platform_admin` | 3 | mutation | oui |
+| `admin_issue_platform_invoice` | 4 | mutation | oui |
+| `admin_list_platform_audit_log` | 5 | **lecture** | — |
+| `admin_list_platform_invoices` | 4/5 | **lecture** | — |
+| `admin_list_unlinked_auth_users` | 0 | **lecture** | — |
+| `admin_list_user_access` | 3 | **lecture** | — |
+| `admin_platform_alerts` | 5 | **lecture** | — |
+| `admin_platform_overview_kpis` | 5 | **lecture** | — |
+| `admin_reactivate_subscription` | 1 | mutation | non |
+| `admin_record_platform_payment` | 4/5 | mutation | oui |
+| `admin_regularize_legacy_subscription` | 0.5 | mutation | oui |
+| `admin_renew_subscription` | 1 | mutation | non |
+| `admin_resolve_app_access` | 1 | mutation | non |
+| `admin_restore_group` | 2 | mutation | oui |
+| `admin_reverse_platform_payment` | 5 | mutation | oui |
+| `admin_revert_scheduled_cancellation` | 1 | mutation | non |
+| `admin_revoke_hotel` | 3 | mutation | oui |
+| `admin_revoke_hotel_group_access` | 3 | mutation | non |
+| `admin_revoke_platform_admin` | 3 | mutation | oui |
+| `admin_rights_divergence_report` | 3 | **lecture** | — |
+| `admin_run_expired_trials_processing` | 1 | mutation (batch) | oui |
+| `admin_schedule_subscription_cancellation` | 1 | mutation | non |
+| `admin_set_app_access` | 3 | mutation | non |
+| `admin_set_default_hotel` | pré-existant | mutation | non — **cf. B.3** |
+| `admin_set_hotel_role` | 3 | mutation | oui |
+| `admin_set_hotel_status` | 0 | mutation | oui |
+| `admin_set_plan_active` | 1 | mutation | oui |
+| `admin_set_plan_archived` | 1 | mutation | oui |
+| `admin_set_plan_modules` | 1 | mutation | oui |
+| `admin_set_user_status` | pré-existant | mutation | oui |
+| `admin_supervision_status` | 5 | **lecture** | — |
+| `admin_suspend_subscription` | 1 | mutation | non |
+| `admin_suspend_subscription_for_nonpayment` | 4 | mutation (wrapper) | non (délègue à `admin_suspend_subscription`) |
+| `admin_update_group` | 2 | mutation | oui |
+| `admin_update_hotel` | 0 | mutation | oui |
+| `admin_update_hotel_full` | 2 | mutation | oui |
+| `admin_update_plan` | 1 | mutation | oui |
+| `admin_update_platform_payment_status` | 4/5 | mutation | oui |
+| `admin_update_platform_setting` | 5 | mutation | oui |
+| `admin_update_price_snapshot` | 1 | mutation | non |
+| `admin_void_platform_credit_note` | 4 | mutation | oui |
+
+### B.2 Helpers internes (`_`-préfixés — jamais exposés côté client)
+
+| Fonction | anon | authenticated | service_role | Notes |
+|---|---|---|---|---|
+| `_platform_log` | false | false | false | centralise l'écriture `platform_logs` |
+| `_recompute_invoice_paid_at` | false | false | false | Lot 5, réserve 2 |
+| `_resolve_app_access_core` | false | false | false | resolver divergence observe/enforce |
+| `_next_platform_invoice_number` | false | false | false | séquence atomique |
+| `_next_platform_credit_note_number` | false | false | false | séquence atomique |
+
+Les 5 sont fermées sur les 4 rôles clients — conforme au doctrine du projet (jamais de `GRANT`
+sur un helper interne, quel que soit le rôle).
+
+### B.3 Fonctions historiques hors périmètre — écarts ACL réels détectés
+
+Ces fonctions **pré-existent à ce projet** (Lot 0 n'a fait que les auditer, pas les créer) et
+présentent un profil ACL différent du modèle Super Admin. Documentées ici, non corrigées (hors
+mandat des lots livrés) :
+
+- **`admin_set_default_hotel(p_user_id, p_hotel_id)`** — `anon_exec=true`,
+  `authenticated_exec=true`, `service_role_exec=true`. Malgré son préfixe `admin_`, ce n'est
+  **pas** une fonction Super Admin : c'est un self-service permettant à un utilisateur hôtel de
+  définir son propre hôtel par défaut (le nom est trompeur). Recommandation RC1 : soit la
+  renommer (`user_set_default_hotel`) pour lever l'ambiguïté avec le préfixe `admin_*`, soit
+  documenter explicitement l'exception dans le code. Ne bloque pas la RC1 (le corps de fonction
+  vérifie en interne `auth.uid() = p_user_id`, donc pas de faille — juste une incohérence de
+  nommage/attente ACL).
+- **`org_create_hotel` / `org_update_hotel` / `org_set_hotel_status` / `org_detach_hotel` /
+  `org_get` / `org_provision`** — ouvertes à `anon`/`authenticated`/`service_role` par design :
+  ce sont les RPC self-service tenant utilisées par `index.html`, **non liées au portail Super
+  Admin**, hors périmètre de ce chantier.
+- **`is_platform_admin()` / `platform_admin_role()` / `platform_dashboard_kpis()`** — ouvertes à
+  tous les rôles par design : ce sont des fonctions de lecture bon marché (retournent
+  `false`/`null` pour un non-admin) utilisées comme garde en amont par le frontend lui-même ;
+  aucune donnée sensible n'est retournée à un appelant non-admin.
+- **`grant_superadmin_on_new_hotel()`** — c'est la fonction du **trigger**
+  `trg_grant_superadmin_on_new_hotel` (déclenché `AFTER INSERT ON hotels`, cf. section D), pas
+  une RPC. Elle est néanmoins listée avec `anon_exec=true` par défaut de privilège Postgres sur
+  fonction non révoquée explicitement. Un appel direct via `rpc()` échouerait de toute façon (elle
+  référence `NEW`, disponible seulement en contexte trigger), donc pas de risque d'exploitation
+  réelle, mais l'hygiène ACL est incomplète. **Correctif mineur à prévoir en RC1 ou post-RC1** :
+  `REVOKE ALL ON FUNCTION grant_superadmin_on_new_hotel() FROM PUBLIC, anon, authenticated,
+  service_role;` (ne change rien au comportement du trigger, qui s'exécute avec les privilèges du
+  propriétaire de la fonction, pas ceux de l'appelant).
+
+### B.4 Tables sensibles — ACL vérifiée
+
+| Table | anon SELECT | anon DML | service_role DML |
+|---|---|---|---|
+| `platform_invoices` | false | false | false |
+| `platform_contracts` | false | false | false |
+| `platform_payments` | false | false | false |
+| `platform_credit_notes` | false | false | false |
+| `platform_settings` | false | false | false |
+| `platform_logs` | false | false | false |
+| `platform_schema_markers` | false | false | false |
+| `platform_admins` | false | false | (hérité Lot 0, non re-testé ce lot) |
+
+---
+
+## C. Edge Functions
+
+Inventaire réel (`mcp__Supabase__list_edge_functions`), 20 fonctions actives au total sur le
+projet. Seules 2 concernent le portail Super Admin :
+
+| Slug | Version | `verify_jwt` | Rôle | Lien Super Admin |
+|---|---|---|---|---|
+| `invite-user` | 26 | true | Invitation d'un utilisateur hôtel | Patchée Lot 3 : bypass Super Admin ajouté pour permettre l'invitation cross-hôtel sans appartenance préalable |
+| `invite-platform-admin` | 10 | **false** | Invitation d'un Super Admin | `verify_jwt=false` — l'authentification/autorisation doit être vérifiée dans le corps de la fonction elle-même, pas déléguée à la gateway. **À auditer explicitement avant tout usage financier ou d'accès élargi** (non re-audité dans ce chantier ; le module a été utilisé mais son code source n'a pas été relu ligne à ligne ici) |
+
+Les 18 autres (`send-whatsapp`, `attachment-access`, `gdpr-erase-guest`, `yousign-*`,
+`clock-portal`, `rh-assistant`, `contract-*`, `sig-*`, `trigger-backup`, `send-dispute-email`,
+`html-test`) appartiennent à l'application hôtel (`index.html`) / module Checkout / RH — hors
+périmètre du portail Super Admin, non modifiées par ce projet.
+
+**Dette confirmée (déjà signalée Lot 4)** : aucun harnais de test automatisé pour les Edge
+Functions n'existe dans ce repo (ni pour celles-ci, ni pour les autres). Reporté post-RC1.
+
+---
+
+## D. Sécurité
+
+### D.1 Matrice des rôles (self-consistante avec B)
+
+| Rôle | Portée | Exemple de garde |
+|---|---|---|
+| `anon` | Aucun accès aux RPC/tables `admin_*`/`platform_*` de ce projet | `REVOKE ALL ... FROM anon` systématique |
+| `authenticated` non-Super-Admin | Refusé par `IF NOT is_platform_admin() THEN RAISE EXCEPTION ... '42501'` à l'intérieur de chaque RPC | Testé explicitement (Test 20, Lot 5 : 5 RPC vérifiées, chacune avec un booléen `v_refused` dédié) |
+| `authenticated` Super Admin (`platform_admins.role='super_admin'`, `is_active=true`) | Accès complet aux RPC `admin_*` | — |
+| `service_role` | Volontairement exclu de toutes les RPC/tables `admin_*`/`platform_*` — aucune voie de contournement même depuis un contexte serveur | `REVOKE ALL ... FROM service_role` systématique |
+
+### D.2 Helpers internes
+
+Voir B.2 — 5 helpers, tous fermés sur les 4 rôles clients.
+
+### D.3 Fonctions frontend directement appelées par `admin.html`
+
+Toutes les fonctions de la section B.1 sauf celles marquées "pré-existant" en B.3, plus
+`is_platform_admin()` (garde d'accès au shell) et `platform_admin_role()` (affichage du rôle
+dans l'en-tête).
+
+### D.4 Tables sensibles
+
+Voir B.4.
+
+### D.5 Écart ACL restant sur les fonctions historiques
+
+Voir B.3 — 6 fonctions/triggers hors périmètre documentées, aucune ne représente un risque
+d'exploitation directe avérée (auto-vérification interne ou nature non-RPC), mais 2 corrections
+d'hygiène (renommage `admin_set_default_hotel`, revoke `grant_superadmin_on_new_hotel`) sont
+recommandées en RC1 ou juste après.
+
+### D.6 Trigger `trg_grant_superadmin_on_new_hotel` (documenté, non modifié)
+
+Trigger `AFTER INSERT ON public.hotels`, `SECURITY DEFINER`, fonction
+`grant_superadmin_on_new_hotel()`. Comportement : sélectionne le `platform_admins` actif avec
+`role='super_admin'` le plus ancien (`ORDER BY pa.created_at LIMIT 1`) et lui insère une ligne
+`user_hotels(role='direction', is_default=false)` sur le nouvel hôtel, via
+`ON CONFLICT (user_id, hotel_id) DO NOTHING`. Effet de bord découvert pendant le Lot 5 : **tout
+hôtel nouvellement créé a donc, par défaut, un administrateur de fait** — un test Lot 5
+("hôtel sans administrateur détecté") a dû explicitement supprimer cette ligne pour vérifier le
+scénario "aucun admin". C'est un comportement de production légitime (évite qu'un hôtel fraîchement
+créé ne soit orphelin), mais il doit être connu de quiconque écrit un futur test ou une future
+alerte sur ce sujet — sinon on obtient un faux négatif silencieux, pas une exception.
+
+### D.7 Constat transversal — anon et privilèges table-level (non corrigé, point de décision RC1)
+
+Un balayage `information_schema.role_table_grants` (fait en Lot 5) montre que `anon` possède des
+privilèges INSERT/UPDATE/DELETE au niveau TABLE sur plus de 250 tables du schéma `public` —
+bien au-delà des seules tables `platform_*` déjà retrofixées lots précédents. C'est un
+paramétrage de privilèges par défaut au niveau du projet (vraisemblablement un
+`ALTER DEFAULT PRIVILEGES` appliqué une fois, avant ce chantier), sur lequel toute l'application
+hôtel (`index.html`) repose déjà, RLS étant la seule ligne de défense réelle. C'est un modèle
+Supabase standard et défendable, mais sans la défense en profondeur (revoke explicite au niveau
+table + fonction) appliquée aux tables touchées par ce projet (Lots 0/2/3/4/5).
+
+**Décision requise du CTO avant tout traitement** : corriger ce point à l'échelle du schéma
+entier dépasse le mandat de ce projet et risque de casser des flux anonymes légitimes jamais
+audités ici (portails de signature, auto-check-in...). Recommandation : **ne pas traiter avant
+RC1**, et si un traitement est décidé, le faire comme un chantier dédié avec son propre audit des
+flux anonymes existants.
+
+---
+
+## E. Tests
+
+### E.1 Tests SQL par lot (transaction `BEGIN...ROLLBACK`, jamais commités)
+
+| Lot | Scénarios | Résultat final |
+|---|---|---|
+| Lot 0 (68/69) | ~15 (sécurité/atomicité, non conservés en fichier séparé) | 100% PASS |
+| Lot 0.5 (70) | 38 | 100% PASS |
+| Lot 1 (71) | non isolé en fichier dédié | 100% PASS (validé au moment du lot) |
+| Lot 2 (72) | non isolé en fichier dédié | 100% PASS |
+| Lot 3 (73/74) | 19 (`phase2d_lot3...` — cf. historique, corrigé/re-validé) | 19/19 PASS |
+| Lot 4 (75) | 19 (`sql/tests/phase2e_lot4_billing.sql`) | 19/19 PASS |
+| Lot 5 (76) | 26 (`sql/tests/phase2f_lot5_dashboard_audit_settings_supervision.sql`) | **26/26 PASS** |
+
+Le fichier Lot 5 couvre explicitement les 9 scénarios de réserve Lot 4 (paiement partiel/total,
+double confirmation idempotente, surpaiement refusé, avoir partiel/total, annulation d'avoir,
+renversement de paiement, annulation interdite avec avoir émis) en plus des scénarios propres au
+Lot 5 (KPIs, alertes, audit filtré, paramètres, ACL, non-écriture des RPC de lecture, supervision
+honnête).
+
+Deux bugs de test (pas de produit) ont été trouvés et corrigés pendant la validation Lot 5 :
+une erreur de précédence d'opérateur PL/pgSQL (`v_kpis->'clé'::text` au lieu de
+`(v_kpis->'clé')::text`), et une hypothèse de test invalide sur `trg_grant_superadmin_on_new_hotel`
+(cf. D.6) — corrigée en supprimant explicitement la ligne auto-attribuée avant l'assertion.
+
+### E.2 Tests Jest
+
+**499/499 tests, 21 suites**, dont 43 nouveaux pour les 7 helpers purs introduits au Lot 5
+(`severityBadge`, `periodLabel`, `alertTypeIcon`, `sortAlertsBySeverity`, `settingValueType`,
+`validateSettingValue`, `formatPayloadValue`). Aucune régression sur les 456 tests préexistants
+(couvrant aussi bien le module Super Admin que le reste de l'application — planning, paie,
+pointage, absences, etc.).
+
+### E.3 Intégration frontend (backend mocké)
+
+Qualifiée honnêtement de **"test d'intégration frontend avec backend mocké"**, jamais de test
+E2E réel — le sandbox de développement ne peut pas atteindre les domaines Supabase/Vercel réels
+(confirmé par des 403 systématiques via le proxy). Un faux client Supabase (mêmes signatures que
+`@supabase/supabase-js`) + interception `page.route()` sur le CDN jsdelivr simulent les réponses
+RPC. Couverture Lot 5 : chargement du tableau de bord + changement de période, navigation
+transversale depuis une alerte (hôtel sans admin → ouverture de sa fiche), consultation de
+l'audit avec filtres + détail lisible du payload, modification d'un paramètre avec confirmation +
+toast + refus de valeur invalide côté client, refus d'accès pour un utilisateur non-admin. Zéro
+erreur JS sur l'ensemble du parcours.
+
+### E.4 Tests manquants (dette confirmée)
+
+- Aucun harnais de test pour les Edge Functions (`invite-user`, `invite-platform-admin`) — jamais
+  construit sur l'ensemble du projet, pas seulement le portail Super Admin.
+- Aucun test E2E réel (contre un vrai navigateur + vrai backend Supabase) — contrainte réseau du
+  sandbox, jamais levée durant ce chantier.
+
+---
+
+## F. Déploiement
+
+| Élément | État |
+|---|---|
+| Backend | Appliqué en production (`hzrzkvdebaadditvbqis`), migrations 68 à 76 |
+| Frontend | Preview Vercel (pas encore fusionné sur la branche de production finale) |
+| Branche | `claude/flowtym-super-admin-portal-sf4hei` |
+| Commit final Lot 5 | `c749a2e` |
+| Migrations appliquées | 68, 69, 70, 71, 72, 73, 74, 75, 76 (toutes, dans cet ordre, aucune en attente) |
+| Edge Functions déployées | `invite-user` v26, `invite-platform-admin` v10 (aucune nouvelle Edge Function introduite par ce projet) |
+| Routing `/admin` | `vercel.json` — `/admin` et `/admin/(.*)` → `admin.html`, avant la règle catch-all `/(.*)→/index.html` |
+
+---
+
+## G. Dettes et limites
+
+### G.1 Bloquants avant merge
+
+**Aucun.** Tous les tests SQL (26/26), Jest (499/499) et l'intégration frontend mockée passent ;
+l'ACL est vérifiée exhaustivement sur toutes les fonctions/tables introduites ou modifiées ;
+aucune donnée de test résiduelle en production (vérifié par requête directe) ; l'interface se
+charge sans erreur JS sur le parcours testé.
+
+### G.2 À traiter avant tout usage financier réel
+
+- **PDF de facture** : actuellement `window.print()` sur une zone dédiée avec CSS
+  `@media print`, honnêtement libellé "Imprimer / enregistrer en PDF" (pas de génération PDF
+  définitive). Dette technique explicite pour un vrai moteur documentaire : rendu déterministe,
+  PDF immuable, duplicata identique bit-à-bit, stockage, numérotation définitive, empreinte
+  (hash) optionnelle.
+- **Prestataire de paiement réel** : aucun (Stripe/GoCardless/SEPA) n'est connecté — les
+  paiements sont enregistrés manuellement par le Super Admin (`admin_record_platform_payment`).
+- **Moteur e-invoicing (Chorus Pro / PDP)** : aucun connecté ; les colonnes/format de
+  `platform_invoices` sont compatibles avec une intégration future mais rien n'est câblé.
+- **Edge Function `invite-platform-admin`** (`verify_jwt=false`) : à auditer ligne à ligne avant
+  tout élargissement de son usage — son code source n'a pas été relu dans ce chantier.
+
+### G.3 Reportables après RC1
+
+- Changement de plan planifié (aujourd'hui immédiat uniquement, pas de prise d'effet différée).
+- Révocation globale des sessions d'un utilisateur (aujourd'hui : désactivation du compte, pas
+  d'invalidation de session active en cours).
+- Harnais de test complet pour les Edge Functions.
+- Supervision : `mutation_error_monitoring_available` et
+  `edge_function_error_monitoring_available` restent honnêtement `false` — aucune instrumentation
+  réelle n'existe (une `RAISE EXCEPTION` fait un rollback avant tout log d'erreur possible ; aucun
+  pipeline d'erreur Edge Function n'existe). Pas de faux badge vert affiché à la place.
+- Correctifs ACL d'hygiène sur `admin_set_default_hotel` (renommage) et
+  `grant_superadmin_on_new_hotel` (revoke explicite) — cf. B.3.
+- Constat transversal anon/table-level (D.7) — décision CTO requise avant tout traitement, portée
+  bien au-delà de ce projet.
+
+---
+
+## H. Checklists
+
+### H.1 Checklist de merge
+
+- [x] 26/26 tests SQL Lot 5 (dont réserves Lot 4) — PASS
+- [x] Migration `sql/76` appliquée en production
+- [x] ACL vérifiée (functions + tables) via requête directe post-déploiement
+- [x] 499/499 tests Jest
+- [x] Intégration frontend mockée validée, zéro erreur JS
+- [x] Syntaxe JS validée (`node --check` sur le script extrait)
+- [x] Aucune donnée de test résiduelle en production
+- [x] Commit unique Lot 5 poussé sur la branche désignée
+- [ ] Revue humaine finale du diff avant fusion vers la branche de production (à faire par le CTO)
+
+### H.2 Checklist de déploiement production frontend
+
+- [ ] Fusionner la branche `claude/flowtym-super-admin-portal-sf4hei` vers la branche de
+      production (déclenche le déploiement Vercel de production, actuellement en preview)
+- [ ] Vérifier que `/admin` répond en production (redirection `vercel.json` déjà en place)
+- [ ] Vérifier la connexion d'un vrai compte Super Admin en production
+- [ ] Vérifier le chargement du tableau de bord avec les vraies données de production
+
+### H.3 Checklist de rollback
+
+- Aucune migration de ce projet ne supprime de colonne/table/fonction existante — un rollback de
+  schéma, si nécessaire, se ferait par une nouvelle migration corrective (jamais un script
+  inverse automatique, cohérent avec la doctrine "jamais de perte de données" du projet).
+- Rollback frontend : revert du commit `c749a2e` (et de sa fusion) sur la branche de production ;
+  aucune dépendance de schéma cassante n'empêche `index.html` de continuer à fonctionner sans
+  `admin.html` (fichier strictement indépendant).
+- Aucune donnée n'est perdue en cas de rollback frontend seul (le backend Lot 5 reste additif et
+  inoffensif pour l'app hôtel existante).
+
+### H.4 Plan de smoke test réel post-fusion
+
+1. Se connecter à `/admin` avec un compte Super Admin réel.
+2. Vérifier que le tableau de bord charge sans erreur et affiche des KPIs cohérents avec la
+   réalité (comparer un chiffre — ex. nombre d'hôtels actifs — à une requête SQL directe).
+3. Changer de période (mois dernier / trimestre / année) et vérifier que les montants changent.
+4. Ouvrir une alerte (si une existe en production) et vérifier la navigation vers l'objet concerné.
+5. Consulter l'audit, appliquer un filtre par hôtel, vérifier la pagination et le détail lisible
+   d'un événement.
+6. Modifier un paramètre non critique (ex. `support_email`) puis le remettre à sa valeur
+   d'origine, en vérifiant l'entrée d'audit correspondante à chaque fois.
+7. Se connecter avec un compte authentifié non-Super-Admin et vérifier l'écran de refus d'accès.
+8. Tester une mutation par module déjà livré (Hôtels : changer un statut ; Utilisateurs : révoquer
+   un accès secondaire, jamais le dernier admin d'un hôtel ; Facturation : créer une facture
+   proforma sur un hôtel de test puis l'annuler).
+
+---
+
+## Prochaine étape
+
+Conformément à l'instruction du CTO ("Après cette livraison, arrête les ajouts fonctionnels et
+passe en mode stabilisation RC1"), **aucun nouveau lot fonctionnel ne doit démarrer** sans
+instruction explicite. Ce dossier est l'unique livrable attendu à ce stade ; les points G.2/G.3
+restent des décisions du CTO, pas des blocages techniques.
