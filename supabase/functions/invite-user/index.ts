@@ -54,14 +54,29 @@ Deno.serve(async (req) => {
 
     const admin = createClient(SUPABASE_URL, SERVICE_KEY);
 
-    // --- Vérifier que l'appelant est direction/admin_hotel sur cet hôtel ---
+    // --- Autorisation : deux chemins distincts, ni l'un ni l'autre déduit d'un champ transmis
+    //     par le client. (1) Super Admin PLATEFORME (vérifié en base via platform_admins,
+    //     jamais via un rôle envoyé dans le payload) : peut inviter sur N'IMPORTE QUEL hôtel —
+    //     c'est le chemin qui manquait pour inviter le premier administrateur d'un hôtel neuf
+    //     (portail Super Admin, Lot 2/3). (2) Sinon, comportement historique inchangé :
+    //     l'appelant doit avoir un rôle direction/admin_hotel SUR CET HÔTEL PRÉCIS.
     const { data: cu } = await admin.from('users').select('id').eq('auth_id',user.id).maybeSingle();
-    if (!cu) return json({error:'Profil appelant introuvable'},403);
+    const { data: platformCaller } = await admin.from('platform_admins')
+      .select('id, role').eq('auth_id', user.id).eq('is_active', true).maybeSingle();
+    const isSuperAdmin = !!platformCaller && platformCaller.role === 'super_admin';
 
-    const { data: ch } = await admin.from('user_hotels').select('role')
-      .eq('hotel_id',hotel_id).eq('user_id',cu.id).maybeSingle();
-    if (!ch || !['direction','admin_hotel'].includes(ch.role))
-      return json({error:'Droits direction ou admin_hotel requis pour cet hôtel'},403);
+    if (!isSuperAdmin) {
+      if (!cu) return json({error:'Profil appelant introuvable'},403);
+      const { data: ch } = await admin.from('user_hotels').select('role')
+        .eq('hotel_id',hotel_id).eq('user_id',cu.id).maybeSingle();
+      if (!ch || !['direction','admin_hotel'].includes(ch.role))
+        return json({error:'Droits direction ou admin_hotel requis pour cet hôtel, ou Super Admin plateforme'},403);
+    }
+
+    // --- Hôtel cible : doit exister et ne pas être archivé, quel que soit le chemin ci-dessus ---
+    const { data: targetHotel } = await admin.from('hotels').select('id, status, name').eq('id', hotel_id).maybeSingle();
+    if (!targetHotel) return json({error:'Hôtel introuvable'},404);
+    if (targetHotel.status === 'archived') return json({error:"Impossible d'inviter sur un hôtel archivé"},400);
 
     // --- Déterminer le redirectTo selon le type d'accès ---
     const redirectTo = access_type === 'salarie' ? REDIRECT_SALARIE : REDIRECT_MANAGER;
@@ -145,16 +160,28 @@ Deno.serve(async (req) => {
       userId = uid;
     }
 
-    // --- Audit log (best-effort) ---
+    // --- Audit log (best-effort) — flux distinct selon le chemin d'autorisation : un Super
+    // Admin plateforme n'a pas forcément de ligne public.users (cu peut être null), donc son
+    // audit va dans platform_logs (flux plateforme) plutôt que hr_document_audit_logs
+    // (flux hôtel-scoped, qui suppose un acteur avec un profil users).
     try {
-      await admin.from('hr_document_audit_logs').insert({
-        hotel_id,
-        actor_user_id: cu.id,
-        actor_email:   user.email,
-        action:        'invite_user',
-        entity_type:   access_type === 'salarie' ? 'employee_portal' : 'user',
-        details:       { email, role, access_type, already_existed: alreadyExisted },
-      });
+      if (isSuperAdmin) {
+        await admin.from('platform_logs').insert({
+          admin_id: platformCaller!.id, admin_email: user.email,
+          action: 'user.invite', entity: 'user', entity_id: userId,
+          hotel_id, hotel_name: targetHotel.name, level: 'info',
+          payload: { email, role, access_type, already_existed: alreadyExisted },
+        });
+      } else {
+        await admin.from('hr_document_audit_logs').insert({
+          hotel_id,
+          actor_user_id: cu!.id,
+          actor_email:   user.email,
+          action:        'invite_user',
+          entity_type:   access_type === 'salarie' ? 'employee_portal' : 'user',
+          details:       { email, role, access_type, already_existed: alreadyExisted },
+        });
+      }
     } catch(_) {}
 
     // --- Générer un lien direct (fallback si email non reçu) ---
