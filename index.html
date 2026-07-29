@@ -3979,7 +3979,6 @@ function render(){
       +`<div><div class="nm">${s.first_name} ${s.last_name}${(s.status||'')==='parti'?' <span style="font-size:9.5px;color:var(--red);font-weight:700;background:var(--red-bg);padding:1px 5px;border-radius:5px;margin-left:4px">PARTI</span>':(s.status||'')==='pause'?' <span style="font-size:9.5px;color:#92400E;font-weight:700;background:#FEF3C7;padding:1px 5px;border-radius:5px;margin-left:4px">EN PAUSE</span>':''}${_extraTag}${_alertBadge}</div><div class="sub">${s.department||'—'} · ${s.contract_type||'CDI'}${_extraSub}</div></div></div></td>`
       +`<td class="stickL cRole">${s.role||'—'}</td>`;
     let trav=0,extra=0,cp=0,abs=0,rep=0;
-    const _isCDI=(s.contract_type||'CDI')==='CDI';
     const _hpd=_hpdMap.get(s.id)||7;
     for(let d=1;d<=nd;d++){const k=s.id+'|'+iso(y,m,d);const code=effective(k);const c=code?CMAP[code]:null;
       const wd=new Date(y,m,d).getDay(),we=wd===0||wd===6;
@@ -4002,7 +4001,10 @@ function render(){
       // Décompte : une présence en heures compte comme fraction de journée (hrs/hpd), pas une journée complète
       if(c){if(c.cat==='worked')trav+=(hrs>0?hrs/_hpd:1);else if(c.cat==='paid')cp++;else if(c.cat==='abs')abs++;} else rep++;}
     const travDisp=String(Math.round(trav*10)/10).replace('.',',');
-    h+=`<td class="sum">${travDisp}</td><td class="sum">${_isCDI?extra:''}</td><td class="sum">${cp}</td><td class="sum">${abs}</td><td class="sum">${rep}</td></tr>`;
+    // Colonne Extra : nombre RÉEL de journées PE (Présence en Extra), pour TOUS les
+    // contrats (CDI, CDD, Extra, Saisonnier…), tous hôtels/mois. Anciennement masqué
+    // hors CDI (bug : PE non comptabilisées pour Extra/CDD). Comptage centralisé = extra.
+    h+=`<td class="sum">${travDisp}</td><td class="sum">${extra}</td><td class="sum">${cp}</td><td class="sum">${abs}</td><td class="sum">${rep}</td></tr>`;
   });
   const rows=[['Présents',k=>CMAP[effective(k)]?.cat==='worked'],
               ['Absents', k=>{const c=CMAP[effective(k)];return c&&c.cat!=='worked'&&c.cat!=='holiday'&&c.cat!=='ext';}],
