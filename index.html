@@ -1227,7 +1227,12 @@ async function makeRealBE(){
     async listEmployeeHotels(empId){const {data,error}=await sb.from('employee_hotel_assignments').select('id,target_hotel_id,active').eq('employee_id',empId);if(error&&error.code==='42P01'){return[];}must(error,'Établissements du collaborateur');return data||[];},
     async setEmployeeHotelLink(empId,sourceHotelId,targetHotelId,active,authorizedBy){const {error}=await sb.from('employee_hotel_assignments').upsert({employee_id:empId,source_hotel_id:sourceHotelId,target_hotel_id:targetHotelId,active:!!active,authorized_by:authorizedBy||null},{onConflict:'employee_id,target_hotel_id'});must(error,'Liaison établissement');},
     // Extras : collaborateurs autorisés dans un hôtel (fiche lisible via RLS employees_secondary_read)
-    async listAuthorizedExtras(h){const {data,error}=await sb.from('employee_hotel_assignments').select('employee_id,active,employee:employee_id(id,first_name,last_name,role,department,hotel_id,contract_type,photo_url,status,active)').eq('target_hotel_id',h).eq('active',true);if(error&&error.code==='42P01'){return[];}must(error,'Extras autorisés');return data||[];},
+    // phone/email inclus : l'établissement d'accueil doit pouvoir joindre le salarié en mission
+    // (remplacement/Extra) — modif horaires, consigne, urgence. Coordonnées seules, aucune donnée RH.
+    async listAuthorizedExtras(h){const {data,error}=await sb.from('employee_hotel_assignments').select('employee_id,active,employee:employee_id(id,first_name,last_name,role,department,hotel_id,contract_type,photo_url,status,active,phone,email)').eq('target_hotel_id',h).eq('active',true);if(error&&error.code==='42P01'){return[];}must(error,'Extras autorisés');return data||[];},
+    // Annuaire groupe : coordonnées (tél/e-mail) de tous les collaborateurs du groupe.
+    // RPC dédiée à champs restreints (jamais contrat/salaire/état civil). Voir sql/68.
+    async groupStaffDirectory(){const {data,error}=await sb.rpc('group_staff_directory');must(error,'Annuaire du groupe');return data||[];},
     // Activations mensuelles d'un extra dans un hôtel
     async listExtraActivations(h,empId){const {data,error}=await sb.from('employee_extra_activations').select('id,year,month,active,host_service_id,host_role,comment').eq('hotel_id',h).eq('employee_id',empId);if(error&&error.code==='42P01'){return[];}must(error,'Activations extra');return data||[];},
     async listHotelExtraActivations(h,year,month){const {data,error}=await sb.from('employee_extra_activations').select('employee_id,host_service_id,host_role').eq('hotel_id',h).eq('year',year).eq('month',month).eq('active',true);if(error&&error.code==='42P01'){return[];}must(error,'Activations extra du mois');return data||[];},
@@ -7372,6 +7377,7 @@ function renderPersonnel(){
           <option value="tous" ${pStatus==='tous'?'selected':''}>Tous</option>
         </select>
         <select id="pdept"><option value="">Service : tous</option>${deptOpts}</select>
+        <button class="btn g" id="pGroupDir" title="Annuaire des collaborateurs du groupe (coordonnées)"><i class="fa-solid fa-address-book"></i> Annuaire groupe</button>
         <button class="btn g" id="pImportCSV" title="Importer des collaborateurs depuis un fichier CSV"><i class="fa-solid fa-file-import"></i> Import CSV</button>
         <button class="btn p" id="pAdd"><i class="fa-solid fa-user-plus"></i> Collaborateur</button>
       </div></div>
@@ -7456,6 +7462,7 @@ function renderPersonnel(){
   $('pdept').onchange=e=>{pDept=e.target.value;_drawPersonnelCards();};
   $('pAdd').onclick=()=>openEmpForm(null);
   $('pImportCSV').onclick=()=>openPersonnelImport();
+  { const _g=$('pGroupDir'); if(_g) _g.onclick=openGroupDirectory; }
   _drawPersonnelCards();
 }
 
@@ -7497,6 +7504,54 @@ async function _drawMultiHotelExtras(){
       </div>
     </div>`;
   }).join('');
+}
+
+/* Annuaire du groupe : coordonnées (tél/e-mail) de tous les collaborateurs du groupe.
+   Objectif : joindre un salarié en mission (remplacement/Extra) dans n'importe quel
+   établissement du groupe. Champs restreints (aucune donnée RH sensible) via RPC sql/68. */
+let _groupDirCache=null;
+async function openGroupDirectory(){
+  gpModal('Annuaire du groupe','<div id="gdBody" style="min-height:120px"><div style="padding:40px;text-align:center;color:var(--muted)"><i class="fa-solid fa-spinner fa-spin fa-2x"></i></div></div>','fa-solid fa-address-book');
+  let list;
+  try{ list=await BE.groupStaffDirectory(); }
+  catch(e){ const b=$('gdBody'); if(b) b.innerHTML=`<div style="padding:36px;text-align:center;color:var(--muted)"><i class="fa-solid fa-circle-info" style="font-size:26px;color:var(--violet);display:block;margin-bottom:10px"></i>${esc(friendlyErr(e,"L'annuaire du groupe n'est pas encore disponible sur cet environnement."))}</div>`; return; }
+  _groupDirCache=list;
+  const b=$('gdBody'); if(!b)return;
+  b.innerHTML=`
+    <div class="search" style="margin-bottom:12px"><i class="fa-solid fa-magnifying-glass"></i><input type="text" id="gdq" placeholder="Rechercher un nom, un hôtel, un service…" autocomplete="off"></div>
+    <div style="font-size:11.5px;color:var(--muted);margin-bottom:10px"><i class="fa-solid fa-shield-halved"></i> Coordonnées professionnelles partagées au sein du groupe pour la gestion des missions (remplacements et extras). Aucune donnée RH (contrat, rémunération, état civil) n'est visible ici.</div>
+    <div id="gdList" style="max-height:56vh;overflow:auto"></div>`;
+  const draw=()=>{
+    const q=($('gdq').value||'').trim().toLowerCase();
+    const rows=(_groupDirCache||[]).filter(r=>{
+      if(!q)return true;
+      return [r.first_name,r.last_name,r.hotel_name,r.role,r.department,r.phone,r.email].some(v=>String(v||'').toLowerCase().includes(q));
+    });
+    if(!rows.length){ $('gdList').innerHTML=`<div style="padding:34px;text-align:center;color:var(--muted)">Aucun collaborateur.</div>`; return; }
+    // Regroupé par établissement
+    const byHotel={};
+    rows.forEach(r=>{ const k=r.hotel_name||'—'; (byHotel[k]=byHotel[k]||[]).push(r); });
+    $('gdList').innerHTML=Object.keys(byHotel).sort().map(hn=>{
+      const items=byHotel[hn].sort((a,c)=>((a.last_name||'')+a.first_name).localeCompare((c.last_name||'')+c.first_name));
+      return `<div style="font-size:11px;font-weight:700;color:var(--violet-d);text-transform:uppercase;letter-spacing:.4px;padding:8px 4px 6px;border-bottom:1px solid var(--line);margin-bottom:4px"><i class="fa-solid fa-building" style="font-size:10px"></i> ${esc(hn)} <span style="color:var(--muted);font-weight:500">· ${items.length}</span></div>`
+        + items.map(r=>{
+          const inactive=(r.active===false)||(r.status&&r.status!=='actif');
+          const tel=(r.phone||'').trim(), mail=(r.email||'').trim();
+          return `<div style="display:flex;align-items:center;gap:10px;padding:8px 4px;border-bottom:1px solid #f1f0f7;${inactive?'opacity:.55':''}">
+            <div style="flex:1;min-width:0">
+              <div style="font-size:13px;font-weight:600;color:var(--ink)">${esc(r.first_name||'')} ${esc(r.last_name||'')}${inactive?' <span style="font-size:10px;color:var(--muted);font-weight:500">(inactif)</span>':''}</div>
+              <div style="font-size:11.5px;color:var(--muted)">${esc(r.role||'—')}${r.department?' · '+esc(r.department):''}</div>
+            </div>
+            <div style="display:flex;gap:6px;flex-shrink:0">
+              ${tel?`<a class="btn g" style="font-size:11px;padding:5px 9px;text-decoration:none" href="tel:${esc(tel)}" title="${esc(tel)}"><i class="fa-solid fa-phone"></i> ${esc(tel)}</a>`:`<span style="font-size:11px;color:var(--muted);padding:5px 9px">tél. —</span>`}
+              ${mail?`<a class="btn g" style="font-size:11px;padding:5px 9px;text-decoration:none" href="mailto:${esc(mail)}" title="${esc(mail)}"><i class="fa-solid fa-envelope"></i></a>`:''}
+            </div>
+          </div>`;
+        }).join('');
+    }).join('');
+  };
+  $('gdq').oninput=draw;
+  draw();
 }
 
 const EXTRA_ACT_ERR={SERVICE_REQUIS:'Sélectionnez un service d\'affectation.',SERVICE_INCONNU:'Ce service n\'existe pas dans cet établissement.',NON_AUTORISE_HOTEL:'Ce collaborateur n\'est pas autorisé à intervenir ici.',NON_AUTORISE:'Action non autorisée.'};
