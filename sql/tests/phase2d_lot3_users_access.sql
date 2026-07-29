@@ -257,16 +257,31 @@ END $$;
 -- 11. Interdiction de retirer le DERNIER Super Admin actif
 -- ----------------------------------------------------------------------------
 DO $$
-DECLARE v_admin uuid; v_failed boolean := false;
+DECLARE v_admin uuid; v_failed boolean := false; v_others uuid[];
 BEGIN
   v_admin := pg_temp.zz4_mk_admin();
+  -- Neutralise temporairement tout AUTRE super_admin actif — réel (production) ou créé par les
+  -- tests précédents dans cette même transaction (9 et 10 en ont créé) — pour isoler
+  -- authentiquement le scénario "dernier Super Admin". Restauré explicitement ci-dessous, quel
+  -- que soit le résultat ; de toute façon la suite entière tourne sous ROLLBACK final, rien ne
+  -- persiste, mais la restauration évite de fausser les tests suivants dans cette transaction.
+  SELECT array_agg(auth_id) INTO v_others FROM public.platform_admins
+    WHERE auth_id <> v_admin AND role = 'super_admin' AND is_active = true;
+  UPDATE public.platform_admins SET is_active = false
+    WHERE auth_id <> v_admin AND role = 'super_admin' AND is_active = true;
+
   PERFORM pg_temp.zz4_as(v_admin);
   BEGIN
     PERFORM public.admin_revoke_platform_admin(v_admin, 'Tentative de se retirer soi-même, seul admin');
   EXCEPTION WHEN OTHERS THEN v_failed := SQLERRM LIKE '%dernier Super Admin%';
   END;
+
+  IF v_others IS NOT NULL THEN
+    UPDATE public.platform_admins SET is_active = true WHERE auth_id = ANY(v_others);
+  END IF;
+
   IF v_failed THEN
-    PERFORM pg_temp.zz4_log(11, 'Interdiction de retirer le dernier Super Admin', 'PASS', 'exception levée comme attendu');
+    PERFORM pg_temp.zz4_log(11, 'Interdiction de retirer le dernier Super Admin', 'PASS', 'exception levée comme attendu, autres admins restaurés');
   ELSE
     PERFORM pg_temp.zz4_log(11, 'Interdiction de retirer le dernier Super Admin', 'FAIL', 'aucune exception levée');
   END IF;
@@ -283,6 +298,12 @@ BEGIN
   v_user1 := pg_temp.zz4_mk_user(v_home); v_user2 := pg_temp.zz4_mk_user(v_home);
   PERFORM pg_temp.zz4_as(pg_temp.zz4_mk_admin());
   PERFORM public.admin_grant_hotel(v_user1, v_hotel, 'admin_hotel');
+  -- Neutralise l'effet du trigger historique trg_grant_superadmin_on_new_hotel (découvert lors
+  -- de la validation : il accorde automatiquement un accès 'direction' au Super Admin réel le
+  -- plus ancien sur TOUT nouvel hôtel, dès qu'un tel admin possède une ligne public.users).
+  -- Sans ce nettoyage, ce test ne pourrait jamais observer un hôtel n'ayant qu'un seul
+  -- administrateur. Portée strictement limitée à cet hôtel de test fraîchement créé.
+  DELETE FROM public.user_hotels WHERE hotel_id = v_hotel AND user_id <> v_user1 AND role IN ('direction','admin_hotel');
   BEGIN
     PERFORM public.admin_revoke_hotel(v_user1, v_hotel);
   EXCEPTION WHEN OTHERS THEN v_failed := SQLERRM LIKE '%sans administrateur%';

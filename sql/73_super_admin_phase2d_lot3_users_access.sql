@@ -35,6 +35,16 @@
 --     NON réutilisée pour la création d'hôtel (redondante avec admin_create_hotel_with_subscription
 --     du Lot 2, qui utilise le modèle d'abonnement actuel) ; laissée intacte, hors périmètre.
 --
+-- Découverte faite pendant la validation (test du garde-fou "dernier admin_hotel") : le trigger
+-- historique trg_grant_superadmin_on_new_hotel (AFTER INSERT ON hotels) accorde automatiquement
+-- un accès 'direction' au Super Admin réel le plus ancien (le premier platform_admins.role=
+-- super_admin actif possédant une ligne public.users) sur TOUT nouvel hôtel. Comportement
+-- préexistant, intentionnel (bootstrap d'accès), inchangé ici — documenté pour expliquer
+-- pourquoi le garde-fou "dernier administrateur" de admin_revoke_hotel ne se déclenche
+-- quasiment jamais sur un hôtel neuf en conditions réelles (il y a presque toujours ce second
+-- accès automatique) : le garde-fou reste correct et utile pour les hôtels plus anciens ou dans
+-- les cas où ce trigger n'a pas trouvé de correspondance.
+--
 -- ÉCART DE SÉCURITÉ DÉCOUVERT (même famille que Lots 0-2) : admin_grant_hotel, admin_revoke_hotel,
 -- admin_set_hotel_role, admin_list_user_access, admin_set_app_access, admin_set_user_status,
 -- admin_list_unlinked_auth_users (RPC frontend) et _admin_sync_user_default_role (helper interne)
