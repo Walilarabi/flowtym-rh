@@ -6,6 +6,8 @@ const {
   hotelActionsForStatus,
   hotelRoleLabel, platformRoleLabel, accountStatus, accountStatusBadge, primaryRoleLabel,
   revokeHotelImpactMessage, isLastHotelAdminError, historyActionLabel,
+  invoiceStatusBadge, invoicePaymentBadge, paymentStatusBadge, creditNoteStatusBadge,
+  paymentMethodLabel, billingActionsForStatus, isInvoiceOverdue,
 } = require('./lib/adminHelpers');
 
 describe('Super Admin — hotelStatusBadge()', () => {
@@ -349,5 +351,90 @@ describe('Super Admin — filtres Utilisateurs (logique pure reproduite)', () =>
   });
   test('filtre par groupe isole les utilisateurs dont un hôtel appartient à ce groupe', () => {
     expect(users.filter(u => u.group_names.includes('Groupe A')).map(u => u.user_id)).toEqual(['u2']);
+  });
+});
+
+describe('Super Admin — invoiceStatusBadge() (Lot 4 : jamais confondu avec statut abonnement/hôtel)', () => {
+  test('mappe les trois statuts de facture plateforme', () => {
+    expect(invoiceStatusBadge('proforma')).toEqual({ label: 'Proforma', cls: 'amber' });
+    expect(invoiceStatusBadge('issued')).toEqual({ label: 'Émise', cls: 'blue' });
+    expect(invoiceStatusBadge('cancelled')).toEqual({ label: 'Annulée', cls: 'gray' });
+  });
+});
+
+describe('Super Admin — invoicePaymentBadge() (statut de règlement dérivé, jamais stocké)', () => {
+  test('une proforma n\'a pas de statut de règlement', () => {
+    expect(invoicePaymentBadge({ status: 'proforma', balance: 100 })).toEqual({ label: '—', cls: 'gray' });
+  });
+  test('une facture émise avec solde nul est réglée', () => {
+    expect(invoicePaymentBadge({ status: 'issued', balance: 0 })).toEqual({ label: 'Réglée', cls: 'green' });
+  });
+  test('une facture émise avec solde positif est impayée', () => {
+    expect(invoicePaymentBadge({ status: 'issued', balance: 50 })).toEqual({ label: 'Impayé', cls: 'red' });
+  });
+});
+
+describe('Super Admin — paymentStatusBadge() / creditNoteStatusBadge()', () => {
+  test('statuts de paiement', () => {
+    expect(paymentStatusBadge('recorded')).toEqual({ label: 'Enregistré', cls: 'green' });
+    expect(paymentStatusBadge('pending')).toEqual({ label: 'En attente', cls: 'amber' });
+    expect(paymentStatusBadge('failed')).toEqual({ label: 'Échoué', cls: 'red' });
+  });
+  test('statuts d\'avoir', () => {
+    expect(creditNoteStatusBadge('issued')).toEqual({ label: 'Émis', cls: 'blue' });
+    expect(creditNoteStatusBadge('voided')).toEqual({ label: 'Annulé', cls: 'gray' });
+  });
+});
+
+describe('Super Admin — paymentMethodLabel()', () => {
+  test('traduit les méthodes déjà préparées pour de futurs prestataires', () => {
+    expect(paymentMethodLabel('bank_transfer')).toBe('Virement');
+    expect(paymentMethodLabel('sepa')).toBe('Prélèvement SEPA');
+    expect(paymentMethodLabel('card')).toBe('Carte');
+  });
+  test('méthode inconnue retombe sur la valeur brute', () => {
+    expect(paymentMethodLabel('bitcoin')).toBe('bitcoin');
+  });
+});
+
+describe('Super Admin — billingActionsForStatus() (distinct de actionsForStatus/hotelActionsForStatus)', () => {
+  test('proforma : émission possible, annulation possible, pas de paiement ni avoir', () => {
+    const a = billingActionsForStatus('proforma', 0);
+    expect(a).toEqual({ canIssue: true, canCancel: true, canRecordPayment: false, canCreateCreditNote: false });
+  });
+  test('émise sans paiement : annulation encore possible', () => {
+    const a = billingActionsForStatus('issued', 0);
+    expect(a.canCancel).toBe(true);
+    expect(a.canRecordPayment).toBe(true);
+    expect(a.canCreateCreditNote).toBe(true);
+  });
+  test('émise avec paiement : annulation interdite (utiliser un avoir)', () => {
+    const a = billingActionsForStatus('issued', 50);
+    expect(a.canCancel).toBe(false);
+  });
+  test('annulée : plus aucune action', () => {
+    const a = billingActionsForStatus('cancelled', 0);
+    expect(a.canIssue).toBe(false);
+    expect(a.canCancel).toBe(false);
+    expect(a.canRecordPayment).toBe(false);
+    expect(a.canCreateCreditNote).toBe(false);
+  });
+});
+
+describe('Super Admin — isInvoiceOverdue()', () => {
+  test('facture émise, échéance dépassée, solde positif -> en retard', () => {
+    expect(isInvoiceOverdue({ status: 'issued', due_date: '2026-07-01', balance: 50 }, '2026-07-29')).toBe(true);
+  });
+  test('facture émise mais déjà réglée (solde nul) -> jamais en retard', () => {
+    expect(isInvoiceOverdue({ status: 'issued', due_date: '2026-07-01', balance: 0 }, '2026-07-29')).toBe(false);
+  });
+  test('proforma jamais en retard, quelle que soit l\'échéance', () => {
+    expect(isInvoiceOverdue({ status: 'proforma', due_date: '2026-01-01', balance: 100 }, '2026-07-29')).toBe(false);
+  });
+  test('échéance future -> pas encore en retard', () => {
+    expect(isInvoiceOverdue({ status: 'issued', due_date: '2026-08-15', balance: 50 }, '2026-07-29')).toBe(false);
+  });
+  test('sans échéance renseignée -> jamais en retard', () => {
+    expect(isInvoiceOverdue({ status: 'issued', due_date: null, balance: 50 }, '2026-07-29')).toBe(false);
   });
 });

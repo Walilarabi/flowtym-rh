@@ -196,6 +196,19 @@ button,select,input,textarea{font-family:inherit}
 .mform .fld{margin-bottom:13px}
 .mform .fld label{display:block;font-size:11.5px;font-weight:600;color:var(--ink2);margin-bottom:5px}
 .mform input,.mform select{width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:10px;font-size:13px}
+
+/* ---- Export PDF (facture) : rendu navigateur, aucune librairie, aucun service externe ---- */
+#invoicePrintArea{display:none}
+@media print{
+  body *{visibility:hidden}
+  #invoicePrintArea, #invoicePrintArea *{visibility:visible}
+  #invoicePrintArea{display:block;position:absolute;top:0;left:0;width:100%;padding:24px}
+  .ip-h{display:flex;justify-content:space-between;margin-bottom:24px}
+  .ip-h h1{font-size:20px}
+  .ip-tbl{width:100%;border-collapse:collapse;margin-top:18px}
+  .ip-tbl th,.ip-tbl td{border-bottom:1px solid #ccc;padding:8px;text-align:left;font-size:13px}
+  .ip-tot{margin-top:14px;text-align:right;font-size:14px}
+}
 </style>
 </head>
 <body>
@@ -203,6 +216,7 @@ button,select,input,textarea{font-family:inherit}
 <aside class="drawer" id="drawer"></aside>
 <div class="modalbg" id="modalbg"><div class="modal" id="modal"></div></div>
 <div class="toast" id="toast"></div>
+<div id="invoicePrintArea"></div>
 
 <script>
 /* =====================================================================
@@ -443,6 +457,49 @@ const ACTION_HISTORY_LABEL={
 function historyActionLabel(action){ return ACTION_HISTORY_LABEL[action]||action||'—'; }
 
 /* =====================================================================
+   Helpers purs — Facturation plateforme (Lot 4, mirror exact de tests/lib/adminHelpers.js)
+   ===================================================================== */
+const INVOICE_STATUS_LABEL={proforma:'Proforma', issued:'Émise', cancelled:'Annulée'};
+const INVOICE_STATUS_CLASS={proforma:'amber', issued:'blue', cancelled:'gray'};
+function invoiceStatusBadge(status){ return {label:INVOICE_STATUS_LABEL[status]||status||'—', cls:INVOICE_STATUS_CLASS[status]||'gray'}; }
+
+// Statut de règlement — dérivé (jamais stocké comme statut de facture), jamais confondu avec
+// le statut proforma/émise/annulée de la facture elle-même.
+function invoicePaymentBadge({status, balance}){
+  if(status!=='issued') return {label:'—', cls:'gray'};
+  if(balance<=0) return {label:'Réglée', cls:'green'};
+  return {label:'Impayé', cls:'red'};
+}
+
+const PAYMENT_STATUS_LABEL={recorded:'Enregistré', pending:'En attente', failed:'Échoué'};
+const PAYMENT_STATUS_CLASS={recorded:'green', pending:'amber', failed:'red'};
+function paymentStatusBadge(status){ return {label:PAYMENT_STATUS_LABEL[status]||status||'—', cls:PAYMENT_STATUS_CLASS[status]||'gray'}; }
+
+const CREDIT_NOTE_STATUS_LABEL={issued:'Émis', voided:'Annulé'};
+const CREDIT_NOTE_STATUS_CLASS={issued:'blue', voided:'gray'};
+function creditNoteStatusBadge(status){ return {label:CREDIT_NOTE_STATUS_LABEL[status]||status||'—', cls:CREDIT_NOTE_STATUS_CLASS[status]||'gray'}; }
+
+const PAYMENT_METHOD_LABEL={bank_transfer:'Virement', card:'Carte', sepa:'Prélèvement SEPA', check:'Chèque', cash:'Espèces', other:'Autre'};
+function paymentMethodLabel(method){ return PAYMENT_METHOD_LABEL[method]||method||'—'; }
+
+// Actions pertinentes pour une facture PLATEFORME (proforma/émise/annulée) — distinct de
+// actionsForStatus (abonnement) et hotelActionsForStatus (hôtel), jamais confondus.
+function billingActionsForStatus(status, paidAmount){
+  return {
+    canIssue: status==='proforma',
+    canCancel: status!=='cancelled' && !(paidAmount>0),
+    canRecordPayment: status==='issued',
+    canCreateCreditNote: status==='issued',
+  };
+}
+
+function isInvoiceOverdue({status, due_date, balance}, todayStr){
+  if(status!=='issued' || !due_date || balance<=0) return false;
+  const today = todayStr || new Date().toISOString().slice(0,10);
+  return due_date < today;
+}
+
+/* =====================================================================
    Toast / drawer / confirm
    ===================================================================== */
 let toastT=null;
@@ -587,7 +644,7 @@ const MENU=[
     ['licenses','Licences','fa-solid fa-key',false],
   ]],
   ['Finance',[
-    ['billing','Facturation','fa-regular fa-file-lines',false],
+    ['billing','Facturation','fa-regular fa-file-lines',true],
     ['payments','Paiements','fa-solid fa-credit-card',false],
   ]],
   ['Plateforme',[
@@ -597,9 +654,8 @@ const MENU=[
   ]],
 ];
 const STUB_INFO={
-  billing:{ic:'fa-regular fa-file-lines',desc:'Les tables de facturation plateforme (platform_invoices, platform_contracts) et la préparation e-invoicing existent déjà côté base, sans RPC ni donnée réelle pour l\'instant.'},
   trials:{ic:'fa-regular fa-hourglass-half',desc:'Le suivi d\'essai (dates, alertes 30/15/7/3/1 jours) sera construit sur hotel_subscriptions.trial_ends_at en Phase 2.'},
-  payments:{ic:'fa-solid fa-credit-card',desc:'Le moteur de relance (dunning) existe déjà côté base pour la facturation hôtel ; son équivalent plateforme (paiements Flowtym) arrive en Phase 2.'},
+  payments:{ic:'fa-solid fa-credit-card',desc:'Les paiements par facture se gèrent déjà depuis la fiche facture (module Facturation). Une vue transversale multi-factures (rapprochement bancaire, relances) arrive en Phase 2.'},
   licenses:{ic:'fa-solid fa-key',desc:'platform_apps, hotel_app_subscriptions et user_app_access existent déjà. Vue de gestion consolidée prévue en Phase 2.'},
   stats:{ic:'fa-solid fa-chart-line',desc:'MRR/ARR/churn seront calculés sur hotel_subscriptions et platform_invoices une fois la facturation Phase 2 en place.'},
   support:{ic:'fa-regular fa-life-ring',desc:'La table support_tickets existe déjà (avec triage) et est accessible en lecture aux admins plateforme ; l\'interface dédiée arrive en Phase 2.'},
@@ -680,6 +736,7 @@ async function renderView(){
     else if(view==='groups') await renderGroups(el);
     else if(view==='users') await renderUsers(el);
     else if(view==='subscriptions') await renderSubscriptions(el);
+    else if(view==='billing') await renderBilling(el);
     else if(view==='audit') await renderAudit(el);
     else renderStub(el, view);
   }catch(e){
@@ -905,6 +962,7 @@ function openHotelDrawer(hotel, groupsCache, plansCache){
         <div class="fld"><label>N° TVA</label><input id="f_tva" value="${esc(hotel?.tva_number||'')}"></div>
       </div>
       <div class="fld"><label>Raison sociale</label><input id="f_company" value="${esc(hotel?.company||'')}"></div>
+      <div class="fld"><label>Email de facturation</label><input id="f_billing_email" type="email" placeholder="Si différent de l'email ci-dessus" value="${esc(hotel?.billing_email||'')}"></div>
       <div class="row2">
         <div class="fld"><label>Chambres</label><input id="f_rooms" type="number" min="0" value="${esc(hotel?.total_rooms??'')}"></div>
         <div class="fld"><label>Devise</label><input id="f_currency" value="${esc(hotel?.currency||'EUR')}"></div>
@@ -931,6 +989,7 @@ function openHotelDrawer(hotel, groupsCache, plansCache){
       address:$('f_address').value, city:$('f_city').value, zip:$('f_zip').value, country:$('f_country').value,
       phone:$('f_phone').value, email:$('f_email').value, website:$('f_website').value,
       siret:$('f_siret').value, tva_number:$('f_tva').value, company:$('f_company').value,
+      billing_email:$('f_billing_email').value,
       total_rooms:$('f_rooms').value, currency:$('f_currency').value, timezone:$('f_timezone').value,
     };
     if(!payload.name){ flash('Le nom est requis.','e'); return; }
@@ -964,14 +1023,16 @@ async function openHotelDetailDrawer(hotel){
   if(!hotel){ flash('Hôtel introuvable.','e'); return; }
   openDrawer(`<div class="dh"><button class="close" id="dClose"><i class="fa-solid fa-xmark"></i></button><h2>Chargement…</h2></div>`);
   $('dClose').onclick=closeDrawer;
-  const [{data:groups},{data:sub},{data:plan},{data:users},{data:apps},{data:logs}]=await Promise.all([
+  const [{data:groups},{data:sub},{data:plan},{data:users},{data:apps},{data:logs},{data:hotelInvoices}]=await Promise.all([
     sb.from('hotel_groups').select('id,name,status'),
     sb.from('hotel_subscriptions').select('*').eq('hotel_id',hotel.id).maybeSingle(),
     Promise.resolve({data:null}),
     sb.from('users').select('id,full_name,email,role,is_active').eq('hotel_id',hotel.id),
     sb.from('user_app_access').select('app_id, platform_apps(name)').eq('hotel_id',hotel.id),
     sb.from('platform_logs').select('*').eq('hotel_id',hotel.id).order('created_at',{ascending:false}).limit(15),
+    sb.rpc('admin_list_platform_invoices'),
   ]);
+  const invoicesForHotel=(hotelInvoices||[]).filter(i=>i.hotel_id===hotel.id).slice(0,5);
   let planRow=null;
   if(sub?.plan_id){ const {data}=await sb.from('subscription_plans').select('id,name').eq('id',sub.plan_id).maybeSingle(); planRow=data; }
   const group=(groups||[]).find(g=>g.id===hotel.group_id);
@@ -1030,7 +1091,10 @@ async function openHotelDetailDrawer(hotel){
     </div>
 
     <div class="sec"><h4>Facturation</h4>
-      <div class="muted" style="font-size:12.5px">Module de facturation non encore construit (Lot 4) — aucune intégration de paiement, réelle ou simulée, n'existe à ce jour.</div>
+      <div class="tlist">
+        ${invoicesForHotel.length?invoicesForHotel.map(i=>`<div class="it"><div><div class="nm">${esc(i.number||'(proforma)')}</div><div class="sub">${esc(invoiceStatusBadge(i.status).label)}</div></div><div class="right">${fmtMoney(i.amount_ttc, i.currency)}</div></div>`).join(''):'<div class="empty" style="padding:14px">Aucune facture.</div>'}
+      </div>
+      <div class="actrow"><button class="btn g" id="hGotoBilling"><i class="fa-regular fa-file-lines"></i> Gérer depuis Facturation</button></div>
     </div>
 
     <div class="sec"><h4>Audit</h4>
@@ -1070,6 +1134,7 @@ async function openHotelDetailDrawer(hotel){
   };
   $('hGotoSub')&&($('hGotoSub').onclick=()=>{ closeDrawer(); goView('subscriptions'); });
   $('hGotoUsers').onclick=()=>{ closeDrawer(); goView('users'); };
+  $('hGotoBilling').onclick=()=>{ closeDrawer(); goView('billing'); };
 }
 
 /* =====================================================================
@@ -2170,6 +2235,384 @@ async function openPlanModulesDrawer(plan){
     }catch(e){ flash(errorLabel(e.message),'e'); }
     finally{ $('dSave').disabled=false; }
   };
+}
+
+/* =====================================================================
+   Facturation (Lot 4) — facturation PLATEFORME (Flowtym -> hôtels), distincte de la
+   facturation hôtel -> client final (module Checkout, hors périmètre ici).
+   ===================================================================== */
+let billingTab='list', billingPage=0, billingSort={key:'created_at',dir:'desc'};
+let billingFilterStatus='', billingFilterHotel='', billingFilterOverdue='';
+
+async function renderBilling(el){
+  el.innerHTML=`<div class="page">
+    <div class="phead"><div><h1>Facturation</h1><div class="sub">Facturation de la plateforme Flowtym aux hôtels</div></div></div>
+    <div class="tabs">
+      <button class="tab ${billingTab==='list'?'on':''}" data-tab="list">Factures</button>
+      <button class="tab ${billingTab==='dashboard'?'on':''}" data-tab="dashboard">Tableau de bord</button>
+    </div>
+    <div id="billingBody"></div>
+  </div>`;
+  el.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{ billingTab=b.dataset.tab; renderBilling(el); });
+  const body=$('billingBody');
+  if(billingTab==='dashboard') await renderBillingDashboard(body);
+  else await renderInvoiceList(body);
+}
+
+async function renderInvoiceList(el){
+  el.innerHTML='<div class="loading"><i class="fa-solid fa-circle-notch fa-spin"></i> Chargement…</div>';
+  const [{data:rows,error:iErr},{data:hotels,error:hErr},{data:subs}]=await Promise.all([
+    sb.rpc('admin_list_platform_invoices'),
+    sb.from('hotels').select('id,name,status,company,address,siret,tva_number,email,billing_email'),
+    sb.from('hotel_subscriptions').select('id,hotel_id,plan_id,status'),
+  ]);
+  if(iErr) throw iErr; if(hErr) throw hErr;
+  const hotelById=Object.fromEntries((hotels||[]).map(h=>[h.id,h]));
+
+  let list=rows||[];
+  if(searchQuery.trim()){
+    const q=searchQuery.trim().toLowerCase();
+    list=list.filter(r=>[r.hotel_name,r.number].filter(Boolean).some(v=>String(v).toLowerCase().includes(q)));
+  }
+  if(billingFilterStatus) list=list.filter(r=>r.status===billingFilterStatus);
+  if(billingFilterHotel) list=list.filter(r=>r.hotel_id===billingFilterHotel);
+  if(billingFilterOverdue==='yes') list=list.filter(r=>isInvoiceOverdue(r));
+  list=sortRows(list, billingSort.key, billingSort.dir);
+
+  const pageSize=20, pageCount=Math.max(1,Math.ceil(list.length/pageSize));
+  billingPage=Math.min(billingPage,pageCount-1);
+  const pageRows=list.slice(billingPage*pageSize,(billingPage+1)*pageSize);
+
+  el.innerHTML=`
+    <div class="phead" style="margin-top:14px">
+      <div class="sub">${fmtNum(list.length)} facture(s)</div>
+      <div class="actions">
+        <button class="btn g" id="exportInvoices"><i class="fa-solid fa-download"></i> Exporter CSV</button>
+        <button class="btn p" id="newInvoice"><i class="fa-solid fa-plus"></i> Nouvelle facture</button>
+      </div>
+    </div>
+    <div class="filters">
+      <select id="fBStatus"><option value="">Tous les statuts</option>${Object.entries(INVOICE_STATUS_LABEL).map(([k,l])=>`<option value="${k}" ${billingFilterStatus===k?'selected':''}>${l}</option>`).join('')}</select>
+      <select id="fBHotel"><option value="">Tous les hôtels</option>${(hotels||[]).map(h=>`<option value="${h.id}" ${billingFilterHotel===h.id?'selected':''}>${esc(h.name)}</option>`).join('')}</select>
+      <select id="fBOverdue"><option value="">Échéance : tous</option><option value="yes" ${billingFilterOverdue==='yes'?'selected':''}>En retard uniquement</option></select>
+    </div>
+    <div class="tblwrap"><table class="tbl">
+      <thead><tr>
+        <th data-k="hotel_name">Hôtel</th><th>Numéro</th><th data-k="status">Statut</th>
+        <th data-k="amount_ttc">Montant TTC</th><th>Réglé</th><th>Solde</th>
+        <th data-k="due_date">Échéance</th><th data-k="created_at">Créée le</th><th>Actions</th>
+      </tr></thead>
+      <tbody>${pageRows.length?pageRows.map(rowInvoiceHtml).join(''):`<tr><td colspan="9" class="empty">Aucune facture${searchQuery?' pour cette recherche':''}.</td></tr>`}</tbody>
+    </table></div>
+    <div class="pager">
+      <span>Page ${billingPage+1} / ${pageCount}</span>
+      <button id="bPrev" ${billingPage===0?'disabled':''}>‹ Précédent</button>
+      <button id="bNext" ${billingPage>=pageCount-1?'disabled':''}>Suivant ›</button>
+    </div>
+  `;
+  el.querySelectorAll('th[data-k]').forEach(th=>th.onclick=()=>{
+    const k=th.dataset.k;
+    billingSort = billingSort.key===k ? {key:k,dir:billingSort.dir==='asc'?'desc':'asc'} : {key:k,dir:'asc'};
+    renderInvoiceList(el);
+  });
+  $('fBStatus').onchange=e=>{ billingFilterStatus=e.target.value; billingPage=0; renderInvoiceList(el); };
+  $('fBHotel').onchange=e=>{ billingFilterHotel=e.target.value; billingPage=0; renderInvoiceList(el); };
+  $('fBOverdue').onchange=e=>{ billingFilterOverdue=e.target.value; billingPage=0; renderInvoiceList(el); };
+  $('bPrev')&&($('bPrev').onclick=()=>{ billingPage--; renderInvoiceList(el); });
+  $('bNext')&&($('bNext').onclick=()=>{ billingPage++; renderInvoiceList(el); });
+  $('exportInvoices').onclick=()=>downloadCSV('factures.csv', list, [
+    {label:'Hôtel',get:r=>r.hotel_name},{label:'Numéro',get:r=>r.number||'(proforma)'},
+    {label:'Statut',get:r=>invoiceStatusBadge(r.status).label},{label:'Montant TTC',get:r=>r.amount_ttc},
+    {label:'Réglé',get:r=>r.paid_amount},{label:'Solde',get:r=>r.balance},
+    {label:'Échéance',get:r=>fmtDate(r.due_date)},{label:'Créée le',get:r=>fmtDate(r.created_at)},
+  ]);
+  $('newInvoice').onclick=()=>openCreateInvoiceModal(hotels||[], subs||[], ()=>renderInvoiceList(el));
+  el.querySelectorAll('[data-open-inv]').forEach(b=>b.onclick=()=>openInvoiceDrawer(b.dataset.openInv, hotelById, ()=>renderBilling($('view'))));
+}
+
+function rowInvoiceHtml(r){
+  const st=invoiceStatusBadge(r.status);
+  const overdue=isInvoiceOverdue(r);
+  return `<tr>
+    <td><b>${esc(r.hotel_name)}</b></td>
+    <td>${esc(r.number||'(proforma)')}</td>
+    <td><span class="tag ${st.cls}">${esc(st.label)}</span>${overdue?' <span class="tag red">En retard</span>':''}</td>
+    <td>${fmtMoney(r.amount_ttc, r.currency)}</td>
+    <td>${fmtMoney(r.paid_amount, r.currency)}</td>
+    <td><b>${fmtMoney(r.balance, r.currency)}</b></td>
+    <td class="muted">${fmtDate(r.due_date)}</td>
+    <td class="muted">${fmtDate(r.created_at)}</td>
+    <td><button data-open-inv="${r.id}" title="Ouvrir la fiche"><i class="fa-regular fa-eye"></i></button></td>
+  </tr>`;
+}
+
+function openCreateInvoiceModal(hotels, subs, onDone){
+  const activeHotels=(hotels||[]).filter(h=>h.status!=='archived');
+  formModal({
+    title:'Nouvelle facture (proforma)',
+    bodyHtml:`
+      <div class="fld"><label>Hôtel *</label><select id="ci_hotel">${activeHotels.map(h=>`<option value="${h.id}">${esc(h.name)}</option>`).join('')}</select></div>
+      <div class="fld"><label>Abonnement lié (optionnel)</label><select id="ci_sub"><option value="">Aucun</option>${(subs||[]).map(s=>`<option value="${s.id}" data-hotel="${s.hotel_id}">${s.id.slice(0,8)}… (${esc(s.status)})</option>`).join('')}</select></div>
+      <div class="row2">
+        <div class="fld"><label>Début de période</label><input type="date" id="ci_start"></div>
+        <div class="fld"><label>Fin de période</label><input type="date" id="ci_end"></div>
+      </div>
+      <div class="row2">
+        <div class="fld"><label>Montant HT (€) *</label><input type="number" id="ci_ht" step="0.01" min="0"></div>
+        <div class="fld"><label>Taux TVA (%)</label><input type="number" id="ci_tva" value="20" step="0.1" min="0"></div>
+      </div>
+      <div class="fld"><label>Échéance</label><input type="date" id="ci_due"></div>
+      <div class="fld"><label>Notes</label><textarea id="ci_notes"></textarea></div>
+    `,
+    confirmLabel:'Créer la proforma',
+    onConfirm: async()=>{
+      const hotel_id=$('ci_hotel').value;
+      const subscription_id=$('ci_sub').value||null;
+      const amount_ht=parseFloat($('ci_ht').value);
+      if(!amount_ht || amount_ht<=0){ throw new Error('Le montant HT doit être positif.'); }
+      const {error}=await sb.rpc('admin_create_platform_invoice',{
+        p_hotel_id:hotel_id, p_subscription_id:subscription_id,
+        p_period_start:$('ci_start').value||null, p_period_end:$('ci_end').value||null,
+        p_amount_ht:amount_ht, p_tva_rate:parseFloat($('ci_tva').value)||20,
+        p_due_date:$('ci_due').value||null, p_notes:$('ci_notes').value.trim()||null,
+      });
+      if(error) throw error;
+      flash('Facture proforma créée.'); onDone && onDone();
+    }
+  });
+}
+
+async function openInvoiceDrawer(invoiceId, hotelById, onChange){
+  openDrawer(`<div class="dh"><button class="close" id="dClose"><i class="fa-solid fa-xmark"></i></button><h2>Chargement…</h2></div>`);
+  $('dClose').onclick=closeDrawer;
+  const {data:detail,error}=await sb.rpc('admin_get_platform_invoice_detail',{p_invoice_id:invoiceId});
+  if(error){ flash(errorLabel(error.message),'e'); closeDrawer(); return; }
+  renderInvoiceDrawerBody(detail, onChange);
+}
+
+function renderInvoiceDrawerBody(detail, onChange){
+  const inv=detail.invoice, hotel=detail.hotel, sub=detail.subscription;
+  const payments=detail.payments||[], creditNotes=detail.credit_notes||[], history=detail.history||[];
+  const credited=creditNotes.filter(c=>c.status==='issued').reduce((s,c)=>s+Number(c.amount_ttc),0);
+  const balance=Number(inv.amount_ttc)-Number(inv.paid_amount)-credited;
+  const st=invoiceStatusBadge(inv.status);
+  const acts=billingActionsForStatus(inv.status, inv.paid_amount);
+  const overdue=isInvoiceOverdue({status:inv.status, due_date:inv.due_date, balance});
+
+  openDrawer(`
+    <div class="dh"><button class="close" id="dClose"><i class="fa-solid fa-xmark"></i></button>
+      <h2>${esc(hotel.name)} — ${esc(inv.number||'Proforma')}</h2>
+      <div class="role"><span class="tag ${st.cls}">${esc(st.label)}</span>${overdue?' <span class="tag red">En retard</span>':''}</div>
+    </div>
+
+    <div class="sec"><h4>Détails</h4>
+      <div class="kv"><span>Montant HT</span><b>${fmtMoney(inv.amount_ht, inv.currency)}</b></div>
+      <div class="kv"><span>TVA (${inv.tva_rate}%)</span><b>${fmtMoney(inv.tva_amount, inv.currency)}</b></div>
+      <div class="kv"><span>Montant TTC</span><b>${fmtMoney(inv.amount_ttc, inv.currency)}</b></div>
+      <div class="kv"><span>Réglé</span><b>${fmtMoney(inv.paid_amount, inv.currency)}</b></div>
+      <div class="kv"><span>Avoirs émis</span><b>${fmtMoney(credited, inv.currency)}</b></div>
+      <div class="kv"><span>Solde</span><b>${fmtMoney(balance, inv.currency)}</b></div>
+      <div class="kv"><span>Période</span><b>${inv.period_start?fmtDate(inv.period_start)+' → '+fmtDate(inv.period_end):'—'}</b></div>
+      <div class="kv"><span>Échéance</span><b>${fmtDate(inv.due_date)}</b></div>
+      <div class="kv"><span>Émise le</span><b>${fmtDateTime(inv.issued_at)}</b></div>
+      ${sub?`<div class="kv"><span>Abonnement lié</span><b>${esc(sub.id.slice(0,8))}… (${esc(sub.status)})</b></div>`:''}
+      ${inv.notes?`<div class="kv"><span>Notes</span><b>${esc(inv.notes)}</b></div>`:''}
+      <div class="actrow">
+        ${acts.canIssue?'<button class="btn p" id="iIssue"><i class="fa-solid fa-paper-plane"></i> Émettre</button>':''}
+        ${acts.canCancel?'<button class="btn d" id="iCancel"><i class="fa-solid fa-ban"></i> Annuler</button>':''}
+        <button class="btn g" id="iPrint"><i class="fa-solid fa-print"></i> Export PDF</button>
+      </div>
+      ${overdue && sub?`<div class="actrow"><button class="btn d" id="iSuspend"><i class="fa-solid fa-pause"></i> Suspendre l'abonnement pour impayé</button></div>`:''}
+    </div>
+
+    <div class="sec"><h4>Coordonnées de facturation</h4>
+      <div class="kv"><span>Raison sociale</span><b>${esc(inv.bill_to_name||hotel.company||hotel.name)}</b></div>
+      <div class="kv"><span>Adresse</span><b>${esc(inv.bill_to_address||hotel.address||'—')}</b></div>
+      <div class="kv"><span>TVA</span><b>${esc(inv.bill_to_vat||hotel.tva_number||'—')}</b></div>
+      <div class="kv"><span>Email de facturation</span><b>${esc(inv.bill_to_email||hotel.billing_email||hotel.email||'—')}</b></div>
+      ${inv.status==='proforma'?'<p class="muted" style="font-size:11.5px;margin-top:6px">Aperçu basé sur la fiche hôtel actuelle — figé définitivement à l\'émission.</p>':''}
+    </div>
+
+    <div class="sec"><h4>Paiements (${payments.length})</h4>
+      ${payments.length?payments.map(p=>{
+        const pst=paymentStatusBadge(p.status);
+        return `<div class="it" style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px dashed var(--line)">
+          <div><div class="nm">${fmtMoney(p.amount, p.currency)} · ${esc(paymentMethodLabel(p.method))}</div><div class="sub" style="font-size:11px;color:var(--muted)">${esc(p.reference||'')} · ${fmtDateTime(p.payment_date)}</div></div>
+          <div style="text-align:right"><span class="tag ${pst.cls}">${esc(pst.label)}</span>${p.status==='pending'?`<div style="margin-top:4px"><button class="btn sm g" data-confirm-pay="${p.id}">Confirmer</button> <button class="btn sm d" data-fail-pay="${p.id}">Échec</button></div>`:''}</div>
+        </div>`;
+      }).join(''):'<div class="empty" style="padding:14px">Aucun paiement.</div>'}
+      ${acts.canRecordPayment?'<div class="actrow"><button class="btn g" id="iRecordPayment"><i class="fa-solid fa-hand-holding-dollar"></i> Enregistrer un paiement</button></div>':''}
+    </div>
+
+    <div class="sec"><h4>Avoirs (${creditNotes.length})</h4>
+      ${creditNotes.length?creditNotes.map(c=>{
+        const cst=creditNoteStatusBadge(c.status);
+        return `<div class="it" style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px dashed var(--line)">
+          <div><div class="nm">${esc(c.number)} — ${fmtMoney(c.amount_ttc, c.currency)}</div><div class="sub" style="font-size:11px;color:var(--muted)">${esc(c.reason)}</div></div>
+          <div style="text-align:right"><span class="tag ${cst.cls}">${esc(cst.label)}</span>${c.status==='issued'?`<div style="margin-top:4px"><button class="btn sm d" data-void-cn="${c.id}">Annuler</button></div>`:''}</div>
+        </div>`;
+      }).join(''):'<div class="empty" style="padding:14px">Aucun avoir.</div>'}
+      ${acts.canCreateCreditNote?'<div class="actrow"><button class="btn g" id="iCreateCreditNote"><i class="fa-regular fa-file-lines"></i> Émettre un avoir</button></div>':''}
+    </div>
+
+    <div class="sec"><h4>Historique</h4>
+      <div class="tlist">
+        ${history.length?history.slice(0,50).map(h=>`<div class="it"><div><div class="nm">${esc(historyActionLabel(h.action))}</div><div class="sub">${esc(h.admin_email||'—')}</div></div><div class="right">${fmtDateTime(h.created_at)}</div></div>`).join(''):'<div class="empty" style="padding:14px">Aucun événement.</div>'}
+      </div>
+    </div>
+  `);
+
+  $('dClose').onclick=closeDrawer;
+  const refresh=()=>{ closeDrawer(); onChange && onChange(); };
+
+  $('iIssue')&&($('iIssue').onclick=()=>confirmAction({
+    title:'Émettre la facture', body:'Un numéro définitif sera attribué et les coordonnées de facturation seront figées. Action irréversible.',
+    confirmLabel:'Émettre',
+    onConfirm: async()=>{ const {error}=await sb.rpc('admin_issue_platform_invoice',{p_invoice_id:inv.id}); if(error) throw error; flash('Facture émise.'); refresh(); }
+  }));
+  $('iCancel')&&($('iCancel').onclick=()=>{
+    formModal({
+      title:'Annuler la facture', danger:true,
+      bodyHtml:'<div class="fld"><label>Motif *</label><textarea id="cx_reason"></textarea></div>',
+      confirmLabel:'Annuler la facture',
+      onConfirm: async()=>{
+        const reason=$('cx_reason').value.trim();
+        if(!reason) throw new Error('Un motif est requis.');
+        const {error}=await sb.rpc('admin_cancel_platform_invoice',{p_invoice_id:inv.id,p_reason:reason});
+        if(error) throw error;
+        flash('Facture annulée.'); refresh();
+      }
+    });
+  });
+  $('iPrint').onclick=()=>printInvoice(inv, hotel);
+  $('iSuspend')&&($('iSuspend').onclick=()=>confirmAction({
+    title:'Suspendre l\'abonnement pour impayé', danger:true,
+    body:`L'hôtel ${esc(hotel.name)} perdra l'accès à la plateforme jusqu'à réactivation manuelle. Le motif sera consigné avec la référence de cette facture.`,
+    confirmLabel:'Suspendre',
+    onConfirm: async()=>{
+      const {error}=await sb.rpc('admin_suspend_subscription_for_nonpayment',{p_subscription_id:sub.id,p_invoice_id:inv.id,p_reason:null});
+      if(error) throw error;
+      flash('Abonnement suspendu pour impayé.'); refresh();
+    }
+  }));
+
+  $('iRecordPayment')&&($('iRecordPayment').onclick=()=>{
+    formModal({
+      title:'Enregistrer un paiement',
+      bodyHtml:`
+        <div class="fld"><label>Montant (€) *</label><input type="number" id="rp_amount" step="0.01" min="0" value="${balance}"></div>
+        <div class="fld"><label>Méthode</label><select id="rp_method">${Object.entries(PAYMENT_METHOD_LABEL).map(([k,l])=>`<option value="${k}">${l}</option>`).join('')}</select></div>
+        <div class="fld"><label>Référence</label><input id="rp_ref"></div>
+        <div class="fld"><label>Statut</label><select id="rp_status"><option value="recorded">Enregistré (encaissé)</option><option value="pending">En attente de confirmation</option></select></div>
+      `,
+      confirmLabel:'Enregistrer',
+      onConfirm: async()=>{
+        const amount=parseFloat($('rp_amount').value);
+        if(!amount || amount<=0) throw new Error('Le montant doit être positif.');
+        const {error}=await sb.rpc('admin_record_platform_payment',{
+          p_invoice_id:inv.id, p_amount:amount, p_method:$('rp_method').value,
+          p_reference:$('rp_ref').value.trim()||null, p_status:$('rp_status').value, p_notes:null,
+        });
+        if(error) throw error;
+        flash('Paiement enregistré.'); refresh();
+      }
+    });
+  });
+  document.querySelectorAll('[data-confirm-pay]').forEach(b=>b.onclick=()=>confirmAction({
+    title:'Confirmer ce paiement', body:'Le paiement sera marqué comme encaissé.', confirmLabel:'Confirmer',
+    onConfirm: async()=>{ const {error}=await sb.rpc('admin_update_platform_payment_status',{p_payment_id:b.dataset.confirmPay,p_status:'recorded'}); if(error) throw error; flash('Paiement confirmé.'); refresh(); }
+  }));
+  document.querySelectorAll('[data-fail-pay]').forEach(b=>b.onclick=()=>confirmAction({
+    title:'Marquer ce paiement en échec', danger:true, body:'Ce paiement ne sera pas comptabilisé.', confirmLabel:'Marquer en échec',
+    onConfirm: async()=>{ const {error}=await sb.rpc('admin_update_platform_payment_status',{p_payment_id:b.dataset.failPay,p_status:'failed'}); if(error) throw error; flash('Paiement marqué en échec.'); refresh(); }
+  }));
+
+  $('iCreateCreditNote')&&($('iCreateCreditNote').onclick=()=>{
+    formModal({
+      title:'Émettre un avoir',
+      bodyHtml:`
+        <div class="row2">
+          <div class="fld"><label>Montant HT (€) *</label><input type="number" id="cn_ht" step="0.01" min="0"></div>
+          <div class="fld"><label>TVA (€)</label><input type="number" id="cn_tva" step="0.01" min="0" value="0"></div>
+        </div>
+        <div class="fld"><label>Motif *</label><textarea id="cn_reason"></textarea></div>
+      `,
+      confirmLabel:'Émettre l\'avoir',
+      onConfirm: async()=>{
+        const ht=parseFloat($('cn_ht').value); const reason=$('cn_reason').value.trim();
+        if(!ht || ht<=0) throw new Error('Le montant HT doit être positif.');
+        if(!reason) throw new Error('Un motif est requis.');
+        const {error}=await sb.rpc('admin_create_platform_credit_note',{p_invoice_id:inv.id,p_amount_ht:ht,p_tva_amount:parseFloat($('cn_tva').value)||0,p_reason:reason});
+        if(error) throw error;
+        flash('Avoir émis.'); refresh();
+      }
+    });
+  });
+  document.querySelectorAll('[data-void-cn]').forEach(b=>b.onclick=()=>{
+    formModal({
+      title:'Annuler cet avoir', danger:true,
+      bodyHtml:'<div class="fld"><label>Motif *</label><textarea id="vc_reason"></textarea></div>',
+      confirmLabel:'Annuler l\'avoir',
+      onConfirm: async()=>{
+        const reason=$('vc_reason').value.trim();
+        if(!reason) throw new Error('Un motif est requis.');
+        const {error}=await sb.rpc('admin_void_platform_credit_note',{p_credit_note_id:b.dataset.voidCn,p_reason:reason});
+        if(error) throw error;
+        flash('Avoir annulé.'); refresh();
+      }
+    });
+  });
+}
+
+// Export PDF : rendu navigateur (window.print()) sur une zone dédiée, sans librairie ni service
+// externe — pdf_url reste réservé pour un futur stockage réel une fois un prestataire connecté.
+function printInvoice(inv, hotel){
+  const area=$('invoicePrintArea');
+  area.innerHTML=`
+    <div class="ip-h"><div><h1>Facture ${esc(inv.number||'(proforma)')}</h1><div>${fmtDate(inv.issued_at||inv.created_at)}</div></div>
+      <div><b>Flowtym RH</b></div></div>
+    <div><b>Facturé à :</b> ${esc(inv.bill_to_name||hotel.company||hotel.name)}<br>${esc(inv.bill_to_address||hotel.address||'')}<br>TVA : ${esc(inv.bill_to_vat||hotel.tva_number||'—')}</div>
+    <table class="ip-tbl"><thead><tr><th>Description</th><th>HT</th><th>TVA</th><th>TTC</th></tr></thead>
+      <tbody><tr><td>Abonnement plateforme ${inv.period_start?'('+fmtDate(inv.period_start)+' → '+fmtDate(inv.period_end)+')':''}</td>
+        <td>${fmtMoney(inv.amount_ht, inv.currency)}</td><td>${fmtMoney(inv.tva_amount, inv.currency)}</td><td>${fmtMoney(inv.amount_ttc, inv.currency)}</td></tr></tbody>
+    </table>
+    <div class="ip-tot">Total TTC : <b>${fmtMoney(inv.amount_ttc, inv.currency)}</b></div>
+  `;
+  window.print();
+}
+
+async function renderBillingDashboard(el){
+  el.innerHTML='<div class="loading"><i class="fa-solid fa-circle-notch fa-spin"></i> Chargement…</div>';
+  const {data:k,error}=await sb.rpc('platform_billing_dashboard_kpis');
+  if(error) throw error;
+  const byStatus=k.invoices_by_status||{};
+  el.innerHTML=`
+    <div class="kpis" style="margin-top:14px">
+      <div class="kpi v"><div class="ic"><i class="fa-regular fa-file-lines"></i></div><div class="n">${fmtMoney(k.total_billed_ttc)}</div><div class="l">Total facturé (TTC)</div></div>
+      <div class="kpi g"><div class="ic"><i class="fa-solid fa-hand-holding-dollar"></i></div><div class="n">${fmtMoney(k.total_collected)}</div><div class="l">Total encaissé</div></div>
+      <div class="kpi a"><div class="ic"><i class="fa-solid fa-triangle-exclamation"></i></div><div class="n">${fmtMoney(k.total_overdue)}</div><div class="l">Impayés</div><div class="sub">${fmtNum(k.overdue_invoice_count)} facture(s) en retard</div></div>
+      <div class="kpi b"><div class="ic"><i class="fa-regular fa-file-lines"></i></div><div class="n">${fmtMoney(k.total_credited)}</div><div class="l">Total avoirs émis</div></div>
+    </div>
+    <div class="cols2">
+      <div class="box"><h3><i class="fa-regular fa-file-lines"></i> Factures par statut</h3>
+        <div class="tlist">
+          ${Object.entries(INVOICE_STATUS_LABEL).map(([k2,l])=>`<div class="it"><div class="nm">${l}</div><div class="right"><span class="tag ${invoiceStatusBadge(k2).cls}">${fmtNum(byStatus[k2]||0)}</span></div></div>`).join('')}
+        </div>
+      </div>
+      <div class="box"><h3><i class="fa-solid fa-ban"></i> Abonnements suspendus</h3>
+        <div class="tlist">
+          <div class="it"><div class="nm">Total suspendus</div><div class="right"><span class="tag gray">${fmtNum(k.subscriptions_suspended_total)}</span></div></div>
+          <div class="it"><div class="nm">Dont pour impayé</div><div class="right"><span class="tag red">${fmtNum(k.subscriptions_suspended_nonpayment)}</span></div></div>
+          <div class="it"><div class="nm">Paiements en attente de confirmation</div><div class="right"><span class="tag amber">${fmtNum(k.pending_payments_count)}</span></div></div>
+        </div>
+      </div>
+    </div>
+    <div class="stub" style="margin-top:18px">
+      <div class="ic"><i class="fa-solid fa-file-invoice"></i></div><h2>Facturation électronique</h2>
+      <p>Module en préparation — Phase 2.</p>
+      <div class="note">Le modèle est déjà compatible (TVA/SIRET par facture, coordonnées figées à l'émission). L'intégration réelle (Chorus Pro, PDP, Stripe, GoCardless, SEPA) n'est pas encore connectée.</div>
+    </div>
+  `;
 }
 
 /* =====================================================================

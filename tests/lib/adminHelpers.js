@@ -171,6 +171,45 @@ const ACTION_HISTORY_LABEL = {
 };
 function historyActionLabel(action) { return ACTION_HISTORY_LABEL[action] || action || '—'; }
 
+/* =====================================================================
+   Helpers purs — Facturation plateforme (Lot 4, mirror exact de admin.html)
+   ===================================================================== */
+const INVOICE_STATUS_LABEL = { proforma: 'Proforma', issued: 'Émise', cancelled: 'Annulée' };
+const INVOICE_STATUS_CLASS = { proforma: 'amber', issued: 'blue', cancelled: 'gray' };
+function invoiceStatusBadge(status) { return { label: INVOICE_STATUS_LABEL[status] || status || '—', cls: INVOICE_STATUS_CLASS[status] || 'gray' }; }
+
+function invoicePaymentBadge({ status, balance }) {
+  if (status !== 'issued') return { label: '—', cls: 'gray' };
+  if (balance <= 0) return { label: 'Réglée', cls: 'green' };
+  return { label: 'Impayé', cls: 'red' };
+}
+
+const PAYMENT_STATUS_LABEL = { recorded: 'Enregistré', pending: 'En attente', failed: 'Échoué' };
+const PAYMENT_STATUS_CLASS = { recorded: 'green', pending: 'amber', failed: 'red' };
+function paymentStatusBadge(status) { return { label: PAYMENT_STATUS_LABEL[status] || status || '—', cls: PAYMENT_STATUS_CLASS[status] || 'gray' }; }
+
+const CREDIT_NOTE_STATUS_LABEL = { issued: 'Émis', voided: 'Annulé' };
+const CREDIT_NOTE_STATUS_CLASS = { issued: 'blue', voided: 'gray' };
+function creditNoteStatusBadge(status) { return { label: CREDIT_NOTE_STATUS_LABEL[status] || status || '—', cls: CREDIT_NOTE_STATUS_CLASS[status] || 'gray' }; }
+
+const PAYMENT_METHOD_LABEL = { bank_transfer: 'Virement', card: 'Carte', sepa: 'Prélèvement SEPA', check: 'Chèque', cash: 'Espèces', other: 'Autre' };
+function paymentMethodLabel(method) { return PAYMENT_METHOD_LABEL[method] || method || '—'; }
+
+function billingActionsForStatus(status, paidAmount) {
+  return {
+    canIssue: status === 'proforma',
+    canCancel: status !== 'cancelled' && !(paidAmount > 0),
+    canRecordPayment: status === 'issued',
+    canCreateCreditNote: status === 'issued',
+  };
+}
+
+function isInvoiceOverdue({ status, due_date, balance }, todayStr) {
+  if (status !== 'issued' || !due_date || balance <= 0) return false;
+  const today = todayStr || new Date().toISOString().slice(0, 10);
+  return due_date < today;
+}
+
 module.exports = {
   hotelStatusBadge, subscriptionStatusBadge, trialDaysRemaining,
   fmtMoney, fmtNum, groupNameOr, sortRows, errorLabel,
@@ -178,4 +217,6 @@ module.exports = {
   hotelActionsForStatus,
   hotelRoleLabel, platformRoleLabel, accountStatus, accountStatusBadge, primaryRoleLabel,
   revokeHotelImpactMessage, isLastHotelAdminError, historyActionLabel,
+  invoiceStatusBadge, invoicePaymentBadge, paymentStatusBadge, creditNoteStatusBadge,
+  paymentMethodLabel, billingActionsForStatus, isInvoiceOverdue,
 };
