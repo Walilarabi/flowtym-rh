@@ -365,6 +365,17 @@ function actionsForStatus(status){
   return all; // cancelled : aucune action, statut final
 }
 
+// Actions pertinentes pour un HÔTEL (draft/active/suspended/archived) — distinct de
+// actionsForStatus() qui porte sur le statut d'ABONNEMENT (jamais les deux confondus).
+function hotelActionsForStatus(status){
+  return {
+    canActivate: status !== 'active',
+    canSuspend: status === 'active',
+    canArchive: status !== 'archived',
+    canRestore: status === 'archived',
+  };
+}
+
 /* =====================================================================
    Toast / drawer / confirm
    ===================================================================== */
@@ -668,23 +679,39 @@ async function renderDashboard(el){
 /* =====================================================================
    Hôtels
    ===================================================================== */
-let hotelsPage=0, hotelsSort={key:'name',dir:'asc'}, hotelsFilterStatus='';
+let hotelsPage=0, hotelsSort={key:'name',dir:'asc'}, hotelsFilterStatus='', hotelsFilterGroup='', hotelsFilterPlan='', hotelsFilterSub='', hotelsFilterTrial='';
 async function renderHotels(el){
-  const [{data:hotels,error:hErr},{data:groups,error:gErr},{data:subs}]=await Promise.all([
-    sb.from('hotels').select('id,name,city,country,status,group_id,hotel_code,total_rooms,phone,email,siret,tva_number,company,stars,currency,timezone,address,zip,website,created_at'),
+  const [{data:hotels,error:hErr},{data:groups,error:gErr},{data:subs},{data:plans},{data:users}]=await Promise.all([
+    sb.from('hotels').select('id,name,city,country,status,group_id,hotel_code,total_rooms,phone,email,siret,tva_number,company,stars,currency,timezone,address,zip,website,created_at,updated_at'),
     sb.from('hotel_groups').select('id,name,status'),
     sb.from('hotel_subscriptions').select('hotel_id,status,trial_ends_at,plan_id'),
+    sb.from('subscription_plans').select('id,name'),
+    sb.from('users').select('id,hotel_id,is_active'),
   ]);
   if(hErr) throw hErr; if(gErr) throw gErr;
   const groupById=Object.fromEntries((groups||[]).map(g=>[g.id,g]));
+  const planById=Object.fromEntries((plans||[]).map(p=>[p.id,p]));
   const subByHotel=Object.fromEntries((subs||[]).map(s=>[s.hotel_id,s]));
 
-  let rows=(hotels||[]).map(h=>({...h, _group:groupById[h.group_id]||null, _sub:subByHotel[h.id]||null}));
+  let rows=(hotels||[]).map(h=>({
+    ...h, _group:groupById[h.group_id]||null, _sub:subByHotel[h.id]||null,
+    _plan:subByHotel[h.id]?planById[subByHotel[h.id].plan_id]:null,
+    _userCount:(users||[]).filter(u=>u.hotel_id===h.id && u.is_active).length,
+  }));
   if(searchQuery.trim()){
     const q=searchQuery.trim().toLowerCase();
-    rows=rows.filter(h=>[h.name,h.city,h.hotel_code,h.email].filter(Boolean).some(v=>String(v).toLowerCase().includes(q)));
+    rows=rows.filter(h=>[h.name,h.company,h.city,h.hotel_code,h.email].filter(Boolean).some(v=>String(v).toLowerCase().includes(q)));
   }
   if(hotelsFilterStatus) rows=rows.filter(h=>h.status===hotelsFilterStatus);
+  if(hotelsFilterGroup) rows=rows.filter(h=>h.group_id===hotelsFilterGroup);
+  if(hotelsFilterPlan) rows=rows.filter(h=>h._sub?.plan_id===hotelsFilterPlan);
+  if(hotelsFilterSub) rows=rows.filter(h=>hotelsFilterSub==='none' ? !h._sub : h._sub?.status===hotelsFilterSub);
+  if(hotelsFilterTrial==='ongoing') rows=rows.filter(h=>h._sub?.status==='trial');
+  if(hotelsFilterTrial==='expiring7') rows=rows.filter(h=>{
+    if(h._sub?.status!=='trial') return false;
+    const d=trialDaysRemaining(h._sub.trial_ends_at);
+    return d!=null && d>=0 && d<=7;
+  });
   rows=sortRows(rows,hotelsSort.key,hotelsSort.dir);
 
   const pageSize=20, pageCount=Math.max(1,Math.ceil(rows.length/pageSize));
@@ -699,16 +726,22 @@ async function renderHotels(el){
       </div>
     </div>
     <div class="filters">
-      <select id="fStatus">
-        <option value="">Tous les statuts</option>
-        ${Object.entries(HOTEL_STATUS_LABEL).map(([k,l])=>`<option value="${k}" ${hotelsFilterStatus===k?'selected':''}>${l}</option>`).join('')}
+      <select id="fStatus"><option value="">Tous les statuts</option>${Object.entries(HOTEL_STATUS_LABEL).map(([k,l])=>`<option value="${k}" ${hotelsFilterStatus===k?'selected':''}>${l}</option>`).join('')}</select>
+      <select id="fGroup"><option value="">Tous les groupes</option>${(groups||[]).filter(g=>g.status!=='archived').map(g=>`<option value="${g.id}" ${hotelsFilterGroup===g.id?'selected':''}>${esc(groupNameOr(g.name))}</option>`).join('')}</select>
+      <select id="fPlan"><option value="">Tous les plans</option>${(plans||[]).map(p=>`<option value="${p.id}" ${hotelsFilterPlan===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}</select>
+      <select id="fSub"><option value="">Tous les abonnements</option>${Object.entries(SUB_STATUS_LABEL).map(([k,l])=>`<option value="${k}" ${hotelsFilterSub===k?'selected':''}>${l}</option>`).join('')}<option value="none" ${hotelsFilterSub==='none'?'selected':''}>Sans abonnement</option></select>
+      <select id="fTrial">
+        <option value="">Tous les essais</option>
+        <option value="ongoing" ${hotelsFilterTrial==='ongoing'?'selected':''}>Essais en cours</option>
+        <option value="expiring7" ${hotelsFilterTrial==='expiring7'?'selected':''}>Expirant sous 7 jours</option>
       </select>
     </div>
     <div class="tblwrap"><table class="tbl">
       <thead><tr>
-        <th data-k="name">Hôtel</th><th data-k="_group">Groupe</th><th data-k="status">Statut</th><th>Abonnement</th><th data-k="total_rooms">Chambres</th><th>Actions</th>
+        <th data-k="name">Hôtel</th><th data-k="city">Ville</th><th data-k="_group">Groupe</th><th data-k="status">Statut</th>
+        <th>Plan</th><th>Abonnement</th><th>Essai / échéance</th><th>Utilisateurs</th><th data-k="updated_at">Modifié</th><th>Actions</th>
       </tr></thead>
-      <tbody>${pageRows.length?pageRows.map(rowHotelHtml).join(''):`<tr><td colspan="6" class="empty">Aucun hôtel${searchQuery?' pour cette recherche':''}.</td></tr>`}</tbody>
+      <tbody>${pageRows.length?pageRows.map(rowHotelHtml).join(''):`<tr><td colspan="10" class="empty">Aucun hôtel${searchQuery?' pour cette recherche':''}.</td></tr>`}</tbody>
     </table></div>
     <div class="pager">
       <span>Page ${hotelsPage+1} / ${pageCount}</span>
@@ -723,65 +756,54 @@ async function renderHotels(el){
     renderHotels(el);
   });
   $('fStatus').onchange=e=>{ hotelsFilterStatus=e.target.value; hotelsPage=0; renderHotels(el); };
+  $('fGroup').onchange=e=>{ hotelsFilterGroup=e.target.value; hotelsPage=0; renderHotels(el); };
+  $('fPlan').onchange=e=>{ hotelsFilterPlan=e.target.value; hotelsPage=0; renderHotels(el); };
+  $('fSub').onchange=e=>{ hotelsFilterSub=e.target.value; hotelsPage=0; renderHotels(el); };
+  $('fTrial').onchange=e=>{ hotelsFilterTrial=e.target.value; hotelsPage=0; renderHotels(el); };
   $('hPrev').onclick=()=>{ hotelsPage--; renderHotels(el); };
   $('hNext').onclick=()=>{ hotelsPage++; renderHotels(el); };
-  $('addHotel').onclick=()=>openHotelDrawer(null,groups);
+  $('addHotel').onclick=()=>openHotelDrawer(null,groups,plans);
   $('exportHotels').onclick=()=>downloadCSV('hotels.csv', rows, [
     {label:'Nom',get:r=>r.name},{label:'Ville',get:r=>r.city},{label:'Statut',get:r=>hotelStatusBadge(r.status).label},
-    {label:'Groupe',get:r=>r._group?groupNameOr(r._group.name):''},{label:'Chambres',get:r=>r.total_rooms},
+    {label:'Groupe',get:r=>r._group?groupNameOr(r._group.name):''},{label:'Plan',get:r=>r._plan?.name||''},
+    {label:'Abonnement',get:r=>r._sub?subscriptionStatusBadge(r._sub.status).label:'Aucun'},{label:'Chambres',get:r=>r.total_rooms},
     {label:'Code',get:r=>r.hotel_code},{label:'Email',get:r=>r.email},{label:'Téléphone',get:r=>r.phone},
   ]);
-  el.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openHotelDrawer(rows.find(r=>r.id===b.dataset.edit),groups));
-  el.querySelectorAll('[data-statussel]').forEach(sel=>sel.onchange=()=>{
-    const id=sel.dataset.statussel, status=sel.value;
-    if(!status) return;
-    const hotel=rows.find(r=>r.id===id);
-    const danger = status==='suspended'||status==='archived';
-    confirmAction({
-      title:`Changer le statut de ${esc(hotel.name)}`,
-      body:`Nouveau statut : <b>${esc(hotelStatusBadge(status).label)}</b>. Cette action est historisée et réversible.`,
-      confirmLabel:'Confirmer', danger,
-      onConfirm: async()=>{
-        const {error}=await sb.rpc('admin_set_hotel_status',{p_hotel:id,p_status:status});
-        if(error) throw error;
-        flash('Statut mis à jour.'); renderHotels(el);
-      }
-    });
-    sel.value='';
-  });
+  el.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openHotelDrawer(rows.find(r=>r.id===b.dataset.edit),groups,plans));
+  el.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>openHotelDetailDrawer(rows.find(r=>r.id===b.dataset.open)));
 }
 function rowHotelHtml(h){
   const sb1=hotelStatusBadge(h.status);
-  let subBadge='';
+  let subBadge='<span class="tag gray">Aucun</span>', trialCell='—';
   if(h._sub){
     const s=subscriptionStatusBadge(h._sub.status);
-    let extra='';
+    subBadge=`<span class="tag ${s.cls}">${esc(s.label)}</span>`;
     if(h._sub.status==='trial'){
       const d=trialDaysRemaining(h._sub.trial_ends_at);
-      if(d!=null) extra = d>=0 ? ` (${d}j)` : ' (expiré)';
+      if(h._sub.trial_ends_at==null) trialCell='<span class="tag amber">Date manquante</span>';
+      else if(d<0) trialCell='<span class="tag red">Expiré</span>';
+      else trialCell=`<span class="tag ${d<=7?'amber':'gray'}">${d} j</span>`;
     }
-    subBadge=`<span class="tag ${s.cls}">${esc(s.label)}${extra}</span>`;
-  } else {
-    subBadge='<span class="tag gray">Aucun</span>';
   }
-  const nextStatuses=Object.keys(HOTEL_STATUS_LABEL).filter(s=>s!==h.status);
   return `<tr>
-    <td><b>${esc(h.name)}</b><div class="muted" style="font-size:11.5px">${esc(h.city||'')}${h.hotel_code?' · '+esc(h.hotel_code):''}</div></td>
-    <td>${h._group?esc(groupNameOr(h._group.name)):'<span class="muted">—</span>'}</td>
+    <td><b>${esc(h.name)}</b>${h.hotel_code?`<div class="muted" style="font-size:11.5px">${esc(h.hotel_code)}</div>`:''}</td>
+    <td>${esc(h.city||'—')}</td>
+    <td>${h._group?esc(groupNameOr(h._group.name)):'<span class="muted">Autonome</span>'}</td>
     <td><span class="tag ${sb1.cls}">${esc(sb1.label)}</span></td>
+    <td>${h._plan?esc(h._plan.name):'<span class="muted">—</span>'}</td>
     <td>${subBadge}</td>
-    <td>${h.total_rooms??'—'}</td>
+    <td>${trialCell}</td>
+    <td>${h._userCount}</td>
+    <td class="muted">${fmtDateTime(h.updated_at)}</td>
     <td>
+      <button data-open="${h.id}" title="Ouvrir la fiche"><i class="fa-regular fa-eye"></i></button>
       <button data-edit="${h.id}" title="Modifier"><i class="fa-regular fa-pen-to-square"></i></button>
-      <select data-statussel="${h.id}" style="border:1px solid var(--line);border-radius:8px;font-size:12px;padding:3px 6px">
-        <option value="">Statut…</option>
-        ${nextStatuses.map(s=>`<option value="${s}">${HOTEL_STATUS_LABEL[s]}</option>`).join('')}
-      </select>
     </td>
   </tr>`;
 }
-function openHotelDrawer(hotel, groupsCache){
+function openHotelDrawer(hotel, groupsCache, plansCache){
   const groups = groupsCache || [];
+  const plans = (plansCache || []).filter(p=>p.is_active !== false);
   const isEdit = !!hotel;
   openDrawer(`
     <div class="dh"><button class="close" id="dClose"><i class="fa-solid fa-xmark"></i></button>
@@ -789,12 +811,11 @@ function openHotelDrawer(hotel, groupsCache){
       ${isEdit?`<div class="role">Statut actuel : <span class="tag ${hotelStatusBadge(hotel.status).cls}">${esc(hotelStatusBadge(hotel.status).label)}</span></div>`:''}
     </div>
     <div class="sec"><h4>Identité</h4>
-      <div class="fld"><label>Nom *</label><input id="f_name" value="${esc(hotel?.name||'')}"></div>
+      <div class="fld"><label>Nom commercial *</label><input id="f_name" value="${esc(hotel?.name||'')}"></div>
       <div class="row2">
-        <div class="fld"><label>Groupe</label><select id="f_group"><option value="">Aucun</option>${groups.map(g=>`<option value="${g.id}" ${hotel?.group_id===g.id?'selected':''}>${esc(groupNameOr(g.name))}</option>`).join('')}</select></div>
-        <div class="fld"><label>Code hôtel</label><input id="f_code" value="${esc(hotel?.hotel_code||'')}" placeholder="Auto si vide" ${isEdit?'disabled title="Le code hôtel ne se modifie pas après création."':''}></div>
+        <div class="fld"><label>Groupe</label><select id="f_group"><option value="">Aucun (hôtel autonome)</option>${groups.filter(g=>g.status!=='archived').map(g=>`<option value="${g.id}" ${hotel?.group_id===g.id?'selected':''}>${esc(groupNameOr(g.name))}</option>`).join('')}</select></div>
+        <div class="fld"><label>Code hôtel</label><input id="f_code" value="${esc(hotel?.hotel_code||'')}" placeholder="Auto si vide (5 car. max)" maxlength="5" ${isEdit?'disabled title="Le code hôtel ne se modifie pas après création."':''}></div>
       </div>
-      ${!isEdit?`<div class="fld"><label>Statut initial</label><select id="f_status">${Object.entries(HOTEL_STATUS_LABEL).map(([k,l])=>`<option value="${k}" ${k==='draft'?'selected':''}>${l}</option>`).join('')}</select></div>`:''}
     </div>
     <div class="sec"><h4>Coordonnées</h4>
       <div class="fld"><label>Adresse</label><input id="f_address" value="${esc(hotel?.address||'')}"></div>
@@ -804,14 +825,15 @@ function openHotelDrawer(hotel, groupsCache){
       </div>
       <div class="row2">
         <div class="fld"><label>Pays</label><input id="f_country" value="${esc(hotel?.country||'France')}"></div>
-        <div class="fld"><label>Téléphone</label><input id="f_phone" value="${esc(hotel?.phone||'')}"></div>
+        <div class="fld"><label>Fuseau horaire</label><input id="f_timezone" value="${esc(hotel?.timezone||'Europe/Paris')}"></div>
       </div>
       <div class="row2">
+        <div class="fld"><label>Téléphone</label><input id="f_phone" value="${esc(hotel?.phone||'')}"></div>
         <div class="fld"><label>Email</label><input id="f_email" type="email" value="${esc(hotel?.email||'')}"></div>
-        <div class="fld"><label>Site web</label><input id="f_website" value="${esc(hotel?.website||'')}"></div>
       </div>
+      <div class="fld"><label>Site web</label><input id="f_website" value="${esc(hotel?.website||'')}"></div>
     </div>
-    <div class="sec"><h4>Légal & capacité</h4>
+    <div class="sec"><h4>Informations administratives</h4>
       <div class="row2">
         <div class="fld"><label>SIRET</label><input id="f_siret" value="${esc(hotel?.siret||'')}"></div>
         <div class="fld"><label>N° TVA</label><input id="f_tva" value="${esc(hotel?.tva_number||'')}"></div>
@@ -819,13 +841,21 @@ function openHotelDrawer(hotel, groupsCache){
       <div class="fld"><label>Raison sociale</label><input id="f_company" value="${esc(hotel?.company||'')}"></div>
       <div class="row2">
         <div class="fld"><label>Chambres</label><input id="f_rooms" type="number" min="0" value="${esc(hotel?.total_rooms??'')}"></div>
-        <div class="fld"><label>Étoiles</label><select id="f_stars"><option value="">—</option>${[1,2,3,4,5].map(n=>`<option value="${n}" ${hotel?.stars===n?'selected':''}>${n}</option>`).join('')}</select></div>
-      </div>
-      <div class="row2">
         <div class="fld"><label>Devise</label><input id="f_currency" value="${esc(hotel?.currency||'EUR')}"></div>
-        <div class="fld"><label>Fuseau horaire</label><input id="f_timezone" value="${esc(hotel?.timezone||'Europe/Paris')}"></div>
       </div>
     </div>
+    ${!isEdit?`
+    <div class="sec"><h4>Abonnement initial</h4>
+      <div class="fld"><label>Plan *</label><select id="f_plan"><option value="">Choisir un plan…</option>${plans.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select></div>
+      <div class="fld"><label>Statut de départ</label><select id="f_substatus"><option value="trial">Période d'essai</option><option value="active">Activation immédiate</option></select></div>
+    </div>
+    <div class="sec"><h4>Premier administrateur</h4>
+      <div class="row2">
+        <div class="fld"><label>Nom complet</label><input id="f_admin_name" placeholder="Optionnel"></div>
+        <div class="fld"><label>E-mail</label><input id="f_admin_email" type="email" placeholder="Optionnel"></div>
+      </div>
+      <p class="muted" style="font-size:12px">L'invitation par e-mail n'est pas encore automatisée : ces informations sont consignées dans l'audit. Créez le compte utilisateur depuis Utilisateurs une fois la personne prête à se connecter.</p>
+    </div>`:''}
     <div class="dfoot"><button class="btn g" id="dCancel">Annuler</button><button class="btn p" id="dSave">${isEdit?'Enregistrer':'Créer'}</button></div>
   `);
   $('dClose').onclick=closeDrawer; $('dCancel').onclick=closeDrawer;
@@ -835,9 +865,8 @@ function openHotelDrawer(hotel, groupsCache){
       address:$('f_address').value, city:$('f_city').value, zip:$('f_zip').value, country:$('f_country').value,
       phone:$('f_phone').value, email:$('f_email').value, website:$('f_website').value,
       siret:$('f_siret').value, tva_number:$('f_tva').value, company:$('f_company').value,
-      stars:$('f_stars').value, total_rooms:$('f_rooms').value, currency:$('f_currency').value, timezone:$('f_timezone').value,
+      total_rooms:$('f_rooms').value, currency:$('f_currency').value, timezone:$('f_timezone').value,
     };
-    if(!isEdit) payload.status=$('f_status').value;
     if(!payload.name){ flash('Le nom est requis.','e'); return; }
     $('dSave').disabled=true;
     try{
@@ -848,7 +877,14 @@ function openHotelDrawer(hotel, groupsCache){
         const {error}=await sb.rpc('admin_update_hotel_full',{p_hotel:hotel.id,p:payload});
         if(error) throw error;
       } else {
-        const {error}=await sb.rpc('admin_create_hotel',{p:payload});
+        const planId=$('f_plan').value;
+        if(!planId){ flash('Un plan est requis pour créer un hôtel.','e'); $('dSave').disabled=false; return; }
+        // Une seule RPC atomique (hôtel + abonnement) : jamais d'hôtel orphelin sans abonnement
+        // si l'étape d'abonnement échouait dans un second appel séparé.
+        const {error}=await sb.rpc('admin_create_hotel_with_subscription',{
+          p_hotel:payload, p_plan_id:planId, p_subscription_status:$('f_substatus').value,
+          p_first_admin_email:$('f_admin_email').value.trim()||null, p_first_admin_name:$('f_admin_name').value.trim()||null,
+        });
         if(error) throw error;
       }
       flash(isEdit?'Hôtel mis à jour.':'Hôtel créé.'); closeDrawer(); renderView();
@@ -857,38 +893,171 @@ function openHotelDrawer(hotel, groupsCache){
   };
 }
 
+/* ---- Fiche détaillée d'un hôtel ---- */
+async function openHotelDetailDrawer(hotel){
+  if(!hotel){ flash('Hôtel introuvable.','e'); return; }
+  openDrawer(`<div class="dh"><button class="close" id="dClose"><i class="fa-solid fa-xmark"></i></button><h2>Chargement…</h2></div>`);
+  $('dClose').onclick=closeDrawer;
+  const [{data:groups},{data:sub},{data:plan},{data:users},{data:apps},{data:logs}]=await Promise.all([
+    sb.from('hotel_groups').select('id,name,status'),
+    sb.from('hotel_subscriptions').select('*').eq('hotel_id',hotel.id).maybeSingle(),
+    Promise.resolve({data:null}),
+    sb.from('users').select('id,full_name,email,role,is_active').eq('hotel_id',hotel.id),
+    sb.from('user_app_access').select('app_id, platform_apps(name)').eq('hotel_id',hotel.id),
+    sb.from('platform_logs').select('*').eq('hotel_id',hotel.id).order('created_at',{ascending:false}).limit(15),
+  ]);
+  let planRow=null;
+  if(sub?.plan_id){ const {data}=await sb.from('subscription_plans').select('id,name').eq('id',sub.plan_id).maybeSingle(); planRow=data; }
+  const group=(groups||[]).find(g=>g.id===hotel.group_id);
+  const activeApps=[...new Set((apps||[]).map(a=>a.platform_apps?.name).filter(Boolean))];
+  const st=hotelStatusBadge(hotel.status);
+
+  openDrawer(`
+    <div class="dh"><button class="close" id="dClose"><i class="fa-solid fa-xmark"></i></button>
+      <h2>${esc(hotel.name)}</h2>
+      <div class="role"><span class="tag ${st.cls}">${esc(st.label)}</span>${hotel.hotel_code?' · '+esc(hotel.hotel_code):''}</div>
+    </div>
+
+    <div class="sec"><h4>Informations générales</h4>
+      <div class="kv"><span>Raison sociale</span><b>${esc(hotel.company||'—')}</b></div>
+      <div class="kv"><span>Adresse</span><b>${esc([hotel.address,hotel.zip,hotel.city,hotel.country].filter(Boolean).join(', ')||'—')}</b></div>
+      <div class="kv"><span>Téléphone</span><b>${esc(hotel.phone||'—')}</b></div>
+      <div class="kv"><span>E-mail</span><b>${esc(hotel.email||'—')}</b></div>
+      <div class="kv"><span>SIRET / TVA</span><b>${esc(hotel.siret||'—')} / ${esc(hotel.tva_number||'—')}</b></div>
+      <div class="kv"><span>Créé le</span><b>${fmtDateTime(hotel.created_at)}</b></div>
+      <div class="kv"><span>Modifié le</span><b>${fmtDateTime(hotel.updated_at)}</b></div>
+      <div class="actrow">
+        <button class="btn g" id="hEdit"><i class="fa-regular fa-pen-to-square"></i> Modifier</button>
+        <button class="btn g" id="hCopyUrl"><i class="fa-regular fa-copy"></i> Copier l'URL du portail</button>
+        ${(()=>{ const a=hotelActionsForStatus(hotel.status); return `
+        ${a.canActivate?'<button class="btn g" id="hActivate"><i class="fa-solid fa-play"></i> Activer</button>':''}
+        ${a.canSuspend?'<button class="btn g" id="hSuspend"><i class="fa-solid fa-pause"></i> Suspendre</button>':''}
+        ${a.canArchive?'<button class="btn d" id="hArchive"><i class="fa-regular fa-box-archive"></i> Archiver</button>':''}
+        ${a.canRestore?'<button class="btn g" id="hRestore"><i class="fa-solid fa-box-open"></i> Restaurer</button>':''}
+        `; })()}
+      </div>
+    </div>
+
+    <div class="sec"><h4>Groupe</h4>
+      <div class="kv"><span>Groupe actuel</span><b>${group?esc(groupNameOr(group.name)):'Aucun (hôtel autonome)'}</b></div>
+      <div class="actrow">
+        <select id="hGroupSel"><option value="">Aucun</option>${(groups||[]).filter(g=>g.status!=='archived').map(g=>`<option value="${g.id}" ${hotel.group_id===g.id?'selected':''}>${esc(groupNameOr(g.name))}</option>`).join('')}</select>
+        <button class="btn g" id="hGroupApply">Appliquer (rattacher / transférer / détacher)</button>
+      </div>
+    </div>
+
+    <div class="sec"><h4>Abonnement</h4>
+      ${sub?`
+        <div class="kv"><span>Plan</span><b>${planRow?esc(planRow.name):'—'}</b></div>
+        <div class="kv"><span>Statut</span><b>${esc(subscriptionStatusBadge(sub.status).label)}</b></div>
+        <div class="kv"><span>Essai</span><b>${sub.status==='trial'?(sub.trial_ends_at?fmtDateTime(sub.trial_ends_at):'Date non renseignée'):'—'}</b></div>
+        <div class="actrow"><button class="btn g" id="hGotoSub"><i class="fa-regular fa-calendar-check"></i> Voir la fiche abonnement complète</button></div>
+      `:'<div class="empty" style="padding:14px">Aucun abonnement.</div>'}
+    </div>
+
+    <div class="sec"><h4>Utilisateurs</h4>
+      <div class="tlist">
+        ${(users||[]).length?(users||[]).map(u=>`<div class="it"><div><div class="nm">${esc(u.full_name)}</div><div class="sub">${esc(u.email)} · ${esc(u.role)}</div></div><div class="right"><span class="tag ${u.is_active?'green':'gray'}">${u.is_active?'Actif':'Désactivé'}</span></div></div>`).join(''):'<div class="empty" style="padding:14px">Aucun utilisateur.</div>'}
+      </div>
+      ${activeApps.length?`<div class="muted" style="font-size:11.5px;margin-top:8px">Applications avec accès individuel accordé : ${activeApps.map(esc).join(', ')}</div>`:''}
+      <div class="actrow"><button class="btn g" id="hGotoUsers"><i class="fa-regular fa-user"></i> Gérer depuis Utilisateurs</button></div>
+    </div>
+
+    <div class="sec"><h4>Facturation</h4>
+      <div class="muted" style="font-size:12.5px">Module de facturation non encore construit (Lot 4) — aucune intégration de paiement, réelle ou simulée, n'existe à ce jour.</div>
+    </div>
+
+    <div class="sec"><h4>Audit</h4>
+      <div class="tlist">
+        ${(logs||[]).length?(logs||[]).map(l=>`<div class="it"><div><div class="nm">${esc(l.action)}</div><div class="sub">${esc(l.admin_email||'—')}</div></div><div class="right">${fmtDateTime(l.created_at)}</div></div>`).join(''):'<div class="empty" style="padding:14px">Aucun événement.</div>'}
+      </div>
+    </div>
+  `);
+  $('dClose').onclick=closeDrawer;
+  const refresh=async()=>{ closeDrawer(); renderView(); };
+  $('hEdit').onclick=async()=>{ const {data:groups2}=await sb.from('hotel_groups').select('id,name,status'); const {data:plans2}=await sb.from('subscription_plans').select('id,name,is_active'); openHotelDrawer(hotel, groups2, plans2); };
+  $('hCopyUrl').onclick=()=>{
+    const url=`${location.origin}/?hotel=${hotel.hotel_code||hotel.id}`;
+    navigator.clipboard?.writeText(url).then(()=>flash('URL copiée.')).catch(()=>flash('Copie impossible.','e'));
+  };
+  $('hActivate')&&($('hActivate').onclick=()=>confirmAction({title:'Activer l\'hôtel',body:'L\'hôtel redevient opérationnel.',confirmLabel:'Activer',onConfirm:async()=>{
+    const {error}=await sb.rpc('admin_set_hotel_status',{p_hotel:hotel.id,p_status:'active'}); if(error) throw error; flash('Hôtel activé.'); await refresh();
+  }}));
+  $('hSuspend')&&($('hSuspend').onclick=()=>confirmAction({title:'Suspendre l\'hôtel',danger:true,body:'L\'hôtel est marqué suspendu. Réversible à tout moment.',confirmLabel:'Suspendre',onConfirm:async()=>{
+    const {error}=await sb.rpc('admin_set_hotel_status',{p_hotel:hotel.id,p_status:'suspended'}); if(error) throw error; flash('Hôtel suspendu.'); await refresh();
+  }}));
+  $('hArchive')&&($('hArchive').onclick=()=>confirmAction({title:'Archiver l\'hôtel',danger:true,body:'Action réversible (restauration possible). L\'abonnement et l\'historique sont conservés.',confirmLabel:'Archiver',onConfirm:async()=>{
+    const {error}=await sb.rpc('admin_set_hotel_status',{p_hotel:hotel.id,p_status:'archived'}); if(error) throw error; flash('Hôtel archivé.'); await refresh();
+  }}));
+  $('hRestore')&&($('hRestore').onclick=()=>confirmAction({title:'Restaurer l\'hôtel',body:'L\'hôtel redevient actif.',confirmLabel:'Restaurer',onConfirm:async()=>{
+    const {error}=await sb.rpc('admin_set_hotel_status',{p_hotel:hotel.id,p_status:'active'}); if(error) throw error; flash('Hôtel restauré.'); await refresh();
+  }}));
+  $('hGroupApply').onclick=()=>{
+    const newGroup=$('hGroupSel').value;
+    confirmAction({title:'Modifier le rattachement au groupe', body:newGroup?'L\'hôtel sera rattaché (ou transféré) vers ce groupe.':'L\'hôtel sera détaché de son groupe (hôtel autonome).', confirmLabel:'Appliquer', onConfirm:async()=>{
+      const {error}= newGroup
+        ? await sb.rpc('admin_attach_hotel_to_group',{p_hotel:hotel.id,p_group:newGroup})
+        : await sb.rpc('admin_detach_hotel_from_group',{p_hotel:hotel.id});
+      if(error) throw error;
+      flash('Rattachement mis à jour.'); await refresh();
+    }});
+  };
+  $('hGotoSub')&&($('hGotoSub').onclick=()=>{ closeDrawer(); goView('subscriptions'); });
+  $('hGotoUsers').onclick=()=>{ closeDrawer(); goView('users'); };
+}
+
 /* =====================================================================
    Groupes hôteliers
    ===================================================================== */
 async function renderGroups(el){
-  const [{data:groups,error:gErr},{data:hotels}]=await Promise.all([
+  const [{data:groups,error:gErr},{data:hotels},{data:subs},{data:users}]=await Promise.all([
     sb.from('hotel_groups').select('id,name,status,logo_url,created_at').order('created_at',{ascending:false}),
     sb.from('hotels').select('id,name,group_id'),
+    sb.from('hotel_subscriptions').select('hotel_id,status'),
+    sb.from('users').select('id,hotel_id,is_active'),
   ]);
   if(gErr) throw gErr;
-  let rows=(groups||[]).filter(g=>g.status!=='archived').map(g=>({...g,_hotels:(hotels||[]).filter(h=>h.group_id===g.id)}));
+  const withStats=g=>{
+    const gHotels=(hotels||[]).filter(h=>h.group_id===g.id);
+    const hotelIds=new Set(gHotels.map(h=>h.id));
+    const activeSubs=(subs||[]).filter(s=>hotelIds.has(s.hotel_id) && ['trial','active'].includes(s.status)).length;
+    const userCount=(users||[]).filter(u=>hotelIds.has(u.hotel_id) && u.is_active).length;
+    return {...g, _hotels:gHotels, _activeSubs:activeSubs, _userCount:userCount};
+  };
+  let rows=(groups||[]).filter(g=>g.status!=='archived').map(withStats);
+  const archived=(groups||[]).filter(g=>g.status==='archived').map(withStats);
   if(searchQuery.trim()){
     const q=searchQuery.trim().toLowerCase();
     rows=rows.filter(g=>(g.name||'').toLowerCase().includes(q));
   }
   el.innerHTML=`<div class="page">
-    <div class="phead"><div><h1>Groupes hôteliers</h1><div class="sub">${fmtNum(rows.length)} groupe(s)</div></div>
+    <div class="phead"><div><h1>Groupes hôteliers</h1><div class="sub">${fmtNum(rows.length)} groupe(s) actif(s) · ${fmtNum(archived.length)} archivé(s)</div></div>
       <div class="actions"><button class="btn p" id="addGroup"><i class="fa-solid fa-plus"></i> Nouveau groupe</button></div>
     </div>
     <div class="tblwrap"><table class="tbl">
-      <thead><tr><th>Groupe</th><th>Hôtels rattachés</th><th>Statut</th><th>Créé le</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Groupe</th><th>Hôtels</th><th>Utilisateurs</th><th>Abonnements actifs</th><th>Statut</th><th>Créé le</th><th>Actions</th></tr></thead>
       <tbody>${rows.length?rows.map(g=>`
         <tr>
           <td><b>${esc(groupNameOr(g.name))}</b></td>
           <td>${g._hotels.length ? g._hotels.map(h=>esc(h.name)).join(', ') : '<span class="muted">Aucun</span>'}</td>
+          <td>${g._userCount}</td>
+          <td>${g._activeSubs}</td>
           <td><span class="tag ${g.status==='active'?'green':'gray'}">${g.status==='active'?'Actif':esc(g.status)}</span></td>
           <td>${fmtDate(g.created_at)}</td>
           <td>
             <button data-edit-group="${g.id}" title="Modifier"><i class="fa-regular fa-pen-to-square"></i></button>
-            <button data-del-group="${g.id}" title="Archiver" ${g._hotels.length?'disabled':''}><i class="fa-regular fa-trash-can"></i></button>
+            <button data-del-group="${g.id}" title="Archiver" ${g._hotels.length?'disabled':''}><i class="fa-regular fa-box-archive"></i></button>
           </td>
-        </tr>`).join(''):'<tr><td colspan="5" class="empty">Aucun groupe.</td></tr>'}</tbody>
+        </tr>`).join(''):'<tr><td colspan="7" class="empty">Aucun groupe.</td></tr>'}</tbody>
     </table></div>
+    ${archived.length?`<h3 style="margin-top:18px;font-size:13px;color:var(--muted)">Groupes archivés</h3>
+    <div class="tblwrap"><table class="tbl">
+      <thead><tr><th>Groupe</th><th>Archivé — hôtels rattachés</th><th>Actions</th></tr></thead>
+      <tbody>${archived.map(g=>`<tr>
+        <td>${esc(groupNameOr(g.name))}</td><td class="muted">${g._hotels.length} hôtel(s)</td>
+        <td><button data-restore-group="${g.id}" title="Restaurer"><i class="fa-solid fa-box-open"></i></button></td>
+      </tr>`).join('')}</tbody>
+    </table></div>`:''}
   </div>`;
   $('addGroup').onclick=()=>openGroupDrawer(null, hotels||[]);
   el.querySelectorAll('[data-edit-group]').forEach(b=>b.onclick=()=>openGroupDrawer(rows.find(g=>g.id===b.dataset.editGroup), hotels||[]));
@@ -898,7 +1067,7 @@ async function renderGroups(el){
       const g=rows.find(x=>x.id===b.dataset.delGroup);
       confirmAction({
         title:`Archiver le groupe ${groupNameOr(g.name)}`,
-        body:'Ce groupe sera archivé (suppression logique). Cette action est réversible via la base de données.',
+        body:'Ce groupe sera archivé (suppression logique, jamais physique). Réversible via « Restaurer ».',
         confirmLabel:'Archiver', danger:true,
         onConfirm: async()=>{
           const {error}=await sb.rpc('admin_delete_group',{p_group:g.id});
@@ -907,6 +1076,17 @@ async function renderGroups(el){
         }
       });
     };
+  });
+  el.querySelectorAll('[data-restore-group]').forEach(b=>b.onclick=()=>{
+    const g=archived.find(x=>x.id===b.dataset.restoreGroup);
+    confirmAction({
+      title:`Restaurer le groupe ${groupNameOr(g.name)}`, body:'Le groupe redevient actif.', confirmLabel:'Restaurer',
+      onConfirm: async()=>{
+        const {error}=await sb.rpc('admin_restore_group',{p_group:g.id});
+        if(error) throw error;
+        flash('Groupe restauré.'); renderGroups(el);
+      }
+    });
   });
 }
 function openGroupDrawer(group, allHotels){

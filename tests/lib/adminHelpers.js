@@ -108,8 +108,18 @@ function actionsForStatus(status) {
   return all;
 }
 
+function hotelActionsForStatus(status) {
+  return {
+    canActivate: status !== 'active',
+    canSuspend: status === 'active',
+    canArchive: status !== 'archived',
+    canRestore: status === 'archived',
+  };
+}
+
 module.exports = {
   hotelStatusBadge, subscriptionStatusBadge, trialDaysRemaining,
   fmtMoney, fmtNum, groupNameOr, sortRows, errorLabel,
   attributionTypeBadge, addonStatusBadge, causeLabel, eventTypeLabel, actionsForStatus,
+  hotelActionsForStatus,
 };

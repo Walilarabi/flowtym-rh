@@ -3,6 +3,7 @@ const {
   hotelStatusBadge, subscriptionStatusBadge, trialDaysRemaining,
   fmtMoney, fmtNum, groupNameOr, sortRows, errorLabel,
   attributionTypeBadge, addonStatusBadge, causeLabel, eventTypeLabel, actionsForStatus,
+  hotelActionsForStatus,
 } = require('./lib/adminHelpers');
 
 describe('Super Admin — hotelStatusBadge()', () => {
@@ -186,5 +187,44 @@ describe('Super Admin — actionsForStatus()', () => {
   test('cancelled : statut final, aucune action de cycle de vie', () => {
     const a = actionsForStatus('cancelled');
     expect(Object.values(a).every(v => v === false)).toBe(true);
+  });
+});
+
+describe('Super Admin — hotelActionsForStatus() (distinct de actionsForStatus, jamais confondu)', () => {
+  test('draft : activable, non suspendable, archivable, non restaurable', () => {
+    expect(hotelActionsForStatus('draft')).toEqual({ canActivate: true, canSuspend: false, canArchive: true, canRestore: false });
+  });
+  test('active : non activable, suspendable, archivable, non restaurable', () => {
+    expect(hotelActionsForStatus('active')).toEqual({ canActivate: false, canSuspend: true, canArchive: true, canRestore: false });
+  });
+  test('suspended : activable, non suspendable (déjà suspendu), archivable', () => {
+    const a = hotelActionsForStatus('suspended');
+    expect(a.canActivate).toBe(true);
+    expect(a.canSuspend).toBe(false);
+    expect(a.canArchive).toBe(true);
+  });
+  test('archived : seule la restauration est proposée', () => {
+    expect(hotelActionsForStatus('archived')).toEqual({ canActivate: true, canSuspend: false, canArchive: false, canRestore: true });
+  });
+});
+
+describe('Super Admin — filtres Hôtels (logique pure reproduite)', () => {
+  const hotels = [
+    { id: 'h1', name: 'Alpha', group_id: 'g1', _sub: { plan_id: 'p1', status: 'active' } },
+    { id: 'h2', name: 'Beta', group_id: null, _sub: { plan_id: 'p2', status: 'trial', trial_ends_at: '2026-08-01T00:00:00Z' } },
+    { id: 'h3', name: 'Gamma', group_id: 'g1', _sub: null },
+  ];
+  test('filtre par groupe ne retourne que les hôtels rattachés', () => {
+    expect(hotels.filter(h => h.group_id === 'g1').map(h => h.name)).toEqual(['Alpha', 'Gamma']);
+  });
+  test('filtre "sans abonnement" isole les hôtels autonomes sans _sub', () => {
+    expect(hotels.filter(h => !h._sub).map(h => h.name)).toEqual(['Gamma']);
+  });
+  test('filtre par statut d\'abonnement', () => {
+    expect(hotels.filter(h => h._sub?.status === 'trial').map(h => h.name)).toEqual(['Beta']);
+  });
+  test('hôtel autonome (group_id null) affiché distinctement d\'un hôtel de groupe', () => {
+    const autonomous = hotels.filter(h => !h.group_id);
+    expect(autonomous.map(h => h.name)).toEqual(['Beta']);
   });
 });
