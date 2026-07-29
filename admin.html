@@ -78,6 +78,8 @@ button,select,input,textarea{font-family:inherit}
 
 .sidebar{width:236px;background:#fff;border-right:1px solid var(--line);display:flex;flex-direction:column;flex-shrink:0}
 .sidebar .menu{flex:1;padding:14px 10px;overflow-y:auto}
+.navToggle{display:none}
+.sidebarBackdrop{display:none}
 .sidebar .menu .grp{font-size:10.5px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:14px 12px 6px}
 .sidebar .menu .grp:first-child{padding-top:4px}
 .sidebar .menu .it{display:flex;align-items:center;gap:11px;padding:10px 12px;border-radius:10px;color:var(--ink2);font-weight:500;cursor:pointer;font-size:13.5px;margin-bottom:2px;border:0;background:transparent;width:100%;text-align:left;font-family:inherit}
@@ -109,6 +111,28 @@ button,select,input,textarea{font-family:inherit}
 
 .cols2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 @media(max-width:1100px){.cols2{grid-template-columns:1fr}}
+
+/* ---- responsive : sidebar hors-écran + topbar compacte sous 768px ----
+   Au-dessus de 768px (desktop + tablette, testé sur iPad 834px) la sidebar fixe de 236px
+   reste inchangée. Sous 768px (mobile), elle devient un panneau superposé (comme le drawer
+   existant), déclenché par un bouton hamburger, avec un fond semi-opaque pour la refermer. */
+@media(max-width:768px){
+  .navToggle{display:grid;place-items:center}
+  .searchbox{display:none}
+  #quickAddHotel .lbl{display:none}
+  .top-in{padding:10px 14px;gap:8px}
+  .meB .nm{display:none}
+  .sidebar{
+    position:fixed;top:0;left:0;height:100%;z-index:120;width:260px;max-width:82vw;
+    transform:translateX(-100%);transition:transform .25s cubic-bezier(.4,0,.2,1);
+    box-shadow:12px 0 40px rgba(0,0,0,.18);
+  }
+  .sidebar.on{transform:none}
+  .sidebarBackdrop{display:none;position:fixed;inset:0;background:rgba(14,16,28,.44);z-index:110}
+  .sidebarBackdrop.on{display:block}
+  .page{padding:16px 14px 50px}
+  .kpis{grid-template-columns:1fr}
+}
 .box{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px;box-shadow:var(--shadow)}
 .box h3{font-size:14px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px}
 .box h3 i{color:var(--violet)}
@@ -220,12 +244,13 @@ button,select,input,textarea{font-family:inherit}
 
 <script>
 /* =====================================================================
-   Flowtym RH — Super Admin (/admin) — Phase 1
+   Flowtym RH — Super Admin (/admin)
    Fichier statique indépendant (même approche que portal.html), sans build.
-   Fonctionnel : Tableau de bord, Hôtels, Groupes hôteliers, Utilisateurs, Audit.
-   Le reste du menu (Abonnements, Facturation, Essais, Paiements, Licences,
-   Statistiques, Support, Paramètres) est en préparation Phase 2 : les tables
-   existent déjà côté base mais sans RPC ni donnée réelle — pas d'UI mensongère.
+   Fonctionnel : Tableau de bord, Hôtels, Groupes hôteliers, Utilisateurs,
+   Abonnements, Facturation, Audit, Paramètres plateforme, Supervision.
+   Le reste du menu (Statistiques, Essais, Licences, Paiements, Support) est
+   en préparation Phase 2+ : les tables existent déjà côté base mais sans RPC
+   ni donnée réelle — pas d'UI mensongère.
    ===================================================================== */
 const SUPABASE_URL = "https://hzrzkvdebaadditvbqis.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh6cnprdmRlYmFhZGRpdHZicWlzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxMjEwMTQsImV4cCI6MjA5MjY5NzAxNH0.IDFFWHNNIeBReWRTeVj8RlRpyz5J4XaStFhGVEYEBU8";
@@ -243,7 +268,7 @@ window.addEventListener('unhandledrejection',e=>showFatal(e.reason));
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
-let sb=null, me=null, session=null, view='dashboard';
+let sb=null, me=null, session=null, view=(location.hash.slice(1))||'dashboard';
 
 /* =====================================================================
    Helpers purs (mirror exact de tests/lib/adminHelpers.js — garder synchronisés)
@@ -729,10 +754,11 @@ function renderShell(){
   const displayName = me.full_name || me.email;
   $('root').innerHTML=`
     <header class="top"><div class="top-in">
+      <button class="iconbtn navToggle" id="navToggle" title="Menu"><i class="fa-solid fa-bars"></i></button>
       <div class="logo"><div class="mk"><i class="fa-solid fa-hotel"></i></div>Flowtym <small>SUPER ADMIN</small></div>
       <div class="searchbox"><i class="fa-solid fa-magnifying-glass"></i><input id="gsearch" placeholder="Rechercher un hôtel, un utilisateur, un groupe…"></div>
       <div class="spacer"></div>
-      <button class="btn p" id="quickAddHotel"><i class="fa-solid fa-plus"></i> Ajouter un hôtel</button>
+      <button class="btn p" id="quickAddHotel"><i class="fa-solid fa-plus"></i> <span class="lbl">Ajouter un hôtel</span></button>
       <div style="position:relative">
         <button class="iconbtn" id="bellBtn" title="Activité récente"><i class="fa-solid fa-bell"></i></button>
         <div class="popover" id="bellPanel"><div class="ph">Activité récente</div><div id="bellBody" class="popitem">Chargement…</div></div>
@@ -749,8 +775,9 @@ function renderShell(){
         </div>
       </div>
     </div></header>
+    <div class="sidebarBackdrop" id="sidebarBackdrop"></div>
     <div class="main">
-      <aside class="sidebar"><nav class="menu" id="nav">
+      <aside class="sidebar" id="sidebar"><nav class="menu" id="nav">
         ${MENU.map(([grp,items])=>`<div class="grp">${esc(grp)}</div>`+
           items.map(([k,lab,ic,on])=>`<button class="it ${k===view?'on':''}" data-v="${k}">
             <i class="ic ${ic}"></i><span>${esc(lab)}</span>${on?'':'<span class="soon">Phase 2</span>'}</button>`).join('')
@@ -758,8 +785,18 @@ function renderShell(){
       </nav></aside>
       <section class="content"><div id="view"></div></section>
     </div>`;
-  $('nav').onclick=e=>{ const b=e.target.closest('.it'); if(!b) return; goView(b.dataset.v); };
-  $('quickAddHotel').onclick=()=>{ goView('hotels'); setTimeout(()=>openHotelDrawer(null),50); };
+  const closeMobileSidebar=()=>{ $('sidebar').classList.remove('on'); $('sidebarBackdrop').classList.remove('on'); };
+  $('navToggle').onclick=()=>{ $('sidebar').classList.toggle('on'); $('sidebarBackdrop').classList.toggle('on'); };
+  $('sidebarBackdrop').onclick=closeMobileSidebar;
+  $('nav').onclick=e=>{ const b=e.target.closest('.it'); if(!b) return; closeMobileSidebar(); goView(b.dataset.v); };
+  $('quickAddHotel').onclick=async()=>{
+    goView('hotels');
+    const [{data:groups},{data:plans}]=await Promise.all([
+      sb.from('hotel_groups').select('id,name,status'),
+      sb.from('subscription_plans').select('id,name,is_active'),
+    ]);
+    setTimeout(()=>openHotelDrawer(null,groups,plans),50);
+  };
   $('signOutBtn').onclick=async()=>{ await sb.auth.signOut(); location.reload(); };
   $('meBtn').onclick=()=>{ $('mePanel').classList.toggle('on'); $('bellPanel').classList.remove('on'); };
   $('bellBtn').onclick=async()=>{
@@ -788,7 +825,22 @@ async function loadBell(){
 }
 
 let searchQuery='';
-function goView(v){ view=v; searchQuery=''; document.querySelectorAll('.menu .it').forEach(b=>b.classList.toggle('on', b.dataset.v===v)); renderView(); }
+function goView(v){
+  view=v; searchQuery='';
+  if(location.hash.slice(1)!==v) history.pushState({view:v},'','#'+v);
+  document.querySelectorAll('.menu .it').forEach(b=>b.classList.toggle('on', b.dataset.v===v));
+  renderView();
+}
+// Permet le retour/avance navigateur entre les vues du portail (ex. Dashboard -> Hôtels -> Retour),
+// et fait en sorte qu'un rafraîchissement (F5) recharge la vue en cours plutôt que de revenir au Dashboard.
+window.addEventListener('popstate',()=>{
+  if(!$('nav')) return; // shell pas encore rendu (ex. écran de connexion)
+  const v=location.hash.slice(1)||'dashboard';
+  if(v===view) return;
+  view=v; searchQuery='';
+  document.querySelectorAll('.menu .it').forEach(b=>b.classList.toggle('on', b.dataset.v===v));
+  renderView();
+});
 
 async function renderView(){
   const el=$('view');
@@ -923,9 +975,13 @@ function goToAlertEntity(alert){
   } else if(alert.entity_type==='user'){
     goView('users');
     setTimeout(async()=>{
-      const {data}=await sb.rpc('admin_list_user_access');
+      const [{data},{data:hotels},{data:groups}]=await Promise.all([
+        sb.rpc('admin_list_user_access'),
+        sb.from('hotels').select('id,name,status'),
+        sb.from('hotel_groups').select('id,name,status'),
+      ]);
       const row=(data||[]).find(u=>u.user_id===alert.entity_id);
-      if(row) openUserDrawer(row, [], [], ()=>renderView());
+      if(row) openUserDrawer(row, hotels||[], groups||[], ()=>renderView());
     }, 250);
   } else if(alert.entity_type==='hotel_subscription'){
     searchQuery=alert.hotel_name||'';
@@ -2872,7 +2928,16 @@ const SETTING_CATEGORY={
   trial_duration_days:'Essais', max_trial_days:'Essais', min_trial_days:'Essais', max_trial_extensions:'Essais',
   dunning_days_before:'Relances', churn_alert_rate:'Objectifs', mrr_target:'Objectifs', arr_target:'Objectifs',
 };
-function settingLabel(key){ return key.replace(/_/g,' ').replace(/^./,c=>c.toUpperCase()); }
+const SETTING_LABEL_FR={
+  platform_name:'Nom de la plateforme', support_email:'E-mail de support', terms_url:'CGU/CGV (URL)',
+  default_currency:'Devise par défaut', default_billing_cycle:'Cycle de facturation par défaut',
+  default_commitment:'Engagement par défaut', default_tva_rate:'Taux de TVA par défaut', billing_email:'E-mail de facturation',
+  trial_duration_days:"Durée d'essai (jours)", max_trial_days:"Durée d'essai maximale (jours)",
+  min_trial_days:"Durée d'essai minimale (jours)", max_trial_extensions:"Nombre maximal de prolongations d'essai",
+  dunning_days_before:'Jours de relance avant échéance', churn_alert_rate:"Seuil d'alerte de résiliation",
+  mrr_target:'Objectif de revenu mensuel récurrent (MRR)', arr_target:'Objectif de revenu annuel récurrent (ARR)',
+};
+function settingLabel(key){ return SETTING_LABEL_FR[key] || key.replace(/_/g,' ').replace(/^./,c=>c.toUpperCase()); }
 
 async function renderSettings(el){
   el.innerHTML='<div class="loading"><i class="fa-solid fa-circle-notch fa-spin"></i> Chargement…</div>';
@@ -2944,7 +3009,7 @@ async function renderSupervision(el){
       </div>
       <div class="box"><h3><i class="fa-solid fa-code-branch"></i> Déploiement</h3>
         <div class="tlist">
-          <div class="it"><div class="nm">Version frontend</div><div class="right"><b>Lot 5 — RC1 en préparation</b></div></div>
+          <div class="it"><div class="nm">Version frontend</div><div class="right"><b>Lot 5 — RC1 (stabilisation)</b></div></div>
           <div class="it"><div class="nm">Tâches planifiées (cron)</div><div class="right">${s.scheduled_tasks_known?`<span class="tag gray">${fmtNum(s.scheduled_tasks_count)}</span>`:notSupervised()}</div></div>
           <div class="it"><div class="nm">Webhooks configurés</div><div class="right">${s.webhooks_configured?'<span class="tag green">Oui</span>':'<span class="tag gray">Aucun à ce jour</span>'}</div></div>
         </div>
