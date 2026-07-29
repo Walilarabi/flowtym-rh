@@ -463,16 +463,18 @@ const INVOICE_STATUS_LABEL={proforma:'Proforma', issued:'Émise', cancelled:'Ann
 const INVOICE_STATUS_CLASS={proforma:'amber', issued:'blue', cancelled:'gray'};
 function invoiceStatusBadge(status){ return {label:INVOICE_STATUS_LABEL[status]||status||'—', cls:INVOICE_STATUS_CLASS[status]||'gray'}; }
 
-// Statut de règlement — dérivé (jamais stocké comme statut de facture), jamais confondu avec
-// le statut proforma/émise/annulée de la facture elle-même.
-function invoicePaymentBadge({status, balance}){
-  if(status!=='issued') return {label:'—', cls:'gray'};
-  if(balance<=0) return {label:'Réglée', cls:'green'};
-  return {label:'Impayé', cls:'red'};
+// État financier — calculé côté serveur (financial_state), 5 valeurs, jamais confondu avec le
+// statut documentaire proforma/émise/annulée (réserve CTO Lot 4, point 3). Un avoir qui ramène
+// le solde à zéro donne "fully_credited", jamais "paid" (aucun argent réel n'a circulé).
+const FINANCIAL_STATE_LABEL={unpaid:'Impayée', partially_paid:'Partiellement réglée', paid:'Réglée', overdue:'En retard', fully_credited:'Soldée par avoir'};
+const FINANCIAL_STATE_CLASS={unpaid:'gray', partially_paid:'amber', paid:'green', overdue:'red', fully_credited:'blue'};
+function financialStateBadge(state){
+  if(!state) return {label:'—', cls:'gray'};
+  return {label:FINANCIAL_STATE_LABEL[state]||state, cls:FINANCIAL_STATE_CLASS[state]||'gray'};
 }
 
-const PAYMENT_STATUS_LABEL={recorded:'Enregistré', pending:'En attente', failed:'Échoué'};
-const PAYMENT_STATUS_CLASS={recorded:'green', pending:'amber', failed:'red'};
+const PAYMENT_STATUS_LABEL={recorded:'Enregistré', pending:'En attente', failed:'Échoué', reversed:'Renversé'};
+const PAYMENT_STATUS_CLASS={recorded:'green', pending:'amber', failed:'red', reversed:'gray'};
 function paymentStatusBadge(status){ return {label:PAYMENT_STATUS_LABEL[status]||status||'—', cls:PAYMENT_STATUS_CLASS[status]||'gray'}; }
 
 const CREDIT_NOTE_STATUS_LABEL={issued:'Émis', voided:'Annulé'};
@@ -497,6 +499,67 @@ function isInvoiceOverdue({status, due_date, balance}, todayStr){
   if(status!=='issued' || !due_date || balance<=0) return false;
   const today = todayStr || new Date().toISOString().slice(0,10);
   return due_date < today;
+}
+
+/* =====================================================================
+   Helpers purs — Dashboard, Alertes, Paramètres (Lot 5, mirror exact dans tests/lib)
+   ===================================================================== */
+const SEVERITY_LABEL={high:'Prioritaire', medium:'À surveiller', low:'Information'};
+const SEVERITY_CLASS={high:'red', medium:'amber', low:'gray'};
+function severityBadge(sev){ return {label:SEVERITY_LABEL[sev]||sev||'—', cls:SEVERITY_CLASS[sev]||'gray'}; }
+
+const PERIOD_LABEL={this_month:'Ce mois', last_month:'Mois précédent', quarter:'Trimestre', year:'Année', custom:'Période personnalisée'};
+function periodLabel(period){ return PERIOD_LABEL[period]||period||'—'; }
+
+const ALERT_TYPE_ICON={
+  trial_ending_soon:'fa-regular fa-hourglass-half', invoice_overdue:'fa-solid fa-file-invoice',
+  hotel_without_admin:'fa-solid fa-user-shield', invitation_stale:'fa-regular fa-envelope',
+  subscription_suspended:'fa-solid fa-ban', subscription_no_plan:'fa-solid fa-triangle-exclamation',
+  archived_plan_assigned:'fa-solid fa-box-archive', hotel_active_no_subscription:'fa-solid fa-hotel',
+  deactivated_user_with_access:'fa-solid fa-user-slash',
+};
+function alertTypeIcon(type){ return ALERT_TYPE_ICON[type]||'fa-solid fa-circle-info'; }
+
+// Tri des alertes : prioritaires d'abord, jamais un simple ordre d'insertion — une alerte
+// décorative sans distinction de gravité serait contraire à la demande CTO.
+const SEVERITY_ORDER={high:0, medium:1, low:2};
+function sortAlertsBySeverity(alerts){
+  return [...(alerts||[])].sort((a,b)=>(SEVERITY_ORDER[a.severity]??9)-(SEVERITY_ORDER[b.severity]??9));
+}
+
+// Validation cliente miroir de admin_update_platform_setting (le backend est la source de
+// vérité, ceci évite un aller-retour réseau pour une erreur de saisie évidente).
+const SETTING_NUMERIC_KEYS=['mrr_target','arr_target','default_tva_rate','default_commitment',
+  'max_trial_days','min_trial_days','max_trial_extensions','churn_alert_rate','trial_duration_days'];
+function settingValueType(key){
+  if(SETTING_NUMERIC_KEYS.includes(key)) return 'number';
+  if(key==='dunning_days_before') return 'array';
+  return 'string';
+}
+function validateSettingValue(key, rawValue){
+  const type=settingValueType(key);
+  if(type==='number'){
+    const n=Number(rawValue);
+    if(rawValue===''||rawValue==null||Number.isNaN(n)) return {valid:false, error:'Doit être un nombre.'};
+    return {valid:true, value:n};
+  }
+  if(type==='array'){
+    const parts=String(rawValue||'').split(',').map(s=>s.trim()).filter(Boolean).map(Number);
+    if(!parts.length||parts.some(Number.isNaN)) return {valid:false, error:'Doit être une liste de nombres séparés par des virgules.'};
+    return {valid:true, value:parts};
+  }
+  if(rawValue==null||String(rawValue).trim()===''){ return {valid:false, error:'Ne peut pas être vide.'}; }
+  return {valid:true, value:String(rawValue)};
+}
+
+// Présentation lisible d'une valeur de payload d'audit — jamais un bloc JSON brut par défaut
+// (le JSON brut reste disponible via un <details> replié, pour l'utilisateur avancé).
+function formatPayloadValue(v){
+  if(v===null||v===undefined) return '—';
+  if(typeof v==='boolean') return v?'Oui':'Non';
+  if(Array.isArray(v)) return v.length?v.map(x=>formatPayloadValue(x)).join(', '):'—';
+  if(typeof v==='object') return JSON.stringify(v);
+  return String(v);
 }
 
 /* =====================================================================
@@ -650,7 +713,8 @@ const MENU=[
   ['Plateforme',[
     ['audit','Audit','fa-solid fa-shield-halved',true],
     ['support','Support','fa-regular fa-life-ring',false],
-    ['settings','Paramètres plateforme','fa-solid fa-gear',false],
+    ['settings','Paramètres plateforme','fa-solid fa-gear',true],
+    ['supervision','Supervision','fa-solid fa-heart-pulse',true],
   ]],
 ];
 const STUB_INFO={
@@ -659,7 +723,6 @@ const STUB_INFO={
   licenses:{ic:'fa-solid fa-key',desc:'platform_apps, hotel_app_subscriptions et user_app_access existent déjà. Vue de gestion consolidée prévue en Phase 2.'},
   stats:{ic:'fa-solid fa-chart-line',desc:'MRR/ARR/churn seront calculés sur hotel_subscriptions et platform_invoices une fois la facturation Phase 2 en place.'},
   support:{ic:'fa-regular fa-life-ring',desc:'La table support_tickets existe déjà (avec triage) et est accessible en lecture aux admins plateforme ; l\'interface dédiée arrive en Phase 2.'},
-  settings:{ic:'fa-solid fa-gear',desc:'platform_settings contient déjà 16 paramètres (devise, essai, relances, objectifs MRR/ARR...). Écran d\'édition prévu en Phase 2.'},
 };
 
 function renderShell(){
@@ -738,6 +801,8 @@ async function renderView(){
     else if(view==='subscriptions') await renderSubscriptions(el);
     else if(view==='billing') await renderBilling(el);
     else if(view==='audit') await renderAudit(el);
+    else if(view==='settings') await renderSettings(el);
+    else if(view==='supervision') await renderSupervision(el);
     else renderStub(el, view);
   }catch(e){
     console.error(e);
@@ -757,46 +822,117 @@ function renderStub(el, key){
 }
 
 /* =====================================================================
-   Tableau de bord
+   Tableau de bord (Lot 5) — vue d'ensemble plateforme + alertes priorisées
    ===================================================================== */
+let dashboardPeriod='this_month';
+
 async function renderDashboard(el){
-  const [{data:kpis,error:kErr},{data:activity,error:aErr}]=await Promise.all([
-    sb.rpc('platform_dashboard_kpis'),
+  el.innerHTML='<div class="loading"><i class="fa-solid fa-circle-notch fa-spin"></i> Chargement…</div>';
+  const [{data:kpis,error:kErr},{data:alerts,error:alErr},{data:activity}]=await Promise.all([
+    sb.rpc('admin_platform_overview_kpis',{p_period:dashboardPeriod,p_start:null,p_end:null}),
+    sb.rpc('admin_platform_alerts'),
     sb.from('platform_logs').select('*').order('created_at',{ascending:false}).limit(8),
   ]);
   if(kErr) throw kErr;
-  const h=kpis.hotels, g=kpis.groups, u=kpis.users, s=kpis.subscriptions;
+  const h=kpis.hotels, g=kpis.groups, u=kpis.users, sub=kpis.subscriptions, apps=kpis.apps, bill=kpis.billing, ud=kpis.users_detail;
+  const sortedAlerts=alErr?[]:sortAlertsBySeverity(alerts);
+
   el.innerHTML=`<div class="page">
-    <div class="phead"><div><h1>Tableau de bord</h1><div class="sub">Vue d'ensemble de la plateforme Flowtym RH</div></div></div>
-    <div class="kpis">
-      <div class="kpi v"><div class="ic"><i class="fa-solid fa-hotel"></i></div><div class="n">${fmtNum(h.total)}</div><div class="l">Hôtels totaux</div><div class="sub">${fmtNum(h.active)} actifs · ${fmtNum(h.suspended)} suspendus</div></div>
-      <div class="kpi g"><div class="ic"><i class="fa-solid fa-sitemap"></i></div><div class="n">${fmtNum(g.total)}</div><div class="l">Groupes hôteliers</div></div>
-      <div class="kpi b"><div class="ic"><i class="fa-regular fa-user"></i></div><div class="n">${fmtNum(u.total)}</div><div class="l">Utilisateurs</div><div class="sub">${fmtNum(u.active)} actifs${u.unlinked_auth_accounts?` · ${fmtNum(u.unlinked_auth_accounts)} non liés`:''}</div></div>
-      <div class="kpi a"><div class="ic"><i class="fa-regular fa-hourglass-half"></i></div><div class="n">${fmtNum(h.in_trial)}</div><div class="l">Hôtels en essai</div></div>
-    </div>
-    <div class="kpis">
-      <div class="kpi v"><div class="ic"><i class="fa-regular fa-calendar-check"></i></div><div class="n">${fmtNum(s.active)}</div><div class="l">Abonnements actifs</div></div>
-      <div class="kpi a"><div class="ic"><i class="fa-solid fa-triangle-exclamation"></i></div><div class="n">${fmtNum(s.expiring_30d)}</div><div class="l">Expirant sous 30 jours</div></div>
-      <div class="kpi g"><div class="ic"><i class="fa-solid fa-euro-sign"></i></div><div class="n">${fmtMoney(kpis.mrr_estimate)}</div><div class="l">MRR estimé</div><div class="sub">${fmtMoney(kpis.mrr_estimate*12)} ARR estimé</div></div>
-      <div class="kpi b"><div class="ic"><i class="fa-solid fa-ban"></i></div><div class="n">${fmtNum(s.cancelled)}</div><div class="l">Abonnements résiliés</div></div>
-    </div>
-    <div class="cols2">
-      <div class="box"><h3><i class="fa-solid fa-clock-rotate-left"></i> Activité récente</h3>
-        <div class="tlist">${aErr||!activity?.length?'<div class="empty" style="padding:20px">Aucune activité.</div>':activity.map(l=>`
-          <div class="it"><div><div class="nm">${esc(l.action)}</div><div class="sub">${esc(l.hotel_name||l.entity||'')} · ${esc(l.admin_email||'—')}</div></div><div class="right">${fmtDateTime(l.created_at)}</div></div>
-        `).join('')}</div>
+    <div class="phead"><div><h1>Tableau de bord</h1><div class="sub">Vue d'ensemble de la plateforme Flowtym — ${esc(periodLabel(dashboardPeriod))} (${fmtDate(kpis.period.start)} → ${fmtDate(kpis.period.end)})</div></div>
+      <div class="actions">
+        ${['this_month','last_month','quarter','year'].map(p=>`<button class="btn ${p===dashboardPeriod?'p':'g'} sm" data-period="${p}">${esc(periodLabel(p))}</button>`).join('')}
       </div>
-      <div class="box"><h3><i class="fa-solid fa-hotel"></i> Répartition des hôtels</h3>
-        <div class="tlist">
-          <div class="it"><div class="nm">Actifs</div><div class="right"><span class="tag green">${fmtNum(h.active)}</span></div></div>
-          <div class="it"><div class="nm">En essai</div><div class="right"><span class="tag amber">${fmtNum(h.in_trial)}</span></div></div>
-          <div class="it"><div class="nm">Suspendus</div><div class="right"><span class="tag red">${fmtNum(h.suspended)}</span></div></div>
-          <div class="it"><div class="nm">Brouillon</div><div class="right"><span class="tag gray">${fmtNum(h.draft)}</span></div></div>
-          <div class="it"><div class="nm">Archivés</div><div class="right"><span class="tag gray">${fmtNum(h.archived)}</span></div></div>
+    </div>
+
+    <h3 style="margin:6px 0 10px;font-size:13px;color:var(--ink2)"><i class="fa-solid fa-hotel"></i> Plateforme</h3>
+    <div class="kpis">
+      <div class="kpi v"><div class="ic"><i class="fa-solid fa-hotel"></i></div><div class="n">${fmtNum(h.total)}</div><div class="l">Hôtels totaux</div><div class="sub">${fmtNum(h.active)} actifs · ${fmtNum(h.inactive_or_archived)} inactifs/archivés</div></div>
+      <div class="kpi g"><div class="ic"><i class="fa-solid fa-sitemap"></i></div><div class="n">${fmtNum(g.total)}</div><div class="l">Groupes hôteliers</div></div>
+      <div class="kpi b"><div class="ic"><i class="fa-regular fa-user"></i></div><div class="n">${fmtNum(u.total)}</div><div class="l">Utilisateurs</div></div>
+      <div class="kpi a"><div class="ic"><i class="fa-solid fa-user-shield"></i></div><div class="n">${fmtNum(u.super_admins)}</div><div class="l">Super Admins</div></div>
+    </div>
+
+    <h3 style="margin:18px 0 10px;font-size:13px;color:var(--ink2)"><i class="fa-regular fa-calendar-check"></i> Abonnements</h3>
+    <div class="kpis">
+      <div class="kpi v"><div class="ic"><i class="fa-regular fa-calendar-check"></i></div><div class="n">${fmtNum(sub.active)}</div><div class="l">Actifs</div></div>
+      <div class="kpi a"><div class="ic"><i class="fa-regular fa-hourglass-half"></i></div><div class="n">${fmtNum(sub.trial)}</div><div class="l">Essais en cours</div><div class="sub">${fmtNum(sub.trial_expiring_7d)} expirant sous 7 jours</div></div>
+      <div class="kpi b"><div class="ic"><i class="fa-solid fa-ban"></i></div><div class="n">${fmtNum(sub.suspended)}</div><div class="l">Suspendus</div><div class="sub">${fmtNum(sub.scheduled_cancellation)} résiliation(s) programmée(s)</div></div>
+      <div class="kpi a"><div class="ic"><i class="fa-solid fa-triangle-exclamation"></i></div><div class="n">${fmtNum(sub.plan_incoherent)}</div><div class="l">Sans plan cohérent</div></div>
+    </div>
+
+    <h3 style="margin:18px 0 10px;font-size:13px;color:var(--ink2)"><i class="fa-solid fa-grip"></i> Applications</h3>
+    <div class="kpis">
+      <div class="kpi v"><div class="ic"><i class="fa-solid fa-grip"></i></div><div class="n">${fmtNum(apps.active)}</div><div class="l">Applications actives</div></div>
+      <div class="kpi b"><div class="ic"><i class="fa-regular fa-user"></i></div><div class="n">${fmtNum(apps.total_access_grants)}</div><div class="l">Accès individuels</div></div>
+      <div class="kpi a"><div class="ic"><i class="fa-solid fa-triangle-exclamation"></i></div><div class="n">${fmtNum(apps.divergence_count)}</div><div class="l">Écarts observe/enforce</div></div>
+      <div class="kpi a"><div class="ic"><i class="fa-solid fa-bug"></i></div><div class="n">${fmtNum(apps.resolution_errors)}</div><div class="l">Erreurs de résolution</div></div>
+    </div>
+
+    <h3 style="margin:18px 0 10px;font-size:13px;color:var(--ink2)"><i class="fa-regular fa-file-lines"></i> Facturation</h3>
+    <div class="kpis">
+      <div class="kpi v"><div class="ic"><i class="fa-regular fa-file-lines"></i></div><div class="n">${fmtMoney(bill.period_billed_ttc)}</div><div class="l">Facturé sur la période</div></div>
+      <div class="kpi g"><div class="ic"><i class="fa-solid fa-hand-holding-dollar"></i></div><div class="n">${fmtMoney(bill.period_collected)}</div><div class="l">Encaissé sur la période</div></div>
+      <div class="kpi a"><div class="ic"><i class="fa-solid fa-triangle-exclamation"></i></div><div class="n">${fmtMoney(bill.outstanding_total)}</div><div class="l">Restant dû</div><div class="sub">${fmtNum(bill.overdue_invoice_count)} facture(s) en retard</div></div>
+      <div class="kpi b"><div class="ic"><i class="fa-regular fa-file-lines"></i></div><div class="n">${fmtMoney(bill.credits_issued_ttc)}</div><div class="l">Avoirs émis sur la période</div><div class="sub">${fmtNum(bill.pending_payments)} paiement(s) en attente · ${fmtNum(bill.subscriptions_suspended_nonpayment)} suspendu(s) pour impayé</div></div>
+    </div>
+
+    <h3 style="margin:18px 0 10px;font-size:13px;color:var(--ink2)"><i class="fa-regular fa-user"></i> Utilisateurs</h3>
+    <div class="kpis">
+      <div class="kpi v"><div class="ic"><i class="fa-regular fa-user"></i></div><div class="n">${fmtNum(ud.active)}</div><div class="l">Actifs</div><div class="sub">${fmtNum(ud.deactivated)} désactivés</div></div>
+      <div class="kpi a"><div class="ic"><i class="fa-regular fa-envelope"></i></div><div class="n">${fmtNum(ud.pending_invites)}</div><div class="l">Invitations en attente</div><div class="sub">${fmtNum(ud.stale_invites)} anciennes (+14j)</div></div>
+      <div class="kpi a"><div class="ic"><i class="fa-solid fa-user-slash"></i></div><div class="n">${fmtNum(ud.without_access)}</div><div class="l">Sans accès hôtel</div></div>
+      <div class="kpi a"><div class="ic"><i class="fa-solid fa-user-shield"></i></div><div class="n">${fmtNum(ud.hotels_without_admin)}</div><div class="l">Hôtels sans administrateur</div></div>
+    </div>
+
+    <div class="cols2" style="margin-top:20px">
+      <div class="box">
+        <h3><i class="fa-solid fa-triangle-exclamation"></i> Alertes et actions requises (${sortedAlerts.length})</h3>
+        <div class="tlist" id="alertsList">
+          ${sortedAlerts.length?sortedAlerts.slice(0,25).map((a,i)=>{
+            const sv=severityBadge(a.severity);
+            return `<div class="it" style="cursor:pointer" data-alert="${i}">
+              <div><div class="nm"><i class="${alertTypeIcon(a.alert_type)}"></i> ${esc(a.message)}</div><div class="sub">${a.group_name?esc(groupNameOr(a.group_name))+' · ':''}${esc(a.hotel_name||'')}</div></div>
+              <div class="right"><span class="tag ${sv.cls}">${esc(sv.label)}</span></div>
+            </div>`;
+          }).join(''):'<div class="empty" style="padding:20px">Aucune alerte active.</div>'}
         </div>
+      </div>
+      <div class="box"><h3><i class="fa-solid fa-clock-rotate-left"></i> Activité récente</h3>
+        <div class="tlist">${!activity?.length?'<div class="empty" style="padding:20px">Aucune activité.</div>':activity.map(l=>`
+          <div class="it"><div><div class="nm">${esc(historyActionLabel(l.action))}</div><div class="sub">${esc(l.hotel_name||l.entity||'')} · ${esc(l.admin_email||'—')}</div></div><div class="right">${fmtDateTime(l.created_at)}</div></div>
+        `).join('')}</div>
       </div>
     </div>
   </div>`;
+
+  el.querySelectorAll('[data-period]').forEach(b=>b.onclick=()=>{ dashboardPeriod=b.dataset.period; renderDashboard(el); });
+  el.querySelectorAll('[data-alert]').forEach(b=>b.onclick=()=>goToAlertEntity(sortedAlerts[Number(b.dataset.alert)]));
+}
+
+// Navigation transversale depuis une alerte : ouvre directement l'objet concerné, en
+// conservant le contexte (recherche pré-remplie) quand un lien direct par identifiant
+// n'existe pas encore pour ce type d'objet (abonnement).
+function goToAlertEntity(alert){
+  if(!alert) return;
+  if(alert.entity_type==='hotel'){
+    goView('hotels');
+    setTimeout(async()=>{ const {data}=await sb.from('hotels').select('*').eq('id',alert.entity_id).maybeSingle(); if(data) openHotelDetailDrawer(data); }, 250);
+  } else if(alert.entity_type==='platform_invoice'){
+    goView('billing');
+    setTimeout(()=>openInvoiceDrawer(alert.entity_id, {}, ()=>renderView()), 250);
+  } else if(alert.entity_type==='user'){
+    goView('users');
+    setTimeout(async()=>{
+      const {data}=await sb.rpc('admin_list_user_access');
+      const row=(data||[]).find(u=>u.user_id===alert.entity_id);
+      if(row) openUserDrawer(row, [], [], ()=>renderView());
+    }, 250);
+  } else if(alert.entity_type==='hotel_subscription'){
+    searchQuery=alert.hotel_name||'';
+    goView('subscriptions');
+  } else {
+    goView('audit');
+  }
 }
 
 /* =====================================================================
@@ -2298,11 +2434,11 @@ async function renderInvoiceList(el){
     </div>
     <div class="tblwrap"><table class="tbl">
       <thead><tr>
-        <th data-k="hotel_name">Hôtel</th><th>Numéro</th><th data-k="status">Statut</th>
+        <th data-k="hotel_name">Hôtel</th><th>Numéro</th><th data-k="status">Statut</th><th>État financier</th>
         <th data-k="amount_ttc">Montant TTC</th><th>Réglé</th><th>Solde</th>
         <th data-k="due_date">Échéance</th><th data-k="created_at">Créée le</th><th>Actions</th>
       </tr></thead>
-      <tbody>${pageRows.length?pageRows.map(rowInvoiceHtml).join(''):`<tr><td colspan="9" class="empty">Aucune facture${searchQuery?' pour cette recherche':''}.</td></tr>`}</tbody>
+      <tbody>${pageRows.length?pageRows.map(rowInvoiceHtml).join(''):`<tr><td colspan="10" class="empty">Aucune facture${searchQuery?' pour cette recherche':''}.</td></tr>`}</tbody>
     </table></div>
     <div class="pager">
       <span>Page ${billingPage+1} / ${pageCount}</span>
@@ -2332,11 +2468,12 @@ async function renderInvoiceList(el){
 
 function rowInvoiceHtml(r){
   const st=invoiceStatusBadge(r.status);
-  const overdue=isInvoiceOverdue(r);
+  const fs=financialStateBadge(r.financial_state);
   return `<tr>
     <td><b>${esc(r.hotel_name)}</b></td>
     <td>${esc(r.number||'(proforma)')}</td>
-    <td><span class="tag ${st.cls}">${esc(st.label)}</span>${overdue?' <span class="tag red">En retard</span>':''}</td>
+    <td><span class="tag ${st.cls}">${esc(st.label)}</span></td>
+    <td><span class="tag ${fs.cls}">${esc(fs.label)}</span></td>
     <td>${fmtMoney(r.amount_ttc, r.currency)}</td>
     <td>${fmtMoney(r.paid_amount, r.currency)}</td>
     <td><b>${fmtMoney(r.balance, r.currency)}</b></td>
@@ -2393,16 +2530,17 @@ async function openInvoiceDrawer(invoiceId, hotelById, onChange){
 function renderInvoiceDrawerBody(detail, onChange){
   const inv=detail.invoice, hotel=detail.hotel, sub=detail.subscription;
   const payments=detail.payments||[], creditNotes=detail.credit_notes||[], history=detail.history||[];
-  const credited=creditNotes.filter(c=>c.status==='issued').reduce((s,c)=>s+Number(c.amount_ttc),0);
-  const balance=Number(inv.amount_ttc)-Number(inv.paid_amount)-credited;
+  const credited=inv.credited_ttc!=null?Number(inv.credited_ttc):creditNotes.filter(c=>c.status==='issued').reduce((s,c)=>s+Number(c.amount_ttc),0);
+  const balance=inv.balance!=null?Number(inv.balance):Number(inv.amount_ttc)-Number(inv.paid_amount)-credited;
   const st=invoiceStatusBadge(inv.status);
+  const fs=financialStateBadge(inv.financial_state);
   const acts=billingActionsForStatus(inv.status, inv.paid_amount);
-  const overdue=isInvoiceOverdue({status:inv.status, due_date:inv.due_date, balance});
+  const overdue=inv.financial_state==='overdue';
 
   openDrawer(`
     <div class="dh"><button class="close" id="dClose"><i class="fa-solid fa-xmark"></i></button>
       <h2>${esc(hotel.name)} — ${esc(inv.number||'Proforma')}</h2>
-      <div class="role"><span class="tag ${st.cls}">${esc(st.label)}</span>${overdue?' <span class="tag red">En retard</span>':''}</div>
+      <div class="role"><span class="tag ${st.cls}">${esc(st.label)}</span> <span class="tag ${fs.cls}">${esc(fs.label)}</span></div>
     </div>
 
     <div class="sec"><h4>Détails</h4>
@@ -2420,7 +2558,7 @@ function renderInvoiceDrawerBody(detail, onChange){
       <div class="actrow">
         ${acts.canIssue?'<button class="btn p" id="iIssue"><i class="fa-solid fa-paper-plane"></i> Émettre</button>':''}
         ${acts.canCancel?'<button class="btn d" id="iCancel"><i class="fa-solid fa-ban"></i> Annuler</button>':''}
-        <button class="btn g" id="iPrint"><i class="fa-solid fa-print"></i> Export PDF</button>
+        <button class="btn g" id="iPrint"><i class="fa-solid fa-print"></i> Imprimer / enregistrer en PDF</button>
       </div>
       ${overdue && sub?`<div class="actrow"><button class="btn d" id="iSuspend"><i class="fa-solid fa-pause"></i> Suspendre l'abonnement pour impayé</button></div>`:''}
     </div>
@@ -2437,8 +2575,11 @@ function renderInvoiceDrawerBody(detail, onChange){
       ${payments.length?payments.map(p=>{
         const pst=paymentStatusBadge(p.status);
         return `<div class="it" style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px dashed var(--line)">
-          <div><div class="nm">${fmtMoney(p.amount, p.currency)} · ${esc(paymentMethodLabel(p.method))}</div><div class="sub" style="font-size:11px;color:var(--muted)">${esc(p.reference||'')} · ${fmtDateTime(p.payment_date)}</div></div>
-          <div style="text-align:right"><span class="tag ${pst.cls}">${esc(pst.label)}</span>${p.status==='pending'?`<div style="margin-top:4px"><button class="btn sm g" data-confirm-pay="${p.id}">Confirmer</button> <button class="btn sm d" data-fail-pay="${p.id}">Échec</button></div>`:''}</div>
+          <div><div class="nm">${fmtMoney(p.amount, p.currency)} · ${esc(paymentMethodLabel(p.method))}</div><div class="sub" style="font-size:11px;color:var(--muted)">${esc(p.reference||'')} · ${fmtDateTime(p.payment_date)}${p.reversal_reason?' · Renversé : '+esc(p.reversal_reason):''}</div></div>
+          <div style="text-align:right"><span class="tag ${pst.cls}">${esc(pst.label)}</span>
+            ${p.status==='pending'?`<div style="margin-top:4px"><button class="btn sm g" data-confirm-pay="${p.id}">Confirmer</button> <button class="btn sm d" data-fail-pay="${p.id}">Échec</button></div>`:''}
+            ${p.status==='recorded'?`<div style="margin-top:4px"><button class="btn sm d" data-reverse-pay="${p.id}">Renverser</button></div>`:''}
+          </div>
         </div>`;
       }).join(''):'<div class="empty" style="padding:14px">Aucun paiement.</div>'}
       ${acts.canRecordPayment?'<div class="actrow"><button class="btn g" id="iRecordPayment"><i class="fa-solid fa-hand-holding-dollar"></i> Enregistrer un paiement</button></div>':''}
@@ -2526,6 +2667,20 @@ function renderInvoiceDrawerBody(detail, onChange){
     title:'Marquer ce paiement en échec', danger:true, body:'Ce paiement ne sera pas comptabilisé.', confirmLabel:'Marquer en échec',
     onConfirm: async()=>{ const {error}=await sb.rpc('admin_update_platform_payment_status',{p_payment_id:b.dataset.failPay,p_status:'failed'}); if(error) throw error; flash('Paiement marqué en échec.'); refresh(); }
   }));
+  document.querySelectorAll('[data-reverse-pay]').forEach(b=>b.onclick=()=>{
+    formModal({
+      title:'Renverser ce paiement', danger:true,
+      bodyHtml:'<p style="margin-bottom:10px">Le montant sera retiré du réglé de la facture (chèque rejeté, virement annulé...).</p><div class="fld"><label>Motif *</label><textarea id="rv_pay_reason"></textarea></div>',
+      confirmLabel:'Renverser',
+      onConfirm: async()=>{
+        const reason=$('rv_pay_reason').value.trim();
+        if(!reason) throw new Error('Un motif est requis.');
+        const {error}=await sb.rpc('admin_reverse_platform_payment',{p_payment_id:b.dataset.reversePay,p_reason:reason});
+        if(error) throw error;
+        flash('Paiement renversé.'); refresh();
+      }
+    });
+  });
 
   $('iCreateCreditNote')&&($('iCreateCreditNote').onclick=()=>{
     formModal({
@@ -2616,66 +2771,193 @@ async function renderBillingDashboard(el){
 }
 
 /* =====================================================================
-   Audit
+   Audit (Lot 5) — filtré, paginé côté serveur, JSON présenté lisiblement
    ===================================================================== */
-let auditPage=0, auditFilterAction='', auditFilterLevel='';
-async function renderAudit(el){
-  const {data,error}=await sb.from('platform_logs').select('*').order('created_at',{ascending:false}).limit(200);
-  if(error) throw error;
-  let rows=data||[];
-  const actions=[...new Set(rows.map(r=>r.action))].sort();
-  if(searchQuery.trim()){
-    const q=searchQuery.trim().toLowerCase();
-    rows=rows.filter(r=>[r.action,r.entity,r.hotel_name,r.admin_email].filter(Boolean).some(v=>String(v).toLowerCase().includes(q)));
-  }
-  if(auditFilterAction) rows=rows.filter(r=>r.action===auditFilterAction);
-  if(auditFilterLevel) rows=rows.filter(r=>r.level===auditFilterLevel);
+let auditPage=0, auditPageSize=25, auditTotal=0;
+let auditFilterAction='', auditFilterLevel='', auditFilterHotel='', auditFilterGroup='', auditFilterEntity='', auditDateFrom='', auditDateTo='';
 
-  const pageSize=25, pageCount=Math.max(1,Math.ceil(rows.length/pageSize));
-  auditPage=Math.min(auditPage,pageCount-1);
-  const pageRows=rows.slice(auditPage*pageSize,(auditPage+1)*pageSize);
+async function renderAudit(el){
+  el.innerHTML='<div class="loading"><i class="fa-solid fa-circle-notch fa-spin"></i> Chargement…</div>';
+  const [{data:hotels},{data:groups}]=await Promise.all([
+    sb.from('hotels').select('id,name'),
+    sb.from('hotel_groups').select('id,name').neq('status','archived'),
+  ]);
+  const {data:rows,error}=await sb.rpc('admin_list_platform_audit_log',{
+    p_search: searchQuery.trim()||null, p_admin_email:null,
+    p_hotel_id: auditFilterHotel||null, p_group_id: auditFilterGroup||null,
+    p_entity: auditFilterEntity||null, p_action: auditFilterAction||null, p_level: auditFilterLevel||null,
+    p_date_from: auditDateFrom?new Date(auditDateFrom).toISOString():null,
+    p_date_to: auditDateTo?new Date(auditDateTo+'T23:59:59').toISOString():null,
+    p_limit: auditPageSize, p_offset: auditPage*auditPageSize,
+  });
+  if(error) throw error;
+  auditTotal=rows?.[0]?.total_count?Number(rows[0].total_count):0;
+  const pageCount=Math.max(1,Math.ceil(auditTotal/auditPageSize));
+  const entities=['user','user_hotels','hotel','platform_admin','platform_invoice','platform_setting'];
+  const actions=['user.invite','user.grant_hotel','user.revoke_hotel','user.change_role','user.suspend','user.reactivate',
+    'platform_admin.grant','platform_admin.revoke','hotel.update','group.attach_hotel','group.detach_hotel',
+    'invoice.create_proforma','invoice.issue','invoice.cancel','payment.record','payment.update_status','payment.reverse',
+    'credit_note.create','credit_note.void','setting.update'];
 
   el.innerHTML=`<div class="page">
-    <div class="phead"><div><h1>Audit</h1><div class="sub">Journal des actions Super Admin — immuable, ${fmtNum(data.length)} derniers événements chargés</div></div>
-      <div class="actions"><button class="btn g" id="exportAudit"><i class="fa-solid fa-download"></i> Exporter CSV</button></div>
+    <div class="phead"><div><h1>Audit</h1><div class="sub">Journal des actions Super Admin — immuable, ${fmtNum(auditTotal)} événement(s)</div></div>
+      <div class="actions"><button class="btn g" id="exportAudit"><i class="fa-solid fa-download"></i> Exporter CSV (page)</button></div>
     </div>
     <div class="filters">
-      <select id="fAction"><option value="">Toutes les actions</option>${actions.map(a=>`<option value="${esc(a)}" ${auditFilterAction===a?'selected':''}>${esc(a)}</option>`).join('')}</select>
-      <select id="fLevel"><option value="">Tous niveaux</option><option value="info" ${auditFilterLevel==='info'?'selected':''}>Info</option><option value="warn" ${auditFilterLevel==='warn'?'selected':''}>Warn</option><option value="error" ${auditFilterLevel==='error'?'selected':''}>Error</option></select>
+      <input type="date" id="fDateFrom" value="${esc(auditDateFrom)}" title="Depuis">
+      <input type="date" id="fDateTo" value="${esc(auditDateTo)}" title="Jusqu'à">
+      <select id="fHotel"><option value="">Tous les hôtels</option>${(hotels||[]).map(h=>`<option value="${h.id}" ${auditFilterHotel===h.id?'selected':''}>${esc(h.name)}</option>`).join('')}</select>
+      <select id="fGroup"><option value="">Tous les groupes</option>${(groups||[]).map(g=>`<option value="${g.id}" ${auditFilterGroup===g.id?'selected':''}>${esc(groupNameOr(g.name))}</option>`).join('')}</select>
+      <select id="fEntity"><option value="">Tous les objets</option>${entities.map(e=>`<option value="${e}" ${auditFilterEntity===e?'selected':''}>${esc(e)}</option>`).join('')}</select>
+      <select id="fAction"><option value="">Toutes les actions</option>${actions.map(a=>`<option value="${a}" ${auditFilterAction===a?'selected':''}>${esc(historyActionLabel(a))}</option>`).join('')}</select>
+      <select id="fLevel"><option value="">Tous niveaux</option><option value="info" ${auditFilterLevel==='info'?'selected':''}>Info</option><option value="warn" ${auditFilterLevel==='warn'?'selected':''}>Avertissement</option><option value="error" ${auditFilterLevel==='error'?'selected':''}>Échec</option></select>
     </div>
     <div class="tblwrap"><table class="tbl">
-      <thead><tr><th>Date</th><th>Admin</th><th>Action</th><th>Entité</th><th>Hôtel</th><th>Niveau</th><th>Détails</th></tr></thead>
-      <tbody>${pageRows.length?pageRows.map(r=>`
+      <thead><tr><th>Date</th><th>Admin</th><th>Action</th><th>Objet</th><th>Hôtel</th><th>Groupe</th><th>Niveau</th><th>Détails</th></tr></thead>
+      <tbody>${rows?.length?rows.map(r=>`
         <tr>
           <td class="muted">${fmtDateTime(r.created_at)}</td>
           <td>${esc(r.admin_email||'—')}</td>
-          <td><b>${esc(r.action)}</b></td>
+          <td><b>${esc(historyActionLabel(r.action))}</b></td>
           <td>${esc(r.entity||'—')}</td>
           <td>${esc(r.hotel_name||'—')}</td>
+          <td>${esc(r.group_name?groupNameOr(r.group_name):'—')}</td>
           <td><span class="tag ${r.level==='error'?'red':r.level==='warn'?'amber':'gray'}">${esc(r.level)}</span></td>
           <td><button data-payload="${r.id}" title="Voir le détail"><i class="fa-regular fa-eye"></i></button></td>
-        </tr>`).join(''):'<tr><td colspan="7" class="empty">Aucun événement.</td></tr>'}</tbody>
+        </tr>`).join(''):'<tr><td colspan="8" class="empty">Aucun événement pour ces filtres.</td></tr>'}</tbody>
     </table></div>
     <div class="pager">
-      <span>Page ${auditPage+1} / ${pageCount}</span>
+      <span>Page ${auditPage+1} / ${pageCount} (${fmtNum(auditTotal)} au total)</span>
       <button id="aPrev" ${auditPage===0?'disabled':''}>‹ Précédent</button>
       <button id="aNext" ${auditPage>=pageCount-1?'disabled':''}>Suivant ›</button>
     </div>
   </div>`;
+  $('fDateFrom').onchange=e=>{ auditDateFrom=e.target.value; auditPage=0; renderAudit(el); };
+  $('fDateTo').onchange=e=>{ auditDateTo=e.target.value; auditPage=0; renderAudit(el); };
+  $('fHotel').onchange=e=>{ auditFilterHotel=e.target.value; auditPage=0; renderAudit(el); };
+  $('fGroup').onchange=e=>{ auditFilterGroup=e.target.value; auditPage=0; renderAudit(el); };
+  $('fEntity').onchange=e=>{ auditFilterEntity=e.target.value; auditPage=0; renderAudit(el); };
   $('fAction').onchange=e=>{ auditFilterAction=e.target.value; auditPage=0; renderAudit(el); };
   $('fLevel').onchange=e=>{ auditFilterLevel=e.target.value; auditPage=0; renderAudit(el); };
   $('aPrev').onclick=()=>{ auditPage--; renderAudit(el); };
   $('aNext').onclick=()=>{ auditPage++; renderAudit(el); };
-  $('exportAudit').onclick=()=>downloadCSV('audit.csv', rows, [
-    {label:'Date',get:r=>fmtDateTime(r.created_at)},{label:'Admin',get:r=>r.admin_email},{label:'Action',get:r=>r.action},
-    {label:'Entité',get:r=>r.entity},{label:'Hôtel',get:r=>r.hotel_name},{label:'Niveau',get:r=>r.level},{label:'IP',get:r=>r.ip_address},
+  $('exportAudit').onclick=()=>downloadCSV('audit.csv', rows||[], [
+    {label:'Date',get:r=>fmtDateTime(r.created_at)},{label:'Admin',get:r=>r.admin_email},{label:'Action',get:r=>historyActionLabel(r.action)},
+    {label:'Objet',get:r=>r.entity},{label:'Hôtel',get:r=>r.hotel_name},{label:'Groupe',get:r=>r.group_name},{label:'Niveau',get:r=>r.level},
   ]);
   el.querySelectorAll('[data-payload]').forEach(b=>b.onclick=()=>{
-    const row=rows.find(r=>r.id===b.dataset.payload);
-    $('modal').innerHTML=`<h3>Détail de l'événement</h3><pre style="background:#fafafe;border:1px solid var(--line);border-radius:10px;padding:14px;font-size:12px;white-space:pre-wrap;max-height:340px;overflow:auto">${esc(JSON.stringify(row,null,2))}</pre><div class="mact"><button class="btn g" id="mCancel">Fermer</button></div>`;
+    const row=(rows||[]).find(r=>r.id===b.dataset.payload);
+    const entries=Object.entries(row.payload||{});
+    $('modal').innerHTML=`<h3>${esc(historyActionLabel(row.action))}</h3>
+      <div class="kv"><span>Date</span><b>${fmtDateTime(row.created_at)}</b></div>
+      <div class="kv"><span>Administrateur</span><b>${esc(row.admin_email||'—')}</b></div>
+      ${row.ip_address?`<div class="kv"><span>Adresse IP</span><b>${esc(row.ip_address)}</b></div>`:''}
+      ${entries.length?`<h4 style="margin:14px 0 8px;font-size:11px;text-transform:uppercase;color:var(--muted)">Détails</h4>${entries.map(([k,v])=>`<div class="kv"><span>${esc(k)}</span><b>${esc(formatPayloadValue(v))}</b></div>`).join('')}`:''}
+      <details style="margin-top:12px"><summary style="cursor:pointer;font-size:12px;color:var(--muted)">Voir le JSON brut</summary>
+        <pre style="background:#fafafe;border:1px solid var(--line);border-radius:10px;padding:14px;font-size:12px;white-space:pre-wrap;max-height:280px;overflow:auto;margin-top:8px">${esc(JSON.stringify(row.payload||{},null,2))}</pre>
+      </details>
+      <div class="mact"><button class="btn g" id="mCancel">Fermer</button></div>`;
     $('modalbg').classList.add('on');
     $('mCancel').onclick=()=>$('modalbg').classList.remove('on');
   });
+}
+
+/* =====================================================================
+   Paramètres plateforme (Lot 5) — les 16 clés existantes uniquement
+   ===================================================================== */
+const SETTING_CATEGORY={
+  platform_name:'Identité', support_email:'Identité', terms_url:'Identité',
+  default_currency:'Configuration', default_billing_cycle:'Configuration', default_commitment:'Configuration',
+  default_tva_rate:'Configuration', billing_email:'Configuration',
+  trial_duration_days:'Essais', max_trial_days:'Essais', min_trial_days:'Essais', max_trial_extensions:'Essais',
+  dunning_days_before:'Relances', churn_alert_rate:'Objectifs', mrr_target:'Objectifs', arr_target:'Objectifs',
+};
+function settingLabel(key){ return key.replace(/_/g,' ').replace(/^./,c=>c.toUpperCase()); }
+
+async function renderSettings(el){
+  el.innerHTML='<div class="loading"><i class="fa-solid fa-circle-notch fa-spin"></i> Chargement…</div>';
+  const {data,error}=await sb.from('platform_settings').select('*').order('key');
+  if(error) throw error;
+  const byCategory={};
+  (data||[]).forEach(s=>{ const cat=SETTING_CATEGORY[s.key]||'Autres'; (byCategory[cat]=byCategory[cat]||[]).push(s); });
+
+  el.innerHTML=`<div class="page">
+    <div class="phead"><div><h1>Paramètres plateforme</h1><div class="sub">${fmtNum((data||[]).length)} paramètre(s) — toute modification est validée, auditée et réservée au Super Admin</div></div></div>
+    ${Object.entries(byCategory).map(([cat,settings])=>`
+      <div class="box" style="margin-bottom:16px">
+        <h3><i class="fa-solid fa-gear"></i> ${esc(cat)}</h3>
+        <div class="tlist">
+          ${settings.map(s=>`<div class="it">
+            <div><div class="nm">${esc(settingLabel(s.key))}</div><div class="sub">${esc(s.description||'')}</div></div>
+            <div class="right" style="display:flex;align-items:center;gap:10px">
+              <span>${esc(typeof s.value==='object'?JSON.stringify(s.value):String(s.value))}</span>
+              <button class="btn sm g" data-edit-setting="${esc(s.key)}">Modifier</button>
+            </div>
+          </div>`).join('')}
+        </div>
+      </div>
+    `).join('')}
+  </div>`;
+
+  el.querySelectorAll('[data-edit-setting]').forEach(b=>b.onclick=()=>{
+    const setting=(data||[]).find(s=>s.key===b.dataset.editSetting);
+    const type=settingValueType(setting.key);
+    const currentDisplay=type==='array'?(setting.value||[]).join(', '):(typeof setting.value==='string'?setting.value:setting.value);
+    formModal({
+      title:`Modifier « ${settingLabel(setting.key)} »`,
+      bodyHtml:`
+        <p class="muted" style="font-size:12.5px;margin-bottom:10px">${esc(setting.description||'')}</p>
+        <div class="fld"><label>Nouvelle valeur${type==='array'?' (nombres séparés par des virgules)':''}</label><input id="sv_value" value="${esc(currentDisplay)}"></div>
+        <div class="fld"><label>Motif (optionnel)</label><input id="sv_reason" placeholder="Consigné dans l'audit"></div>
+        <div class="err" id="sv_err"></div>
+      `,
+      confirmLabel:'Enregistrer',
+      onConfirm: async()=>{
+        const raw=$('sv_value').value;
+        const validation=validateSettingValue(setting.key, raw);
+        if(!validation.valid){ throw new Error(validation.error); }
+        const {error}=await sb.rpc('admin_update_platform_setting',{p_key:setting.key,p_value:JSON.stringify(validation.value),p_reason:$('sv_reason').value.trim()||null});
+        if(error) throw error;
+        flash('Paramètre mis à jour.'); renderSettings(el);
+      }
+    });
+  });
+}
+
+/* =====================================================================
+   Supervision (Lot 5) — honnête : "Non supervisé" plutôt qu'un faux badge vert
+   ===================================================================== */
+async function renderSupervision(el){
+  el.innerHTML='<div class="loading"><i class="fa-solid fa-circle-notch fa-spin"></i> Chargement…</div>';
+  const {data:s,error}=await sb.rpc('admin_supervision_status');
+  if(error) throw error;
+  const notSupervised=()=>'<span class="tag gray">Non supervisé</span>';
+  el.innerHTML=`<div class="page">
+    <div class="phead"><div><h1>Supervision</h1><div class="sub">État technique de la plateforme — uniquement ce qui est réellement mesurable aujourd'hui</div></div></div>
+    <div class="cols2">
+      <div class="box"><h3><i class="fa-solid fa-database"></i> Base de données</h3>
+        <div class="tlist">
+          <div class="it"><div class="nm">Connexion</div><div class="right">${s.database_connected?'<span class="tag green">Connectée</span>':notSupervised()}</div></div>
+          <div class="it"><div class="nm">Dernière migration appliquée</div><div class="right"><b>${esc(s.last_migration_name||'—')}</b></div></div>
+          <div class="it"><div class="nm">Appliquée le</div><div class="right">${fmtDateTime(s.last_migration_at)}</div></div>
+        </div>
+      </div>
+      <div class="box"><h3><i class="fa-solid fa-code-branch"></i> Déploiement</h3>
+        <div class="tlist">
+          <div class="it"><div class="nm">Version frontend</div><div class="right"><b>Lot 5 — RC1 en préparation</b></div></div>
+          <div class="it"><div class="nm">Tâches planifiées (cron)</div><div class="right">${s.scheduled_tasks_known?`<span class="tag gray">${fmtNum(s.scheduled_tasks_count)}</span>`:notSupervised()}</div></div>
+          <div class="it"><div class="nm">Webhooks configurés</div><div class="right">${s.webhooks_configured?'<span class="tag green">Oui</span>':'<span class="tag gray">Aucun à ce jour</span>'}</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="box" style="margin-top:16px"><h3><i class="fa-solid fa-triangle-exclamation"></i> Signaux non encore instrumentés</h3>
+      <div class="tlist">
+        <div class="it"><div class="nm">Erreurs de mutation (RPC)</div><div class="right">${s.mutation_error_monitoring_available?'':notSupervised()}</div></div>
+        <div class="it"><div class="nm">Erreurs Edge Functions</div><div class="right">${s.edge_function_error_monitoring_available?'':notSupervised()}</div></div>
+      </div>
+      <p class="muted" style="font-size:12px;margin-top:10px">Ces deux signaux nécessitent une instrumentation dédiée (journalisation systématique des échecs) non construite à ce jour — dette documentée dans le dossier RC1, jamais simulée ici par un faux badge vert.</p>
+    </div>
+  </div>`;
 }
 
 boot();

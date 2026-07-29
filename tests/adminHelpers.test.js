@@ -6,8 +6,10 @@ const {
   hotelActionsForStatus,
   hotelRoleLabel, platformRoleLabel, accountStatus, accountStatusBadge, primaryRoleLabel,
   revokeHotelImpactMessage, isLastHotelAdminError, historyActionLabel,
-  invoiceStatusBadge, invoicePaymentBadge, paymentStatusBadge, creditNoteStatusBadge,
+  invoiceStatusBadge, financialStateBadge, paymentStatusBadge, creditNoteStatusBadge,
   paymentMethodLabel, billingActionsForStatus, isInvoiceOverdue,
+  severityBadge, periodLabel, alertTypeIcon, sortAlertsBySeverity,
+  settingValueType, validateSettingValue, formatPayloadValue,
 } = require('./lib/adminHelpers');
 
 describe('Super Admin — hotelStatusBadge()', () => {
@@ -362,15 +364,17 @@ describe('Super Admin — invoiceStatusBadge() (Lot 4 : jamais confondu avec sta
   });
 });
 
-describe('Super Admin — invoicePaymentBadge() (statut de règlement dérivé, jamais stocké)', () => {
-  test('une proforma n\'a pas de statut de règlement', () => {
-    expect(invoicePaymentBadge({ status: 'proforma', balance: 100 })).toEqual({ label: '—', cls: 'gray' });
+describe('Super Admin — financialStateBadge() (état financier calculé serveur, jamais le statut documentaire)', () => {
+  test('les 5 valeurs sont mappées vers un libellé et une classe distincts', () => {
+    expect(financialStateBadge('unpaid')).toEqual({ label: 'Impayée', cls: 'gray' });
+    expect(financialStateBadge('partially_paid')).toEqual({ label: 'Partiellement réglée', cls: 'amber' });
+    expect(financialStateBadge('paid')).toEqual({ label: 'Réglée', cls: 'green' });
+    expect(financialStateBadge('overdue')).toEqual({ label: 'En retard', cls: 'red' });
+    expect(financialStateBadge('fully_credited')).toEqual({ label: 'Soldée par avoir', cls: 'blue' });
   });
-  test('une facture émise avec solde nul est réglée', () => {
-    expect(invoicePaymentBadge({ status: 'issued', balance: 0 })).toEqual({ label: 'Réglée', cls: 'green' });
-  });
-  test('une facture émise avec solde positif est impayée', () => {
-    expect(invoicePaymentBadge({ status: 'issued', balance: 50 })).toEqual({ label: 'Impayé', cls: 'red' });
+  test('absent (facture non émise) retombe sur un tiret neutre', () => {
+    expect(financialStateBadge(null)).toEqual({ label: '—', cls: 'gray' });
+    expect(financialStateBadge(undefined)).toEqual({ label: '—', cls: 'gray' });
   });
 });
 
@@ -379,6 +383,7 @@ describe('Super Admin — paymentStatusBadge() / creditNoteStatusBadge()', () =>
     expect(paymentStatusBadge('recorded')).toEqual({ label: 'Enregistré', cls: 'green' });
     expect(paymentStatusBadge('pending')).toEqual({ label: 'En attente', cls: 'amber' });
     expect(paymentStatusBadge('failed')).toEqual({ label: 'Échoué', cls: 'red' });
+    expect(paymentStatusBadge('reversed')).toEqual({ label: 'Renversé', cls: 'gray' });
   });
   test('statuts d\'avoir', () => {
     expect(creditNoteStatusBadge('issued')).toEqual({ label: 'Émis', cls: 'blue' });
@@ -436,5 +441,136 @@ describe('Super Admin — isInvoiceOverdue()', () => {
   });
   test('sans échéance renseignée -> jamais en retard', () => {
     expect(isInvoiceOverdue({ status: 'issued', due_date: null, balance: 50 }, '2026-07-29')).toBe(false);
+  });
+});
+
+describe('Super Admin — severityBadge() (Lot 5, alertes)', () => {
+  test('high -> Prioritaire / red', () => {
+    expect(severityBadge('high')).toEqual({ label: 'Prioritaire', cls: 'red' });
+  });
+  test('medium -> À surveiller / amber', () => {
+    expect(severityBadge('medium')).toEqual({ label: 'À surveiller', cls: 'amber' });
+  });
+  test('low -> Information / gray', () => {
+    expect(severityBadge('low')).toEqual({ label: 'Information', cls: 'gray' });
+  });
+  test('valeur inconnue -> repli sur la valeur brute, classe gray', () => {
+    expect(severityBadge('exotic')).toEqual({ label: 'exotic', cls: 'gray' });
+  });
+  test('vide/null -> tiret, classe gray', () => {
+    expect(severityBadge(null)).toEqual({ label: '—', cls: 'gray' });
+  });
+});
+
+describe('Super Admin — periodLabel()', () => {
+  test('mappe chaque période connue', () => {
+    expect(periodLabel('this_month')).toBe('Ce mois');
+    expect(periodLabel('last_month')).toBe('Mois précédent');
+    expect(periodLabel('quarter')).toBe('Trimestre');
+    expect(periodLabel('year')).toBe('Année');
+    expect(periodLabel('custom')).toBe('Période personnalisée');
+  });
+  test('valeur inconnue -> repli sur la valeur brute', () => {
+    expect(periodLabel('semester')).toBe('semester');
+  });
+  test('vide/null -> tiret', () => {
+    expect(periodLabel(null)).toBe('—');
+  });
+});
+
+describe('Super Admin — alertTypeIcon()', () => {
+  test('renvoie une icône dédiée pour chaque type d\'alerte connu', () => {
+    expect(alertTypeIcon('trial_ending_soon')).toBe('fa-regular fa-hourglass-half');
+    expect(alertTypeIcon('invoice_overdue')).toBe('fa-solid fa-file-invoice');
+    expect(alertTypeIcon('hotel_without_admin')).toBe('fa-solid fa-user-shield');
+    expect(alertTypeIcon('deactivated_user_with_access')).toBe('fa-solid fa-user-slash');
+  });
+  test('type inconnu -> icône générique, jamais une icône trompeuse', () => {
+    expect(alertTypeIcon('unknown_alert')).toBe('fa-solid fa-circle-info');
+  });
+});
+
+describe('Super Admin — sortAlertsBySeverity() (les alertes prioritaires toujours en premier)', () => {
+  test('trie high avant medium avant low', () => {
+    const alerts = [{ id: 1, severity: 'low' }, { id: 2, severity: 'high' }, { id: 3, severity: 'medium' }];
+    expect(sortAlertsBySeverity(alerts).map(a => a.id)).toEqual([2, 3, 1]);
+  });
+  test('une sévérité inconnue passe après les connues, ne casse pas le tri', () => {
+    const alerts = [{ id: 1, severity: 'weird' }, { id: 2, severity: 'high' }];
+    expect(sortAlertsBySeverity(alerts).map(a => a.id)).toEqual([2, 1]);
+  });
+  test('ne mute pas le tableau original', () => {
+    const alerts = [{ id: 1, severity: 'low' }, { id: 2, severity: 'high' }];
+    const sorted = sortAlertsBySeverity(alerts);
+    expect(sorted).not.toBe(alerts);
+    expect(alerts.map(a => a.id)).toEqual([1, 2]);
+  });
+  test('liste vide/null -> tableau vide', () => {
+    expect(sortAlertsBySeverity([])).toEqual([]);
+    expect(sortAlertsBySeverity(null)).toEqual([]);
+  });
+});
+
+describe('Super Admin — settingValueType() (jamais de paramètre inventé)', () => {
+  test('clés numériques connues -> number', () => {
+    expect(settingValueType('mrr_target')).toBe('number');
+    expect(settingValueType('default_tva_rate')).toBe('number');
+    expect(settingValueType('trial_duration_days')).toBe('number');
+  });
+  test('dunning_days_before -> array', () => {
+    expect(settingValueType('dunning_days_before')).toBe('array');
+  });
+  test('toute autre clé -> string', () => {
+    expect(settingValueType('platform_name')).toBe('string');
+    expect(settingValueType('support_email')).toBe('string');
+  });
+});
+
+describe('Super Admin — validateSettingValue()', () => {
+  test('nombre valide accepté et converti', () => {
+    expect(validateSettingValue('mrr_target', '5000')).toEqual({ valid: true, value: 5000 });
+  });
+  test('nombre vide ou non numérique refusé', () => {
+    expect(validateSettingValue('mrr_target', '').valid).toBe(false);
+    expect(validateSettingValue('mrr_target', 'abc').valid).toBe(false);
+  });
+  test('liste de nombres valide acceptée (dunning_days_before)', () => {
+    expect(validateSettingValue('dunning_days_before', '3, 7, 15')).toEqual({ valid: true, value: [3, 7, 15] });
+  });
+  test('liste vide ou contenant une valeur non numérique refusée', () => {
+    expect(validateSettingValue('dunning_days_before', '').valid).toBe(false);
+    expect(validateSettingValue('dunning_days_before', '3, x, 15').valid).toBe(false);
+  });
+  test('chaîne non vide acceptée telle quelle', () => {
+    expect(validateSettingValue('platform_name', 'Flowtym RH')).toEqual({ valid: true, value: 'Flowtym RH' });
+  });
+  test('chaîne vide refusée', () => {
+    expect(validateSettingValue('support_email', '   ').valid).toBe(false);
+    expect(validateSettingValue('support_email', null).valid).toBe(false);
+  });
+});
+
+describe('Super Admin — formatPayloadValue() (rendu lisible du JSON d\'audit, jamais un bloc technique brut)', () => {
+  test('null/undefined -> tiret', () => {
+    expect(formatPayloadValue(null)).toBe('—');
+    expect(formatPayloadValue(undefined)).toBe('—');
+  });
+  test('booléen -> Oui/Non', () => {
+    expect(formatPayloadValue(true)).toBe('Oui');
+    expect(formatPayloadValue(false)).toBe('Non');
+  });
+  test('tableau -> valeurs jointes par virgule, récursif', () => {
+    expect(formatPayloadValue([1, 2, 3])).toBe('1, 2, 3');
+    expect(formatPayloadValue([true, false, null])).toBe('Oui, Non, —');
+  });
+  test('tableau vide -> tiret', () => {
+    expect(formatPayloadValue([])).toBe('—');
+  });
+  test('objet -> JSON.stringify', () => {
+    expect(formatPayloadValue({ a: 1 })).toBe(JSON.stringify({ a: 1 }));
+  });
+  test('nombre/chaîne -> String()', () => {
+    expect(formatPayloadValue(42)).toBe('42');
+    expect(formatPayloadValue('hello')).toBe('hello');
   });
 });

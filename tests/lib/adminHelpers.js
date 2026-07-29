@@ -178,14 +178,15 @@ const INVOICE_STATUS_LABEL = { proforma: 'Proforma', issued: 'Émise', cancelled
 const INVOICE_STATUS_CLASS = { proforma: 'amber', issued: 'blue', cancelled: 'gray' };
 function invoiceStatusBadge(status) { return { label: INVOICE_STATUS_LABEL[status] || status || '—', cls: INVOICE_STATUS_CLASS[status] || 'gray' }; }
 
-function invoicePaymentBadge({ status, balance }) {
-  if (status !== 'issued') return { label: '—', cls: 'gray' };
-  if (balance <= 0) return { label: 'Réglée', cls: 'green' };
-  return { label: 'Impayé', cls: 'red' };
+const FINANCIAL_STATE_LABEL = { unpaid: 'Impayée', partially_paid: 'Partiellement réglée', paid: 'Réglée', overdue: 'En retard', fully_credited: 'Soldée par avoir' };
+const FINANCIAL_STATE_CLASS = { unpaid: 'gray', partially_paid: 'amber', paid: 'green', overdue: 'red', fully_credited: 'blue' };
+function financialStateBadge(state) {
+  if (!state) return { label: '—', cls: 'gray' };
+  return { label: FINANCIAL_STATE_LABEL[state] || state, cls: FINANCIAL_STATE_CLASS[state] || 'gray' };
 }
 
-const PAYMENT_STATUS_LABEL = { recorded: 'Enregistré', pending: 'En attente', failed: 'Échoué' };
-const PAYMENT_STATUS_CLASS = { recorded: 'green', pending: 'amber', failed: 'red' };
+const PAYMENT_STATUS_LABEL = { recorded: 'Enregistré', pending: 'En attente', failed: 'Échoué', reversed: 'Renversé' };
+const PAYMENT_STATUS_CLASS = { recorded: 'green', pending: 'amber', failed: 'red', reversed: 'gray' };
 function paymentStatusBadge(status) { return { label: PAYMENT_STATUS_LABEL[status] || status || '—', cls: PAYMENT_STATUS_CLASS[status] || 'gray' }; }
 
 const CREDIT_NOTE_STATUS_LABEL = { issued: 'Émis', voided: 'Annulé' };
@@ -210,6 +211,61 @@ function isInvoiceOverdue({ status, due_date, balance }, todayStr) {
   return due_date < today;
 }
 
+/* =====================================================================
+   Helpers purs — Dashboard, Alertes, Paramètres (Lot 5, mirror exact de admin.html)
+   ===================================================================== */
+const SEVERITY_LABEL = { high: 'Prioritaire', medium: 'À surveiller', low: 'Information' };
+const SEVERITY_CLASS = { high: 'red', medium: 'amber', low: 'gray' };
+function severityBadge(sev) { return { label: SEVERITY_LABEL[sev] || sev || '—', cls: SEVERITY_CLASS[sev] || 'gray' }; }
+
+const PERIOD_LABEL = { this_month: 'Ce mois', last_month: 'Mois précédent', quarter: 'Trimestre', year: 'Année', custom: 'Période personnalisée' };
+function periodLabel(period) { return PERIOD_LABEL[period] || period || '—'; }
+
+const ALERT_TYPE_ICON = {
+  trial_ending_soon: 'fa-regular fa-hourglass-half', invoice_overdue: 'fa-solid fa-file-invoice',
+  hotel_without_admin: 'fa-solid fa-user-shield', invitation_stale: 'fa-regular fa-envelope',
+  subscription_suspended: 'fa-solid fa-ban', subscription_no_plan: 'fa-solid fa-triangle-exclamation',
+  archived_plan_assigned: 'fa-solid fa-box-archive', hotel_active_no_subscription: 'fa-solid fa-hotel',
+  deactivated_user_with_access: 'fa-solid fa-user-slash',
+};
+function alertTypeIcon(type) { return ALERT_TYPE_ICON[type] || 'fa-solid fa-circle-info'; }
+
+const SEVERITY_ORDER = { high: 0, medium: 1, low: 2 };
+function sortAlertsBySeverity(alerts) {
+  return [...(alerts || [])].sort((a, b) => (SEVERITY_ORDER[a.severity] ?? 9) - (SEVERITY_ORDER[b.severity] ?? 9));
+}
+
+const SETTING_NUMERIC_KEYS = ['mrr_target', 'arr_target', 'default_tva_rate', 'default_commitment',
+  'max_trial_days', 'min_trial_days', 'max_trial_extensions', 'churn_alert_rate', 'trial_duration_days'];
+function settingValueType(key) {
+  if (SETTING_NUMERIC_KEYS.includes(key)) return 'number';
+  if (key === 'dunning_days_before') return 'array';
+  return 'string';
+}
+function validateSettingValue(key, rawValue) {
+  const type = settingValueType(key);
+  if (type === 'number') {
+    const n = Number(rawValue);
+    if (rawValue === '' || rawValue == null || Number.isNaN(n)) return { valid: false, error: 'Doit être un nombre.' };
+    return { valid: true, value: n };
+  }
+  if (type === 'array') {
+    const parts = String(rawValue || '').split(',').map(s => s.trim()).filter(Boolean).map(Number);
+    if (!parts.length || parts.some(Number.isNaN)) return { valid: false, error: 'Doit être une liste de nombres séparés par des virgules.' };
+    return { valid: true, value: parts };
+  }
+  if (rawValue == null || String(rawValue).trim() === '') { return { valid: false, error: 'Ne peut pas être vide.' }; }
+  return { valid: true, value: String(rawValue) };
+}
+
+function formatPayloadValue(v) {
+  if (v === null || v === undefined) return '—';
+  if (typeof v === 'boolean') return v ? 'Oui' : 'Non';
+  if (Array.isArray(v)) return v.length ? v.map(x => formatPayloadValue(x)).join(', ') : '—';
+  if (typeof v === 'object') return JSON.stringify(v);
+  return String(v);
+}
+
 module.exports = {
   hotelStatusBadge, subscriptionStatusBadge, trialDaysRemaining,
   fmtMoney, fmtNum, groupNameOr, sortRows, errorLabel,
@@ -217,6 +273,8 @@ module.exports = {
   hotelActionsForStatus,
   hotelRoleLabel, platformRoleLabel, accountStatus, accountStatusBadge, primaryRoleLabel,
   revokeHotelImpactMessage, isLastHotelAdminError, historyActionLabel,
-  invoiceStatusBadge, invoicePaymentBadge, paymentStatusBadge, creditNoteStatusBadge,
+  invoiceStatusBadge, financialStateBadge, paymentStatusBadge, creditNoteStatusBadge,
   paymentMethodLabel, billingActionsForStatus, isInvoiceOverdue,
+  severityBadge, periodLabel, alertTypeIcon, sortAlertsBySeverity,
+  settingValueType, validateSettingValue, formatPayloadValue,
 };
