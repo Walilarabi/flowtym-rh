@@ -2,6 +2,7 @@
 const {
   hotelStatusBadge, subscriptionStatusBadge, trialDaysRemaining,
   fmtMoney, fmtNum, groupNameOr, sortRows, errorLabel,
+  attributionTypeBadge, addonStatusBadge, causeLabel, eventTypeLabel, actionsForStatus,
 } = require('./lib/adminHelpers');
 
 describe('Super Admin — hotelStatusBadge()', () => {
@@ -105,5 +106,85 @@ describe('Super Admin — errorLabel()', () => {
   });
   test('message absent retombe sur un message générique', () => {
     expect(errorLabel(undefined)).toBe('Une erreur est survenue.');
+  });
+});
+
+describe('Super Admin — attributionTypeBadge()', () => {
+  test('régularisation interne est mise en avant (ambre)', () => {
+    expect(attributionTypeBadge('internal_regularization')).toEqual({ label: 'Régularisation interne', cls: 'amber' });
+  });
+  test('commercial est neutre (gris)', () => {
+    expect(attributionTypeBadge('commercial')).toEqual({ label: 'Commercial', cls: 'gray' });
+  });
+  test('valeur inconnue retombe sur la valeur brute', () => {
+    expect(attributionTypeBadge('mystere').label).toBe('mystere');
+  });
+});
+
+describe('Super Admin — addonStatusBadge()', () => {
+  test('actif est vert, retiré est gris', () => {
+    expect(addonStatusBadge('active')).toEqual({ label: 'Actif', cls: 'green' });
+    expect(addonStatusBadge('cancelled')).toEqual({ label: 'Retiré', cls: 'gray' });
+  });
+});
+
+describe('Super Admin — causeLabel()', () => {
+  test('traduit les 13 codes de divergence connus en français', () => {
+    expect(causeLabel('missing_main_subscription')).toBe('Aucun abonnement principal');
+    expect(causeLabel('expired_trial')).toBe("Période d'essai expirée");
+    expect(causeLabel('addon_missing_app_mapping')).toBe('Option active sans application associée');
+  });
+  test('code inconnu est renvoyé tel quel (jamais masqué)', () => {
+    expect(causeLabel('futur_code_inconnu')).toBe('futur_code_inconnu');
+  });
+});
+
+describe('Super Admin — eventTypeLabel()', () => {
+  test('traduit les événements de cycle de vie', () => {
+    expect(eventTypeLabel('plan_changed')).toBe('Changement de plan');
+    expect(eventTypeLabel('trial_extended')).toBe('Essai prolongé');
+    expect(eventTypeLabel('expired_automatic')).toBe('Expiration automatique');
+  });
+  test('code inconnu est renvoyé tel quel', () => {
+    expect(eventTypeLabel('code_futur')).toBe('code_futur');
+  });
+});
+
+describe('Super Admin — actionsForStatus()', () => {
+  test('trial : prolongation, conversion, changement de plan et résiliation possibles, pas de suspension', () => {
+    const a = actionsForStatus('trial');
+    expect(a.extendTrial).toBe(true);
+    expect(a.convertTrial).toBe(true);
+    expect(a.changePlan).toBe(true);
+    expect(a.scheduleCancel).toBe(true);
+    expect(a.cancelNow).toBe(true);
+    expect(a.suspend).toBe(false);
+    expect(a.reactivate).toBe(false);
+  });
+  test('active : suspension, renouvellement, changement de plan possibles, pas de conversion d\'essai', () => {
+    const a = actionsForStatus('active');
+    expect(a.suspend).toBe(true);
+    expect(a.renew).toBe(true);
+    expect(a.changePlan).toBe(true);
+    expect(a.extendTrial).toBe(false);
+    expect(a.convertTrial).toBe(false);
+  });
+  test('suspended : réactivation et changement de plan possibles, pas de suspension ni de renouvellement', () => {
+    const a = actionsForStatus('suspended');
+    expect(a.reactivate).toBe(true);
+    expect(a.changePlan).toBe(true);
+    expect(a.suspend).toBe(false);
+    expect(a.renew).toBe(false);
+  });
+  test('expired : seule la résiliation immédiate reste pertinente', () => {
+    const a = actionsForStatus('expired');
+    expect(a.cancelNow).toBe(true);
+    expect(a.suspend).toBe(false);
+    expect(a.changePlan).toBe(false);
+    expect(a.reactivate).toBe(false);
+  });
+  test('cancelled : statut final, aucune action de cycle de vie', () => {
+    const a = actionsForStatus('cancelled');
+    expect(Object.values(a).every(v => v === false)).toBe(true);
   });
 });

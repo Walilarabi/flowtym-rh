@@ -181,6 +181,21 @@ button,select,input,textarea{font-family:inherit}
 
 .toast{position:fixed;bottom:26px;left:50%;transform:translateX(-50%);background:#15233b;color:#fff;padding:10px 16px;border-radius:10px;font-size:13px;font-weight:600;z-index:300;opacity:0;transition:.25s;pointer-events:none}
 .toast.on{opacity:1}
+
+/* ---- abonnements : tabs, fiche détaillée, formulaires modaux ---- */
+.tabs{display:flex;gap:6px;margin-bottom:16px;border-bottom:1px solid var(--line)}
+.tabs .tab{border:0;background:none;padding:10px 4px;margin-right:18px;font-size:13.5px;font-weight:700;color:var(--ink2);cursor:pointer;position:relative;top:1px}
+.tabs .tab.on{color:var(--violet-d);border-bottom:2px solid var(--violet)}
+.kv{display:flex;justify-content:space-between;gap:10px;padding:6px 0;font-size:13px;border-bottom:1px dashed var(--line)}
+.kv:last-of-type{border-bottom:0}
+.kv span{color:var(--ink2)}
+.actrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.applist{display:flex;flex-direction:column;gap:6px}
+.appitem{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;font-size:12.5px}
+.appitem .right{display:flex;align-items:center;gap:8px}
+.mform .fld{margin-bottom:13px}
+.mform .fld label{display:block;font-size:11.5px;font-weight:600;color:var(--ink2);margin-bottom:5px}
+.mform input,.mform select{width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:10px;font-size:13px}
 </style>
 </head>
 <body>
@@ -303,6 +318,54 @@ function sortRows(rows, key, dir){
 }
 
 /* =====================================================================
+   Helpers purs — Abonnements/Applications (mirror exact de tests/lib/adminHelpers.js)
+   ===================================================================== */
+const ATTRIBUTION_TYPE_LABEL={commercial:'Commercial',internal_regularization:'Régularisation interne'};
+function attributionTypeBadge(t){ return {label:ATTRIBUTION_TYPE_LABEL[t]||t||'—', cls:t==='internal_regularization'?'amber':'gray'}; }
+
+const ADDON_STATUS_LABEL={active:'Actif',cancelled:'Retiré'};
+const ADDON_STATUS_CLASS={active:'green',cancelled:'gray'};
+function addonStatusBadge(status){ return {label:ADDON_STATUS_LABEL[status]||status||'—', cls:ADDON_STATUS_CLASS[status]||'gray'}; }
+
+const CAUSE_LABEL={
+  missing_main_subscription:"Aucun abonnement principal",
+  app_not_in_plan:"Application non incluse dans le plan",
+  missing_addon:"Aucune option ne couvre cette application",
+  addon_missing_app_mapping:"Option active sans application associée",
+  expired_addon:"Option expirée",
+  expired_trial:"Période d'essai expirée",
+  trial_missing_end_date:"Date de fin d'essai manquante",
+  inactive_user:"Utilisateur désactivé",
+  suspended_hotel:"Hôtel non actif",
+  incomplete_contract_snapshot:"Contrat historique incomplet",
+  archived_plan:"Plan archivé",
+  inactive_plan:"Plan inactif",
+  missing_individual_access:"Aucun accès individuel accordé",
+};
+function causeLabel(code){ return CAUSE_LABEL[code]||code; }
+
+const EVENT_TYPE_LABEL={
+  created:'Création', trial_started:'Début essai', trial_extended:'Essai prolongé', trial_converted:'Essai converti',
+  activated:'Activation', suspended:'Suspension', reactivated:'Réactivation', renewed:'Renouvellement',
+  cancelled_immediate:'Résiliation immédiate', cancellation_scheduled:'Résiliation planifiée', cancellation_reverted:'Résiliation annulée',
+  expired_automatic:'Expiration automatique', plan_changed:'Changement de plan', price_snapshot_updated:'Tarif mis à jour',
+  regularized_legacy:'Régularisation', migrated_to_commercial_plan:'Migration vers plan commercial',
+};
+function eventTypeLabel(code){ return EVENT_TYPE_LABEL[code]||code; }
+
+// Détermine quelles actions de cycle de vie sont pertinentes pour un statut donné —
+// évite d'afficher un bouton dont l'appel échouerait systématiquement côté RPC.
+function actionsForStatus(status){
+  const all={ extendTrial:false, convertTrial:false, activate:false, suspend:false, reactivate:false,
+    renew:false, changePlan:false, scheduleCancel:false, revertCancel:false, cancelNow:false };
+  if(status==='trial') return {...all, extendTrial:true, convertTrial:true, changePlan:true, scheduleCancel:true, cancelNow:true};
+  if(status==='active') return {...all, suspend:true, renew:true, changePlan:true, scheduleCancel:true, cancelNow:true};
+  if(status==='suspended') return {...all, reactivate:true, changePlan:true, cancelNow:true};
+  if(status==='expired') return {...all, cancelNow:true};
+  return all; // cancelled : aucune action, statut final
+}
+
+/* =====================================================================
    Toast / drawer / confirm
    ===================================================================== */
 let toastT=null;
@@ -333,6 +396,24 @@ function confirmAction({title, body, confirmLabel='Confirmer', danger=false, onC
   };
 }
 $('modalbg').addEventListener('click',e=>{ if(e.target.id==='modalbg') $('modalbg').classList.remove('on'); });
+// Variante de confirmAction avec un corps HTML libre (champs de formulaire), pour les actions
+// qui exigent une saisie (motif, date, sélection de plan) en plus d'une simple confirmation.
+function formModal({title, bodyHtml, confirmLabel='Confirmer', danger=false, onConfirm}){
+  $('modal').innerHTML=`
+    <h3>${esc(title)}</h3>
+    <div class="mform">${bodyHtml}</div>
+    <div class="mact">
+      <button class="btn g" id="mCancel">Annuler</button>
+      <button class="btn ${danger?'d':'p'}" id="mOk">${esc(confirmLabel)}</button>
+    </div>`;
+  $('modalbg').classList.add('on');
+  $('mCancel').onclick=()=>$('modalbg').classList.remove('on');
+  $('mOk').onclick=async()=>{
+    $('mOk').disabled=true;
+    try{ await onConfirm(); $('modalbg').classList.remove('on'); }
+    catch(e){ flash(errorLabel(e.message),'e'); $('mOk').disabled=false; }
+  };
+}
 
 /* =====================================================================
    Boot / Auth gate
@@ -424,7 +505,7 @@ const MENU=[
     ['hotels','Hôtels','fa-solid fa-hotel',true],
     ['groups','Groupes hôteliers','fa-solid fa-sitemap',true],
     ['users','Utilisateurs','fa-regular fa-user',true],
-    ['subscriptions','Abonnements','fa-regular fa-calendar-check',false],
+    ['subscriptions','Abonnements','fa-regular fa-calendar-check',true],
     ['trials','Périodes d\'essai','fa-regular fa-hourglass-half',false],
     ['licenses','Licences','fa-solid fa-key',false],
   ]],
@@ -439,7 +520,6 @@ const MENU=[
   ]],
 ];
 const STUB_INFO={
-  subscriptions:{ic:'fa-regular fa-calendar-check',desc:'5 plans réels sont déjà en base (Flow Starter à Enterprise) ainsi que les abonnements par hôtel. L\'interface de gestion (créer/renouveler/suspendre/résilier) arrive en Phase 2.'},
   billing:{ic:'fa-regular fa-file-lines',desc:'Les tables de facturation plateforme (platform_invoices, platform_contracts) et la préparation e-invoicing existent déjà côté base, sans RPC ni donnée réelle pour l\'instant.'},
   trials:{ic:'fa-regular fa-hourglass-half',desc:'Le suivi d\'essai (dates, alertes 30/15/7/3/1 jours) sera construit sur hotel_subscriptions.trial_ends_at en Phase 2.'},
   payments:{ic:'fa-solid fa-credit-card',desc:'Le moteur de relance (dunning) existe déjà côté base pour la facturation hôtel ; son équivalent plateforme (paiements Flowtym) arrive en Phase 2.'},
@@ -522,6 +602,7 @@ async function renderView(){
     else if(view==='hotels') await renderHotels(el);
     else if(view==='groups') await renderGroups(el);
     else if(view==='users') await renderUsers(el);
+    else if(view==='subscriptions') await renderSubscriptions(el);
     else if(view==='audit') await renderAudit(el);
     else renderStub(el, view);
   }catch(e){
@@ -937,6 +1018,562 @@ async function renderUsers(el){
       }
     });
   });
+}
+
+/* =====================================================================
+   Abonnements et Applications
+   ===================================================================== */
+let subsTab='list', subsPage=0, subsSort={key:'_hotelName',dir:'asc'};
+let subsFilterGroup='', subsFilterPlan='', subsFilterStatus='', subsFilterTrial='';
+
+async function renderSubscriptions(el){
+  el.innerHTML=`<div class="page">
+    <div class="phead"><div><h1>Abonnements</h1><div class="sub">Cycle de vie des abonnements et applications par hôtel</div></div></div>
+    <div class="tabs">
+      <button class="tab ${subsTab==='list'?'on':''}" data-tab="list">Abonnements</button>
+      <button class="tab ${subsTab==='catalog'?'on':''}" data-tab="catalog">Catalogue des offres</button>
+    </div>
+    <div id="subsBody"></div>
+  </div>`;
+  el.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{ subsTab=b.dataset.tab; renderSubscriptions(el); });
+  const body=$('subsBody');
+  if(subsTab==='catalog') await renderPlanCatalog(body);
+  else await renderSubscriptionsList(body);
+}
+
+async function renderSubscriptionsList(el){
+  el.innerHTML='<div class="loading"><i class="fa-solid fa-circle-notch fa-spin"></i> Chargement…</div>';
+  const [{data:hotels,error:hErr},{data:groups},{data:plans},{data:subs,error:sErr}]=await Promise.all([
+    sb.from('hotels').select('id,name,group_id,status'),
+    sb.from('hotel_groups').select('id,name'),
+    sb.from('subscription_plans').select('id,name,slug,is_active,archived_at'),
+    sb.from('hotel_subscriptions').select('*'),
+  ]);
+  if(hErr) throw hErr; if(sErr) throw sErr;
+  const groupById=Object.fromEntries((groups||[]).map(g=>[g.id,g]));
+  const planById=Object.fromEntries((plans||[]).map(p=>[p.id,p]));
+
+  let rows=(subs||[]).map(s=>{
+    const hotel=(hotels||[]).find(h=>h.id===s.hotel_id);
+    const group=hotel?.group_id?groupById[hotel.group_id]:null;
+    const plan=planById[s.plan_id];
+    return {...s, _hotel:hotel, _hotelName:hotel?.name||'(hôtel introuvable)', _group:group, _plan:plan};
+  });
+
+  if(searchQuery.trim()){
+    const q=searchQuery.trim().toLowerCase();
+    rows=rows.filter(r=>[r._hotelName, r._group?.name, r._plan?.name].filter(Boolean).some(v=>String(v).toLowerCase().includes(q)));
+  }
+  if(subsFilterGroup) rows=rows.filter(r=>r._hotel?.group_id===subsFilterGroup);
+  if(subsFilterPlan) rows=rows.filter(r=>r.plan_id===subsFilterPlan);
+  if(subsFilterStatus) rows=rows.filter(r=>r.status===subsFilterStatus);
+  if(subsFilterTrial==='ongoing') rows=rows.filter(r=>r.status==='trial');
+  if(subsFilterTrial==='expiring7') rows=rows.filter(r=>{
+    if(r.status!=='trial') return false;
+    const d=trialDaysRemaining(r.trial_ends_at);
+    return d!=null && d>=0 && d<=7;
+  });
+  rows=sortRows(rows, subsSort.key, subsSort.dir);
+
+  const pageSize=20, pageCount=Math.max(1,Math.ceil(rows.length/pageSize));
+  subsPage=Math.min(subsPage,pageCount-1);
+  const pageRows=rows.slice(subsPage*pageSize,(subsPage+1)*pageSize);
+
+  el.innerHTML=`
+    <div class="filters">
+      <select id="fGroup"><option value="">Tous les groupes</option>${(groups||[]).map(g=>`<option value="${g.id}" ${subsFilterGroup===g.id?'selected':''}>${esc(groupNameOr(g.name))}</option>`).join('')}</select>
+      <select id="fPlan"><option value="">Tous les plans</option>${(plans||[]).map(p=>`<option value="${p.id}" ${subsFilterPlan===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}</select>
+      <select id="fStatus"><option value="">Tous les statuts</option>${Object.entries(SUB_STATUS_LABEL).map(([k,l])=>`<option value="${k}" ${subsFilterStatus===k?'selected':''}>${l}</option>`).join('')}</select>
+      <select id="fTrial">
+        <option value="">Tous les essais</option>
+        <option value="ongoing" ${subsFilterTrial==='ongoing'?'selected':''}>Essais en cours</option>
+        <option value="expiring7" ${subsFilterTrial==='expiring7'?'selected':''}>Expirant sous 7 jours</option>
+      </select>
+    </div>
+    ${!rows.length && !subsFilterGroup && !subsFilterPlan && !subsFilterStatus && !subsFilterTrial && !searchQuery.trim() ? `
+    <div class="stub"><div class="ic"><i class="fa-regular fa-calendar-check"></i></div><h2>Aucun abonnement</h2>
+      <p>Aucun hôtel n'a encore d'abonnement principal. Créez-en un depuis la fiche d'un hôtel (vue Hôtels) ou via l'action ci-dessous.</p>
+    </div>` : `
+    <div class="tblwrap"><table class="tbl">
+      <thead><tr>
+        <th data-k="_hotelName">Hôtel</th><th>Groupe</th><th data-k="status">Statut</th><th>Plan</th><th>Essai</th>
+        <th data-k="updated_at">Dernière mise à jour</th><th>Attribution</th><th>Actions</th>
+      </tr></thead>
+      <tbody>${pageRows.length?pageRows.map(rowSubscriptionHtml).join(''):`<tr><td colspan="8" class="empty">Aucun résultat${searchQuery?' pour cette recherche':''}.</td></tr>`}</tbody>
+    </table></div>
+    <div class="pager">
+      <span>Page ${subsPage+1} / ${pageCount}</span>
+      <button id="sPrev" ${subsPage===0?'disabled':''}>‹ Précédent</button>
+      <button id="sNext" ${subsPage>=pageCount-1?'disabled':''}>Suivant ›</button>
+    </div>`}
+  `;
+  el.querySelectorAll('th[data-k]').forEach(th=>th.onclick=()=>{
+    const k=th.dataset.k;
+    subsSort = subsSort.key===k ? {key:k,dir:subsSort.dir==='asc'?'desc':'asc'} : {key:k,dir:'asc'};
+    renderSubscriptionsList(el);
+  });
+  $('fGroup').onchange=e=>{ subsFilterGroup=e.target.value; subsPage=0; renderSubscriptionsList(el); };
+  $('fPlan').onchange=e=>{ subsFilterPlan=e.target.value; subsPage=0; renderSubscriptionsList(el); };
+  $('fStatus').onchange=e=>{ subsFilterStatus=e.target.value; subsPage=0; renderSubscriptionsList(el); };
+  $('fTrial').onchange=e=>{ subsFilterTrial=e.target.value; subsPage=0; renderSubscriptionsList(el); };
+  $('sPrev')&&($('sPrev').onclick=()=>{ subsPage--; renderSubscriptionsList(el); });
+  $('sNext')&&($('sNext').onclick=()=>{ subsPage++; renderSubscriptionsList(el); });
+  el.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>openSubscriptionDrawer(rows.find(r=>r.id===b.dataset.open)));
+}
+
+function rowSubscriptionHtml(s){
+  const st=subscriptionStatusBadge(s.status);
+  const at=attributionTypeBadge(s.attribution_type);
+  let trialCell='—';
+  if(s.status==='trial'){
+    const d=trialDaysRemaining(s.trial_ends_at);
+    if(s.trial_ends_at==null) trialCell='<span class="tag amber">Date manquante</span>';
+    else if(d<0) trialCell=`<span class="tag red">Expiré</span>`;
+    else trialCell=`<span class="tag ${d<=7?'amber':'gray'}">${d} j restant(s)</span>`;
+  }
+  return `<tr>
+    <td><b>${esc(s._hotelName)}</b></td>
+    <td>${s._group?esc(groupNameOr(s._group.name)):'<span class="muted">—</span>'}</td>
+    <td><span class="tag ${st.cls}">${esc(st.label)}</span></td>
+    <td>${s._plan?esc(s._plan.name):'<span class="muted">Plan introuvable</span>'}</td>
+    <td>${trialCell}</td>
+    <td class="muted">${fmtDateTime(s.updated_at)}</td>
+    <td><span class="tag ${at.cls}">${esc(at.label)}</span></td>
+    <td><button data-open="${s.id}" title="Ouvrir la fiche"><i class="fa-regular fa-eye"></i></button></td>
+  </tr>`;
+}
+
+/* ---- Fiche détaillée d'un abonnement ---- */
+async function openSubscriptionDrawer(sub){
+  if(!sub){ flash('Abonnement introuvable.','e'); return; }
+  openDrawer(`<div class="dh"><button class="close" id="dClose"><i class="fa-solid fa-xmark"></i></button><h2>Chargement…</h2></div>`);
+  $('dClose').onclick=closeDrawer;
+
+  const [{data:hotel},{data:plan},{data:allPlans},{data:events},{data:addons},{data:allAddons},{data:appAccess},{data:apps}]=await Promise.all([
+    sb.from('hotels').select('id,name,group_id').eq('id',sub.hotel_id).maybeSingle(),
+    sb.from('subscription_plans').select('*').eq('id',sub.plan_id).maybeSingle(),
+    sb.from('subscription_plans').select('id,name,is_active,archived_at').order('sort_order'),
+    sb.from('hotel_subscription_events').select('*').eq('subscription_id',sub.id).order('created_at',{ascending:false}),
+    sb.from('hotel_addon_subscriptions').select('*, add_ons(name,app_id)').eq('hotel_id',sub.hotel_id),
+    sb.from('add_ons').select('id,name,app_id').eq('is_active',true),
+    sb.from('user_app_access').select('user_id, app_id, users(email,is_active)').eq('hotel_id',sub.hotel_id),
+    sb.from('platform_apps').select('id,code,name'),
+  ]);
+  const appById=Object.fromEntries((apps||[]).map(a=>[a.id,a]));
+  const {data:planModules}=await sb.from('plan_modules').select('app_id').eq('plan_id',sub.plan_id).eq('is_active',true);
+  const includedAppIds=new Set((planModules||[]).map(m=>m.app_id));
+
+  renderSubscriptionDrawerBody({sub, hotel, plan, allPlans:allPlans||[], events:events||[], addons:addons||[],
+    allAddons:allAddons||[], appAccess:appAccess||[], apps:apps||[], appById, includedAppIds});
+}
+
+function renderSubscriptionDrawerBody(ctx){
+  const {sub, hotel, plan, allPlans, events, addons, allAddons, appAccess, apps, appById, includedAppIds}=ctx;
+  const st=subscriptionStatusBadge(sub.status);
+  const at=attributionTypeBadge(sub.attribution_type);
+  const acts=actionsForStatus(sub.status);
+  const trialDays=sub.status==='trial'?trialDaysRemaining(sub.trial_ends_at):null;
+
+  const activeAddons=addons.filter(a=>a.status==='active');
+  const inactiveAddons=addons.filter(a=>a.status!=='active');
+
+  openDrawer(`
+    <div class="dh"><button class="close" id="dClose"><i class="fa-solid fa-xmark"></i></button>
+      <h2>${esc(hotel?.name||'Hôtel')}</h2>
+      <div class="role"><span class="tag ${st.cls}">${esc(st.label)}</span> · <span class="tag ${at.cls}">${esc(at.label)}</span></div>
+    </div>
+
+    <div class="sec"><h4>Résumé</h4>
+      <div class="kv"><span>Plan</span><b>${plan?esc(plan.name):'Plan introuvable'}</b></div>
+      <div class="kv"><span>Prix net</span><b>${fmtMoney(sub.snapshot_price_net_ht, sub.snapshot_currency)} / ${sub.billing_cycle==='annual'?'an':'mois'}</b></div>
+      <div class="kv"><span>Date de début</span><b>${fmtDate(sub.created_at)}</b></div>
+      <div class="kv"><span>Prochain renouvellement</span><b>${fmtDate(sub.next_billing_date)}</b></div>
+      <div class="kv"><span>Résiliation planifiée</span><b>${sub.scheduled_cancellation_at?fmtDateTime(sub.scheduled_cancellation_at):'—'}</b></div>
+      <div class="kv"><span>Résilié le</span><b>${sub.cancelled_at?fmtDateTime(sub.cancelled_at):'—'}</b></div>
+      <div class="actrow">
+        ${acts.changePlan?'<button class="btn g" id="aChangePlan"><i class="fa-solid fa-arrows-turn-right"></i> Changer de plan</button>':''}
+        ${acts.suspend?'<button class="btn g" id="aSuspend"><i class="fa-solid fa-pause"></i> Suspendre</button>':''}
+        ${acts.reactivate?'<button class="btn g" id="aReactivate"><i class="fa-solid fa-play"></i> Réactiver</button>':''}
+        ${acts.renew?'<button class="btn g" id="aRenew"><i class="fa-solid fa-rotate"></i> Renouveler</button>':''}
+        ${acts.scheduleCancel?'<button class="btn g" id="aScheduleCancel"><i class="fa-regular fa-calendar-xmark"></i> Planifier une résiliation</button>':''}
+        ${sub.scheduled_cancellation_at?'<button class="btn g" id="aRevertCancel"><i class="fa-solid fa-rotate-left"></i> Annuler la résiliation planifiée</button>':''}
+        ${acts.cancelNow?'<button class="btn d" id="aCancelNow"><i class="fa-solid fa-ban"></i> Résilier immédiatement</button>':''}
+      </div>
+    </div>
+
+    ${sub.status==='trial'?`
+    <div class="sec"><h4>Essai</h4>
+      <div class="kv"><span>Fin d'essai</span><b>${sub.trial_ends_at?fmtDateTime(sub.trial_ends_at):'Non renseignée'}</b></div>
+      <div class="kv"><span>Jours restants</span><b>${sub.trial_ends_at?(trialDays<0?'Expiré':trialDays+' j'):'—'}</b></div>
+      <div class="kv"><span>Prolongations déjà accordées</span><b>${sub.trial_extensions_count}</b></div>
+      <div class="actrow">
+        ${acts.extendTrial?'<button class="btn g" id="aExtendTrial"><i class="fa-regular fa-hourglass-half"></i> Prolonger l\'essai</button>':''}
+        ${acts.convertTrial?'<button class="btn p" id="aConvertTrial"><i class="fa-solid fa-check"></i> Convertir en abonnement actif</button>':''}
+      </div>
+    </div>` : ''}
+
+    <div class="sec"><h4>Applications</h4>
+      <div class="applist">
+        ${apps.map(a=>{
+          const included=includedAppIds.has(a.id);
+          const addonCovers=activeAddons.some(ad=>ad.add_ons?.app_id===a.id);
+          const usersWithAccess=appAccess.filter(u=>u.app_id===a.id && u.users?.is_active).length;
+          return `<div class="appitem">
+            <div class="nm">${esc(a.name)}</div>
+            <div class="right">
+              ${included?'<span class="tag green">Incluse au plan</span>':addonCovers?'<span class="tag amber">Via option</span>':'<span class="tag gray">Non couverte</span>'}
+              <span class="muted" style="font-size:11.5px">${usersWithAccess} accès utilisateur(s)</span>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+
+    <div class="sec"><h4>Options (add-ons)</h4>
+      <div class="applist">
+        ${activeAddons.length?activeAddons.map(a=>{
+          const ab=addonStatusBadge(a.status);
+          return `<div class="appitem">
+            <div class="nm">${esc(a.add_ons?.name||'Option')}<div class="muted" style="font-size:11.5px">Depuis ${fmtDate(a.started_at)}${a.expires_at?' · jusqu\'au '+fmtDate(a.expires_at):''}</div></div>
+            <div class="right"><span class="tag ${ab.cls}">${esc(ab.label)}</span>
+              <button data-detach="${a.id}" title="Retirer l'option"><i class="fa-regular fa-trash-can"></i></button>
+            </div>
+          </div>`;
+        }).join(''):'<div class="empty" style="padding:14px">Aucune option active.</div>'}
+      </div>
+      <div class="actrow"><button class="btn g" id="aAttachAddon"><i class="fa-solid fa-plus"></i> Attribuer une option</button></div>
+      ${inactiveAddons.length?`<div class="muted" style="font-size:11.5px;margin-top:8px">${inactiveAddons.length} option(s) retirée(s) précédemment — visible dans l'historique.</div>`:''}
+    </div>
+
+    <div class="sec"><h4>Accès aux applications</h4>
+      <div class="muted" style="font-size:12.5px;margin-bottom:8px">
+        Mode <b>observe</b> : calcule le droit théorique (plan + options + essai + statut) et le compare à l'accès réel, sans rien modifier.
+        Mode <b>enforce</b> : appliquerait ce calcul aux accès réels — verrouillé tant que la normalisation Phase 2E n'est pas terminée (cf. ADR-010 §1).
+      </div>
+      <div id="accessResolution" class="muted" style="font-size:12.5px">Cliquez sur « Résoudre (observe) » pour afficher les droits calculés.</div>
+      <div class="actrow">
+        <select id="resolveUser" style="min-width:220px">
+          <option value="">Choisir un utilisateur…</option>
+          ${appAccess.length?[...new Map(appAccess.map(u=>[u.user_id,u])).values()].map(u=>`<option value="${u.user_id}">${esc(u.users?.email||u.user_id)}</option>`).join(''):''}
+        </select>
+        <select id="resolveApp">${apps.map(a=>`<option value="${esc(a.code)}">${esc(a.name)}</option>`).join('')}</select>
+        <button class="btn g" id="aObserve">Résoudre (observe)</button>
+        <button class="btn d" id="aEnforce" title="Verrouillé — cf. ADR-010 §1">Appliquer (enforce)</button>
+      </div>
+    </div>
+
+    <div class="sec"><h4>Historique</h4>
+      <div class="tlist">
+        ${events.length?events.map(e=>`
+          <div class="it"><div><div class="nm">${esc(eventTypeLabel(e.event_type))}${e.from_status||e.to_status?` <span class="muted">(${esc(e.from_status||'—')} → ${esc(e.to_status||'—')})</span>`:''}</div>
+          <div class="sub">${esc(e.actor_email||(e.actor_type==='system'?'Système':'—'))}${e.reason?' · '+esc(e.reason):''}</div></div>
+          <div class="right">${fmtDateTime(e.created_at)}</div></div>
+        `).join(''):'<div class="empty" style="padding:14px">Aucun événement.</div>'}
+      </div>
+    </div>
+  `);
+
+  $('dClose').onclick=closeDrawer;
+  const refresh=async()=>{
+    const {data:freshSub}=await sb.from('hotel_subscriptions').select('*').eq('id',sub.id).maybeSingle();
+    if(freshSub) openSubscriptionDrawer(freshSub); else closeDrawer();
+    renderView();
+  };
+
+  $('aChangePlan') && ($('aChangePlan').onclick=()=>{
+    const candidates=allPlans.filter(p=>p.id!==sub.plan_id && p.is_active && !p.archived_at);
+    formModal({ title:'Changer de plan', confirmLabel:'Changer', bodyHtml:`
+      <div class="fld"><label>Nouveau plan *</label><select id="f_newplan">${candidates.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select></div>
+      <div class="fld"><label>Motif *</label><input id="f_reason" placeholder="Ex : montée en gamme demandée par le client"></div>
+    `, onConfirm: async()=>{
+      const planId=$('f_newplan').value, reason=$('f_reason').value.trim();
+      if(!reason){ throw new Error('Un motif est requis.'); }
+      const {error}=await sb.rpc('admin_change_subscription_plan',{p_subscription_id:sub.id,p_new_plan_id:planId,p_reason:reason});
+      if(error) throw error;
+      flash('Plan changé.'); await refresh();
+    }});
+  });
+  $('aSuspend') && ($('aSuspend').onclick=()=>{
+    formModal({ title:'Suspendre l\'abonnement', danger:true, confirmLabel:'Suspendre', bodyHtml:`
+      <div class="fld"><label>Motif *</label><input id="f_reason" placeholder="Ex : impayé, demande client…"></div>
+    `, onConfirm: async()=>{
+      const reason=$('f_reason').value.trim();
+      if(!reason) throw new Error('Un motif est requis.');
+      const {error}=await sb.rpc('admin_suspend_subscription',{p_subscription_id:sub.id,p_reason:reason});
+      if(error) throw error;
+      flash('Abonnement suspendu.'); await refresh();
+    }});
+  });
+  $('aReactivate') && ($('aReactivate').onclick=()=>{
+    confirmAction({ title:'Réactiver l\'abonnement', body:'L\'hôtel retrouvera un accès actif.', confirmLabel:'Réactiver', onConfirm: async()=>{
+      const {error}=await sb.rpc('admin_reactivate_subscription',{p_subscription_id:sub.id});
+      if(error) throw error;
+      flash('Abonnement réactivé.'); await refresh();
+    }});
+  });
+  $('aRenew') && ($('aRenew').onclick=()=>{
+    formModal({ title:'Renouveler l\'abonnement', confirmLabel:'Renouveler', bodyHtml:`
+      <div class="fld"><label>Prochaine date de facturation *</label><input id="f_date" type="date"></div>
+    `, onConfirm: async()=>{
+      const date=$('f_date').value;
+      if(!date) throw new Error('Une date est requise.');
+      const {error}=await sb.rpc('admin_renew_subscription',{p_subscription_id:sub.id,p_next_billing_date:date});
+      if(error) throw error;
+      flash('Abonnement renouvelé.'); await refresh();
+    }});
+  });
+  $('aScheduleCancel') && ($('aScheduleCancel').onclick=()=>{
+    formModal({ title:'Planifier une résiliation', danger:true, confirmLabel:'Planifier', bodyHtml:`
+      <div class="fld"><label>Date d'effet *</label><input id="f_date" type="datetime-local"></div>
+      <div class="fld"><label>Motif *</label><input id="f_reason"></div>
+    `, onConfirm: async()=>{
+      const date=$('f_date').value, reason=$('f_reason').value.trim();
+      if(!date || !reason) throw new Error('Date et motif sont requis.');
+      const {error}=await sb.rpc('admin_schedule_subscription_cancellation',{p_subscription_id:sub.id,p_effective_at:new Date(date).toISOString(),p_reason:reason});
+      if(error) throw error;
+      flash('Résiliation planifiée.'); await refresh();
+    }});
+  });
+  $('aRevertCancel') && ($('aRevertCancel').onclick=()=>{
+    confirmAction({ title:'Annuler la résiliation planifiée', body:'L\'abonnement continuera normalement.', confirmLabel:'Annuler la résiliation', onConfirm: async()=>{
+      const {error}=await sb.rpc('admin_revert_scheduled_cancellation',{p_subscription_id:sub.id});
+      if(error) throw error;
+      flash('Résiliation planifiée annulée.'); await refresh();
+    }});
+  });
+  $('aCancelNow') && ($('aCancelNow').onclick=()=>{
+    formModal({ title:'Résilier immédiatement', danger:true, confirmLabel:'Résilier', bodyHtml:`
+      <div class="fld"><label>Motif *</label><input id="f_reason"></div>
+      <p class="muted" style="font-size:12px">Action définitive. L'historique de l'abonnement est conservé (jamais supprimé).</p>
+    `, onConfirm: async()=>{
+      const reason=$('f_reason').value.trim();
+      if(!reason) throw new Error('Un motif est requis.');
+      const {error}=await sb.rpc('admin_cancel_subscription_immediate',{p_subscription_id:sub.id,p_reason:reason});
+      if(error) throw error;
+      flash('Abonnement résilié.'); await refresh();
+    }});
+  });
+  $('aExtendTrial') && ($('aExtendTrial').onclick=()=>{
+    formModal({ title:'Prolonger l\'essai', confirmLabel:'Prolonger', bodyHtml:`
+      <div class="fld"><label>Nouvelle date de fin *</label><input id="f_date" type="date"></div>
+      <div class="fld"><label>Motif</label><input id="f_reason"></div>
+    `, onConfirm: async()=>{
+      const date=$('f_date').value;
+      if(!date) throw new Error('Une date est requise.');
+      const {error}=await sb.rpc('admin_extend_trial',{p_subscription_id:sub.id,p_new_trial_ends_at:new Date(date).toISOString(),p_reason:$('f_reason').value.trim()||null});
+      if(error) throw error;
+      flash('Essai prolongé.'); await refresh();
+    }});
+  });
+  $('aConvertTrial') && ($('aConvertTrial').onclick=()=>{
+    confirmAction({ title:'Convertir en abonnement actif', body:'L\'essai se termine et l\'abonnement devient actif immédiatement.', confirmLabel:'Convertir', onConfirm: async()=>{
+      const {error}=await sb.rpc('admin_convert_trial_to_active',{p_subscription_id:sub.id});
+      if(error) throw error;
+      flash('Essai converti en abonnement actif.'); await refresh();
+    }});
+  });
+  $('aAttachAddon') && ($('aAttachAddon').onclick=()=>{
+    const available=allAddons.filter(a=>!activeAddons.some(x=>x.addon_id===a.id));
+    if(!available.length){ flash('Aucune option disponible à attribuer.','w'); return; }
+    formModal({ title:'Attribuer une option', confirmLabel:'Attribuer', bodyHtml:`
+      <div class="fld"><label>Option *</label><select id="f_addon">${available.map(a=>`<option value="${a.id}">${esc(a.name)}</option>`).join('')}</select></div>
+      <div class="fld"><label>Motif</label><input id="f_reason"></div>
+    `, onConfirm: async()=>{
+      const {error}=await sb.rpc('admin_attach_addon',{p_hotel_id:sub.hotel_id,p_addon_id:$('f_addon').value,p_reason:$('f_reason').value.trim()||null});
+      if(error) throw error;
+      flash('Option attribuée.'); await refresh();
+    }});
+  });
+  document.querySelectorAll('[data-detach]').forEach(b=>b.onclick=()=>{
+    formModal({ title:'Retirer l\'option', danger:true, confirmLabel:'Retirer', bodyHtml:`<div class="fld"><label>Motif *</label><input id="f_reason"></div>`,
+      onConfirm: async()=>{
+        const reason=$('f_reason').value.trim();
+        if(!reason) throw new Error('Un motif est requis.');
+        const {error}=await sb.rpc('admin_detach_addon',{p_hotel_addon_subscription_id:b.dataset.detach,p_reason:reason});
+        if(error) throw error;
+        flash('Option retirée.'); await refresh();
+      }});
+  });
+  $('aObserve') && ($('aObserve').onclick=async()=>{
+    const userId=$('resolveUser').value, appCode=$('resolveApp').value;
+    if(!userId){ flash('Choisissez un utilisateur.','w'); return; }
+    const {data,error}=await sb.rpc('admin_resolve_app_access',{p_user_id:userId,p_hotel_id:sub.hotel_id,p_app_code:appCode,p_mode:'observe'});
+    if(error){ flash(errorLabel(error.message),'e'); return; }
+    const causes=(data.causes||[]).map(c=>`<span class="tag amber">${esc(causeLabel(c))}</span>`).join(' ');
+    $('accessResolution').innerHTML=`
+      <div class="kv"><span>Droit théorique</span><b>${data.theoretical_access?'Accordé':'Refusé'}</b></div>
+      <div class="kv"><span>Accès effectif</span><b>${data.actual_access?'Accordé':'Refusé'}</b></div>
+      <div class="kv"><span>Écart</span><b>${data.diverges?'Oui':'Non'}</b></div>
+      ${causes?`<div style="margin-top:6px">${causes}</div>`:''}
+    `;
+  });
+  $('aEnforce') && ($('aEnforce').onclick=async()=>{
+    const userId=$('resolveUser').value, appCode=$('resolveApp').value;
+    if(!userId){ flash('Choisissez un utilisateur.','w'); return; }
+    confirmAction({ title:'Appliquer les droits (enforce)', danger:true,
+      body:'Cette action tenterait de synchroniser l\'accès réel sur le droit théorique calculé. Le mode enforce est actuellement verrouillé côté serveur tant que la normalisation des abonnements (Phase 2E) n\'est pas terminée — cf. ADR-010 §1.',
+      confirmLabel:'Tenter quand même', onConfirm: async()=>{
+        const {error}=await sb.rpc('admin_resolve_app_access',{p_user_id:userId,p_hotel_id:sub.hotel_id,p_app_code:appCode,p_mode:'enforce'});
+        if(error) throw error;
+        flash('Droits appliqués.'); await refresh();
+      }});
+  });
+}
+
+/* ---- Catalogue des offres ---- */
+async function renderPlanCatalog(el){
+  el.innerHTML='<div class="loading"><i class="fa-solid fa-circle-notch fa-spin"></i> Chargement…</div>';
+  const {data:plans,error}=await sb.from('subscription_plans').select('*').order('sort_order');
+  if(error) throw error;
+  const rows=(plans||[]).filter(p=>!p.archived_at || subsFilterStatus==='__show_archived__');
+  const archived=(plans||[]).filter(p=>p.archived_at);
+  el.innerHTML=`
+    <div class="phead"><div class="sub">${fmtNum(rows.length)} plan(s) actif(s) ou inactif(s) · ${fmtNum(archived.length)} archivé(s)</div>
+      <div class="actions"><button class="btn p" id="addPlan"><i class="fa-solid fa-plus"></i> Nouveau plan</button></div>
+    </div>
+    <div class="tblwrap"><table class="tbl">
+      <thead><tr><th>Plan</th><th>Mensuel</th><th>Annuel</th><th>Essai</th><th>Portée</th><th>Statut</th><th>Actions</th></tr></thead>
+      <tbody>${rows.length?rows.map(rowPlanHtml).join(''):'<tr><td colspan="7" class="empty">Aucun plan.</td></tr>'}</tbody>
+    </table></div>
+    ${archived.length?`<h3 style="margin-top:18px;font-size:13px;color:var(--muted)">Plans archivés</h3>
+    <div class="tblwrap"><table class="tbl">
+      <thead><tr><th>Plan</th><th>Archivé le</th><th>Motif</th><th>Actions</th></tr></thead>
+      <tbody>${archived.map(p=>`<tr>
+        <td>${esc(p.name)}</td><td class="muted">${fmtDate(p.archived_at)}</td><td class="muted">${esc(p.archived_reason||'—')}</td>
+        <td><button data-unarchive="${p.id}" title="Désarchiver"><i class="fa-solid fa-box-open"></i></button></td>
+      </tr>`).join('')}</tbody>
+    </table></div>`:''}
+  `;
+  $('addPlan').onclick=()=>openPlanDrawer(null);
+  el.querySelectorAll('[data-editplan]').forEach(b=>b.onclick=()=>openPlanDrawer(plans.find(p=>p.id===b.dataset.editplan)));
+  el.querySelectorAll('[data-toggleactive]').forEach(b=>b.onclick=()=>{
+    const plan=plans.find(p=>p.id===b.dataset.toggleactive);
+    const nextActive=!plan.is_active;
+    confirmAction({ title:nextActive?'Activer le plan':'Désactiver le plan',
+      body:nextActive?'Le plan redevient utilisable.':'Le plan ne sera plus commercialisable tant qu\'il est inactif.',
+      danger:!nextActive, confirmLabel:'Confirmer', onConfirm: async()=>{
+        const {error}=await sb.rpc('admin_set_plan_active',{p_plan_id:plan.id,p_is_active:nextActive});
+        if(error) throw error;
+        flash('Plan mis à jour.'); renderPlanCatalog(el);
+      }});
+  });
+  el.querySelectorAll('[data-archiveplan]').forEach(b=>b.onclick=()=>{
+    formModal({ title:'Archiver le plan', danger:true, confirmLabel:'Archiver', bodyHtml:`<div class="fld"><label>Motif *</label><input id="f_reason"></div>`,
+      onConfirm: async()=>{
+        const reason=$('f_reason').value.trim();
+        if(!reason) throw new Error('Un motif est requis.');
+        const {error}=await sb.rpc('admin_set_plan_archived',{p_plan_id:b.dataset.archiveplan,p_archived:true,p_reason:reason});
+        if(error) throw error;
+        flash('Plan archivé.'); renderPlanCatalog(el);
+      }});
+  });
+  el.querySelectorAll('[data-unarchive]').forEach(b=>b.onclick=()=>{
+    confirmAction({ title:'Désarchiver le plan', body:'Le plan redevient actif mais restera non commercialisable jusqu\'à revue.', confirmLabel:'Désarchiver', onConfirm: async()=>{
+      const {error}=await sb.rpc('admin_set_plan_archived',{p_plan_id:b.dataset.unarchive,p_archived:false});
+      if(error) throw error;
+      flash('Plan désarchivé.'); renderPlanCatalog(el);
+    }});
+  });
+  el.querySelectorAll('[data-modules]').forEach(b=>b.onclick=()=>openPlanModulesDrawer(plans.find(p=>p.id===b.dataset.modules)));
+}
+function rowPlanHtml(p){
+  return `<tr>
+    <td><b>${esc(p.name)}</b><div class="muted" style="font-size:11.5px">${esc(p.slug)}</div></td>
+    <td>${fmtMoney(p.price_monthly)}</td>
+    <td>${fmtMoney(p.price_annual)}</td>
+    <td>${p.trial_days??'—'} j</td>
+    <td><span class="tag ${p.plan_scope==='internal'?'amber':'gray'}">${p.plan_scope==='internal'?'Interne':'Public'}</span></td>
+    <td><span class="tag ${p.is_active?'green':'red'}">${p.is_active?'Actif':'Inactif'}</span>${p.is_commercializable?' <span class="tag green">Commercialisable</span>':''}</td>
+    <td>
+      <button data-editplan="${p.id}" title="Modifier"><i class="fa-regular fa-pen-to-square"></i></button>
+      <button data-modules="${p.id}" title="Applications incluses"><i class="fa-solid fa-cubes"></i></button>
+      <button data-toggleactive="${p.id}" title="${p.is_active?'Désactiver':'Activer'}"><i class="fa-solid ${p.is_active?'fa-toggle-on':'fa-toggle-off'}"></i></button>
+      <button data-archiveplan="${p.id}" title="Archiver"><i class="fa-regular fa-box-archive"></i></button>
+    </td>
+  </tr>`;
+}
+function openPlanDrawer(plan){
+  const isEdit=!!plan;
+  openDrawer(`
+    <div class="dh"><button class="close" id="dClose"><i class="fa-solid fa-xmark"></i></button><h2>${isEdit?'Modifier le plan':'Nouveau plan'}</h2></div>
+    <div class="sec">
+      <div class="fld"><label>Nom *</label><input id="f_name" value="${esc(plan?.name||'')}"></div>
+      ${!isEdit?`<div class="fld"><label>Slug *</label><input id="f_slug" placeholder="ex: flow-starter"></div>`:''}
+      <div class="fld"><label>Description</label><input id="f_desc" value="${esc(plan?.description||'')}"></div>
+      <div class="row2">
+        <div class="fld"><label>Prix mensuel (€ HT)</label><input id="f_pm" type="number" step="0.01" value="${plan?.price_monthly??0}"></div>
+        <div class="fld"><label>Prix annuel (€ HT)</label><input id="f_pa" type="number" step="0.01" value="${plan?.price_annual??0}"></div>
+      </div>
+      <div class="row2">
+        <div class="fld"><label>Essai (jours)</label><input id="f_trial" type="number" value="${plan?.trial_days??14}"></div>
+        <div class="fld"><label>Ordre d'affichage</label><input id="f_sort" type="number" value="${plan?.sort_order??0}"></div>
+      </div>
+      <div class="row2">
+        <div class="fld"><label>Chambres max</label><input id="f_rooms" type="number" value="${plan?.max_rooms??''}"></div>
+        <div class="fld"><label>Utilisateurs max</label><input id="f_users" type="number" value="${plan?.max_users??''}"></div>
+      </div>
+      <div class="fld"><label>Hôtels max</label><input id="f_hotels" type="number" value="${plan?.max_hotels??1}"></div>
+    </div>
+    <div class="dfoot"><button class="btn g" id="dCancel">Annuler</button><button class="btn p" id="dSave">${isEdit?'Enregistrer':'Créer'}</button></div>
+  `);
+  $('dClose').onclick=closeDrawer; $('dCancel').onclick=closeDrawer;
+  $('dSave').onclick=async()=>{
+    const name=$('f_name').value.trim();
+    if(!name){ flash('Le nom est requis.','e'); return; }
+    $('dSave').disabled=true;
+    try{
+      if(isEdit){
+        const {error}=await sb.rpc('admin_update_plan',{
+          p_plan_id:plan.id, p_name:name, p_description:$('f_desc').value||null,
+          p_price_monthly:Number($('f_pm').value||0), p_price_annual:Number($('f_pa').value||0),
+          p_trial_days:Number($('f_trial').value||14), p_max_rooms:$('f_rooms').value?Number($('f_rooms').value):null,
+          p_max_users:$('f_users').value?Number($('f_users').value):null, p_max_hotels:Number($('f_hotels').value||1),
+          p_sort_order:Number($('f_sort').value||0),
+        });
+        if(error) throw error;
+      } else {
+        const slug=$('f_slug').value.trim();
+        if(!slug){ flash('Le slug est requis.','e'); $('dSave').disabled=false; return; }
+        const {error}=await sb.rpc('admin_create_plan',{
+          p_name:name, p_slug:slug, p_description:$('f_desc').value||null,
+          p_price_monthly:Number($('f_pm').value||0), p_price_annual:Number($('f_pa').value||0),
+          p_trial_days:Number($('f_trial').value||14), p_max_rooms:$('f_rooms').value?Number($('f_rooms').value):null,
+          p_max_users:$('f_users').value?Number($('f_users').value):null, p_max_hotels:Number($('f_hotels').value||1),
+          p_sort_order:Number($('f_sort').value||0),
+        });
+        if(error) throw error;
+      }
+      flash(isEdit?'Plan mis à jour.':'Plan créé.'); closeDrawer(); renderView();
+    }catch(e){ flash(errorLabel(e.message),'e'); }
+    finally{ $('dSave').disabled=false; }
+  };
+}
+async function openPlanModulesDrawer(plan){
+  const [{data:apps},{data:modules}]=await Promise.all([
+    sb.from('platform_apps').select('id,code,name').order('name'),
+    sb.from('plan_modules').select('app_id').eq('plan_id',plan.id).eq('is_active',true),
+  ]);
+  const includedIds=new Set((modules||[]).map(m=>m.app_id));
+  openDrawer(`
+    <div class="dh"><button class="close" id="dClose"><i class="fa-solid fa-xmark"></i></button><h2>Applications incluses — ${esc(plan.name)}</h2></div>
+    <div class="sec">
+      ${(apps||[]).map(a=>`<label style="display:flex;align-items:center;gap:8px;padding:6px 0">
+        <input type="checkbox" data-app="${a.id}" ${includedIds.has(a.id)?'checked':''}> ${esc(a.name)}
+      </label>`).join('')}
+    </div>
+    <div class="dfoot"><button class="btn g" id="dCancel">Annuler</button><button class="btn p" id="dSave">Enregistrer</button></div>
+  `);
+  $('dClose').onclick=closeDrawer; $('dCancel').onclick=closeDrawer;
+  $('dSave').onclick=async()=>{
+    const ids=[...document.querySelectorAll('[data-app]:checked')].map(i=>i.dataset.app);
+    $('dSave').disabled=true;
+    try{
+      const {error}=await sb.rpc('admin_set_plan_modules',{p_plan_id:plan.id,p_app_ids:ids});
+      if(error) throw error;
+      flash('Applications mises à jour.'); closeDrawer(); renderView();
+    }catch(e){ flash(errorLabel(e.message),'e'); }
+    finally{ $('dSave').disabled=false; }
+  };
 }
 
 /* =====================================================================
