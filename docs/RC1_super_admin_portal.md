@@ -365,13 +365,15 @@ erreur JS sur l'ensemble du parcours.
 
 | Élément | État |
 |---|---|
-| Backend | Appliqué en production (`hzrzkvdebaadditvbqis`), migrations 68 à 76 |
-| Frontend | Preview Vercel (pas encore fusionné sur la branche de production finale) |
-| Branche | `claude/flowtym-super-admin-portal-sf4hei` |
-| Commit final Lot 5 | `c749a2e` |
-| Migrations appliquées | 68, 69, 70, 71, 72, 73, 74, 75, 76 (toutes, dans cet ordre, aucune en attente) |
-| Edge Functions déployées | `invite-user` v26, `invite-platform-admin` v10 (aucune nouvelle Edge Function introduite par ce projet) |
+| Backend | Appliqué en production (`hzrzkvdebaadditvbqis`), migrations 68 à 77 |
+| Frontend | **Fusionné et déployé en production** — PR [#17](https://github.com/Walilarabi/flowtym-rh/pull/17), commit de merge `eaa204b126f47b04ce1c1f73f9fc8bbf81007d79` |
+| Branche source | `claude/flowtym-super-admin-portal-sf4hei` (fusionnée, squash merge) |
+| Branche cible | `main` |
+| Déploiement Vercel production | `dpl_J6TV1RMvAU83QSYRWHJmkGwsZPmf`, `target: production`, `READY`, SHA `eaa204b1` confirmé identique au commit de merge, 0 erreur de build, 0 erreur runtime |
+| Migrations appliquées | 68, 69, 70, 71, 72, 73, 74, 75, 76, 77 (toutes, dans cet ordre, aucune en attente, idempotence confirmée via `list_migrations`) |
+| Edge Functions déployées | `invite-user` v26 (contenu déployé vérifié identique au fichier du dépôt), `invite-platform-admin` v10 (aucune nouvelle Edge Function introduite par ce projet) |
 | Routing `/admin` | `vercel.json` — `/admin` et `/admin/(.*)` → `admin.html`, avant la règle catch-all `/(.*)→/index.html` |
+| CI GitHub | 4/4 checks verts (`Front — syntaxe & code de debug`, `DB — reconstruction dépôt + tests`, `DB — pointage terminals + hardening`, `Vercel Preview Comments`) — périmètre historique, ne couvre pas directement `admin.html`/`sql/68-77` (cf. dette CI ci-dessous) |
 
 ---
 
@@ -410,6 +412,28 @@ charge sans erreur JS sur le parcours testé.
   pipeline d'erreur Edge Function n'existe). Pas de faux badge vert affiché à la place.
 - Constat transversal anon/table-level (D.7) — décision CTO requise avant tout traitement, portée
   bien au-delà de ce projet.
+- **Dette CI** (prioritaire avant les prochaines évolutions majeures du portail) : étendre le
+  workflow CI GitHub pour couvrir syntaxe et chargement de `admin.html`, Jest Super Admin,
+  migrations `sql/68` à `sql/77` en rollback, contrôle automatisé des ACL, tests des Edge
+  Functions du portail, vérification du dossier d'inventaire RC. Le workflow actuel (4 checks
+  verts sur la PR #17) ne couvre que `index.html`/`portal.html` et le périmètre pilote
+  `sql/54`-`56` — la validation du portail Super Admin repose entièrement sur les suites SQL/Jest/
+  intégration frontend exécutées manuellement et documentées ici, pas sur cette CI.
+- **Smoke test réel navigateur non exécuté** : l'environnement d'exécution de cette session bloque
+  tout accès réseau sortant vers `rh.flowtym.com`, l'alias `*.vercel.app` et l'endpoint REST
+  Supabase (politique réseau du sandbox, confirmée via `connect_rejected` sur les trois hôtes,
+  indépendamment du domaine). Impossible d'y exécuter un test de navigation réel (connexion,
+  clic, capture de console JS) dans cette session. Compensé par une vérification maximale
+  possible sans navigateur : appels RPC réels (non mockés) contre la production, sous l'identité
+  du compte Super Admin réel (`walilarabi@gmail.com`), couvrant dashboard/alertes/audit/
+  supervision/facturation/utilisateurs, plus refus non-admin réel — cf. H.4. **Un test de
+  navigation réel par un humain (ou une session avec accès réseau) reste recommandé avant de
+  considérer le parcours UI complet comme validé.**
+- Deux hôtels historiques `ZZ Deploy Check Self` / `ZZ Deploy Check Admin` (statut `archived`,
+  créés le 2026-07-28 lors de la vérification de déploiement du hotfix Lot 0 — antérieurs à ce
+  travail, non nettoyés par cette branche) subsistent en base, déjà archivés, sans impact
+  fonctionnel. Suppression physique non effectuée (hors mandat de cette session, action
+  destructive non demandée) — signalé pour une éventuelle purge décidée par le CTO.
 
 *(Les deux écarts ACL sur `admin_set_default_hotel` et `grant_superadmin_on_new_hotel`, initialement
 listés ici, ont été corrigés avant merge — cf. B.3 et `sql/77_super_admin_rc1_acl_hygiene.sql`.)*
@@ -421,46 +445,72 @@ listés ici, ont été corrigés avant merge — cf. B.3 et `sql/77_super_admin_
 ### H.1 Checklist de merge
 
 - [x] 26/26 tests SQL Lot 5 (dont réserves Lot 4) — PASS
-- [x] Migration `sql/76` appliquée en production
+- [x] Migrations `sql/76` et `sql/77` appliquées en production
 - [x] ACL vérifiée (functions + tables) via requête directe post-déploiement
 - [x] 499/499 tests Jest
 - [x] Intégration frontend mockée validée, zéro erreur JS
 - [x] Syntaxe JS validée (`node --check` sur le script extrait)
-- [x] Aucune donnée de test résiduelle en production
-- [x] Commit unique Lot 5 poussé sur la branche désignée
-- [ ] Revue humaine finale du diff avant fusion vers la branche de production (à faire par le CTO)
+- [x] Aucune donnée de test résiduelle en production (de cette session)
+- [x] Commit unique Lot 5 + commit de stabilisation ACL poussés sur la branche désignée
+- [x] 2 écarts ACL historiques analysés en profondeur et corrigés avant merge
+- [x] Vérification ciblée des findings advisors Checkout (aucun lien avec le portail Super Admin)
+- [x] CI GitHub verte (4/4 checks) sur la PR
+- [x] Revue finale du diff PR vs `main` (aucun fichier inattendu, aucun secret détecté)
+- [x] Fusion contrôlée vers `main` — PR #17, commit `eaa204b`
 
 ### H.2 Checklist de déploiement production frontend
 
-- [ ] Fusionner la branche `claude/flowtym-super-admin-portal-sf4hei` vers la branche de
-      production (déclenche le déploiement Vercel de production, actuellement en preview)
-- [ ] Vérifier que `/admin` répond en production (redirection `vercel.json` déjà en place)
-- [ ] Vérifier la connexion d'un vrai compte Super Admin en production
-- [ ] Vérifier le chargement du tableau de bord avec les vraies données de production
+- [x] Fusion de `claude/flowtym-super-admin-portal-sf4hei` vers `main` (squash merge, commit
+      `eaa204b126f47b04ce1c1f73f9fc8bbf81007d79`)
+- [x] Déploiement Vercel production déclenché automatiquement par la fusion, `target: production`,
+      `READY`, SHA confirmé identique au commit de merge
+- [x] `/admin` routé (règle `vercel.json` déjà en place, non modifiée par ce merge)
+- [ ] Connexion effective d'un vrai compte Super Admin **via un navigateur réel** en production —
+      non exécutable depuis cette session (accès réseau sortant bloqué vers `rh.flowtym.com`,
+      voir G.3). Compensé par un appel RPC réel sous l'identité du compte réel (H.4).
+- [x] Chargement du tableau de bord avec les vraies données de production — vérifié via appel RPC
+      réel (non mocké), pas via navigateur (cf. ci-dessus)
 
 ### H.3 Checklist de rollback
 
 - Aucune migration de ce projet ne supprime de colonne/table/fonction existante — un rollback de
   schéma, si nécessaire, se ferait par une nouvelle migration corrective (jamais un script
   inverse automatique, cohérent avec la doctrine "jamais de perte de données" du projet).
-- Rollback frontend : revert du commit `c749a2e` (et de sa fusion) sur la branche de production ;
-  aucune dépendance de schéma cassante n'empêche `index.html` de continuer à fonctionner sans
-  `admin.html` (fichier strictement indépendant).
-- Aucune donnée n'est perdue en cas de rollback frontend seul (le backend Lot 5 reste additif et
+- Rollback frontend : revert du commit de merge `eaa204b` sur `main` ; aucune dépendance de
+  schéma cassante n'empêche `index.html` de continuer à fonctionner sans `admin.html` (fichier
+  strictement indépendant).
+- Aucune donnée n'est perdue en cas de rollback frontend seul (le backend reste additif et
   inoffensif pour l'app hôtel existante).
+- Vercel conserve l'historique des déploiements production précédents (`isRollbackCandidate`) —
+  un rollback frontend peut aussi se faire par réassignation d'alias vers le déploiement
+  précédent (`dpl_CMM5Daez2Li2QCGfJdD5qWUrEtdt`, commit `cb23f90`) sans attendre un revert Git.
 
-### H.4 Plan de smoke test réel post-fusion
+### H.4 Smoke tests réels post-fusion — résultats
 
-1. Se connecter à `/admin` avec un compte Super Admin réel.
-2. Vérifier que le tableau de bord charge sans erreur et affiche des KPIs cohérents avec la
-   réalité (comparer un chiffre — ex. nombre d'hôtels actifs — à une requête SQL directe).
-3. Changer de période (mois dernier / trimestre / année) et vérifier que les montants changent.
-4. Ouvrir une alerte (si une existe en production) et vérifier la navigation vers l'objet concerné.
-5. Consulter l'audit, appliquer un filtre par hôtel, vérifier la pagination et le détail lisible
-   d'un événement.
-6. Modifier un paramètre non critique (ex. `support_email`) puis le remettre à sa valeur
-   d'origine, en vérifiant l'entrée d'audit correspondante à chaque fois.
-7. Se connecter avec un compte authentifié non-Super-Admin et vérifier l'écran de refus d'accès.
+**Exécutés avec succès (appels RPC réels, non mockés, contre la production `hzrzkvdebaadditvbqis`,
+sous l'identité du compte Super Admin réel `walilarabi@gmail.com`, en lecture seule) :**
+
+- Dashboard (`admin_platform_overview_kpis('this_month', NULL, NULL)`) : 7 hôtels (4 actifs, 3
+  inactifs/archivés), 1 groupe, 14 utilisateurs (13 actifs, 1 désactivé), 1 Super Admin, 1
+  abonnement en essai (plan Flow Starter), 0 facture (module facturation pas encore utilisé en
+  production — cohérent), 4 utilisateurs sans accès, 0 hôtel sans admin.
+- Alertes (`admin_platform_alerts()`) : 4 alertes réelles retournées, aucune erreur.
+- Audit (`admin_list_platform_audit_log(...)`) : entrées réelles retournées (`group.detach_hotel`,
+  `group.attach_hotel`, `hotel.auto_grant_superadmin_access`), niveau `info`.
+- Supervision (`admin_supervision_status()`) : `last_migration_name` = migration Lot 5 confirmée,
+  signaux non mesurés honnêtement à `false`, aucun faux badge vert.
+- Facturation (`admin_list_platform_invoices()`) : 0 ligne, aucune erreur.
+- Utilisateurs (`admin_list_user_access()`) : 14 lignes retournées, aucune erreur.
+- Refus non-admin réel : un utilisateur `auth.users` synthétique non-Super-Admin se voit refuser
+  `admin_platform_overview_kpis` avec `SQLSTATE 42501`, confirmé (transaction rollback, 0 résidu).
+
+**Non exécutable depuis cette session — limite d'environnement, pas un échec produit :** connexion
+navigateur réelle, clic à travers chaque module, capture de la console JS en conditions réelles.
+L'accès réseau sortant vers `rh.flowtym.com`, l'alias `*.vercel.app` et l'endpoint REST Supabase
+est bloqué par la politique du sandbox (`connect_rejected`, confirmé sur les trois hôtes). Un test
+de navigation réel par un humain (ou une session avec accès réseau) reste recommandé pour valider
+le rendu visuel et l'absence d'erreur console, en complément des vérifications backend réelles
+ci-dessus.
 8. Tester une mutation par module déjà livré (Hôtels : changer un statut ; Utilisateurs : révoquer
    un accès secondaire, jamais le dernier admin d'un hôtel ; Facturation : créer une facture
    proforma sur un hôtel de test puis l'annuler).
