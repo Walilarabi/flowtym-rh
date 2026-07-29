@@ -687,8 +687,13 @@ EXCEPTION WHEN OTHERS THEN
 END $$;
 
 -- ----------------------------------------------------------------------------
--- 24b. Aucune des 17 RPC frontend n'est exécutable par PUBLIC (arbitrage B) — vérifié sur
---      les 17 signatures exactes attendues après application de la migration corrigée.
+-- 24b. Aucune des 17 RPC frontend n'est exécutable par PUBLIC, anon ou service_role
+--      (arbitrage B) — vérifié sur les 17 signatures exactes attendues après application
+--      de la migration corrigée. Élargi à anon/service_role suite à la découverte, lors de
+--      l'application réelle en production, que ce projet porte des ALTER DEFAULT PRIVILEGES
+--      accordant EXECUTE directement à anon/authenticated/service_role à la création d'une
+--      fonction, indépendamment du grant implicite à PUBLIC — un test qui ne vérifiait que
+--      PUBLIC ne l'aurait jamais détecté (grantee=0 seul ne couvre pas les rôles nommés).
 -- ----------------------------------------------------------------------------
 DO $$
 DECLARE v_remaining int;
@@ -703,13 +708,17 @@ BEGIN
       'admin_attach_addon','admin_detach_addon','admin_resolve_app_access',
       'admin_rights_divergence_report','admin_run_expired_trials_processing','resolve_my_app_access'
     )
-    AND a.grantee = 0 AND a.privilege_type = 'EXECUTE';
+    AND a.privilege_type = 'EXECUTE'
+    AND (a.grantee = 0 OR a.grantee IN (
+      (SELECT oid FROM pg_roles WHERE rolname = 'anon'),
+      (SELECT oid FROM pg_roles WHERE rolname = 'service_role')
+    ));
   IF v_remaining = 0 THEN
-    PERFORM pg_temp.zz_log(41, 'Aucune des 17 RPC frontend n''est exécutable par PUBLIC', 'PASS', 'REVOKE ALL FROM PUBLIC confirmé sur les 17 signatures');
+    PERFORM pg_temp.zz_log(41, 'Aucune des 17 RPC frontend n''est exécutable par PUBLIC/anon/service_role', 'PASS', 'REVOKE ALL FROM PUBLIC, anon, service_role confirmé sur les 17 signatures');
   ELSE
-    PERFORM pg_temp.zz_log(41, 'Aucune des 17 RPC frontend n''est exécutable par PUBLIC', 'FAIL', format('%s fonction(s) encore accessible(s) à PUBLIC', v_remaining));
+    PERFORM pg_temp.zz_log(41, 'Aucune des 17 RPC frontend n''est exécutable par PUBLIC/anon/service_role', 'FAIL', format('%s privilège(s) résiduel(s) sur PUBLIC/anon/service_role', v_remaining));
   END IF;
-EXCEPTION WHEN OTHERS THEN PERFORM pg_temp.zz_log(41, 'Aucune des 17 RPC frontend n''est exécutable par PUBLIC', 'FAIL', SQLERRM);
+EXCEPTION WHEN OTHERS THEN PERFORM pg_temp.zz_log(41, 'Aucune des 17 RPC frontend n''est exécutable par PUBLIC/anon/service_role', 'FAIL', SQLERRM);
 END $$;
 
 -- ----------------------------------------------------------------------------

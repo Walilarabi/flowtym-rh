@@ -1144,10 +1144,23 @@ $function$;
 -- avant son GRANT, avec la signature exacte (types, sans les noms de paramètres — la
 -- signature qu'utilise PostgreSQL pour résoudre une fonction surchargée).
 --
+-- Correction CTO n°2 (constatée lors de l'application réelle en production, arbitrage B) :
+-- ce projet Supabase porte des ALTER DEFAULT PRIVILEGES au niveau du schéma `public` qui
+-- accordent automatiquement EXECUTE à `anon`, `authenticated` ET `service_role` à la création
+-- de toute fonction — indépendamment du grant implicite à PUBLIC. `REVOKE ALL ... FROM PUBLIC`
+-- seul ne retire donc PAS ces grants directs : vérifié après application réelle, les 17 RPC
+-- restaient exécutables par `anon` et `service_role` malgré le REVOKE FROM PUBLIC (confirmé
+-- par get_advisors : 17 WARN anon_security_definer_function_executable). Chaque garde interne
+-- (is_platform_admin() ou repli auth.uid()) empêchait toute exploitation réelle, mais c'est un
+-- écart réel par rapport à la doctrine « GRANT EXECUTE uniquement au rôle nécessaire ». Chaque
+-- REVOKE ci-dessous cible donc explicitement PUBLIC, anon ET service_role — pas seulement
+-- PUBLIC — avant le GRANT à authenticated seul.
+--
 -- Doctrine appliquée (ne pas confondre) :
 --   RPC frontend (catégorie 1, 16 fonctions admin_* + admin_resolve_app_access) :
---     REVOKE ALL FROM PUBLIC, puis GRANT EXECUTE TO authenticated, ET garde interne
---     is_platform_admin() en première ligne du corps — vérifiée présente pour les 16.
+--     REVOKE ALL FROM PUBLIC, anon, service_role, puis GRANT EXECUTE TO authenticated
+--     (le seul rôle nécessaire), ET garde interne is_platform_admin() en première ligne du
+--     corps — vérifiée présente pour les 16.
 --   RPC frontend self-service (catégorie 4, resolve_my_app_access) : idem ACL, mais garde
 --     interne différente (repli sur auth.uid(), pas de vérification is_platform_admin(),
 --     car destinée à tout utilisateur authentifié résolvant SES PROPRES droits).
@@ -1162,55 +1175,55 @@ $function$;
 -- (les 9 autres RPC de cycle de vie) — vérifié fonction par fonction, aucune mutation sans
 -- écriture d'événement correspondante.
 
-REVOKE ALL ON FUNCTION public.admin_create_subscription(uuid, uuid, text, numeric, text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.admin_create_subscription(uuid, uuid, text, numeric, text, text) FROM PUBLIC, anon, service_role;
 GRANT EXECUTE ON FUNCTION public.admin_create_subscription(uuid, uuid, text, numeric, text, text) TO authenticated;
 
-REVOKE ALL ON FUNCTION public.admin_regularize_legacy_subscription(uuid, uuid, text, timestamptz, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.admin_regularize_legacy_subscription(uuid, uuid, text, timestamptz, text) FROM PUBLIC, anon, service_role;
 GRANT EXECUTE ON FUNCTION public.admin_regularize_legacy_subscription(uuid, uuid, text, timestamptz, text) TO authenticated;
 
-REVOKE ALL ON FUNCTION public.admin_update_price_snapshot(uuid, numeric, numeric, text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.admin_update_price_snapshot(uuid, numeric, numeric, text, text) FROM PUBLIC, anon, service_role;
 GRANT EXECUTE ON FUNCTION public.admin_update_price_snapshot(uuid, numeric, numeric, text, text) TO authenticated;
 
-REVOKE ALL ON FUNCTION public.admin_extend_trial(uuid, timestamptz, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.admin_extend_trial(uuid, timestamptz, text) FROM PUBLIC, anon, service_role;
 GRANT EXECUTE ON FUNCTION public.admin_extend_trial(uuid, timestamptz, text) TO authenticated;
 
-REVOKE ALL ON FUNCTION public.admin_convert_trial_to_active(uuid, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.admin_convert_trial_to_active(uuid, text) FROM PUBLIC, anon, service_role;
 GRANT EXECUTE ON FUNCTION public.admin_convert_trial_to_active(uuid, text) TO authenticated;
 
-REVOKE ALL ON FUNCTION public.admin_suspend_subscription(uuid, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.admin_suspend_subscription(uuid, text) FROM PUBLIC, anon, service_role;
 GRANT EXECUTE ON FUNCTION public.admin_suspend_subscription(uuid, text) TO authenticated;
 
-REVOKE ALL ON FUNCTION public.admin_reactivate_subscription(uuid, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.admin_reactivate_subscription(uuid, text) FROM PUBLIC, anon, service_role;
 GRANT EXECUTE ON FUNCTION public.admin_reactivate_subscription(uuid, text) TO authenticated;
 
-REVOKE ALL ON FUNCTION public.admin_renew_subscription(uuid, date, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.admin_renew_subscription(uuid, date, text) FROM PUBLIC, anon, service_role;
 GRANT EXECUTE ON FUNCTION public.admin_renew_subscription(uuid, date, text) TO authenticated;
 
-REVOKE ALL ON FUNCTION public.admin_cancel_subscription_immediate(uuid, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.admin_cancel_subscription_immediate(uuid, text) FROM PUBLIC, anon, service_role;
 GRANT EXECUTE ON FUNCTION public.admin_cancel_subscription_immediate(uuid, text) TO authenticated;
 
-REVOKE ALL ON FUNCTION public.admin_schedule_subscription_cancellation(uuid, timestamptz, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.admin_schedule_subscription_cancellation(uuid, timestamptz, text) FROM PUBLIC, anon, service_role;
 GRANT EXECUTE ON FUNCTION public.admin_schedule_subscription_cancellation(uuid, timestamptz, text) TO authenticated;
 
-REVOKE ALL ON FUNCTION public.admin_revert_scheduled_cancellation(uuid, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.admin_revert_scheduled_cancellation(uuid, text) FROM PUBLIC, anon, service_role;
 GRANT EXECUTE ON FUNCTION public.admin_revert_scheduled_cancellation(uuid, text) TO authenticated;
 
-REVOKE ALL ON FUNCTION public.admin_attach_addon(uuid, uuid, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.admin_attach_addon(uuid, uuid, text) FROM PUBLIC, anon, service_role;
 GRANT EXECUTE ON FUNCTION public.admin_attach_addon(uuid, uuid, text) TO authenticated;
 
-REVOKE ALL ON FUNCTION public.admin_detach_addon(uuid, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.admin_detach_addon(uuid, text) FROM PUBLIC, anon, service_role;
 GRANT EXECUTE ON FUNCTION public.admin_detach_addon(uuid, text) TO authenticated;
 
-REVOKE ALL ON FUNCTION public.admin_resolve_app_access(uuid, uuid, text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.admin_resolve_app_access(uuid, uuid, text, text) FROM PUBLIC, anon, service_role;
 GRANT EXECUTE ON FUNCTION public.admin_resolve_app_access(uuid, uuid, text, text) TO authenticated;
 
-REVOKE ALL ON FUNCTION public.admin_rights_divergence_report() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.admin_rights_divergence_report() FROM PUBLIC, anon, service_role;
 GRANT EXECUTE ON FUNCTION public.admin_rights_divergence_report() TO authenticated;
 
-REVOKE ALL ON FUNCTION public.admin_run_expired_trials_processing() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.admin_run_expired_trials_processing() FROM PUBLIC, anon, service_role;
 GRANT EXECUTE ON FUNCTION public.admin_run_expired_trials_processing() TO authenticated;
 
-REVOKE ALL ON FUNCTION public.resolve_my_app_access(uuid, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.resolve_my_app_access(uuid, text) FROM PUBLIC, anon, service_role;
 GRANT EXECUTE ON FUNCTION public.resolve_my_app_access(uuid, text) TO authenticated;
 
 -- Fin de migration. Aucune donnée existante modifiée. Aucun plan Legacy Pilot inséré.
