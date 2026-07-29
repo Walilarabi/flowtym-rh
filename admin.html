@@ -1,0 +1,2966 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flowtym RH — Super Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<style>
+/*
+  Feuille de style dupliquée intentionnellement depuis index.html (variables, sidebar, kpis,
+  tables, drawer, toast, login) plutôt qu'importée : ce fichier doit rester 100% indépendant
+  de l'app hôtel (aucun risque de régression sur index.html, monolithe fragile). À maintenir
+  manuellement en cohérence avec index.html si le design system évolue.
+*/
+:root{
+  --violet:#8B5CF6;--violet-d:#7C3AED;--violet-bg:#ede9fe;
+  --ink:#1e2330;--ink2:#5b6172;--muted:#9aa0ad;--line:#eceef3;--bg:#f6f7f9;--card:#fff;
+  --green:#16a34a;--green-bg:#dcfce7;--red:#ef4444;--red-bg:#fee2e2;
+  --amber:#d97706;--amber-bg:#fef3c7;--blue:#2563eb;--blue-bg:#dbeafe;
+  --shadow:0 2px 8px rgba(0,0,0,.04);--shadow-h:0 12px 32px rgba(124,58,237,.14);--r:16px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--ink);font-size:14px;-webkit-font-smoothing:antialiased}
+button,select,input,textarea{font-family:inherit}
+#root{min-height:100vh;display:flex;flex-direction:column}
+
+/* ---- login ---- */
+.login{height:100vh;display:grid;place-items:center;background:linear-gradient(135deg,#f6f7f9,#ede9fe)}
+.lcard{background:#fff;border-radius:20px;padding:32px;width:380px;box-shadow:0 24px 60px rgba(20,20,40,.08)}
+.lcard .mk{width:46px;height:46px;border-radius:12px;background:linear-gradient(135deg,var(--violet),var(--violet-d));display:grid;place-items:center;color:#fff;font-size:18px;margin-bottom:18px}
+.lcard h1{font-size:20px;font-weight:800;margin-bottom:4px}
+.lcard .sub{color:var(--ink2);font-size:13px;margin-bottom:22px}
+.fld{margin-bottom:13px}.fld label{display:block;font-size:11.5px;font-weight:600;color:var(--ink2);margin-bottom:5px}
+.fld input,.fld select,.fld textarea{width:100%;padding:11px 13px;border:1px solid var(--line);border-radius:10px;font-size:14px;font-family:inherit;color:var(--ink);background:#fff}
+.fld input:focus,.fld select:focus,.fld textarea:focus{outline:none;border-color:var(--violet);box-shadow:0 0 0 3px var(--violet-bg)}
+.fld textarea{resize:vertical;min-height:70px}
+.err{color:var(--red);font-size:12.5px;margin-top:10px;min-height:18px}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+
+/* ---- boutons ---- */
+.btn{border:0;border-radius:10px;padding:8px 13px;font-weight:600;font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:7px;transition:.15s;white-space:nowrap}
+.btn.p{background:var(--violet);color:#fff}.btn.p:hover{background:var(--violet-d)}
+.btn.g{background:#f4f2fd;color:var(--violet-d)}.btn.g:hover{background:var(--violet-bg)}
+.btn.d{background:var(--red-bg);color:var(--red)}.btn.d:hover{background:#fbcaca}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn.sm{padding:5px 10px;font-size:12px;border-radius:8px}
+
+/* ---- structure : topbar + sidebar + contenu ---- */
+.main{flex:1;display:flex;min-height:0}
+.top{background:#fff;border-bottom:1px solid var(--line);flex-shrink:0}
+.top-in{display:flex;align-items:center;gap:14px;padding:12px 22px}
+.logo{display:flex;align-items:center;gap:10px;font-weight:800;font-size:16px}
+.logo .mk{width:32px;height:32px;border-radius:9px;background:linear-gradient(135deg,var(--violet),var(--violet-d));display:grid;place-items:center;color:#fff;font-size:14px}
+.logo small{color:var(--violet-d);font-weight:700;background:var(--violet-bg);padding:2px 7px;border-radius:6px;font-size:10.5px;margin-left:2px}
+.searchbox{flex:1;max-width:420px;position:relative}
+.searchbox i{position:absolute;left:13px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:13px}
+.searchbox input{width:100%;padding:9px 13px 9px 34px;border:1px solid var(--line);border-radius:10px;font-size:13px;background:#fafafe}
+.searchbox input:focus{outline:none;border-color:var(--violet);background:#fff;box-shadow:0 0 0 3px var(--violet-bg)}
+.spacer{flex:1}
+.iconbtn{position:relative;width:36px;height:36px;border-radius:9px;border:0;background:#f4f4f6;color:var(--ink2);cursor:pointer;display:grid;place-items:center;font-size:14px}
+.iconbtn:hover{background:var(--violet-bg);color:var(--violet-d)}
+.popover{display:none;position:absolute;right:0;top:calc(100% + 8px);width:340px;background:#fff;border:1px solid var(--line);border-radius:16px;box-shadow:0 12px 40px rgba(0,0,0,.15);z-index:200;max-height:420px;overflow:auto}
+.popover.on{display:block}
+.popover .ph{padding:12px 16px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px;color:var(--ink2);text-transform:uppercase;letter-spacing:.04em}
+.popitem{padding:11px 16px;border-bottom:1px dashed var(--line);font-size:12.5px}
+.popitem:last-child{border:0}
+.popitem .a{font-weight:600}
+.popitem .t{color:var(--muted);font-size:11px;margin-top:2px}
+.meB{display:flex;align-items:center;gap:9px;border:0;background:transparent;cursor:pointer;padding:4px;border-radius:10px}
+.meB:hover{background:#f4f4f6}
+.av{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;font-weight:700;font-size:12px;color:#fff;flex-shrink:0}
+.meB .nm{text-align:left;font-size:12.5px}
+.meB .nm b{display:block;font-weight:700;color:var(--ink)}
+.meB .nm span{color:var(--muted);font-size:11px}
+
+.sidebar{width:236px;background:#fff;border-right:1px solid var(--line);display:flex;flex-direction:column;flex-shrink:0}
+.sidebar .menu{flex:1;padding:14px 10px;overflow-y:auto}
+.sidebar .menu .grp{font-size:10.5px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:14px 12px 6px}
+.sidebar .menu .grp:first-child{padding-top:4px}
+.sidebar .menu .it{display:flex;align-items:center;gap:11px;padding:10px 12px;border-radius:10px;color:var(--ink2);font-weight:500;cursor:pointer;font-size:13.5px;margin-bottom:2px;border:0;background:transparent;width:100%;text-align:left;font-family:inherit}
+.sidebar .menu .it:hover{background:#f4f2fd;color:var(--violet-d)}
+.sidebar .menu .it.on{background:var(--violet);color:#fff;font-weight:600}
+.sidebar .menu .it .ic{width:20px;text-align:center;font-size:13px;flex-shrink:0}
+.sidebar .menu .it .soon{margin-left:auto;font-size:9px;background:#fef3c7;color:#92400e;padding:2px 6px;border-radius:5px;font-weight:700}
+.sidebar .menu .it.on .soon{background:rgba(255,255,255,.2);color:#fff}
+.content{flex:1;overflow-y:auto;min-width:0}
+.page{padding:22px 26px 60px}
+.phead{display:flex;align-items:center;gap:14px;margin-bottom:18px;flex-wrap:wrap}
+.phead h1{font-size:22px;font-weight:800;letter-spacing:-.01em}
+.phead .sub{color:var(--ink2);font-size:13px}
+.phead .actions{margin-left:auto;display:flex;gap:8px}
+.loading{padding:60px;text-align:center;color:var(--muted)}
+
+/* ---- KPI cards ---- */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-bottom:22px}
+.kpi{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px 20px;box-shadow:var(--shadow);transition:.15s}
+.kpi:hover{box-shadow:var(--shadow-h);transform:translateY(-2px)}
+.kpi .ic{width:42px;height:42px;border-radius:12px;display:grid;place-items:center;font-size:17px;margin-bottom:14px}
+.kpi.v .ic{background:var(--violet-bg);color:var(--violet)}
+.kpi.g .ic{background:var(--green-bg);color:var(--green)}
+.kpi.b .ic{background:var(--blue-bg);color:var(--blue)}
+.kpi.a .ic{background:var(--amber-bg);color:var(--amber)}
+.kpi .n{font-size:28px;font-weight:800;letter-spacing:-.02em}
+.kpi .l{color:var(--ink2);font-size:13px;font-weight:600;margin-top:2px}
+.kpi .sub{color:var(--muted);font-size:11.5px;margin-top:4px}
+
+.cols2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:1100px){.cols2{grid-template-columns:1fr}}
+.box{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px;box-shadow:var(--shadow)}
+.box h3{font-size:14px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+.box h3 i{color:var(--violet)}
+.tlist{font-size:13px}
+.tlist .it{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px dashed var(--line)}
+.tlist .it:last-child{border:0}
+.tlist .it .nm{font-weight:600}.tlist .it .sub{font-size:11.5px;color:var(--muted)}
+.tlist .it .right{margin-left:auto;text-align:right;font-size:11.5px;color:var(--ink2);white-space:nowrap}
+
+.tag{background:#f4f2fd;color:var(--violet-d);padding:3px 9px;border-radius:999px;font-weight:600;font-size:11px;display:inline-block;white-space:nowrap}
+.tag.red{background:var(--red-bg);color:var(--red)}
+.tag.green{background:var(--green-bg);color:var(--green)}
+.tag.amber{background:var(--amber-bg);color:var(--amber)}
+.tag.blue{background:var(--blue-bg);color:var(--blue)}
+.tag.gray{background:#f1f1f5;color:var(--ink2)}
+
+.tbl{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.tbl th,.tbl td{padding:11px 14px;text-align:left;border-bottom:1px solid var(--line);font-size:13px}
+.tbl th{background:#fafafe;font-weight:700;color:var(--ink2);font-size:11px;text-transform:uppercase;letter-spacing:.04em;cursor:pointer;user-select:none}
+.tbl th:hover{color:var(--violet-d)}
+.tbl th i{margin-left:4px;font-size:9px}
+.tbl tr:last-child td{border-bottom:0}
+.tbl tr:hover td{background:#fafaff}
+.tbl button{border:0;background:transparent;cursor:pointer;color:var(--violet);padding:4px 7px;border-radius:6px;font-size:13px}
+.tbl button:hover{background:var(--violet-bg)}
+.tbl .muted{color:var(--muted)}
+.tblwrap{background:#fff;border:1px solid var(--line);border-radius:14px;overflow:auto}
+.tblwrap .tbl{border:0;border-radius:0}
+.filters{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;align-items:center}
+.filters select,.filters input{padding:9px 12px;border:1px solid var(--line);border-radius:10px;font-size:13px;background:#fff}
+.filters select:focus,.filters input:focus{outline:none;border-color:var(--violet)}
+.pager{display:flex;align-items:center;gap:10px;justify-content:flex-end;padding:14px 4px;font-size:12.5px;color:var(--ink2)}
+.pager button{border:1px solid var(--line);background:#fff;border-radius:8px;padding:5px 10px;cursor:pointer}
+.pager button:disabled{opacity:.4;cursor:not-allowed}
+.empty{padding:40px;text-align:center;color:var(--muted)}
+
+/* ---- drawer ---- */
+.drawer{position:fixed;top:0;right:0;height:100%;width:460px;max-width:96vw;background:#fff;z-index:61;transform:translateX(100%);transition:.3s cubic-bezier(.4,0,.2,1);overflow-y:auto;box-shadow:-12px 0 40px rgba(0,0,0,.14)}
+.drawer.on{transform:none}
+.dh{padding:22px 22px 16px;border-bottom:1px solid var(--line);position:relative}
+.dh .close{position:absolute;top:16px;right:16px;width:32px;height:32px;border-radius:9px;border:0;background:#f4f4f6;cursor:pointer;color:var(--ink2)}
+.dh h2{font-size:19px;font-weight:800;padding-right:40px}
+.dh .role{color:var(--ink2);font-size:13px;margin-top:4px}
+.sec{padding:16px 22px;border-bottom:1px solid var(--line)}
+.sec h4{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:11px;font-weight:700}
+.dfoot{padding:16px 22px;display:flex;gap:10px;justify-content:flex-end;position:sticky;bottom:0;background:#fff;border-top:1px solid var(--line)}
+.hchip{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;margin-bottom:6px;font-size:12.5px}
+
+/* ---- modale confirmation ---- */
+.modalbg{position:fixed;inset:0;background:rgba(14,16,28,.48);display:none;z-index:150;align-items:center;justify-content:center;padding:20px}
+.modalbg.on{display:flex}
+.modal{background:#fff;border-radius:18px;width:min(440px,94vw);box-shadow:0 32px 80px rgba(0,0,0,.22);padding:24px}
+.modal h3{font-size:16px;font-weight:800;margin-bottom:8px}
+.modal p{color:var(--ink2);font-size:13.5px;line-height:1.5;margin-bottom:18px}
+.modal .mact{display:flex;gap:10px;justify-content:flex-end}
+
+/* ---- accès refusé ---- */
+.deny{height:100vh;display:grid;place-items:center}
+.deny .card{text-align:center;max-width:380px;padding:20px}
+.deny .ic{width:56px;height:56px;border-radius:16px;background:var(--red-bg);color:var(--red);display:grid;place-items:center;font-size:22px;margin:0 auto 16px}
+.deny h1{font-size:18px;font-weight:800;margin-bottom:8px}
+.deny p{color:var(--ink2);font-size:13.5px;margin-bottom:20px}
+
+/* ---- stub phase 2 ---- */
+.stub{background:#fff;border:1px solid var(--line);border-radius:18px;padding:60px 30px;text-align:center;max-width:520px;margin:40px auto}
+.stub .ic{width:56px;height:56px;border-radius:16px;background:var(--violet-bg);color:var(--violet-d);display:grid;place-items:center;font-size:22px;margin:0 auto 18px}
+.stub h2{font-size:18px;font-weight:800;margin-bottom:8px}
+.stub p{color:var(--ink2);font-size:13.5px;line-height:1.6}
+.stub .note{margin-top:16px;font-size:12px;color:var(--muted);background:#fafafe;border-radius:10px;padding:10px 14px}
+
+.toast{position:fixed;bottom:26px;left:50%;transform:translateX(-50%);background:#15233b;color:#fff;padding:10px 16px;border-radius:10px;font-size:13px;font-weight:600;z-index:300;opacity:0;transition:.25s;pointer-events:none}
+.toast.on{opacity:1}
+
+/* ---- abonnements : tabs, fiche détaillée, formulaires modaux ---- */
+.tabs{display:flex;gap:6px;margin-bottom:16px;border-bottom:1px solid var(--line)}
+.tabs .tab{border:0;background:none;padding:10px 4px;margin-right:18px;font-size:13.5px;font-weight:700;color:var(--ink2);cursor:pointer;position:relative;top:1px}
+.tabs .tab.on{color:var(--violet-d);border-bottom:2px solid var(--violet)}
+.kv{display:flex;justify-content:space-between;gap:10px;padding:6px 0;font-size:13px;border-bottom:1px dashed var(--line)}
+.kv:last-of-type{border-bottom:0}
+.kv span{color:var(--ink2)}
+.actrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.applist{display:flex;flex-direction:column;gap:6px}
+.appitem{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;font-size:12.5px}
+.appitem .right{display:flex;align-items:center;gap:8px}
+.mform .fld{margin-bottom:13px}
+.mform .fld label{display:block;font-size:11.5px;font-weight:600;color:var(--ink2);margin-bottom:5px}
+.mform input,.mform select{width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:10px;font-size:13px}
+
+/* ---- Export PDF (facture) : rendu navigateur, aucune librairie, aucun service externe ---- */
+#invoicePrintArea{display:none}
+@media print{
+  body *{visibility:hidden}
+  #invoicePrintArea, #invoicePrintArea *{visibility:visible}
+  #invoicePrintArea{display:block;position:absolute;top:0;left:0;width:100%;padding:24px}
+  .ip-h{display:flex;justify-content:space-between;margin-bottom:24px}
+  .ip-h h1{font-size:20px}
+  .ip-tbl{width:100%;border-collapse:collapse;margin-top:18px}
+  .ip-tbl th,.ip-tbl td{border-bottom:1px solid #ccc;padding:8px;text-align:left;font-size:13px}
+  .ip-tot{margin-top:14px;text-align:right;font-size:14px}
+}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<aside class="drawer" id="drawer"></aside>
+<div class="modalbg" id="modalbg"><div class="modal" id="modal"></div></div>
+<div class="toast" id="toast"></div>
+<div id="invoicePrintArea"></div>
+
+<script>
+/* =====================================================================
+   Flowtym RH — Super Admin (/admin) — Phase 1
+   Fichier statique indépendant (même approche que portal.html), sans build.
+   Fonctionnel : Tableau de bord, Hôtels, Groupes hôteliers, Utilisateurs, Audit.
+   Le reste du menu (Abonnements, Facturation, Essais, Paiements, Licences,
+   Statistiques, Support, Paramètres) est en préparation Phase 2 : les tables
+   existent déjà côté base mais sans RPC ni donnée réelle — pas d'UI mensongère.
+   ===================================================================== */
+const SUPABASE_URL = "https://hzrzkvdebaadditvbqis.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh6cnprdmRlYmFhZGRpdHZicWlzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxMjEwMTQsImV4cCI6MjA5MjY5NzAxNH0.IDFFWHNNIeBReWRTeVj8RlRpyz5J4XaStFhGVEYEBU8";
+
+function showFatal(err){
+  console.error(err);
+  const r=document.getElementById('root');
+  if(r) r.innerHTML=`<div style="max-width:640px;margin:60px auto;background:#fff;border:1px solid #eceef3;border-radius:16px;padding:28px;font-family:Inter,sans-serif">
+    <h2 style="color:#b23b3b;margin-bottom:8px">Erreur de chargement</h2>
+    <p style="color:#5b6172;margin-bottom:10px">${(err&&err.message)||err}</p></div>`;
+}
+window.addEventListener('error',e=>showFatal(e.error||e.message));
+window.addEventListener('unhandledrejection',e=>showFatal(e.reason));
+
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+let sb=null, me=null, session=null, view='dashboard';
+
+/* =====================================================================
+   Helpers purs (mirror exact de tests/lib/adminHelpers.js — garder synchronisés)
+   ===================================================================== */
+const HOTEL_STATUS_LABEL={draft:'Brouillon',active:'Actif',suspended:'Suspendu',archived:'Archivé'};
+const HOTEL_STATUS_CLASS={draft:'gray',active:'green',suspended:'red',archived:'gray'};
+function hotelStatusBadge(status){
+  return {label:HOTEL_STATUS_LABEL[status]||status||'—', cls:HOTEL_STATUS_CLASS[status]||'gray'};
+}
+const SUB_STATUS_LABEL={trial:'Essai',active:'Actif',suspended:'Suspendu',expired:'Expiré',cancelled:'Résilié'};
+const SUB_STATUS_CLASS={trial:'amber',active:'green',suspended:'red',expired:'gray',cancelled:'gray'};
+function subscriptionStatusBadge(status){
+  return {label:SUB_STATUS_LABEL[status]||status||'—', cls:SUB_STATUS_CLASS[status]||'gray'};
+}
+function trialDaysRemaining(dateStr, nowMs){
+  if(!dateStr) return null;
+  const now = nowMs || Date.now();
+  const end = new Date(dateStr).getTime();
+  if(Number.isNaN(end)) return null;
+  return Math.ceil((end-now)/86400000);
+}
+function fmtMoney(n, cur){
+  const v = Number(n||0);
+  return v.toLocaleString('fr-FR',{minimumFractionDigits:0,maximumFractionDigits:2})+' '+(cur==='EUR'||!cur?'€':cur);
+}
+function fmtNum(n){ return Number(n||0).toLocaleString('fr-FR'); }
+function groupNameOr(name){ return (name&&name.trim())?name:'(sans nom)'; }
+function fmtDate(s){
+  if(!s) return '—';
+  const d=new Date(s);
+  if(Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'});
+}
+function fmtDateTime(s){
+  if(!s) return '—';
+  const d=new Date(s);
+  if(Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'})+' '+d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+}
+function avColor(seed){
+  const colors=['#8B5CF6','#2563eb','#16a34a','#d97706','#dc2626','#0891b2'];
+  let h=0; for(const c of String(seed||'')) h=(h*31+c.charCodeAt(0))>>>0;
+  return colors[h%colors.length];
+}
+function initials(name){
+  const parts=String(name||'?').trim().split(/\s+/).filter(Boolean);
+  if(!parts.length) return '?';
+  return (parts[0][0]+(parts[1]?.[0]||'')).toUpperCase();
+}
+function errorLabel(msg){
+  const map={
+    NOM_VIDE:'Le nom est requis.',
+    CODE_EXISTANT:'Ce code hôtel existe déjà.',
+    HOTEL_INTROUVABLE:'Hôtel introuvable.',
+    GROUPE_INTROUVABLE:'Groupe introuvable.',
+    STATUT_INVALIDE:'Statut invalide.',
+  };
+  const key=String(msg||'').split(' ')[0].replace(/:$/,'');
+  if(map[key]) return map[key];
+  if(String(msg||'').startsWith('GROUPE_NON_VIDE')) return String(msg).replace('GROUPE_NON_VIDE :','').trim();
+  return msg||'Une erreur est survenue.';
+}
+function toCSV(rows, cols){
+  const esc2=v=>{const s=String(v??''); return /[",\n;]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;};
+  const head=cols.map(c=>esc2(c.label)).join(';');
+  const body=rows.map(r=>cols.map(c=>esc2(c.get(r))).join(';')).join('\n');
+  return head+'\n'+body;
+}
+function downloadCSV(filename, rows, cols){
+  const csv='﻿'+toCSV(rows,cols);
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob); a.download=filename;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+function sortRows(rows, key, dir){
+  return [...rows].sort((a,b)=>{
+    const av=a[key], bv=b[key];
+    if(av==null && bv==null) return 0;
+    if(av==null) return 1;
+    if(bv==null) return -1;
+    if(av>bv) return dir==='desc'?-1:1;
+    if(av<bv) return dir==='desc'?1:-1;
+    return 0;
+  });
+}
+
+/* =====================================================================
+   Helpers purs — Abonnements/Applications (mirror exact de tests/lib/adminHelpers.js)
+   ===================================================================== */
+const ATTRIBUTION_TYPE_LABEL={commercial:'Commercial',internal_regularization:'Régularisation interne'};
+function attributionTypeBadge(t){ return {label:ATTRIBUTION_TYPE_LABEL[t]||t||'—', cls:t==='internal_regularization'?'amber':'gray'}; }
+
+const ADDON_STATUS_LABEL={active:'Actif',cancelled:'Retiré'};
+const ADDON_STATUS_CLASS={active:'green',cancelled:'gray'};
+function addonStatusBadge(status){ return {label:ADDON_STATUS_LABEL[status]||status||'—', cls:ADDON_STATUS_CLASS[status]||'gray'}; }
+
+const CAUSE_LABEL={
+  missing_main_subscription:"Aucun abonnement principal",
+  app_not_in_plan:"Application non incluse dans le plan",
+  missing_addon:"Aucune option ne couvre cette application",
+  addon_missing_app_mapping:"Option active sans application associée",
+  expired_addon:"Option expirée",
+  expired_trial:"Période d'essai expirée",
+  trial_missing_end_date:"Date de fin d'essai manquante",
+  inactive_user:"Utilisateur désactivé",
+  suspended_hotel:"Hôtel non actif",
+  incomplete_contract_snapshot:"Contrat historique incomplet",
+  archived_plan:"Plan archivé",
+  inactive_plan:"Plan inactif",
+  missing_individual_access:"Aucun accès individuel accordé",
+};
+function causeLabel(code){ return CAUSE_LABEL[code]||code; }
+
+const EVENT_TYPE_LABEL={
+  created:'Création', trial_started:'Début essai', trial_extended:'Essai prolongé', trial_converted:'Essai converti',
+  activated:'Activation', suspended:'Suspension', reactivated:'Réactivation', renewed:'Renouvellement',
+  cancelled_immediate:'Résiliation immédiate', cancellation_scheduled:'Résiliation planifiée', cancellation_reverted:'Résiliation annulée',
+  expired_automatic:'Expiration automatique', plan_changed:'Changement de plan', price_snapshot_updated:'Tarif mis à jour',
+  regularized_legacy:'Régularisation', migrated_to_commercial_plan:'Migration vers plan commercial',
+};
+function eventTypeLabel(code){ return EVENT_TYPE_LABEL[code]||code; }
+
+// Détermine quelles actions de cycle de vie sont pertinentes pour un statut donné —
+// évite d'afficher un bouton dont l'appel échouerait systématiquement côté RPC.
+function actionsForStatus(status){
+  const all={ extendTrial:false, convertTrial:false, activate:false, suspend:false, reactivate:false,
+    renew:false, changePlan:false, scheduleCancel:false, revertCancel:false, cancelNow:false };
+  if(status==='trial') return {...all, extendTrial:true, convertTrial:true, changePlan:true, scheduleCancel:true, cancelNow:true};
+  if(status==='active') return {...all, suspend:true, renew:true, changePlan:true, scheduleCancel:true, cancelNow:true};
+  if(status==='suspended') return {...all, reactivate:true, changePlan:true, cancelNow:true};
+  if(status==='expired') return {...all, cancelNow:true};
+  return all; // cancelled : aucune action, statut final
+}
+
+// Actions pertinentes pour un HÔTEL (draft/active/suspended/archived) — distinct de
+// actionsForStatus() qui porte sur le statut d'ABONNEMENT (jamais les deux confondus).
+function hotelActionsForStatus(status){
+  return {
+    canActivate: status !== 'active',
+    canSuspend: status === 'active',
+    canArchive: status !== 'archived',
+    canRestore: status === 'archived',
+  };
+}
+
+/* =====================================================================
+   Helpers purs — Utilisateurs et Accès (Lot 3, mirror exact de tests/lib/adminHelpers.js)
+   ===================================================================== */
+const HOTEL_ROLE_LABEL={
+  direction:'Direction', admin_hotel:'Administrateur hôtel', comptabilite:'Comptabilité',
+  revenue_manager:'Revenue manager', reception:'Réception', gouvernante:'Gouvernante',
+  femme_de_chambre:'Femme de chambre', maintenance:'Maintenance', breakfast:'Petit-déjeuner',
+};
+function hotelRoleLabel(role){ return HOTEL_ROLE_LABEL[role]||role||'—'; }
+
+const PLATFORM_ROLE_LABEL={super_admin:'Super Admin', billing_admin:'Administrateur facturation', support_agent:'Agent support'};
+function platformRoleLabel(role){ return PLATFORM_ROLE_LABEL[role]||role||'—'; }
+
+// Statut de COMPTE uniquement (jamais confondu avec le statut d'un accès hôtel précis, ni avec
+// le statut de l'hôtel lui-même, ni avec celui d'un abonnement) : désactivé > invitation en
+// attente/expirée > actif. Le seuil "expirée" est un indicateur d'UI (ancienneté de l'invitation
+// Supabase, dont la validité réelle est un paramètre de projet non piloté ici), pas une vraie
+// invalidation technique du lien.
+const INVITE_STALE_DAYS=14;
+function accountStatus({is_active, email_confirmed_at, invited_at}, nowMs){
+  if(is_active===false) return 'deactivated';
+  if(!email_confirmed_at){
+    if(invited_at){
+      const now=nowMs||Date.now();
+      const days=(now-new Date(invited_at).getTime())/86400000;
+      if(days>INVITE_STALE_DAYS) return 'expired_invite';
+    }
+    return 'pending_invite';
+  }
+  return 'active';
+}
+const ACCOUNT_STATUS_LABEL={active:'Actif', deactivated:'Désactivé', pending_invite:'Invitation en attente', expired_invite:'Invitation ancienne'};
+const ACCOUNT_STATUS_CLASS={active:'green', deactivated:'red', pending_invite:'amber', expired_invite:'gray'};
+function accountStatusBadge(status){ return {label:ACCOUNT_STATUS_LABEL[status]||status, cls:ACCOUNT_STATUS_CLASS[status]||'gray'}; }
+
+// Rôle "principal" affiché en liste : Super Admin plateforme prime (jamais confondu avec un
+// rôle hôtel), sinon le rôle de l'hôtel par défaut, sinon aucun rôle.
+function primaryRoleLabel(u){
+  if(u.is_super_admin) return 'Super Admin';
+  const hotels=u.hotels||[];
+  const def=hotels.find(h=>h.is_default)||hotels[0];
+  return def ? hotelRoleLabel(def.role) : '—';
+}
+
+// Phrase d'impact affichée avant un retrait d'accès hôtel — jamais un simple "Confirmer ?" pour
+// une action à fort impact (exigence CTO). Distingue le cas "encore d'autres hôtels" du cas
+// "c'était son dernier hôtel".
+function revokeHotelImpactMessage(hotelName, otherHotelNames){
+  if(!otherHotelNames || !otherHotelNames.length){
+    return `Cet utilisateur perdra l'accès à l'hôtel <b>${esc(hotelName)}</b> et n'aura plus aucun accès hôtel après cette action.`;
+  }
+  return `Cet utilisateur perdra l'accès à l'hôtel <b>${esc(hotelName)}</b>, mais conservera ses accès aux autres établissements (${otherHotelNames.map(esc).join(', ')}).`;
+}
+
+// Détecte le refus serveur "retrait laisserait l'hôtel sans administrateur" pour proposer un
+// remplaçant côté UI, sans dupliquer la logique de garde-fou (qui reste 100% côté RPC).
+function isLastHotelAdminError(message){ return String(message||'').includes('sans administrateur'); }
+
+const ACTION_HISTORY_LABEL={
+  'user.invite':'Invitation envoyée', 'user.grant_hotel':'Accès hôtel accordé', 'user.revoke_hotel':'Accès hôtel retiré',
+  'user.change_role':'Rôle hôtel modifié', 'user.suspend':'Compte désactivé', 'user.reactivate':'Compte réactivé',
+  'platform_admin.grant':'Rôle plateforme accordé', 'platform_admin.revoke':'Rôle plateforme retiré',
+  'invite_user':'Invitation envoyée (par un administrateur hôtel)',
+};
+function historyActionLabel(action){ return ACTION_HISTORY_LABEL[action]||action||'—'; }
+
+/* =====================================================================
+   Helpers purs — Facturation plateforme (Lot 4, mirror exact de tests/lib/adminHelpers.js)
+   ===================================================================== */
+const INVOICE_STATUS_LABEL={proforma:'Proforma', issued:'Émise', cancelled:'Annulée'};
+const INVOICE_STATUS_CLASS={proforma:'amber', issued:'blue', cancelled:'gray'};
+function invoiceStatusBadge(status){ return {label:INVOICE_STATUS_LABEL[status]||status||'—', cls:INVOICE_STATUS_CLASS[status]||'gray'}; }
+
+// État financier — calculé côté serveur (financial_state), 5 valeurs, jamais confondu avec le
+// statut documentaire proforma/émise/annulée (réserve CTO Lot 4, point 3). Un avoir qui ramène
+// le solde à zéro donne "fully_credited", jamais "paid" (aucun argent réel n'a circulé).
+const FINANCIAL_STATE_LABEL={unpaid:'Impayée', partially_paid:'Partiellement réglée', paid:'Réglée', overdue:'En retard', fully_credited:'Soldée par avoir'};
+const FINANCIAL_STATE_CLASS={unpaid:'gray', partially_paid:'amber', paid:'green', overdue:'red', fully_credited:'blue'};
+function financialStateBadge(state){
+  if(!state) return {label:'—', cls:'gray'};
+  return {label:FINANCIAL_STATE_LABEL[state]||state, cls:FINANCIAL_STATE_CLASS[state]||'gray'};
+}
+
+const PAYMENT_STATUS_LABEL={recorded:'Enregistré', pending:'En attente', failed:'Échoué', reversed:'Renversé'};
+const PAYMENT_STATUS_CLASS={recorded:'green', pending:'amber', failed:'red', reversed:'gray'};
+function paymentStatusBadge(status){ return {label:PAYMENT_STATUS_LABEL[status]||status||'—', cls:PAYMENT_STATUS_CLASS[status]||'gray'}; }
+
+const CREDIT_NOTE_STATUS_LABEL={issued:'Émis', voided:'Annulé'};
+const CREDIT_NOTE_STATUS_CLASS={issued:'blue', voided:'gray'};
+function creditNoteStatusBadge(status){ return {label:CREDIT_NOTE_STATUS_LABEL[status]||status||'—', cls:CREDIT_NOTE_STATUS_CLASS[status]||'gray'}; }
+
+const PAYMENT_METHOD_LABEL={bank_transfer:'Virement', card:'Carte', sepa:'Prélèvement SEPA', check:'Chèque', cash:'Espèces', other:'Autre'};
+function paymentMethodLabel(method){ return PAYMENT_METHOD_LABEL[method]||method||'—'; }
+
+// Actions pertinentes pour une facture PLATEFORME (proforma/émise/annulée) — distinct de
+// actionsForStatus (abonnement) et hotelActionsForStatus (hôtel), jamais confondus.
+function billingActionsForStatus(status, paidAmount){
+  return {
+    canIssue: status==='proforma',
+    canCancel: status!=='cancelled' && !(paidAmount>0),
+    canRecordPayment: status==='issued',
+    canCreateCreditNote: status==='issued',
+  };
+}
+
+function isInvoiceOverdue({status, due_date, balance}, todayStr){
+  if(status!=='issued' || !due_date || balance<=0) return false;
+  const today = todayStr || new Date().toISOString().slice(0,10);
+  return due_date < today;
+}
+
+/* =====================================================================
+   Helpers purs — Dashboard, Alertes, Paramètres (Lot 5, mirror exact dans tests/lib)
+   ===================================================================== */
+const SEVERITY_LABEL={high:'Prioritaire', medium:'À surveiller', low:'Information'};
+const SEVERITY_CLASS={high:'red', medium:'amber', low:'gray'};
+function severityBadge(sev){ return {label:SEVERITY_LABEL[sev]||sev||'—', cls:SEVERITY_CLASS[sev]||'gray'}; }
+
+const PERIOD_LABEL={this_month:'Ce mois', last_month:'Mois précédent', quarter:'Trimestre', year:'Année', custom:'Période personnalisée'};
+function periodLabel(period){ return PERIOD_LABEL[period]||period||'—'; }
+
+const ALERT_TYPE_ICON={
+  trial_ending_soon:'fa-regular fa-hourglass-half', invoice_overdue:'fa-solid fa-file-invoice',
+  hotel_without_admin:'fa-solid fa-user-shield', invitation_stale:'fa-regular fa-envelope',
+  subscription_suspended:'fa-solid fa-ban', subscription_no_plan:'fa-solid fa-triangle-exclamation',
+  archived_plan_assigned:'fa-solid fa-box-archive', hotel_active_no_subscription:'fa-solid fa-hotel',
+  deactivated_user_with_access:'fa-solid fa-user-slash',
+};
+function alertTypeIcon(type){ return ALERT_TYPE_ICON[type]||'fa-solid fa-circle-info'; }
+
+// Tri des alertes : prioritaires d'abord, jamais un simple ordre d'insertion — une alerte
+// décorative sans distinction de gravité serait contraire à la demande CTO.
+const SEVERITY_ORDER={high:0, medium:1, low:2};
+function sortAlertsBySeverity(alerts){
+  return [...(alerts||[])].sort((a,b)=>(SEVERITY_ORDER[a.severity]??9)-(SEVERITY_ORDER[b.severity]??9));
+}
+
+// Validation cliente miroir de admin_update_platform_setting (le backend est la source de
+// vérité, ceci évite un aller-retour réseau pour une erreur de saisie évidente).
+const SETTING_NUMERIC_KEYS=['mrr_target','arr_target','default_tva_rate','default_commitment',
+  'max_trial_days','min_trial_days','max_trial_extensions','churn_alert_rate','trial_duration_days'];
+function settingValueType(key){
+  if(SETTING_NUMERIC_KEYS.includes(key)) return 'number';
+  if(key==='dunning_days_before') return 'array';
+  return 'string';
+}
+function validateSettingValue(key, rawValue){
+  const type=settingValueType(key);
+  if(type==='number'){
+    const n=Number(rawValue);
+    if(rawValue===''||rawValue==null||Number.isNaN(n)) return {valid:false, error:'Doit être un nombre.'};
+    return {valid:true, value:n};
+  }
+  if(type==='array'){
+    const parts=String(rawValue||'').split(',').map(s=>s.trim()).filter(Boolean).map(Number);
+    if(!parts.length||parts.some(Number.isNaN)) return {valid:false, error:'Doit être une liste de nombres séparés par des virgules.'};
+    return {valid:true, value:parts};
+  }
+  if(rawValue==null||String(rawValue).trim()===''){ return {valid:false, error:'Ne peut pas être vide.'}; }
+  return {valid:true, value:String(rawValue)};
+}
+
+// Présentation lisible d'une valeur de payload d'audit — jamais un bloc JSON brut par défaut
+// (le JSON brut reste disponible via un <details> replié, pour l'utilisateur avancé).
+function formatPayloadValue(v){
+  if(v===null||v===undefined) return '—';
+  if(typeof v==='boolean') return v?'Oui':'Non';
+  if(Array.isArray(v)) return v.length?v.map(x=>formatPayloadValue(x)).join(', '):'—';
+  if(typeof v==='object') return JSON.stringify(v);
+  return String(v);
+}
+
+/* =====================================================================
+   Toast / drawer / confirm
+   ===================================================================== */
+let toastT=null;
+function flash(msg,type){
+  const t=$('toast');
+  t.textContent=msg;
+  t.style.background=type==='e'?'#dc2626':type==='w'?'#d97706':'#15233b';
+  t.classList.add('on');
+  clearTimeout(toastT);
+  toastT=setTimeout(()=>t.classList.remove('on'), type==='e'?3200:1800);
+}
+function openDrawer(html){ $('drawer').innerHTML=html; $('drawer').classList.add('on'); }
+function closeDrawer(){ $('drawer').classList.remove('on'); }
+function confirmAction({title, body, confirmLabel='Confirmer', danger=false, onConfirm}){
+  $('modal').innerHTML=`
+    <h3>${esc(title)}</h3>
+    <p>${body}</p>
+    <div class="mact">
+      <button class="btn g" id="mCancel">Annuler</button>
+      <button class="btn ${danger?'d':'p'}" id="mOk">${esc(confirmLabel)}</button>
+    </div>`;
+  $('modalbg').classList.add('on');
+  $('mCancel').onclick=()=>$('modalbg').classList.remove('on');
+  $('mOk').onclick=async()=>{
+    $('mOk').disabled=true;
+    try{ await onConfirm(); $('modalbg').classList.remove('on'); }
+    catch(e){ flash(errorLabel(e.message),'e'); $('mOk').disabled=false; }
+  };
+}
+$('modalbg').addEventListener('click',e=>{ if(e.target.id==='modalbg') $('modalbg').classList.remove('on'); });
+// Variante de confirmAction avec un corps HTML libre (champs de formulaire), pour les actions
+// qui exigent une saisie (motif, date, sélection de plan) en plus d'une simple confirmation.
+function formModal({title, bodyHtml, confirmLabel='Confirmer', danger=false, onConfirm}){
+  $('modal').innerHTML=`
+    <h3>${esc(title)}</h3>
+    <div class="mform">${bodyHtml}</div>
+    <div class="mact">
+      <button class="btn g" id="mCancel">Annuler</button>
+      <button class="btn ${danger?'d':'p'}" id="mOk">${esc(confirmLabel)}</button>
+    </div>`;
+  $('modalbg').classList.add('on');
+  $('mCancel').onclick=()=>$('modalbg').classList.remove('on');
+  $('mOk').onclick=async()=>{
+    $('mOk').disabled=true;
+    try{ await onConfirm(); $('modalbg').classList.remove('on'); }
+    catch(e){ flash(errorLabel(e.message),'e'); $('mOk').disabled=false; }
+  };
+}
+
+/* =====================================================================
+   Boot / Auth gate
+   ===================================================================== */
+async function boot(){
+  const {createClient}=await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm');
+  sb=createClient(SUPABASE_URL,SUPABASE_ANON_KEY,{auth:{persistSession:true}});
+  await checkAuthAndRender();
+}
+async function checkAuthAndRender(){
+  const {data:sessData}=await sb.auth.getSession();
+  session=sessData?.session||null;
+  if(!session){ renderLogin(); return; }
+  const {data:isAdmin,error}=await sb.rpc('is_platform_admin');
+  if(error){ showFatal(error); return; }
+  if(!isAdmin){ renderAccessDenied(); return; }
+  const {data:meRow}=await sb.from('platform_admins').select('*').eq('auth_id',session.user.id).maybeSingle();
+  me = meRow || {email:session.user.email, role:'super_admin', full_name:null};
+  renderShell();
+}
+
+function renderLogin(err){
+  $('root').innerHTML=`<div class="login"><div class="lcard">
+    <div class="mk"><i class="fa-solid fa-shield-halved"></i></div>
+    <h1>Flowtym RH — Super Admin</h1><div class="sub">Connectez-vous avec votre compte administrateur plateforme.</div>
+    <div class="fld"><label>E-mail</label><input type="email" id="le" autocomplete="email"></div>
+    <div class="fld"><label>Mot de passe</label><input type="password" id="lp" autocomplete="current-password"></div>
+    <button class="btn p" id="lb" style="width:100%;justify-content:center;padding:11px">Se connecter</button>
+    <div style="text-align:center;margin-top:10px">
+      <button id="forgotBtn" style="background:none;border:none;color:var(--violet-d);font-size:12.5px;cursor:pointer;text-decoration:underline;padding:0">Mot de passe oublié ?</button>
+    </div>
+    <div class="err" id="lerr">${esc(err||'')}</div></div></div>`;
+  $('lb').onclick=async()=>{
+    const e=$('le').value.trim(), p=$('lp').value;
+    if(!e||!p){$('lerr').textContent='E-mail et mot de passe requis.';return;}
+    $('lb').disabled=true; $('lerr').textContent='';
+    const {error}=await sb.auth.signInWithPassword({email:e,password:p});
+    $('lb').disabled=false;
+    if(error) $('lerr').textContent=error.message; else checkAuthAndRender();
+  };
+  $('lp').addEventListener('keydown',e=>{if(e.key==='Enter')$('lb').click();});
+  $('forgotBtn').onclick=()=>renderForgotPwd();
+}
+function renderForgotPwd(msg){
+  $('root').innerHTML=`<div class="login"><div class="lcard">
+    <div class="mk"><i class="fa-solid fa-key"></i></div>
+    <h1>Mot de passe oublié</h1>
+    <div class="sub">Saisissez votre adresse email. Vous recevrez un lien pour redéfinir votre mot de passe.</div>
+    ${msg?`<div style="background:#dcfce7;color:#166534;padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:4px">${esc(msg)}</div>`:''}
+    <div class="fld"><label>E-mail</label><input type="email" id="fpe" autocomplete="email"></div>
+    <button class="btn p" id="fpb" style="width:100%;justify-content:center;padding:11px">Envoyer le lien</button>
+    <div style="text-align:center;margin-top:10px">
+      <button id="backLogin" style="background:none;border:none;color:var(--violet-d);font-size:12.5px;cursor:pointer;text-decoration:underline;padding:0">← Retour à la connexion</button>
+    </div>
+    <div class="err" id="fperr"></div></div></div>`;
+  $('fpb').onclick=async()=>{
+    const email=$('fpe').value.trim();
+    if(!email){$('fperr').textContent='E-mail requis.';return;}
+    $('fpb').disabled=true;
+    const {error}=await sb.auth.resetPasswordForEmail(email,{redirectTo:'https://rh.flowtym.com/admin'});
+    $('fpb').disabled=false;
+    if(error) $('fperr').textContent=error.message;
+    else renderForgotPwd('Email envoyé ! Vérifiez votre boîte de réception.');
+  };
+  $('backLogin').onclick=()=>renderLogin();
+}
+function renderAccessDenied(){
+  $('root').innerHTML=`<div class="deny"><div class="card">
+    <div class="ic"><i class="fa-solid fa-ban"></i></div>
+    <h1>Accès refusé</h1>
+    <p>Ce compte n'est pas administrateur plateforme Flowtym. Le portail Super Admin est réservé aux comptes <code>platform_admins</code>.</p>
+    <div style="display:flex;gap:10px;justify-content:center">
+      <a class="btn g" href="/">Retour à l'application</a>
+      <button class="btn d" id="dOut">Se déconnecter</button>
+    </div>
+  </div></div>`;
+  $('dOut').onclick=async()=>{ await sb.auth.signOut(); location.reload(); };
+}
+
+/* =====================================================================
+   Shell (sidebar + header)
+   ===================================================================== */
+const MENU=[
+  ['Pilotage',[
+    ['dashboard','Tableau de bord','fa-solid fa-table-columns',true],
+    ['stats','Statistiques','fa-solid fa-chart-line',false],
+  ]],
+  ['Gestion globale',[
+    ['hotels','Hôtels','fa-solid fa-hotel',true],
+    ['groups','Groupes hôteliers','fa-solid fa-sitemap',true],
+    ['users','Utilisateurs','fa-regular fa-user',true],
+    ['subscriptions','Abonnements','fa-regular fa-calendar-check',true],
+    ['trials','Périodes d\'essai','fa-regular fa-hourglass-half',false],
+    ['licenses','Licences','fa-solid fa-key',false],
+  ]],
+  ['Finance',[
+    ['billing','Facturation','fa-regular fa-file-lines',true],
+    ['payments','Paiements','fa-solid fa-credit-card',false],
+  ]],
+  ['Plateforme',[
+    ['audit','Audit','fa-solid fa-shield-halved',true],
+    ['support','Support','fa-regular fa-life-ring',false],
+    ['settings','Paramètres plateforme','fa-solid fa-gear',true],
+    ['supervision','Supervision','fa-solid fa-heart-pulse',true],
+  ]],
+];
+const STUB_INFO={
+  trials:{ic:'fa-regular fa-hourglass-half',desc:'Le suivi d\'essai (dates, alertes 30/15/7/3/1 jours) sera construit sur hotel_subscriptions.trial_ends_at en Phase 2.'},
+  payments:{ic:'fa-solid fa-credit-card',desc:'Les paiements par facture se gèrent déjà depuis la fiche facture (module Facturation). Une vue transversale multi-factures (rapprochement bancaire, relances) arrive en Phase 2.'},
+  licenses:{ic:'fa-solid fa-key',desc:'platform_apps, hotel_app_subscriptions et user_app_access existent déjà. Vue de gestion consolidée prévue en Phase 2.'},
+  stats:{ic:'fa-solid fa-chart-line',desc:'MRR/ARR/churn seront calculés sur hotel_subscriptions et platform_invoices une fois la facturation Phase 2 en place.'},
+  support:{ic:'fa-regular fa-life-ring',desc:'La table support_tickets existe déjà (avec triage) et est accessible en lecture aux admins plateforme ; l\'interface dédiée arrive en Phase 2.'},
+};
+
+function renderShell(){
+  const displayName = me.full_name || me.email;
+  $('root').innerHTML=`
+    <header class="top"><div class="top-in">
+      <div class="logo"><div class="mk"><i class="fa-solid fa-hotel"></i></div>Flowtym <small>SUPER ADMIN</small></div>
+      <div class="searchbox"><i class="fa-solid fa-magnifying-glass"></i><input id="gsearch" placeholder="Rechercher un hôtel, un utilisateur, un groupe…"></div>
+      <div class="spacer"></div>
+      <button class="btn p" id="quickAddHotel"><i class="fa-solid fa-plus"></i> Ajouter un hôtel</button>
+      <div style="position:relative">
+        <button class="iconbtn" id="bellBtn" title="Activité récente"><i class="fa-solid fa-bell"></i></button>
+        <div class="popover" id="bellPanel"><div class="ph">Activité récente</div><div id="bellBody" class="popitem">Chargement…</div></div>
+      </div>
+      <div style="position:relative">
+        <button class="meB" id="meBtn">
+          <div class="av" style="background:${avColor(me.email)}">${initials(displayName)}</div>
+          <div class="nm"><b>${esc(displayName)}</b><span>${esc(me.role||'super_admin')}</span></div>
+        </button>
+        <div class="popover" id="mePanel" style="width:220px">
+          <div class="popitem" style="font-size:12px;color:var(--muted)">${esc(me.email)}</div>
+          <div class="popitem"><a href="/" style="color:var(--ink);text-decoration:none"><i class="fa-solid fa-arrow-left" style="width:16px"></i> Retour à l'application</a></div>
+          <div class="popitem" id="signOutBtn" style="cursor:pointer;color:var(--red)"><i class="fa-solid fa-arrow-right-from-bracket" style="width:16px"></i> Se déconnecter</div>
+        </div>
+      </div>
+    </div></header>
+    <div class="main">
+      <aside class="sidebar"><nav class="menu" id="nav">
+        ${MENU.map(([grp,items])=>`<div class="grp">${esc(grp)}</div>`+
+          items.map(([k,lab,ic,on])=>`<button class="it ${k===view?'on':''}" data-v="${k}">
+            <i class="ic ${ic}"></i><span>${esc(lab)}</span>${on?'':'<span class="soon">Phase 2</span>'}</button>`).join('')
+        ).join('')}
+      </nav></aside>
+      <section class="content"><div id="view"></div></section>
+    </div>`;
+  $('nav').onclick=e=>{ const b=e.target.closest('.it'); if(!b) return; goView(b.dataset.v); };
+  $('quickAddHotel').onclick=()=>{ goView('hotels'); setTimeout(()=>openHotelDrawer(null),50); };
+  $('signOutBtn').onclick=async()=>{ await sb.auth.signOut(); location.reload(); };
+  $('meBtn').onclick=()=>{ $('mePanel').classList.toggle('on'); $('bellPanel').classList.remove('on'); };
+  $('bellBtn').onclick=async()=>{
+    const wasOn=$('bellPanel').classList.contains('on');
+    $('mePanel').classList.remove('on');
+    $('bellPanel').classList.toggle('on');
+    if(!wasOn) await loadBell();
+  };
+  document.addEventListener('click',e=>{
+    if(!e.target.closest('#meBtn')&&!e.target.closest('#mePanel')) $('mePanel')?.classList.remove('on');
+    if(!e.target.closest('#bellBtn')&&!e.target.closest('#bellPanel')) $('bellPanel')?.classList.remove('on');
+  });
+  let searchT=null;
+  $('gsearch').addEventListener('input',e=>{
+    clearTimeout(searchT);
+    const q=e.target.value;
+    searchT=setTimeout(()=>{ searchQuery=q; renderView(); }, 200);
+  });
+  goView(view);
+}
+async function loadBell(){
+  const {data,error}=await sb.from('platform_logs').select('action,entity,hotel_name,admin_email,created_at').order('created_at',{ascending:false}).limit(6);
+  if(error){ $('bellBody').textContent='Erreur de chargement.'; return; }
+  if(!data||!data.length){ $('bellBody').textContent='Aucune activité récente.'; return; }
+  $('bellBody').innerHTML=data.map(l=>`<div class="popitem"><div class="a">${esc(l.action)}${l.hotel_name?' · '+esc(l.hotel_name):''}</div><div class="t">${esc(l.admin_email||'—')} · ${fmtDateTime(l.created_at)}</div></div>`).join('');
+}
+
+let searchQuery='';
+function goView(v){ view=v; searchQuery=''; document.querySelectorAll('.menu .it').forEach(b=>b.classList.toggle('on', b.dataset.v===v)); renderView(); }
+
+async function renderView(){
+  const el=$('view');
+  el.innerHTML='<div class="loading"><i class="fa-solid fa-circle-notch fa-spin"></i> Chargement…</div>';
+  try{
+    if(view==='dashboard') await renderDashboard(el);
+    else if(view==='hotels') await renderHotels(el);
+    else if(view==='groups') await renderGroups(el);
+    else if(view==='users') await renderUsers(el);
+    else if(view==='subscriptions') await renderSubscriptions(el);
+    else if(view==='billing') await renderBilling(el);
+    else if(view==='audit') await renderAudit(el);
+    else if(view==='settings') await renderSettings(el);
+    else if(view==='supervision') await renderSupervision(el);
+    else renderStub(el, view);
+  }catch(e){
+    console.error(e);
+    el.innerHTML=`<div class="page"><div class="box" style="color:var(--red)"><i class="fa-solid fa-triangle-exclamation"></i> ${esc(e.message||String(e))}</div></div>`;
+  }
+}
+
+function renderStub(el, key){
+  const info=STUB_INFO[key]||{ic:'fa-solid fa-hourglass-half',desc:''};
+  const label=MENU.flatMap(([,items])=>items).find(([k])=>k===key)?.[1]||key;
+  el.innerHTML=`<div class="page"><div class="stub">
+    <div class="ic"><i class="${info.ic}"></i></div>
+    <h2>${esc(label)}</h2>
+    <p>Module en préparation — Phase 2.</p>
+    ${info.desc?`<div class="note">${esc(info.desc)}</div>`:''}
+  </div></div>`;
+}
+
+/* =====================================================================
+   Tableau de bord (Lot 5) — vue d'ensemble plateforme + alertes priorisées
+   ===================================================================== */
+let dashboardPeriod='this_month';
+
+async function renderDashboard(el){
+  el.innerHTML='<div class="loading"><i class="fa-solid fa-circle-notch fa-spin"></i> Chargement…</div>';
+  const [{data:kpis,error:kErr},{data:alerts,error:alErr},{data:activity}]=await Promise.all([
+    sb.rpc('admin_platform_overview_kpis',{p_period:dashboardPeriod,p_start:null,p_end:null}),
+    sb.rpc('admin_platform_alerts'),
+    sb.from('platform_logs').select('*').order('created_at',{ascending:false}).limit(8),
+  ]);
+  if(kErr) throw kErr;
+  const h=kpis.hotels, g=kpis.groups, u=kpis.users, sub=kpis.subscriptions, apps=kpis.apps, bill=kpis.billing, ud=kpis.users_detail;
+  const sortedAlerts=alErr?[]:sortAlertsBySeverity(alerts);
+
+  el.innerHTML=`<div class="page">
+    <div class="phead"><div><h1>Tableau de bord</h1><div class="sub">Vue d'ensemble de la plateforme Flowtym — ${esc(periodLabel(dashboardPeriod))} (${fmtDate(kpis.period.start)} → ${fmtDate(kpis.period.end)})</div></div>
+      <div class="actions">
+        ${['this_month','last_month','quarter','year'].map(p=>`<button class="btn ${p===dashboardPeriod?'p':'g'} sm" data-period="${p}">${esc(periodLabel(p))}</button>`).join('')}
+      </div>
+    </div>
+
+    <h3 style="margin:6px 0 10px;font-size:13px;color:var(--ink2)"><i class="fa-solid fa-hotel"></i> Plateforme</h3>
+    <div class="kpis">
+      <div class="kpi v"><div class="ic"><i class="fa-solid fa-hotel"></i></div><div class="n">${fmtNum(h.total)}</div><div class="l">Hôtels totaux</div><div class="sub">${fmtNum(h.active)} actifs · ${fmtNum(h.inactive_or_archived)} inactifs/archivés</div></div>
+      <div class="kpi g"><div class="ic"><i class="fa-solid fa-sitemap"></i></div><div class="n">${fmtNum(g.total)}</div><div class="l">Groupes hôteliers</div></div>
+      <div class="kpi b"><div class="ic"><i class="fa-regular fa-user"></i></div><div class="n">${fmtNum(u.total)}</div><div class="l">Utilisateurs</div></div>
+      <div class="kpi a"><div class="ic"><i class="fa-solid fa-user-shield"></i></div><div class="n">${fmtNum(u.super_admins)}</div><div class="l">Super Admins</div></div>
+    </div>
+
+    <h3 style="margin:18px 0 10px;font-size:13px;color:var(--ink2)"><i class="fa-regular fa-calendar-check"></i> Abonnements</h3>
+    <div class="kpis">
+      <div class="kpi v"><div class="ic"><i class="fa-regular fa-calendar-check"></i></div><div class="n">${fmtNum(sub.active)}</div><div class="l">Actifs</div></div>
+      <div class="kpi a"><div class="ic"><i class="fa-regular fa-hourglass-half"></i></div><div class="n">${fmtNum(sub.trial)}</div><div class="l">Essais en cours</div><div class="sub">${fmtNum(sub.trial_expiring_7d)} expirant sous 7 jours</div></div>
+      <div class="kpi b"><div class="ic"><i class="fa-solid fa-ban"></i></div><div class="n">${fmtNum(sub.suspended)}</div><div class="l">Suspendus</div><div class="sub">${fmtNum(sub.scheduled_cancellation)} résiliation(s) programmée(s)</div></div>
+      <div class="kpi a"><div class="ic"><i class="fa-solid fa-triangle-exclamation"></i></div><div class="n">${fmtNum(sub.plan_incoherent)}</div><div class="l">Sans plan cohérent</div></div>
+    </div>
+
+    <h3 style="margin:18px 0 10px;font-size:13px;color:var(--ink2)"><i class="fa-solid fa-grip"></i> Applications</h3>
+    <div class="kpis">
+      <div class="kpi v"><div class="ic"><i class="fa-solid fa-grip"></i></div><div class="n">${fmtNum(apps.active)}</div><div class="l">Applications actives</div></div>
+      <div class="kpi b"><div class="ic"><i class="fa-regular fa-user"></i></div><div class="n">${fmtNum(apps.total_access_grants)}</div><div class="l">Accès individuels</div></div>
+      <div class="kpi a"><div class="ic"><i class="fa-solid fa-triangle-exclamation"></i></div><div class="n">${fmtNum(apps.divergence_count)}</div><div class="l">Écarts observe/enforce</div></div>
+      <div class="kpi a"><div class="ic"><i class="fa-solid fa-bug"></i></div><div class="n">${fmtNum(apps.resolution_errors)}</div><div class="l">Erreurs de résolution</div></div>
+    </div>
+
+    <h3 style="margin:18px 0 10px;font-size:13px;color:var(--ink2)"><i class="fa-regular fa-file-lines"></i> Facturation</h3>
+    <div class="kpis">
+      <div class="kpi v"><div class="ic"><i class="fa-regular fa-file-lines"></i></div><div class="n">${fmtMoney(bill.period_billed_ttc)}</div><div class="l">Facturé sur la période</div></div>
+      <div class="kpi g"><div class="ic"><i class="fa-solid fa-hand-holding-dollar"></i></div><div class="n">${fmtMoney(bill.period_collected)}</div><div class="l">Encaissé sur la période</div></div>
+      <div class="kpi a"><div class="ic"><i class="fa-solid fa-triangle-exclamation"></i></div><div class="n">${fmtMoney(bill.outstanding_total)}</div><div class="l">Restant dû</div><div class="sub">${fmtNum(bill.overdue_invoice_count)} facture(s) en retard</div></div>
+      <div class="kpi b"><div class="ic"><i class="fa-regular fa-file-lines"></i></div><div class="n">${fmtMoney(bill.credits_issued_ttc)}</div><div class="l">Avoirs émis sur la période</div><div class="sub">${fmtNum(bill.pending_payments)} paiement(s) en attente · ${fmtNum(bill.subscriptions_suspended_nonpayment)} suspendu(s) pour impayé</div></div>
+    </div>
+
+    <h3 style="margin:18px 0 10px;font-size:13px;color:var(--ink2)"><i class="fa-regular fa-user"></i> Utilisateurs</h3>
+    <div class="kpis">
+      <div class="kpi v"><div class="ic"><i class="fa-regular fa-user"></i></div><div class="n">${fmtNum(ud.active)}</div><div class="l">Actifs</div><div class="sub">${fmtNum(ud.deactivated)} désactivés</div></div>
+      <div class="kpi a"><div class="ic"><i class="fa-regular fa-envelope"></i></div><div class="n">${fmtNum(ud.pending_invites)}</div><div class="l">Invitations en attente</div><div class="sub">${fmtNum(ud.stale_invites)} anciennes (+14j)</div></div>
+      <div class="kpi a"><div class="ic"><i class="fa-solid fa-user-slash"></i></div><div class="n">${fmtNum(ud.without_access)}</div><div class="l">Sans accès hôtel</div></div>
+      <div class="kpi a"><div class="ic"><i class="fa-solid fa-user-shield"></i></div><div class="n">${fmtNum(ud.hotels_without_admin)}</div><div class="l">Hôtels sans administrateur</div></div>
+    </div>
+
+    <div class="cols2" style="margin-top:20px">
+      <div class="box">
+        <h3><i class="fa-solid fa-triangle-exclamation"></i> Alertes et actions requises (${sortedAlerts.length})</h3>
+        <div class="tlist" id="alertsList">
+          ${sortedAlerts.length?sortedAlerts.slice(0,25).map((a,i)=>{
+            const sv=severityBadge(a.severity);
+            return `<div class="it" style="cursor:pointer" data-alert="${i}">
+              <div><div class="nm"><i class="${alertTypeIcon(a.alert_type)}"></i> ${esc(a.message)}</div><div class="sub">${a.group_name?esc(groupNameOr(a.group_name))+' · ':''}${esc(a.hotel_name||'')}</div></div>
+              <div class="right"><span class="tag ${sv.cls}">${esc(sv.label)}</span></div>
+            </div>`;
+          }).join(''):'<div class="empty" style="padding:20px">Aucune alerte active.</div>'}
+        </div>
+      </div>
+      <div class="box"><h3><i class="fa-solid fa-clock-rotate-left"></i> Activité récente</h3>
+        <div class="tlist">${!activity?.length?'<div class="empty" style="padding:20px">Aucune activité.</div>':activity.map(l=>`
+          <div class="it"><div><div class="nm">${esc(historyActionLabel(l.action))}</div><div class="sub">${esc(l.hotel_name||l.entity||'')} · ${esc(l.admin_email||'—')}</div></div><div class="right">${fmtDateTime(l.created_at)}</div></div>
+        `).join('')}</div>
+      </div>
+    </div>
+  </div>`;
+
+  el.querySelectorAll('[data-period]').forEach(b=>b.onclick=()=>{ dashboardPeriod=b.dataset.period; renderDashboard(el); });
+  el.querySelectorAll('[data-alert]').forEach(b=>b.onclick=()=>goToAlertEntity(sortedAlerts[Number(b.dataset.alert)]));
+}
+
+// Navigation transversale depuis une alerte : ouvre directement l'objet concerné, en
+// conservant le contexte (recherche pré-remplie) quand un lien direct par identifiant
+// n'existe pas encore pour ce type d'objet (abonnement).
+function goToAlertEntity(alert){
+  if(!alert) return;
+  if(alert.entity_type==='hotel'){
+    goView('hotels');
+    setTimeout(async()=>{ const {data}=await sb.from('hotels').select('*').eq('id',alert.entity_id).maybeSingle(); if(data) openHotelDetailDrawer(data); }, 250);
+  } else if(alert.entity_type==='platform_invoice'){
+    goView('billing');
+    setTimeout(()=>openInvoiceDrawer(alert.entity_id, {}, ()=>renderView()), 250);
+  } else if(alert.entity_type==='user'){
+    goView('users');
+    setTimeout(async()=>{
+      const {data}=await sb.rpc('admin_list_user_access');
+      const row=(data||[]).find(u=>u.user_id===alert.entity_id);
+      if(row) openUserDrawer(row, [], [], ()=>renderView());
+    }, 250);
+  } else if(alert.entity_type==='hotel_subscription'){
+    searchQuery=alert.hotel_name||'';
+    goView('subscriptions');
+  } else {
+    goView('audit');
+  }
+}
+
+/* =====================================================================
+   Hôtels
+   ===================================================================== */
+let hotelsPage=0, hotelsSort={key:'name',dir:'asc'}, hotelsFilterStatus='', hotelsFilterGroup='', hotelsFilterPlan='', hotelsFilterSub='', hotelsFilterTrial='';
+async function renderHotels(el){
+  const [{data:hotels,error:hErr},{data:groups,error:gErr},{data:subs},{data:plans},{data:users}]=await Promise.all([
+    sb.from('hotels').select('id,name,city,country,status,group_id,hotel_code,total_rooms,phone,email,siret,tva_number,company,stars,currency,timezone,address,zip,website,created_at,updated_at'),
+    sb.from('hotel_groups').select('id,name,status'),
+    sb.from('hotel_subscriptions').select('hotel_id,status,trial_ends_at,plan_id'),
+    sb.from('subscription_plans').select('id,name'),
+    sb.from('users').select('id,hotel_id,is_active'),
+  ]);
+  if(hErr) throw hErr; if(gErr) throw gErr;
+  const groupById=Object.fromEntries((groups||[]).map(g=>[g.id,g]));
+  const planById=Object.fromEntries((plans||[]).map(p=>[p.id,p]));
+  const subByHotel=Object.fromEntries((subs||[]).map(s=>[s.hotel_id,s]));
+
+  let rows=(hotels||[]).map(h=>({
+    ...h, _group:groupById[h.group_id]||null, _sub:subByHotel[h.id]||null,
+    _plan:subByHotel[h.id]?planById[subByHotel[h.id].plan_id]:null,
+    _userCount:(users||[]).filter(u=>u.hotel_id===h.id && u.is_active).length,
+  }));
+  if(searchQuery.trim()){
+    const q=searchQuery.trim().toLowerCase();
+    rows=rows.filter(h=>[h.name,h.company,h.city,h.hotel_code,h.email].filter(Boolean).some(v=>String(v).toLowerCase().includes(q)));
+  }
+  if(hotelsFilterStatus) rows=rows.filter(h=>h.status===hotelsFilterStatus);
+  if(hotelsFilterGroup) rows=rows.filter(h=>h.group_id===hotelsFilterGroup);
+  if(hotelsFilterPlan) rows=rows.filter(h=>h._sub?.plan_id===hotelsFilterPlan);
+  if(hotelsFilterSub) rows=rows.filter(h=>hotelsFilterSub==='none' ? !h._sub : h._sub?.status===hotelsFilterSub);
+  if(hotelsFilterTrial==='ongoing') rows=rows.filter(h=>h._sub?.status==='trial');
+  if(hotelsFilterTrial==='expiring7') rows=rows.filter(h=>{
+    if(h._sub?.status!=='trial') return false;
+    const d=trialDaysRemaining(h._sub.trial_ends_at);
+    return d!=null && d>=0 && d<=7;
+  });
+  rows=sortRows(rows,hotelsSort.key,hotelsSort.dir);
+
+  const pageSize=20, pageCount=Math.max(1,Math.ceil(rows.length/pageSize));
+  hotelsPage=Math.min(hotelsPage,pageCount-1);
+  const pageRows=rows.slice(hotelsPage*pageSize,(hotelsPage+1)*pageSize);
+
+  el.innerHTML=`<div class="page">
+    <div class="phead"><div><h1>Hôtels</h1><div class="sub">${fmtNum(rows.length)} hôtel(s)</div></div>
+      <div class="actions">
+        <button class="btn g" id="exportHotels"><i class="fa-solid fa-download"></i> Exporter CSV</button>
+        <button class="btn p" id="addHotel"><i class="fa-solid fa-plus"></i> Nouvel hôtel</button>
+      </div>
+    </div>
+    <div class="filters">
+      <select id="fStatus"><option value="">Tous les statuts</option>${Object.entries(HOTEL_STATUS_LABEL).map(([k,l])=>`<option value="${k}" ${hotelsFilterStatus===k?'selected':''}>${l}</option>`).join('')}</select>
+      <select id="fGroup"><option value="">Tous les groupes</option>${(groups||[]).filter(g=>g.status!=='archived').map(g=>`<option value="${g.id}" ${hotelsFilterGroup===g.id?'selected':''}>${esc(groupNameOr(g.name))}</option>`).join('')}</select>
+      <select id="fPlan"><option value="">Tous les plans</option>${(plans||[]).map(p=>`<option value="${p.id}" ${hotelsFilterPlan===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}</select>
+      <select id="fSub"><option value="">Tous les abonnements</option>${Object.entries(SUB_STATUS_LABEL).map(([k,l])=>`<option value="${k}" ${hotelsFilterSub===k?'selected':''}>${l}</option>`).join('')}<option value="none" ${hotelsFilterSub==='none'?'selected':''}>Sans abonnement</option></select>
+      <select id="fTrial">
+        <option value="">Tous les essais</option>
+        <option value="ongoing" ${hotelsFilterTrial==='ongoing'?'selected':''}>Essais en cours</option>
+        <option value="expiring7" ${hotelsFilterTrial==='expiring7'?'selected':''}>Expirant sous 7 jours</option>
+      </select>
+    </div>
+    <div class="tblwrap"><table class="tbl">
+      <thead><tr>
+        <th data-k="name">Hôtel</th><th data-k="city">Ville</th><th data-k="_group">Groupe</th><th data-k="status">Statut</th>
+        <th>Plan</th><th>Abonnement</th><th>Essai / échéance</th><th>Utilisateurs</th><th data-k="updated_at">Modifié</th><th>Actions</th>
+      </tr></thead>
+      <tbody>${pageRows.length?pageRows.map(rowHotelHtml).join(''):`<tr><td colspan="10" class="empty">Aucun hôtel${searchQuery?' pour cette recherche':''}.</td></tr>`}</tbody>
+    </table></div>
+    <div class="pager">
+      <span>Page ${hotelsPage+1} / ${pageCount}</span>
+      <button id="hPrev" ${hotelsPage===0?'disabled':''}>‹ Précédent</button>
+      <button id="hNext" ${hotelsPage>=pageCount-1?'disabled':''}>Suivant ›</button>
+    </div>
+  </div>`;
+
+  el.querySelectorAll('th[data-k]').forEach(th=>th.onclick=()=>{
+    const k=th.dataset.k;
+    hotelsSort = hotelsSort.key===k ? {key:k,dir:hotelsSort.dir==='asc'?'desc':'asc'} : {key:k,dir:'asc'};
+    renderHotels(el);
+  });
+  $('fStatus').onchange=e=>{ hotelsFilterStatus=e.target.value; hotelsPage=0; renderHotels(el); };
+  $('fGroup').onchange=e=>{ hotelsFilterGroup=e.target.value; hotelsPage=0; renderHotels(el); };
+  $('fPlan').onchange=e=>{ hotelsFilterPlan=e.target.value; hotelsPage=0; renderHotels(el); };
+  $('fSub').onchange=e=>{ hotelsFilterSub=e.target.value; hotelsPage=0; renderHotels(el); };
+  $('fTrial').onchange=e=>{ hotelsFilterTrial=e.target.value; hotelsPage=0; renderHotels(el); };
+  $('hPrev').onclick=()=>{ hotelsPage--; renderHotels(el); };
+  $('hNext').onclick=()=>{ hotelsPage++; renderHotels(el); };
+  $('addHotel').onclick=()=>openHotelDrawer(null,groups,plans);
+  $('exportHotels').onclick=()=>downloadCSV('hotels.csv', rows, [
+    {label:'Nom',get:r=>r.name},{label:'Ville',get:r=>r.city},{label:'Statut',get:r=>hotelStatusBadge(r.status).label},
+    {label:'Groupe',get:r=>r._group?groupNameOr(r._group.name):''},{label:'Plan',get:r=>r._plan?.name||''},
+    {label:'Abonnement',get:r=>r._sub?subscriptionStatusBadge(r._sub.status).label:'Aucun'},{label:'Chambres',get:r=>r.total_rooms},
+    {label:'Code',get:r=>r.hotel_code},{label:'Email',get:r=>r.email},{label:'Téléphone',get:r=>r.phone},
+  ]);
+  el.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openHotelDrawer(rows.find(r=>r.id===b.dataset.edit),groups,plans));
+  el.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>openHotelDetailDrawer(rows.find(r=>r.id===b.dataset.open)));
+}
+function rowHotelHtml(h){
+  const sb1=hotelStatusBadge(h.status);
+  let subBadge='<span class="tag gray">Aucun</span>', trialCell='—';
+  if(h._sub){
+    const s=subscriptionStatusBadge(h._sub.status);
+    subBadge=`<span class="tag ${s.cls}">${esc(s.label)}</span>`;
+    if(h._sub.status==='trial'){
+      const d=trialDaysRemaining(h._sub.trial_ends_at);
+      if(h._sub.trial_ends_at==null) trialCell='<span class="tag amber">Date manquante</span>';
+      else if(d<0) trialCell='<span class="tag red">Expiré</span>';
+      else trialCell=`<span class="tag ${d<=7?'amber':'gray'}">${d} j</span>`;
+    }
+  }
+  return `<tr>
+    <td><b>${esc(h.name)}</b>${h.hotel_code?`<div class="muted" style="font-size:11.5px">${esc(h.hotel_code)}</div>`:''}</td>
+    <td>${esc(h.city||'—')}</td>
+    <td>${h._group?esc(groupNameOr(h._group.name)):'<span class="muted">Autonome</span>'}</td>
+    <td><span class="tag ${sb1.cls}">${esc(sb1.label)}</span></td>
+    <td>${h._plan?esc(h._plan.name):'<span class="muted">—</span>'}</td>
+    <td>${subBadge}</td>
+    <td>${trialCell}</td>
+    <td>${h._userCount}</td>
+    <td class="muted">${fmtDateTime(h.updated_at)}</td>
+    <td>
+      <button data-open="${h.id}" title="Ouvrir la fiche"><i class="fa-regular fa-eye"></i></button>
+      <button data-edit="${h.id}" title="Modifier"><i class="fa-regular fa-pen-to-square"></i></button>
+    </td>
+  </tr>`;
+}
+function openHotelDrawer(hotel, groupsCache, plansCache){
+  const groups = groupsCache || [];
+  const plans = (plansCache || []).filter(p=>p.is_active !== false);
+  const isEdit = !!hotel;
+  openDrawer(`
+    <div class="dh"><button class="close" id="dClose"><i class="fa-solid fa-xmark"></i></button>
+      <h2>${isEdit?'Modifier l\'hôtel':'Nouvel hôtel'}</h2>
+      ${isEdit?`<div class="role">Statut actuel : <span class="tag ${hotelStatusBadge(hotel.status).cls}">${esc(hotelStatusBadge(hotel.status).label)}</span></div>`:''}
+    </div>
+    <div class="sec"><h4>Identité</h4>
+      <div class="fld"><label>Nom commercial *</label><input id="f_name" value="${esc(hotel?.name||'')}"></div>
+      <div class="row2">
+        <div class="fld"><label>Groupe</label><select id="f_group"><option value="">Aucun (hôtel autonome)</option>${groups.filter(g=>g.status!=='archived').map(g=>`<option value="${g.id}" ${hotel?.group_id===g.id?'selected':''}>${esc(groupNameOr(g.name))}</option>`).join('')}</select></div>
+        <div class="fld"><label>Code hôtel</label><input id="f_code" value="${esc(hotel?.hotel_code||'')}" placeholder="Auto si vide (5 car. max)" maxlength="5" ${isEdit?'disabled title="Le code hôtel ne se modifie pas après création."':''}></div>
+      </div>
+    </div>
+    <div class="sec"><h4>Coordonnées</h4>
+      <div class="fld"><label>Adresse</label><input id="f_address" value="${esc(hotel?.address||'')}"></div>
+      <div class="row2">
+        <div class="fld"><label>Ville</label><input id="f_city" value="${esc(hotel?.city||'')}"></div>
+        <div class="fld"><label>Code postal</label><input id="f_zip" value="${esc(hotel?.zip||'')}"></div>
+      </div>
+      <div class="row2">
+        <div class="fld"><label>Pays</label><input id="f_country" value="${esc(hotel?.country||'France')}"></div>
+        <div class="fld"><label>Fuseau horaire</label><input id="f_timezone" value="${esc(hotel?.timezone||'Europe/Paris')}"></div>
+      </div>
+      <div class="row2">
+        <div class="fld"><label>Téléphone</label><input id="f_phone" value="${esc(hotel?.phone||'')}"></div>
+        <div class="fld"><label>Email</label><input id="f_email" type="email" value="${esc(hotel?.email||'')}"></div>
+      </div>
+      <div class="fld"><label>Site web</label><input id="f_website" value="${esc(hotel?.website||'')}"></div>
+    </div>
+    <div class="sec"><h4>Informations administratives</h4>
+      <div class="row2">
+        <div class="fld"><label>SIRET</label><input id="f_siret" value="${esc(hotel?.siret||'')}"></div>
+        <div class="fld"><label>N° TVA</label><input id="f_tva" value="${esc(hotel?.tva_number||'')}"></div>
+      </div>
+      <div class="fld"><label>Raison sociale</label><input id="f_company" value="${esc(hotel?.company||'')}"></div>
+      <div class="fld"><label>Email de facturation</label><input id="f_billing_email" type="email" placeholder="Si différent de l'email ci-dessus" value="${esc(hotel?.billing_email||'')}"></div>
+      <div class="row2">
+        <div class="fld"><label>Chambres</label><input id="f_rooms" type="number" min="0" value="${esc(hotel?.total_rooms??'')}"></div>
+        <div class="fld"><label>Devise</label><input id="f_currency" value="${esc(hotel?.currency||'EUR')}"></div>
+      </div>
+    </div>
+    ${!isEdit?`
+    <div class="sec"><h4>Abonnement initial</h4>
+      <div class="fld"><label>Plan *</label><select id="f_plan"><option value="">Choisir un plan…</option>${plans.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select></div>
+      <div class="fld"><label>Statut de départ</label><select id="f_substatus"><option value="trial">Période d'essai</option><option value="active">Activation immédiate</option></select></div>
+    </div>
+    <div class="sec"><h4>Premier administrateur</h4>
+      <div class="row2">
+        <div class="fld"><label>Nom complet</label><input id="f_admin_name" placeholder="Optionnel"></div>
+        <div class="fld"><label>E-mail</label><input id="f_admin_email" type="email" placeholder="Optionnel"></div>
+      </div>
+      <p class="muted" style="font-size:12px">L'invitation par e-mail n'est pas encore automatisée : ces informations sont consignées dans l'audit. Créez le compte utilisateur depuis Utilisateurs une fois la personne prête à se connecter.</p>
+    </div>`:''}
+    <div class="dfoot"><button class="btn g" id="dCancel">Annuler</button><button class="btn p" id="dSave">${isEdit?'Enregistrer':'Créer'}</button></div>
+  `);
+  $('dClose').onclick=closeDrawer; $('dCancel').onclick=closeDrawer;
+  $('dSave').onclick=async()=>{
+    const payload={
+      name:$('f_name').value.trim(), group_id:$('f_group').value||'', hotel_code:$('f_code').value.trim(),
+      address:$('f_address').value, city:$('f_city').value, zip:$('f_zip').value, country:$('f_country').value,
+      phone:$('f_phone').value, email:$('f_email').value, website:$('f_website').value,
+      siret:$('f_siret').value, tva_number:$('f_tva').value, company:$('f_company').value,
+      billing_email:$('f_billing_email').value,
+      total_rooms:$('f_rooms').value, currency:$('f_currency').value, timezone:$('f_timezone').value,
+    };
+    if(!payload.name){ flash('Le nom est requis.','e'); return; }
+    $('dSave').disabled=true;
+    try{
+      if(isEdit){
+        // Un seul appel atomique (admin_update_hotel_full) : les champs de l'hôtel et le
+        // rattachement de groupe sont modifiés dans la même transaction SQL — soit les deux
+        // réussissent, soit aucun n'est appliqué. Évite tout état partiel visible côté UI.
+        const {error}=await sb.rpc('admin_update_hotel_full',{p_hotel:hotel.id,p:payload});
+        if(error) throw error;
+      } else {
+        const planId=$('f_plan').value;
+        if(!planId){ flash('Un plan est requis pour créer un hôtel.','e'); $('dSave').disabled=false; return; }
+        // Une seule RPC atomique (hôtel + abonnement) : jamais d'hôtel orphelin sans abonnement
+        // si l'étape d'abonnement échouait dans un second appel séparé.
+        const {error}=await sb.rpc('admin_create_hotel_with_subscription',{
+          p_hotel:payload, p_plan_id:planId, p_subscription_status:$('f_substatus').value,
+          p_first_admin_email:$('f_admin_email').value.trim()||null, p_first_admin_name:$('f_admin_name').value.trim()||null,
+        });
+        if(error) throw error;
+      }
+      flash(isEdit?'Hôtel mis à jour.':'Hôtel créé.'); closeDrawer(); renderView();
+    }catch(e){ flash(errorLabel(e.message),'e'); }
+    finally{ $('dSave').disabled=false; }
+  };
+}
+
+/* ---- Fiche détaillée d'un hôtel ---- */
+async function openHotelDetailDrawer(hotel){
+  if(!hotel){ flash('Hôtel introuvable.','e'); return; }
+  openDrawer(`<div class="dh"><button class="close" id="dClose"><i class="fa-solid fa-xmark"></i></button><h2>Chargement…</h2></div>`);
+  $('dClose').onclick=closeDrawer;
+  const [{data:groups},{data:sub},{data:plan},{data:users},{data:apps},{data:logs},{data:hotelInvoices}]=await Promise.all([
+    sb.from('hotel_groups').select('id,name,status'),
+    sb.from('hotel_subscriptions').select('*').eq('hotel_id',hotel.id).maybeSingle(),
+    Promise.resolve({data:null}),
+    sb.from('users').select('id,full_name,email,role,is_active').eq('hotel_id',hotel.id),
+    sb.from('user_app_access').select('app_id, platform_apps(name)').eq('hotel_id',hotel.id),
+    sb.from('platform_logs').select('*').eq('hotel_id',hotel.id).order('created_at',{ascending:false}).limit(15),
+    sb.rpc('admin_list_platform_invoices'),
+  ]);
+  const invoicesForHotel=(hotelInvoices||[]).filter(i=>i.hotel_id===hotel.id).slice(0,5);
+  let planRow=null;
+  if(sub?.plan_id){ const {data}=await sb.from('subscription_plans').select('id,name').eq('id',sub.plan_id).maybeSingle(); planRow=data; }
+  const group=(groups||[]).find(g=>g.id===hotel.group_id);
+  const activeApps=[...new Set((apps||[]).map(a=>a.platform_apps?.name).filter(Boolean))];
+  const st=hotelStatusBadge(hotel.status);
+
+  openDrawer(`
+    <div class="dh"><button class="close" id="dClose"><i class="fa-solid fa-xmark"></i></button>
+      <h2>${esc(hotel.name)}</h2>
+      <div class="role"><span class="tag ${st.cls}">${esc(st.label)}</span>${hotel.hotel_code?' · '+esc(hotel.hotel_code):''}</div>
+    </div>
+
+    <div class="sec"><h4>Informations générales</h4>
+      <div class="kv"><span>Raison sociale</span><b>${esc(hotel.company||'—')}</b></div>
+      <div class="kv"><span>Adresse</span><b>${esc([hotel.address,hotel.zip,hotel.city,hotel.country].filter(Boolean).join(', ')||'—')}</b></div>
+      <div class="kv"><span>Téléphone</span><b>${esc(hotel.phone||'—')}</b></div>
+      <div class="kv"><span>E-mail</span><b>${esc(hotel.email||'—')}</b></div>
+      <div class="kv"><span>SIRET / TVA</span><b>${esc(hotel.siret||'—')} / ${esc(hotel.tva_number||'—')}</b></div>
+      <div class="kv"><span>Créé le</span><b>${fmtDateTime(hotel.created_at)}</b></div>
+      <div class="kv"><span>Modifié le</span><b>${fmtDateTime(hotel.updated_at)}</b></div>
+      <div class="actrow">
+        <button class="btn g" id="hEdit"><i class="fa-regular fa-pen-to-square"></i> Modifier</button>
+        <button class="btn g" id="hCopyUrl"><i class="fa-regular fa-copy"></i> Copier l'URL du portail</button>
+        ${(()=>{ const a=hotelActionsForStatus(hotel.status); return `
+        ${a.canActivate?'<button class="btn g" id="hActivate"><i class="fa-solid fa-play"></i> Activer</button>':''}
+        ${a.canSuspend?'<button class="btn g" id="hSuspend"><i class="fa-solid fa-pause"></i> Suspendre</button>':''}
+        ${a.canArchive?'<button class="btn d" id="hArchive"><i class="fa-regular fa-box-archive"></i> Archiver</button>':''}
+        ${a.canRestore?'<button class="btn g" id="hRestore"><i class="fa-solid fa-box-open"></i> Restaurer</button>':''}
+        `; })()}
+      </div>
+    </div>
+
+    <div class="sec"><h4>Groupe</h4>
+      <div class="kv"><span>Groupe actuel</span><b>${group?esc(groupNameOr(group.name)):'Aucun (hôtel autonome)'}</b></div>
+      <div class="actrow">
+        <select id="hGroupSel"><option value="">Aucun</option>${(groups||[]).filter(g=>g.status!=='archived').map(g=>`<option value="${g.id}" ${hotel.group_id===g.id?'selected':''}>${esc(groupNameOr(g.name))}</option>`).join('')}</select>
+        <button class="btn g" id="hGroupApply">Appliquer (rattacher / transférer / détacher)</button>
+      </div>
+    </div>
+
+    <div class="sec"><h4>Abonnement</h4>
+      ${sub?`
+        <div class="kv"><span>Plan</span><b>${planRow?esc(planRow.name):'—'}</b></div>
+        <div class="kv"><span>Statut</span><b>${esc(subscriptionStatusBadge(sub.status).label)}</b></div>
+        <div class="kv"><span>Essai</span><b>${sub.status==='trial'?(sub.trial_ends_at?fmtDateTime(sub.trial_ends_at):'Date non renseignée'):'—'}</b></div>
+        <div class="actrow"><button class="btn g" id="hGotoSub"><i class="fa-regular fa-calendar-check"></i> Voir la fiche abonnement complète</button></div>
+      `:'<div class="empty" style="padding:14px">Aucun abonnement.</div>'}
+    </div>
+
+    <div class="sec"><h4>Utilisateurs</h4>
+      <div class="tlist">
+        ${(users||[]).length?(users||[]).map(u=>`<div class="it"><div><div class="nm">${esc(u.full_name)}</div><div class="sub">${esc(u.email)} · ${esc(u.role)}</div></div><div class="right"><span class="tag ${u.is_active?'green':'gray'}">${u.is_active?'Actif':'Désactivé'}</span></div></div>`).join(''):'<div class="empty" style="padding:14px">Aucun utilisateur.</div>'}
+      </div>
+      ${activeApps.length?`<div class="muted" style="font-size:11.5px;margin-top:8px">Applications avec accès individuel accordé : ${activeApps.map(esc).join(', ')}</div>`:''}
+      <div class="actrow"><button class="btn g" id="hGotoUsers"><i class="fa-regular fa-user"></i> Gérer depuis Utilisateurs</button></div>
+    </div>
+
+    <div class="sec"><h4>Facturation</h4>
+      <div class="tlist">
+        ${invoicesForHotel.length?invoicesForHotel.map(i=>`<div class="it"><div><div class="nm">${esc(i.number||'(proforma)')}</div><div class="sub">${esc(invoiceStatusBadge(i.status).label)}</div></div><div class="right">${fmtMoney(i.amount_ttc, i.currency)}</div></div>`).join(''):'<div class="empty" style="padding:14px">Aucune facture.</div>'}
+      </div>
+      <div class="actrow"><button class="btn g" id="hGotoBilling"><i class="fa-regular fa-file-lines"></i> Gérer depuis Facturation</button></div>
+    </div>
+
+    <div class="sec"><h4>Audit</h4>
+      <div class="tlist">
+        ${(logs||[]).length?(logs||[]).map(l=>`<div class="it"><div><div class="nm">${esc(l.action)}</div><div class="sub">${esc(l.admin_email||'—')}</div></div><div class="right">${fmtDateTime(l.created_at)}</div></div>`).join(''):'<div class="empty" style="padding:14px">Aucun événement.</div>'}
+      </div>
+    </div>
+  `);
+  $('dClose').onclick=closeDrawer;
+  const refresh=async()=>{ closeDrawer(); renderView(); };
+  $('hEdit').onclick=async()=>{ const {data:groups2}=await sb.from('hotel_groups').select('id,name,status'); const {data:plans2}=await sb.from('subscription_plans').select('id,name,is_active'); openHotelDrawer(hotel, groups2, plans2); };
+  $('hCopyUrl').onclick=()=>{
+    const url=`${location.origin}/?hotel=${hotel.hotel_code||hotel.id}`;
+    navigator.clipboard?.writeText(url).then(()=>flash('URL copiée.')).catch(()=>flash('Copie impossible.','e'));
+  };
+  $('hActivate')&&($('hActivate').onclick=()=>confirmAction({title:'Activer l\'hôtel',body:'L\'hôtel redevient opérationnel.',confirmLabel:'Activer',onConfirm:async()=>{
+    const {error}=await sb.rpc('admin_set_hotel_status',{p_hotel:hotel.id,p_status:'active'}); if(error) throw error; flash('Hôtel activé.'); await refresh();
+  }}));
+  $('hSuspend')&&($('hSuspend').onclick=()=>confirmAction({title:'Suspendre l\'hôtel',danger:true,body:'L\'hôtel est marqué suspendu. Réversible à tout moment.',confirmLabel:'Suspendre',onConfirm:async()=>{
+    const {error}=await sb.rpc('admin_set_hotel_status',{p_hotel:hotel.id,p_status:'suspended'}); if(error) throw error; flash('Hôtel suspendu.'); await refresh();
+  }}));
+  $('hArchive')&&($('hArchive').onclick=()=>confirmAction({title:'Archiver l\'hôtel',danger:true,body:'Action réversible (restauration possible). L\'abonnement et l\'historique sont conservés.',confirmLabel:'Archiver',onConfirm:async()=>{
+    const {error}=await sb.rpc('admin_set_hotel_status',{p_hotel:hotel.id,p_status:'archived'}); if(error) throw error; flash('Hôtel archivé.'); await refresh();
+  }}));
+  $('hRestore')&&($('hRestore').onclick=()=>confirmAction({title:'Restaurer l\'hôtel',body:'L\'hôtel redevient actif.',confirmLabel:'Restaurer',onConfirm:async()=>{
+    const {error}=await sb.rpc('admin_set_hotel_status',{p_hotel:hotel.id,p_status:'active'}); if(error) throw error; flash('Hôtel restauré.'); await refresh();
+  }}));
+  $('hGroupApply').onclick=()=>{
+    const newGroup=$('hGroupSel').value;
+    confirmAction({title:'Modifier le rattachement au groupe', body:newGroup?'L\'hôtel sera rattaché (ou transféré) vers ce groupe.':'L\'hôtel sera détaché de son groupe (hôtel autonome).', confirmLabel:'Appliquer', onConfirm:async()=>{
+      const {error}= newGroup
+        ? await sb.rpc('admin_attach_hotel_to_group',{p_hotel:hotel.id,p_group:newGroup})
+        : await sb.rpc('admin_detach_hotel_from_group',{p_hotel:hotel.id});
+      if(error) throw error;
+      flash('Rattachement mis à jour.'); await refresh();
+    }});
+  };
+  $('hGotoSub')&&($('hGotoSub').onclick=()=>{ closeDrawer(); goView('subscriptions'); });
+  $('hGotoUsers').onclick=()=>{ closeDrawer(); goView('users'); };
+  $('hGotoBilling').onclick=()=>{ closeDrawer(); goView('billing'); };
+}
+
+/* =====================================================================
+   Groupes hôteliers
+   ===================================================================== */
+async function renderGroups(el){
+  const [{data:groups,error:gErr},{data:hotels},{data:subs},{data:users}]=await Promise.all([
+    sb.from('hotel_groups').select('id,name,status,logo_url,created_at').order('created_at',{ascending:false}),
+    sb.from('hotels').select('id,name,group_id'),
+    sb.from('hotel_subscriptions').select('hotel_id,status'),
+    sb.from('users').select('id,hotel_id,is_active'),
+  ]);
+  if(gErr) throw gErr;
+  const withStats=g=>{
+    const gHotels=(hotels||[]).filter(h=>h.group_id===g.id);
+    const hotelIds=new Set(gHotels.map(h=>h.id));
+    const activeSubs=(subs||[]).filter(s=>hotelIds.has(s.hotel_id) && ['trial','active'].includes(s.status)).length;
+    const userCount=(users||[]).filter(u=>hotelIds.has(u.hotel_id) && u.is_active).length;
+    return {...g, _hotels:gHotels, _activeSubs:activeSubs, _userCount:userCount};
+  };
+  let rows=(groups||[]).filter(g=>g.status!=='archived').map(withStats);
+  const archived=(groups||[]).filter(g=>g.status==='archived').map(withStats);
+  if(searchQuery.trim()){
+    const q=searchQuery.trim().toLowerCase();
+    rows=rows.filter(g=>(g.name||'').toLowerCase().includes(q));
+  }
+  el.innerHTML=`<div class="page">
+    <div class="phead"><div><h1>Groupes hôteliers</h1><div class="sub">${fmtNum(rows.length)} groupe(s) actif(s) · ${fmtNum(archived.length)} archivé(s)</div></div>
+      <div class="actions"><button class="btn p" id="addGroup"><i class="fa-solid fa-plus"></i> Nouveau groupe</button></div>
+    </div>
+    <div class="tblwrap"><table class="tbl">
+      <thead><tr><th>Groupe</th><th>Hôtels</th><th>Utilisateurs</th><th>Abonnements actifs</th><th>Statut</th><th>Créé le</th><th>Actions</th></tr></thead>
+      <tbody>${rows.length?rows.map(g=>`
+        <tr>
+          <td><b>${esc(groupNameOr(g.name))}</b></td>
+          <td>${g._hotels.length ? g._hotels.map(h=>esc(h.name)).join(', ') : '<span class="muted">Aucun</span>'}</td>
+          <td>${g._userCount}</td>
+          <td>${g._activeSubs}</td>
+          <td><span class="tag ${g.status==='active'?'green':'gray'}">${g.status==='active'?'Actif':esc(g.status)}</span></td>
+          <td>${fmtDate(g.created_at)}</td>
+          <td>
+            <button data-edit-group="${g.id}" title="Modifier"><i class="fa-regular fa-pen-to-square"></i></button>
+            <button data-del-group="${g.id}" title="Archiver" ${g._hotels.length?'disabled':''}><i class="fa-regular fa-box-archive"></i></button>
+          </td>
+        </tr>`).join(''):'<tr><td colspan="7" class="empty">Aucun groupe.</td></tr>'}</tbody>
+    </table></div>
+    ${archived.length?`<h3 style="margin-top:18px;font-size:13px;color:var(--muted)">Groupes archivés</h3>
+    <div class="tblwrap"><table class="tbl">
+      <thead><tr><th>Groupe</th><th>Archivé — hôtels rattachés</th><th>Actions</th></tr></thead>
+      <tbody>${archived.map(g=>`<tr>
+        <td>${esc(groupNameOr(g.name))}</td><td class="muted">${g._hotels.length} hôtel(s)</td>
+        <td><button data-restore-group="${g.id}" title="Restaurer"><i class="fa-solid fa-box-open"></i></button></td>
+      </tr>`).join('')}</tbody>
+    </table></div>`:''}
+  </div>`;
+  $('addGroup').onclick=()=>openGroupDrawer(null, hotels||[]);
+  el.querySelectorAll('[data-edit-group]').forEach(b=>b.onclick=()=>openGroupDrawer(rows.find(g=>g.id===b.dataset.editGroup), hotels||[]));
+  el.querySelectorAll('[data-del-group]').forEach(b=>{
+    if(b.disabled) return;
+    b.onclick=()=>{
+      const g=rows.find(x=>x.id===b.dataset.delGroup);
+      confirmAction({
+        title:`Archiver le groupe ${groupNameOr(g.name)}`,
+        body:'Ce groupe sera archivé (suppression logique, jamais physique). Réversible via « Restaurer ».',
+        confirmLabel:'Archiver', danger:true,
+        onConfirm: async()=>{
+          const {error}=await sb.rpc('admin_delete_group',{p_group:g.id});
+          if(error) throw error;
+          flash('Groupe archivé.'); renderGroups(el);
+        }
+      });
+    };
+  });
+  el.querySelectorAll('[data-restore-group]').forEach(b=>b.onclick=()=>{
+    const g=archived.find(x=>x.id===b.dataset.restoreGroup);
+    confirmAction({
+      title:`Restaurer le groupe ${groupNameOr(g.name)}`, body:'Le groupe redevient actif.', confirmLabel:'Restaurer',
+      onConfirm: async()=>{
+        const {error}=await sb.rpc('admin_restore_group',{p_group:g.id});
+        if(error) throw error;
+        flash('Groupe restauré.'); renderGroups(el);
+      }
+    });
+  });
+}
+function openGroupDrawer(group, allHotels){
+  const isEdit=!!group;
+  const attached = isEdit ? allHotels.filter(h=>h.group_id===group.id) : [];
+  const unattached = allHotels.filter(h=>!h.group_id || (isEdit && h.group_id!==group.id));
+  openDrawer(`
+    <div class="dh"><button class="close" id="dClose"><i class="fa-solid fa-xmark"></i></button>
+      <h2>${isEdit?'Modifier le groupe':'Nouveau groupe'}</h2></div>
+    <div class="sec"><h4>Identité</h4>
+      <div class="fld"><label>Nom *</label><input id="g_name" value="${esc(group?.name||'')}"></div>
+      <div class="fld"><label>Logo (URL)</label><input id="g_logo" value="${esc(group?.logo_url||'')}"></div>
+    </div>
+    <div class="dfoot"><button class="btn g" id="dCancel">Annuler</button><button class="btn p" id="dSave">${isEdit?'Enregistrer':'Créer'}</button></div>
+    ${isEdit?`
+    <div class="sec"><h4>Hôtels rattachés (${attached.length})</h4>
+      ${attached.length?attached.map(h=>`<div class="hchip"><span>${esc(h.name)}</span><button class="btn sm d" data-detach="${h.id}">Détacher</button></div>`).join(''):'<div class="muted" style="font-size:12.5px">Aucun hôtel rattaché.</div>'}
+    </div>
+    <div class="sec"><h4>Rattacher un hôtel</h4>
+      <div class="fld" style="display:flex;gap:8px">
+        <select id="g_attach" style="flex:1">${unattached.length?unattached.map(h=>`<option value="${h.id}">${esc(h.name)}</option>`).join(''):'<option value="">Aucun hôtel disponible</option>'}</select>
+        <button class="btn g" id="g_attachBtn" ${!unattached.length?'disabled':''}>Rattacher</button>
+      </div>
+    </div>`:''}
+  `);
+  $('dClose').onclick=closeDrawer; $('dCancel').onclick=closeDrawer;
+  $('dSave').onclick=async()=>{
+    const name=$('g_name').value.trim();
+    if(!name){ flash('Le nom est requis.','e'); return; }
+    const payload={name, logo_url:$('g_logo').value};
+    $('dSave').disabled=true;
+    try{
+      const {error}= isEdit
+        ? await sb.rpc('admin_update_group',{p_group:group.id,p:payload})
+        : await sb.rpc('admin_create_group',{p:payload});
+      if(error) throw error;
+      flash(isEdit?'Groupe mis à jour.':'Groupe créé.'); closeDrawer(); renderView();
+    }catch(e){ flash(errorLabel(e.message),'e'); }
+    finally{ $('dSave').disabled=false; }
+  };
+  if(isEdit){
+    document.querySelectorAll('[data-detach]').forEach(b=>b.onclick=async()=>{
+      const {error}=await sb.rpc('admin_detach_hotel_from_group',{p_hotel:b.dataset.detach});
+      if(error){ flash(errorLabel(error.message),'e'); return; }
+      flash('Hôtel détaché.'); closeDrawer(); renderView();
+    });
+    $('g_attachBtn')?.addEventListener('click',async()=>{
+      const hotelId=$('g_attach').value;
+      if(!hotelId) return;
+      const {error}=await sb.rpc('admin_attach_hotel_to_group',{p_hotel:hotelId,p_group:group.id});
+      if(error){ flash(errorLabel(error.message),'e'); return; }
+      flash('Hôtel rattaché.'); closeDrawer(); renderView();
+    });
+  }
+}
+
+/* =====================================================================
+   Utilisateurs et Accès (Lot 3)
+   ===================================================================== */
+let usersPage=0, usersSort={key:'_sortName',dir:'asc'};
+let usersFilterStatus='', usersFilterRole='', usersFilterHotel='', usersFilterGroup='', usersFilterPending='', usersFilterSuper='';
+
+async function renderUsers(el){
+  el.innerHTML='<div class="loading"><i class="fa-solid fa-circle-notch fa-spin"></i> Chargement…</div>';
+  const [{data:rows,error:uErr},{data:unlinked,error:ulErr},{data:hotels},{data:groups}]=await Promise.all([
+    sb.rpc('admin_list_user_access'),
+    sb.rpc('admin_list_unlinked_auth_users'),
+    sb.from('hotels').select('id,name,status,group_id'),
+    sb.from('hotel_groups').select('id,name,status'),
+  ]);
+  if(uErr) throw uErr;
+  const hotelById=Object.fromEntries((hotels||[]).map(h=>[h.id,h]));
+
+  let list=(rows||[]).map(u=>{
+    const groupIds=new Set((u.hotels||[]).map(h=>hotelById[h.hotel_id]?.group_id).filter(Boolean));
+    return {...u,
+      _status: accountStatus(u),
+      _primaryRole: primaryRoleLabel(u),
+      _sortName: (u.full_name||u.email||'').toLowerCase(),
+      _groupIds: groupIds,
+    };
+  });
+
+  if(searchQuery.trim()){
+    const q=searchQuery.trim().toLowerCase();
+    list=list.filter(u=>[u.email,u.full_name,...(u.hotels||[]).map(h=>h.hotel_name),...(u.group_names||[])]
+      .filter(Boolean).some(v=>String(v).toLowerCase().includes(q)));
+  }
+  if(usersFilterStatus) list=list.filter(u=>u._status===usersFilterStatus);
+  if(usersFilterRole==='super_admin') list=list.filter(u=>u.is_super_admin);
+  else if(usersFilterRole) list=list.filter(u=>(u.hotels||[]).some(h=>h.role===usersFilterRole));
+  if(usersFilterHotel) list=list.filter(u=>(u.hotels||[]).some(h=>h.hotel_id===usersFilterHotel));
+  if(usersFilterGroup) list=list.filter(u=>u._groupIds.has(usersFilterGroup));
+  if(usersFilterPending==='yes') list=list.filter(u=>u._status==='pending_invite'||u._status==='expired_invite');
+  if(usersFilterSuper==='yes') list=list.filter(u=>u.is_super_admin);
+  list=sortRows(list, usersSort.key, usersSort.dir);
+
+  const pageSize=20, pageCount=Math.max(1,Math.ceil(list.length/pageSize));
+  usersPage=Math.min(usersPage,pageCount-1);
+  const pageRows=list.slice(usersPage*pageSize,(usersPage+1)*pageSize);
+
+  el.innerHTML=`<div class="page">
+    <div class="phead"><div><h1>Utilisateurs</h1><div class="sub">${fmtNum(list.length)} utilisateur(s) sur l'ensemble de la plateforme</div></div>
+      <div class="actions">
+        <button class="btn g" id="exportUsers"><i class="fa-solid fa-download"></i> Exporter CSV</button>
+        <button class="btn p" id="inviteUserBtn"><i class="fa-solid fa-user-plus"></i> Inviter un utilisateur</button>
+      </div>
+    </div>
+    <div class="filters">
+      <select id="fUStatus"><option value="">Tous les statuts</option>${Object.entries(ACCOUNT_STATUS_LABEL).map(([k,l])=>`<option value="${k}" ${usersFilterStatus===k?'selected':''}>${l}</option>`).join('')}</select>
+      <select id="fURole"><option value="">Tous les rôles</option><option value="super_admin" ${usersFilterRole==='super_admin'?'selected':''}>Super Admin</option>${Object.entries(HOTEL_ROLE_LABEL).map(([k,l])=>`<option value="${k}" ${usersFilterRole===k?'selected':''}>${l}</option>`).join('')}</select>
+      <select id="fUHotel"><option value="">Tous les hôtels</option>${(hotels||[]).map(h=>`<option value="${h.id}" ${usersFilterHotel===h.id?'selected':''}>${esc(h.name)}</option>`).join('')}</select>
+      <select id="fUGroup"><option value="">Tous les groupes</option>${(groups||[]).filter(g=>g.status!=='archived').map(g=>`<option value="${g.id}" ${usersFilterGroup===g.id?'selected':''}>${esc(groupNameOr(g.name))}</option>`).join('')}</select>
+      <select id="fUPending"><option value="">Invitation : tous</option><option value="yes" ${usersFilterPending==='yes'?'selected':''}>En attente uniquement</option></select>
+      <select id="fUSuper"><option value="">Super Admin : tous</option><option value="yes" ${usersFilterSuper==='yes'?'selected':''}>Super Admin uniquement</option></select>
+    </div>
+    <div class="tblwrap"><table class="tbl">
+      <thead><tr>
+        <th data-k="_sortName">Utilisateur</th><th>Email</th><th data-k="_status">Statut</th><th>Rôle principal</th>
+        <th>Hôtels accessibles</th><th>Groupe</th><th data-k="last_login_at">Dernière connexion</th>
+        <th data-k="invited_at">Invité le</th><th data-k="updated_at">Modifié le</th><th>Actions</th>
+      </tr></thead>
+      <tbody>${pageRows.length?pageRows.map(rowUserHtml).join(''):`<tr><td colspan="10" class="empty">Aucun utilisateur${searchQuery?' pour cette recherche':''}.</td></tr>`}</tbody>
+    </table></div>
+    <div class="pager">
+      <span>Page ${usersPage+1} / ${pageCount}</span>
+      <button id="uPrev" ${usersPage===0?'disabled':''}>‹ Précédent</button>
+      <button id="uNext" ${usersPage>=pageCount-1?'disabled':''}>Suivant ›</button>
+    </div>
+    ${!ulErr && unlinked?.length ? `
+    <div class="box" style="margin-top:18px">
+      <h3><i class="fa-solid fa-user-clock"></i> Comptes non liés (${unlinked.length})</h3>
+      <p class="muted" style="font-size:12.5px;margin-bottom:12px">Comptes ayant créé un accès (auth) mais sans profil applicatif ni rôle plateforme associé — inscriptions incomplètes ou anciens comptes à réconcilier.</p>
+      <div class="tlist">${unlinked.map(a=>`<div class="it"><div><div class="nm">${esc(a.email)}</div><div class="sub">Créé le ${fmtDate(a.created_at)}</div></div><div class="right">Dernière connexion : ${fmtDateTime(a.last_sign_in_at)}</div></div>`).join('')}</div>
+    </div>`:''}
+  </div>`;
+
+  el.querySelectorAll('th[data-k]').forEach(th=>th.onclick=()=>{
+    const k=th.dataset.k;
+    usersSort = usersSort.key===k ? {key:k,dir:usersSort.dir==='asc'?'desc':'asc'} : {key:k,dir:'asc'};
+    renderUsers(el);
+  });
+  $('fUStatus').onchange=e=>{ usersFilterStatus=e.target.value; usersPage=0; renderUsers(el); };
+  $('fURole').onchange=e=>{ usersFilterRole=e.target.value; usersPage=0; renderUsers(el); };
+  $('fUHotel').onchange=e=>{ usersFilterHotel=e.target.value; usersPage=0; renderUsers(el); };
+  $('fUGroup').onchange=e=>{ usersFilterGroup=e.target.value; usersPage=0; renderUsers(el); };
+  $('fUPending').onchange=e=>{ usersFilterPending=e.target.value; usersPage=0; renderUsers(el); };
+  $('fUSuper').onchange=e=>{ usersFilterSuper=e.target.value; usersPage=0; renderUsers(el); };
+  $('uPrev')&&($('uPrev').onclick=()=>{ usersPage--; renderUsers(el); });
+  $('uNext')&&($('uNext').onclick=()=>{ usersPage++; renderUsers(el); });
+  $('exportUsers').onclick=()=>downloadCSV('utilisateurs.csv', list, [
+    {label:'Nom',get:r=>r.full_name||''},{label:'Email',get:r=>r.email},
+    {label:'Statut',get:r=>accountStatusBadge(r._status).label},{label:'Rôle principal',get:r=>r._primaryRole},
+    {label:'Hôtels',get:r=>(r.hotels||[]).map(h=>h.hotel_name).join(', ')},
+    {label:'Groupe',get:r=>(r.group_names||[]).join(', ')},
+    {label:'Invité le',get:r=>fmtDateTime(r.invited_at)},{label:'Modifié le',get:r=>fmtDateTime(r.updated_at)},
+  ]);
+  $('inviteUserBtn').onclick=()=>openInviteUserModal(hotels||[], ()=>renderUsers(el));
+  el.querySelectorAll('[data-open-user]').forEach(b=>b.onclick=()=>{
+    const row=list.find(u=>(u.user_id||('pa:'+u.auth_id))===b.dataset.openUser);
+    openUserDrawer(row, hotels||[], groups||[], ()=>renderView());
+  });
+}
+
+function rowUserHtml(u){
+  const st=accountStatusBadge(u._status);
+  const hotelTags=(u.hotels||[]).slice(0,3).map(h=>`<span class="tag ${h.is_default?'blue':'gray'}" title="${esc(hotelRoleLabel(h.role))}">${esc(h.hotel_name)}</span>`).join(' ');
+  const hotelMore=(u.hotels||[]).length>3?` <span class="tag gray">+${(u.hotels||[]).length-3}</span>`:'';
+  const groupTags=(u.group_names||[]).map(g=>`<span class="tag gray">${esc(groupNameOr(g))}</span>`).join(' ')||'<span class="muted">—</span>';
+  const rowKey = u.user_id || ('pa:'+u.auth_id);
+  return `<tr>
+    <td>
+      <div style="display:flex;align-items:center;gap:9px">
+        <div class="av" style="width:28px;height:28px;font-size:10.5px;background:${avColor(u.email)}">${initials(u.full_name||u.email)}</div>
+        <div><b>${esc(u.full_name||'(sans nom)')}</b>${u.is_super_admin?' <i class="fa-solid fa-shield-halved" style="color:var(--violet)" title="Super Admin"></i>':''}${u.is_platform_only?'<div class="muted" style="font-size:11px">Compte plateforme (sans profil hôtel)</div>':''}</div>
+      </div>
+    </td>
+    <td>${esc(u.email)}</td>
+    <td><span class="tag ${st.cls}">${esc(st.label)}</span></td>
+    <td>${esc(u._primaryRole)}</td>
+    <td>${hotelTags||'<span class="muted">Aucun</span>'}${hotelMore}</td>
+    <td>${groupTags}</td>
+    <td class="muted">${fmtDateTime(u.last_login_at)}</td>
+    <td class="muted">${fmtDateTime(u.invited_at)}</td>
+    <td class="muted">${fmtDateTime(u.updated_at)}</td>
+    <td><button data-open-user="${rowKey}" title="Ouvrir la fiche"><i class="fa-regular fa-eye"></i></button></td>
+  </tr>`;
+}
+
+/* ---- Invitation d'un utilisateur (via l'Edge Function invite-user, jamais de service_role côté client) ---- */
+function openInviteUserModal(hotels, onDone){
+  const activeHotels=(hotels||[]).filter(h=>h.status!=='archived');
+  formModal({
+    title:'Inviter un utilisateur',
+    bodyHtml:`
+      <div class="fld"><label>Hôtel *</label><select id="iv_hotel">${activeHotels.map(h=>`<option value="${h.id}">${esc(h.name)}</option>`).join('')}</select></div>
+      <div class="fld"><label>Rôle *</label><select id="iv_role">${Object.entries(HOTEL_ROLE_LABEL).map(([k,l])=>`<option value="${k}">${l}</option>`).join('')}</select></div>
+      <div class="row2">
+        <div class="fld"><label>Nom complet</label><input id="iv_name" placeholder="Optionnel"></div>
+        <div class="fld"><label>E-mail *</label><input id="iv_email" type="email"></div>
+      </div>
+      <p class="muted" style="font-size:12px">En tant que Super Admin, vous pouvez inviter sur n'importe quel hôtel — y compris le premier administrateur d'un hôtel qui n'en a encore aucun.</p>
+    `,
+    confirmLabel:'Envoyer l\'invitation',
+    onConfirm: async()=>{
+      const hotel_id=$('iv_hotel').value, role=$('iv_role').value, full_name=$('iv_name').value.trim(), email=$('iv_email').value.trim();
+      if(!email){ throw new Error('L\'e-mail est requis.'); }
+      const {data,error}=await sb.functions.invoke('invite-user',{body:{email, full_name, role, hotel_id, access_type:'manager'}});
+      if(error){ throw new Error(data?.error || error.message); }
+      if(data?.error) throw new Error(data.error);
+      flash(data?.already_existed ? 'Utilisateur existant : accès accordé et notifié.' : 'Invitation envoyée.');
+      onDone && onDone();
+    }
+  });
+}
+
+/* ---- Fiche détaillée d'un utilisateur (5 sections) ---- */
+async function openUserDrawer(row, allHotels, allGroups, onChange){
+  if(!row){ flash('Utilisateur introuvable.','e'); return; }
+  openDrawer(`<div class="dh"><button class="close" id="dClose"><i class="fa-solid fa-xmark"></i></button><h2>Chargement…</h2></div>`);
+  $('dClose').onclick=closeDrawer;
+
+  if(row.is_platform_only){
+    renderUserDrawerPlatformOnly(row, onChange);
+    return;
+  }
+  const {data:detail,error}=await sb.rpc('admin_get_user_detail',{p_user_id:row.user_id});
+  if(error){ flash(errorLabel(error.message),'e'); closeDrawer(); return; }
+  renderUserDrawerBody(row, detail, allHotels, allGroups, onChange);
+}
+
+function renderUserDrawerPlatformOnly(row, onChange){
+  openDrawer(`
+    <div class="dh"><button class="close" id="dClose"><i class="fa-solid fa-xmark"></i></button>
+      <h2>${esc(row.full_name||row.email)}</h2>
+      <div class="role"><span class="tag blue">Super Admin</span> · Compte plateforme sans profil hôtel</div>
+    </div>
+    <div class="sec"><h4>Identité</h4>
+      <div class="kv"><span>Email</span><b>${esc(row.email)}</b></div>
+      <div class="kv"><span>Rôle plateforme</span><b>${esc(platformRoleLabel(row.platform_role))}</b></div>
+      <div class="kv"><span>Dernière connexion</span><b>${fmtDateTime(row.last_login_at)}</b></div>
+      <p class="muted" style="font-size:12px;margin-top:8px">Ce compte n'a aucune fiche employé (public.users) — c'est un rôle plateforme pur. Aucun accès hôtel ne peut lui être attribué directement sous cette forme (limite documentée du Lot 3 ; nécessiterait de créer d'abord un profil employé).</p>
+      <div class="actrow">
+        <button class="btn d" id="uDemote"><i class="fa-solid fa-user-shield"></i> Retirer le rôle Super Admin</button>
+      </div>
+    </div>
+  `);
+  $('dClose').onclick=closeDrawer;
+  $('uDemote').onclick=()=>openRevokePlatformAdminModal(row.auth_id, onChange);
+}
+
+function renderUserDrawerBody(row, detail, allHotels, allGroups, onChange){
+  const id=detail.identity, hotelAcc=detail.hotel_access||[], groupAcc=detail.group_access||[];
+  const platform=detail.platform_role, history=detail.history||[];
+  const status=accountStatusBadge(accountStatus({is_active:id.is_active, email_confirmed_at:id.email_confirmed_at, invited_at:id.invited_at}));
+  const attachableHotels=(allHotels||[]).filter(h=>h.status!=='archived' && !hotelAcc.some(a=>a.hotel_id===h.id));
+  const attachableGroups=(allGroups||[]).filter(g=>g.status!=='archived');
+
+  openDrawer(`
+    <div class="dh"><button class="close" id="dClose"><i class="fa-solid fa-xmark"></i></button>
+      <h2>${esc(id.full_name||id.email)}</h2>
+      <div class="role"><span class="tag ${status.cls}">${esc(status.label)}</span>${platform?` · <span class="tag blue">${esc(platformRoleLabel(platform.role))}</span>`:''}</div>
+    </div>
+
+    <div class="sec"><h4>A. Identité</h4>
+      <div class="kv"><span>Email</span><b>${esc(id.email)}</b></div>
+      <div class="kv"><span>Créé le</span><b>${fmtDateTime(id.created_at)}</b></div>
+      <div class="kv"><span>Invité le</span><b>${fmtDateTime(id.invited_at)}</b></div>
+      <div class="kv"><span>Confirmé le</span><b>${id.accepted_at?fmtDateTime(id.accepted_at):'Pas encore confirmé'}</b></div>
+      <div class="kv"><span>Dernière connexion</span><b>${fmtDateTime(id.last_login_at)}</b></div>
+      <div class="kv"><span>Modifié le</span><b>${fmtDateTime(id.updated_at)}</b></div>
+      <div class="actrow">
+        ${id.is_active?'<button class="btn d" id="uDeactivate"><i class="fa-solid fa-user-slash"></i> Désactiver</button>':'<button class="btn g" id="uReactivate"><i class="fa-solid fa-user-check"></i> Réactiver</button>'}
+        <button class="btn g" id="uResetPwd"><i class="fa-regular fa-key"></i> Réinitialiser le mot de passe</button>
+        ${status.label==='Invitation en attente'||status.label==='Invitation ancienne'?'<button class="btn g" id="uResend"><i class="fa-regular fa-paper-plane"></i> Renvoyer l\'invitation</button>':''}
+      </div>
+    </div>
+
+    <div class="sec"><h4>B. Accès hôtels (${hotelAcc.length})</h4>
+      ${hotelAcc.length?hotelAcc.map(h=>`
+        <div class="hchip" style="align-items:flex-start;flex-direction:column;gap:6px">
+          <div style="display:flex;justify-content:space-between;width:100%;align-items:center">
+            <span><b>${esc(h.hotel_name)}</b>${h.is_default?' <span class="tag blue">Par défaut</span>':''}${h.hotel_status==='archived'?' <span class="tag gray">Hôtel archivé</span>':''}</span>
+            <button class="btn sm d" data-revoke-hotel="${h.hotel_id}">Retirer</button>
+          </div>
+          <div class="muted" style="font-size:11.5px">Accordé le ${fmtDateTime(h.granted_at)}${h.granted_by_name?' par '+esc(h.granted_by_name):''}${h.group_name?' · Groupe '+esc(groupNameOr(h.group_name)):''}</div>
+          <div style="display:flex;gap:6px;align-items:center">
+            <select data-role-hotel="${h.hotel_id}" style="padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:8px">
+              ${Object.entries(HOTEL_ROLE_LABEL).map(([k,l])=>`<option value="${k}" ${h.role===k?'selected':''}>${l}</option>`).join('')}
+            </select>
+            <button class="btn sm g" data-apply-role="${h.hotel_id}">Appliquer le rôle</button>
+          </div>
+        </div>`).join(''):'<div class="empty" style="padding:14px">Aucun accès hôtel.</div>'}
+      <div class="actrow">
+        <select id="uAddHotel" style="flex:1">${attachableHotels.length?attachableHotels.map(h=>`<option value="${h.id}">${esc(h.name)}</option>`).join(''):'<option value="">Aucun hôtel disponible</option>'}</select>
+        <select id="uAddHotelRole">${Object.entries(HOTEL_ROLE_LABEL).map(([k,l])=>`<option value="${k}">${l}</option>`).join('')}</select>
+        <button class="btn g" id="uAddHotelBtn" ${!attachableHotels.length?'disabled':''}>Ajouter un accès</button>
+      </div>
+    </div>
+
+    <div class="sec"><h4>C. Accès groupe (${groupAcc.length})</h4>
+      ${groupAcc.length?groupAcc.map(g=>`<div class="kv"><span>${esc(groupNameOr(g.group_name))}</span><b>${g.accessible_hotel_count}/${g.total_hotel_count} hôtel(s)</b></div>`).join(''):'<div class="empty" style="padding:14px">Aucun accès groupe dérivé de ses hôtels actuels.</div>'}
+      <p class="muted" style="font-size:11.5px;margin:8px 0">Action en masse : accorde ou retire l'accès sur tous les hôtels ACTUELS du groupe choisi (un hôtel qui rejoindrait le groupe plus tard n'hérite pas rétroactivement).</p>
+      <div class="actrow">
+        <select id="uGroupSel">${attachableGroups.map(g=>`<option value="${g.id}">${esc(groupNameOr(g.name))}</option>`).join('')}</select>
+        <select id="uGroupRole">${Object.entries(HOTEL_ROLE_LABEL).map(([k,l])=>`<option value="${k}">${l}</option>`).join('')}</select>
+        <button class="btn g" id="uGroupGrant">Accorder sur le groupe</button>
+        <button class="btn d" id="uGroupRevoke">Retirer sur le groupe</button>
+      </div>
+    </div>
+
+    <div class="sec"><h4>D. Rôle plateforme</h4>
+      ${platform?`
+        <div class="kv"><span>Rôle</span><b>${esc(platformRoleLabel(platform.role))}</b></div>
+        <div class="kv"><span>Statut</span><b>${platform.is_active?'Actif':'Inactif'}</b></div>
+        <div class="actrow">${platform.is_active?'<button class="btn d" id="uDemote"><i class="fa-solid fa-user-shield"></i> Retirer le rôle Super Admin</button>':'<button class="btn g" id="uPromote"><i class="fa-solid fa-user-shield"></i> Repromouvoir Super Admin</button>'}</div>
+      `:`<div class="empty" style="padding:14px">Aucun rôle plateforme.</div><div class="actrow"><button class="btn g" id="uPromote"><i class="fa-solid fa-user-shield"></i> Promouvoir Super Admin</button></div>`}
+    </div>
+
+    <div class="sec"><h4>E. Historique</h4>
+      <div class="tlist">
+        ${history.length?history.slice(0,50).map(h=>`<div class="it"><div><div class="nm">${esc(historyActionLabel(h.action))}</div><div class="sub">${esc(h.admin_email||'—')}</div></div><div class="right">${fmtDateTime(h.created_at)}</div></div>`).join(''):'<div class="empty" style="padding:14px">Aucun événement.</div>'}
+      </div>
+    </div>
+  `);
+
+  $('dClose').onclick=closeDrawer;
+  const refresh=()=>{ closeDrawer(); onChange && onChange(); };
+
+  $('uDeactivate')&&($('uDeactivate').onclick=()=>confirmAction({
+    title:'Désactiver cet utilisateur', danger:true,
+    body:`Cet utilisateur perdra immédiatement tout accès (hôtels : ${hotelAcc.map(h=>esc(h.hotel_name)).join(', ')||'aucun'}). Action réversible à tout moment.`,
+    confirmLabel:'Désactiver',
+    onConfirm: async()=>{ const {error}=await sb.rpc('admin_set_user_status',{p_user_id:row.user_id,p_active:false}); if(error) throw error; flash('Utilisateur désactivé.'); refresh(); }
+  }));
+  $('uReactivate')&&($('uReactivate').onclick=()=>confirmAction({
+    title:'Réactiver cet utilisateur', body:'L\'utilisateur retrouve immédiatement tous ses accès existants.', confirmLabel:'Réactiver',
+    onConfirm: async()=>{ const {error}=await sb.rpc('admin_set_user_status',{p_user_id:row.user_id,p_active:true}); if(error) throw error; flash('Utilisateur réactivé.'); refresh(); }
+  }));
+  $('uResetPwd').onclick=()=>confirmAction({
+    title:'Réinitialiser le mot de passe', body:`Un e-mail de réinitialisation sera envoyé à ${esc(id.email)}.`, confirmLabel:'Envoyer',
+    onConfirm: async()=>{ const {error}=await sb.auth.resetPasswordForEmail(id.email); if(error) throw error; flash('E-mail de réinitialisation envoyé.'); }
+  });
+  $('uResend')&&($('uResend').onclick=()=>{
+    const primary=hotelAcc.find(h=>h.is_default)||hotelAcc[0];
+    if(!primary){ flash('Aucun hôtel associé : impossible de renvoyer une invitation.','e'); return; }
+    confirmAction({
+      title:'Renvoyer l\'invitation', body:`Un nouveau lien sera envoyé à ${esc(id.email)} pour l'hôtel ${esc(primary.hotel_name)}.`, confirmLabel:'Renvoyer',
+      onConfirm: async()=>{
+        const {data,error}=await sb.functions.invoke('invite-user',{body:{email:id.email, full_name:id.full_name, role:primary.role, hotel_id:primary.hotel_id, access_type:'manager'}});
+        if(error) throw new Error(data?.error||error.message);
+        if(data?.error) throw new Error(data.error);
+        flash('Invitation renvoyée.');
+      }
+    });
+  });
+
+  el_bindHotelAccessActions(row, hotelAcc, refresh);
+
+  $('uAddHotelBtn')&&($('uAddHotelBtn').onclick=()=>{
+    const hotelId=$('uAddHotel').value, role=$('uAddHotelRole').value;
+    if(!hotelId) return;
+    confirmAction({
+      title:'Ajouter un accès hôtel', body:`L'utilisateur pourra se connecter à cet hôtel avec le rôle « ${esc(hotelRoleLabel(role))} ».`, confirmLabel:'Ajouter',
+      onConfirm: async()=>{ const {error}=await sb.rpc('admin_grant_hotel',{p_user_id:row.user_id,p_hotel_id:hotelId,p_role:role}); if(error) throw error; flash('Accès hôtel ajouté.'); refresh(); }
+    });
+  });
+
+  $('uGroupGrant').onclick=()=>{
+    const groupId=$('uGroupSel').value, role=$('uGroupRole').value;
+    if(!groupId) return;
+    confirmAction({
+      title:'Accorder l\'accès sur tout le groupe', body:'L\'utilisateur recevra le rôle choisi sur chaque hôtel actuel de ce groupe.', confirmLabel:'Accorder',
+      onConfirm: async()=>{ const {error}=await sb.rpc('admin_grant_hotel_group_access',{p_user_id:row.user_id,p_group_id:groupId,p_role:role}); if(error) throw error; flash('Accès groupe accordé.'); refresh(); }
+    });
+  };
+  $('uGroupRevoke').onclick=()=>{
+    const groupId=$('uGroupSel').value;
+    if(!groupId) return;
+    confirmAction({
+      title:'Retirer l\'accès sur tout le groupe', danger:true, body:'L\'utilisateur perdra l\'accès à chaque hôtel actuel de ce groupe (les autres accès hors groupe sont conservés).', confirmLabel:'Retirer',
+      onConfirm: async()=>{ const {error}=await sb.rpc('admin_revoke_hotel_group_access',{p_user_id:row.user_id,p_group_id:groupId}); if(error) throw error; flash('Accès groupe retiré.'); refresh(); }
+    });
+  };
+
+  $('uPromote')&&($('uPromote').onclick=()=>confirmAction({
+    title:'Promouvoir Super Admin', body:'Cet utilisateur pourra administrer toute la plateforme (tous les hôtels, tous les groupes).', confirmLabel:'Promouvoir',
+    onConfirm: async()=>{ const {error}=await sb.rpc('admin_grant_platform_admin',{p_auth_id:id.auth_id,p_role:'super_admin'}); if(error) throw error; flash('Rôle Super Admin accordé.'); refresh(); }
+  }));
+  $('uDemote')&&($('uDemote').onclick=()=>openRevokePlatformAdminModal(id.auth_id, refresh));
+}
+
+// Actions sur un accès hôtel précis (retrait avec garde du dernier admin + changement de rôle) —
+// factorisé pour être réutilisé par la fiche normale et pourrait l'être par la fiche plateforme.
+function el_bindHotelAccessActions(row, hotelAcc, refresh){
+  document.querySelectorAll('[data-revoke-hotel]').forEach(b=>b.onclick=()=>{
+    const hotelId=b.dataset.revokeHotel;
+    const h=hotelAcc.find(x=>x.hotel_id===hotelId);
+    const others=hotelAcc.filter(x=>x.hotel_id!==hotelId).map(x=>x.hotel_name);
+    confirmAction({
+      title:`Retirer l'accès à ${h.hotel_name}`, danger:true,
+      body: revokeHotelImpactMessage(h.hotel_name, others),
+      confirmLabel:'Retirer',
+      onConfirm: async()=>{
+        const {error}=await sb.rpc('admin_revoke_hotel',{p_user_id:row.user_id,p_hotel_id:hotelId});
+        if(error){
+          if(isLastHotelAdminError(error.message)){
+            closeDrawer();
+            // Différé : confirmAction() referme modalbg juste après la résolution de onConfirm,
+            // ce qui écraserait immédiatement une nouvelle modale ouverte de façon synchrone ici.
+            setTimeout(()=>openReplacementNeededModal(row.user_id, hotelId, h.hotel_name, refresh), 0);
+            return;
+          }
+          throw error;
+        }
+        flash('Accès retiré.'); refresh();
+      }
+    });
+  });
+  document.querySelectorAll('[data-apply-role]').forEach(b=>b.onclick=()=>{
+    const hotelId=b.dataset.applyRole;
+    const sel=document.querySelector(`[data-role-hotel="${hotelId}"]`);
+    const role=sel.value;
+    const h=hotelAcc.find(x=>x.hotel_id===hotelId);
+    if(role===h.role) return;
+    confirmAction({
+      title:'Changer le rôle', body:`Nouveau rôle sur ${esc(h.hotel_name)} : ${esc(hotelRoleLabel(role))}.`, confirmLabel:'Appliquer',
+      onConfirm: async()=>{ const {error}=await sb.rpc('admin_set_hotel_role',{p_user_id:row.user_id,p_hotel_id:hotelId,p_role:role}); if(error) throw error; flash('Rôle mis à jour.'); refresh(); }
+    });
+  });
+}
+
+function openReplacementNeededModal(userId, hotelId, hotelName, refresh){
+  formModal({
+    title:'Un remplaçant est requis',
+    bodyHtml:`<p style="margin-bottom:12px">Ce retrait laisserait <b>${esc(hotelName)}</b> sans administrateur (direction ou administrateur hôtel). Choisissez un remplaçant pour cet hôtel — il recevra le rôle « Administrateur hôtel » avant le retrait.</p>
+      <div class="fld"><label>ID utilisateur remplaçant (depuis la liste Utilisateurs)</label><input id="rp_user" placeholder="Copiez l'identifiant depuis une autre fiche"></div>`,
+    confirmLabel:'Retirer avec remplacement', danger:true,
+    onConfirm: async()=>{
+      const replacementId=$('rp_user').value.trim();
+      if(!replacementId){ throw new Error('Un remplaçant est requis.'); }
+      const {error}=await sb.rpc('admin_revoke_hotel',{p_user_id:userId,p_hotel_id:hotelId,p_replacement_user_id:replacementId});
+      if(error) throw error;
+      flash('Accès retiré, remplaçant promu administrateur hôtel.'); refresh();
+    }
+  });
+}
+
+function openRevokePlatformAdminModal(authId, refresh){
+  formModal({
+    title:'Retirer le rôle Super Admin',
+    bodyHtml:`<div class="fld"><label>Motif *</label><textarea id="rv_reason" placeholder="Obligatoire — consigné dans l'historique"></textarea></div>`,
+    confirmLabel:'Retirer', danger:true,
+    onConfirm: async()=>{
+      const reason=$('rv_reason').value.trim();
+      if(!reason){ throw new Error('Un motif est requis.'); }
+      const {error}=await sb.rpc('admin_revoke_platform_admin',{p_auth_id:authId,p_reason:reason});
+      if(error) throw error;
+      flash('Rôle Super Admin retiré.'); refresh();
+    }
+  });
+}
+
+/* =====================================================================
+   Abonnements et Applications
+   ===================================================================== */
+let subsTab='list', subsPage=0, subsSort={key:'_hotelName',dir:'asc'};
+let subsFilterGroup='', subsFilterPlan='', subsFilterStatus='', subsFilterTrial='';
+
+async function renderSubscriptions(el){
+  el.innerHTML=`<div class="page">
+    <div class="phead"><div><h1>Abonnements</h1><div class="sub">Cycle de vie des abonnements et applications par hôtel</div></div></div>
+    <div class="tabs">
+      <button class="tab ${subsTab==='list'?'on':''}" data-tab="list">Abonnements</button>
+      <button class="tab ${subsTab==='catalog'?'on':''}" data-tab="catalog">Catalogue des offres</button>
+    </div>
+    <div id="subsBody"></div>
+  </div>`;
+  el.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{ subsTab=b.dataset.tab; renderSubscriptions(el); });
+  const body=$('subsBody');
+  if(subsTab==='catalog') await renderPlanCatalog(body);
+  else await renderSubscriptionsList(body);
+}
+
+async function renderSubscriptionsList(el){
+  el.innerHTML='<div class="loading"><i class="fa-solid fa-circle-notch fa-spin"></i> Chargement…</div>';
+  const [{data:hotels,error:hErr},{data:groups},{data:plans},{data:subs,error:sErr}]=await Promise.all([
+    sb.from('hotels').select('id,name,group_id,status'),
+    sb.from('hotel_groups').select('id,name'),
+    sb.from('subscription_plans').select('id,name,slug,is_active,archived_at'),
+    sb.from('hotel_subscriptions').select('*'),
+  ]);
+  if(hErr) throw hErr; if(sErr) throw sErr;
+  const groupById=Object.fromEntries((groups||[]).map(g=>[g.id,g]));
+  const planById=Object.fromEntries((plans||[]).map(p=>[p.id,p]));
+
+  let rows=(subs||[]).map(s=>{
+    const hotel=(hotels||[]).find(h=>h.id===s.hotel_id);
+    const group=hotel?.group_id?groupById[hotel.group_id]:null;
+    const plan=planById[s.plan_id];
+    return {...s, _hotel:hotel, _hotelName:hotel?.name||'(hôtel introuvable)', _group:group, _plan:plan};
+  });
+
+  if(searchQuery.trim()){
+    const q=searchQuery.trim().toLowerCase();
+    rows=rows.filter(r=>[r._hotelName, r._group?.name, r._plan?.name].filter(Boolean).some(v=>String(v).toLowerCase().includes(q)));
+  }
+  if(subsFilterGroup) rows=rows.filter(r=>r._hotel?.group_id===subsFilterGroup);
+  if(subsFilterPlan) rows=rows.filter(r=>r.plan_id===subsFilterPlan);
+  if(subsFilterStatus) rows=rows.filter(r=>r.status===subsFilterStatus);
+  if(subsFilterTrial==='ongoing') rows=rows.filter(r=>r.status==='trial');
+  if(subsFilterTrial==='expiring7') rows=rows.filter(r=>{
+    if(r.status!=='trial') return false;
+    const d=trialDaysRemaining(r.trial_ends_at);
+    return d!=null && d>=0 && d<=7;
+  });
+  rows=sortRows(rows, subsSort.key, subsSort.dir);
+
+  const pageSize=20, pageCount=Math.max(1,Math.ceil(rows.length/pageSize));
+  subsPage=Math.min(subsPage,pageCount-1);
+  const pageRows=rows.slice(subsPage*pageSize,(subsPage+1)*pageSize);
+
+  el.innerHTML=`
+    <div class="filters">
+      <select id="fGroup"><option value="">Tous les groupes</option>${(groups||[]).map(g=>`<option value="${g.id}" ${subsFilterGroup===g.id?'selected':''}>${esc(groupNameOr(g.name))}</option>`).join('')}</select>
+      <select id="fPlan"><option value="">Tous les plans</option>${(plans||[]).map(p=>`<option value="${p.id}" ${subsFilterPlan===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}</select>
+      <select id="fStatus"><option value="">Tous les statuts</option>${Object.entries(SUB_STATUS_LABEL).map(([k,l])=>`<option value="${k}" ${subsFilterStatus===k?'selected':''}>${l}</option>`).join('')}</select>
+      <select id="fTrial">
+        <option value="">Tous les essais</option>
+        <option value="ongoing" ${subsFilterTrial==='ongoing'?'selected':''}>Essais en cours</option>
+        <option value="expiring7" ${subsFilterTrial==='expiring7'?'selected':''}>Expirant sous 7 jours</option>
+      </select>
+    </div>
+    ${!rows.length && !subsFilterGroup && !subsFilterPlan && !subsFilterStatus && !subsFilterTrial && !searchQuery.trim() ? `
+    <div class="stub"><div class="ic"><i class="fa-regular fa-calendar-check"></i></div><h2>Aucun abonnement</h2>
+      <p>Aucun hôtel n'a encore d'abonnement principal. Créez-en un depuis la fiche d'un hôtel (vue Hôtels) ou via l'action ci-dessous.</p>
+    </div>` : `
+    <div class="tblwrap"><table class="tbl">
+      <thead><tr>
+        <th data-k="_hotelName">Hôtel</th><th>Groupe</th><th data-k="status">Statut</th><th>Plan</th><th>Essai</th>
+        <th data-k="updated_at">Dernière mise à jour</th><th>Attribution</th><th>Actions</th>
+      </tr></thead>
+      <tbody>${pageRows.length?pageRows.map(rowSubscriptionHtml).join(''):`<tr><td colspan="8" class="empty">Aucun résultat${searchQuery?' pour cette recherche':''}.</td></tr>`}</tbody>
+    </table></div>
+    <div class="pager">
+      <span>Page ${subsPage+1} / ${pageCount}</span>
+      <button id="sPrev" ${subsPage===0?'disabled':''}>‹ Précédent</button>
+      <button id="sNext" ${subsPage>=pageCount-1?'disabled':''}>Suivant ›</button>
+    </div>`}
+  `;
+  el.querySelectorAll('th[data-k]').forEach(th=>th.onclick=()=>{
+    const k=th.dataset.k;
+    subsSort = subsSort.key===k ? {key:k,dir:subsSort.dir==='asc'?'desc':'asc'} : {key:k,dir:'asc'};
+    renderSubscriptionsList(el);
+  });
+  $('fGroup').onchange=e=>{ subsFilterGroup=e.target.value; subsPage=0; renderSubscriptionsList(el); };
+  $('fPlan').onchange=e=>{ subsFilterPlan=e.target.value; subsPage=0; renderSubscriptionsList(el); };
+  $('fStatus').onchange=e=>{ subsFilterStatus=e.target.value; subsPage=0; renderSubscriptionsList(el); };
+  $('fTrial').onchange=e=>{ subsFilterTrial=e.target.value; subsPage=0; renderSubscriptionsList(el); };
+  $('sPrev')&&($('sPrev').onclick=()=>{ subsPage--; renderSubscriptionsList(el); });
+  $('sNext')&&($('sNext').onclick=()=>{ subsPage++; renderSubscriptionsList(el); });
+  el.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>openSubscriptionDrawer(rows.find(r=>r.id===b.dataset.open)));
+}
+
+function rowSubscriptionHtml(s){
+  const st=subscriptionStatusBadge(s.status);
+  const at=attributionTypeBadge(s.attribution_type);
+  let trialCell='—';
+  if(s.status==='trial'){
+    const d=trialDaysRemaining(s.trial_ends_at);
+    if(s.trial_ends_at==null) trialCell='<span class="tag amber">Date manquante</span>';
+    else if(d<0) trialCell=`<span class="tag red">Expiré</span>`;
+    else trialCell=`<span class="tag ${d<=7?'amber':'gray'}">${d} j restant(s)</span>`;
+  }
+  return `<tr>
+    <td><b>${esc(s._hotelName)}</b></td>
+    <td>${s._group?esc(groupNameOr(s._group.name)):'<span class="muted">—</span>'}</td>
+    <td><span class="tag ${st.cls}">${esc(st.label)}</span></td>
+    <td>${s._plan?esc(s._plan.name):'<span class="muted">Plan introuvable</span>'}</td>
+    <td>${trialCell}</td>
+    <td class="muted">${fmtDateTime(s.updated_at)}</td>
+    <td><span class="tag ${at.cls}">${esc(at.label)}</span></td>
+    <td><button data-open="${s.id}" title="Ouvrir la fiche"><i class="fa-regular fa-eye"></i></button></td>
+  </tr>`;
+}
+
+/* ---- Fiche détaillée d'un abonnement ---- */
+async function openSubscriptionDrawer(sub){
+  if(!sub){ flash('Abonnement introuvable.','e'); return; }
+  openDrawer(`<div class="dh"><button class="close" id="dClose"><i class="fa-solid fa-xmark"></i></button><h2>Chargement…</h2></div>`);
+  $('dClose').onclick=closeDrawer;
+
+  const [{data:hotel},{data:plan},{data:allPlans},{data:events},{data:addons},{data:allAddons},{data:appAccess},{data:apps}]=await Promise.all([
+    sb.from('hotels').select('id,name,group_id').eq('id',sub.hotel_id).maybeSingle(),
+    sb.from('subscription_plans').select('*').eq('id',sub.plan_id).maybeSingle(),
+    sb.from('subscription_plans').select('id,name,is_active,archived_at').order('sort_order'),
+    sb.from('hotel_subscription_events').select('*').eq('subscription_id',sub.id).order('created_at',{ascending:false}),
+    sb.from('hotel_addon_subscriptions').select('*, add_ons(name,app_id)').eq('hotel_id',sub.hotel_id),
+    sb.from('add_ons').select('id,name,app_id').eq('is_active',true),
+    sb.from('user_app_access').select('user_id, app_id, users(email,is_active)').eq('hotel_id',sub.hotel_id),
+    sb.from('platform_apps').select('id,code,name'),
+  ]);
+  const appById=Object.fromEntries((apps||[]).map(a=>[a.id,a]));
+  const {data:planModules}=await sb.from('plan_modules').select('app_id').eq('plan_id',sub.plan_id).eq('is_active',true);
+  const includedAppIds=new Set((planModules||[]).map(m=>m.app_id));
+
+  renderSubscriptionDrawerBody({sub, hotel, plan, allPlans:allPlans||[], events:events||[], addons:addons||[],
+    allAddons:allAddons||[], appAccess:appAccess||[], apps:apps||[], appById, includedAppIds});
+}
+
+function renderSubscriptionDrawerBody(ctx){
+  const {sub, hotel, plan, allPlans, events, addons, allAddons, appAccess, apps, appById, includedAppIds}=ctx;
+  const st=subscriptionStatusBadge(sub.status);
+  const at=attributionTypeBadge(sub.attribution_type);
+  const acts=actionsForStatus(sub.status);
+  const trialDays=sub.status==='trial'?trialDaysRemaining(sub.trial_ends_at):null;
+
+  const activeAddons=addons.filter(a=>a.status==='active');
+  const inactiveAddons=addons.filter(a=>a.status!=='active');
+
+  openDrawer(`
+    <div class="dh"><button class="close" id="dClose"><i class="fa-solid fa-xmark"></i></button>
+      <h2>${esc(hotel?.name||'Hôtel')}</h2>
+      <div class="role"><span class="tag ${st.cls}">${esc(st.label)}</span> · <span class="tag ${at.cls}">${esc(at.label)}</span></div>
+    </div>
+
+    <div class="sec"><h4>Résumé</h4>
+      <div class="kv"><span>Plan</span><b>${plan?esc(plan.name):'Plan introuvable'}</b></div>
+      <div class="kv"><span>Prix net</span><b>${fmtMoney(sub.snapshot_price_net_ht, sub.snapshot_currency)} / ${sub.billing_cycle==='annual'?'an':'mois'}</b></div>
+      <div class="kv"><span>Date de début</span><b>${fmtDate(sub.created_at)}</b></div>
+      <div class="kv"><span>Prochain renouvellement</span><b>${fmtDate(sub.next_billing_date)}</b></div>
+      <div class="kv"><span>Résiliation planifiée</span><b>${sub.scheduled_cancellation_at?fmtDateTime(sub.scheduled_cancellation_at):'—'}</b></div>
+      <div class="kv"><span>Résilié le</span><b>${sub.cancelled_at?fmtDateTime(sub.cancelled_at):'—'}</b></div>
+      <div class="actrow">
+        ${acts.changePlan?'<button class="btn g" id="aChangePlan"><i class="fa-solid fa-arrows-turn-right"></i> Changer de plan</button>':''}
+        ${acts.suspend?'<button class="btn g" id="aSuspend"><i class="fa-solid fa-pause"></i> Suspendre</button>':''}
+        ${acts.reactivate?'<button class="btn g" id="aReactivate"><i class="fa-solid fa-play"></i> Réactiver</button>':''}
+        ${acts.renew?'<button class="btn g" id="aRenew"><i class="fa-solid fa-rotate"></i> Renouveler</button>':''}
+        ${acts.scheduleCancel?'<button class="btn g" id="aScheduleCancel"><i class="fa-regular fa-calendar-xmark"></i> Planifier une résiliation</button>':''}
+        ${sub.scheduled_cancellation_at?'<button class="btn g" id="aRevertCancel"><i class="fa-solid fa-rotate-left"></i> Annuler la résiliation planifiée</button>':''}
+        ${acts.cancelNow?'<button class="btn d" id="aCancelNow"><i class="fa-solid fa-ban"></i> Résilier immédiatement</button>':''}
+      </div>
+    </div>
+
+    ${sub.status==='trial'?`
+    <div class="sec"><h4>Essai</h4>
+      <div class="kv"><span>Fin d'essai</span><b>${sub.trial_ends_at?fmtDateTime(sub.trial_ends_at):'Non renseignée'}</b></div>
+      <div class="kv"><span>Jours restants</span><b>${sub.trial_ends_at?(trialDays<0?'Expiré':trialDays+' j'):'—'}</b></div>
+      <div class="kv"><span>Prolongations déjà accordées</span><b>${sub.trial_extensions_count}</b></div>
+      <div class="actrow">
+        ${acts.extendTrial?'<button class="btn g" id="aExtendTrial"><i class="fa-regular fa-hourglass-half"></i> Prolonger l\'essai</button>':''}
+        ${acts.convertTrial?'<button class="btn p" id="aConvertTrial"><i class="fa-solid fa-check"></i> Convertir en abonnement actif</button>':''}
+      </div>
+    </div>` : ''}
+
+    <div class="sec"><h4>Applications</h4>
+      <div class="applist">
+        ${apps.map(a=>{
+          const included=includedAppIds.has(a.id);
+          const addonCovers=activeAddons.some(ad=>ad.add_ons?.app_id===a.id);
+          const usersWithAccess=appAccess.filter(u=>u.app_id===a.id && u.users?.is_active).length;
+          return `<div class="appitem">
+            <div class="nm">${esc(a.name)}</div>
+            <div class="right">
+              ${included?'<span class="tag green">Incluse au plan</span>':addonCovers?'<span class="tag amber">Via option</span>':'<span class="tag gray">Non couverte</span>'}
+              <span class="muted" style="font-size:11.5px">${usersWithAccess} accès utilisateur(s)</span>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+
+    <div class="sec"><h4>Options (add-ons)</h4>
+      <div class="applist">
+        ${activeAddons.length?activeAddons.map(a=>{
+          const ab=addonStatusBadge(a.status);
+          return `<div class="appitem">
+            <div class="nm">${esc(a.add_ons?.name||'Option')}<div class="muted" style="font-size:11.5px">Depuis ${fmtDate(a.started_at)}${a.expires_at?' · jusqu\'au '+fmtDate(a.expires_at):''}</div></div>
+            <div class="right"><span class="tag ${ab.cls}">${esc(ab.label)}</span>
+              <button data-detach="${a.id}" title="Retirer l'option"><i class="fa-regular fa-trash-can"></i></button>
+            </div>
+          </div>`;
+        }).join(''):'<div class="empty" style="padding:14px">Aucune option active.</div>'}
+      </div>
+      <div class="actrow"><button class="btn g" id="aAttachAddon"><i class="fa-solid fa-plus"></i> Attribuer une option</button></div>
+      ${inactiveAddons.length?`<div class="muted" style="font-size:11.5px;margin-top:8px">${inactiveAddons.length} option(s) retirée(s) précédemment — visible dans l'historique.</div>`:''}
+    </div>
+
+    <div class="sec"><h4>Accès aux applications</h4>
+      <div class="muted" style="font-size:12.5px;margin-bottom:8px">
+        Mode <b>observe</b> : calcule le droit théorique (plan + options + essai + statut) et le compare à l'accès réel, sans rien modifier.
+        Mode <b>enforce</b> : appliquerait ce calcul aux accès réels — verrouillé tant que la normalisation Phase 2E n'est pas terminée (cf. ADR-010 §1).
+      </div>
+      <div id="accessResolution" class="muted" style="font-size:12.5px">Cliquez sur « Résoudre (observe) » pour afficher les droits calculés.</div>
+      <div class="actrow">
+        <select id="resolveUser" style="min-width:220px">
+          <option value="">Choisir un utilisateur…</option>
+          ${appAccess.length?[...new Map(appAccess.map(u=>[u.user_id,u])).values()].map(u=>`<option value="${u.user_id}">${esc(u.users?.email||u.user_id)}</option>`).join(''):''}
+        </select>
+        <select id="resolveApp">${apps.map(a=>`<option value="${esc(a.code)}">${esc(a.name)}</option>`).join('')}</select>
+        <button class="btn g" id="aObserve">Résoudre (observe)</button>
+        <button class="btn d" id="aEnforce" title="Verrouillé — cf. ADR-010 §1">Appliquer (enforce)</button>
+      </div>
+    </div>
+
+    <div class="sec"><h4>Historique</h4>
+      <div class="tlist">
+        ${events.length?events.map(e=>`
+          <div class="it"><div><div class="nm">${esc(eventTypeLabel(e.event_type))}${e.from_status||e.to_status?` <span class="muted">(${esc(e.from_status||'—')} → ${esc(e.to_status||'—')})</span>`:''}</div>
+          <div class="sub">${esc(e.actor_email||(e.actor_type==='system'?'Système':'—'))}${e.reason?' · '+esc(e.reason):''}</div></div>
+          <div class="right">${fmtDateTime(e.created_at)}</div></div>
+        `).join(''):'<div class="empty" style="padding:14px">Aucun événement.</div>'}
+      </div>
+    </div>
+  `);
+
+  $('dClose').onclick=closeDrawer;
+  const refresh=async()=>{
+    const {data:freshSub}=await sb.from('hotel_subscriptions').select('*').eq('id',sub.id).maybeSingle();
+    if(freshSub) openSubscriptionDrawer(freshSub); else closeDrawer();
+    renderView();
+  };
+
+  $('aChangePlan') && ($('aChangePlan').onclick=()=>{
+    const candidates=allPlans.filter(p=>p.id!==sub.plan_id && p.is_active && !p.archived_at);
+    formModal({ title:'Changer de plan', confirmLabel:'Changer', bodyHtml:`
+      <div class="fld"><label>Nouveau plan *</label><select id="f_newplan">${candidates.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select></div>
+      <div class="fld"><label>Motif *</label><input id="f_reason" placeholder="Ex : montée en gamme demandée par le client"></div>
+    `, onConfirm: async()=>{
+      const planId=$('f_newplan').value, reason=$('f_reason').value.trim();
+      if(!reason){ throw new Error('Un motif est requis.'); }
+      const {error}=await sb.rpc('admin_change_subscription_plan',{p_subscription_id:sub.id,p_new_plan_id:planId,p_reason:reason});
+      if(error) throw error;
+      flash('Plan changé.'); await refresh();
+    }});
+  });
+  $('aSuspend') && ($('aSuspend').onclick=()=>{
+    formModal({ title:'Suspendre l\'abonnement', danger:true, confirmLabel:'Suspendre', bodyHtml:`
+      <div class="fld"><label>Motif *</label><input id="f_reason" placeholder="Ex : impayé, demande client…"></div>
+    `, onConfirm: async()=>{
+      const reason=$('f_reason').value.trim();
+      if(!reason) throw new Error('Un motif est requis.');
+      const {error}=await sb.rpc('admin_suspend_subscription',{p_subscription_id:sub.id,p_reason:reason});
+      if(error) throw error;
+      flash('Abonnement suspendu.'); await refresh();
+    }});
+  });
+  $('aReactivate') && ($('aReactivate').onclick=()=>{
+    confirmAction({ title:'Réactiver l\'abonnement', body:'L\'hôtel retrouvera un accès actif.', confirmLabel:'Réactiver', onConfirm: async()=>{
+      const {error}=await sb.rpc('admin_reactivate_subscription',{p_subscription_id:sub.id});
+      if(error) throw error;
+      flash('Abonnement réactivé.'); await refresh();
+    }});
+  });
+  $('aRenew') && ($('aRenew').onclick=()=>{
+    formModal({ title:'Renouveler l\'abonnement', confirmLabel:'Renouveler', bodyHtml:`
+      <div class="fld"><label>Prochaine date de facturation *</label><input id="f_date" type="date"></div>
+    `, onConfirm: async()=>{
+      const date=$('f_date').value;
+      if(!date) throw new Error('Une date est requise.');
+      const {error}=await sb.rpc('admin_renew_subscription',{p_subscription_id:sub.id,p_next_billing_date:date});
+      if(error) throw error;
+      flash('Abonnement renouvelé.'); await refresh();
+    }});
+  });
+  $('aScheduleCancel') && ($('aScheduleCancel').onclick=()=>{
+    formModal({ title:'Planifier une résiliation', danger:true, confirmLabel:'Planifier', bodyHtml:`
+      <div class="fld"><label>Date d'effet *</label><input id="f_date" type="datetime-local"></div>
+      <div class="fld"><label>Motif *</label><input id="f_reason"></div>
+    `, onConfirm: async()=>{
+      const date=$('f_date').value, reason=$('f_reason').value.trim();
+      if(!date || !reason) throw new Error('Date et motif sont requis.');
+      const {error}=await sb.rpc('admin_schedule_subscription_cancellation',{p_subscription_id:sub.id,p_effective_at:new Date(date).toISOString(),p_reason:reason});
+      if(error) throw error;
+      flash('Résiliation planifiée.'); await refresh();
+    }});
+  });
+  $('aRevertCancel') && ($('aRevertCancel').onclick=()=>{
+    confirmAction({ title:'Annuler la résiliation planifiée', body:'L\'abonnement continuera normalement.', confirmLabel:'Annuler la résiliation', onConfirm: async()=>{
+      const {error}=await sb.rpc('admin_revert_scheduled_cancellation',{p_subscription_id:sub.id});
+      if(error) throw error;
+      flash('Résiliation planifiée annulée.'); await refresh();
+    }});
+  });
+  $('aCancelNow') && ($('aCancelNow').onclick=()=>{
+    formModal({ title:'Résilier immédiatement', danger:true, confirmLabel:'Résilier', bodyHtml:`
+      <div class="fld"><label>Motif *</label><input id="f_reason"></div>
+      <p class="muted" style="font-size:12px">Action définitive. L'historique de l'abonnement est conservé (jamais supprimé).</p>
+    `, onConfirm: async()=>{
+      const reason=$('f_reason').value.trim();
+      if(!reason) throw new Error('Un motif est requis.');
+      const {error}=await sb.rpc('admin_cancel_subscription_immediate',{p_subscription_id:sub.id,p_reason:reason});
+      if(error) throw error;
+      flash('Abonnement résilié.'); await refresh();
+    }});
+  });
+  $('aExtendTrial') && ($('aExtendTrial').onclick=()=>{
+    formModal({ title:'Prolonger l\'essai', confirmLabel:'Prolonger', bodyHtml:`
+      <div class="fld"><label>Nouvelle date de fin *</label><input id="f_date" type="date"></div>
+      <div class="fld"><label>Motif</label><input id="f_reason"></div>
+    `, onConfirm: async()=>{
+      const date=$('f_date').value;
+      if(!date) throw new Error('Une date est requise.');
+      const {error}=await sb.rpc('admin_extend_trial',{p_subscription_id:sub.id,p_new_trial_ends_at:new Date(date).toISOString(),p_reason:$('f_reason').value.trim()||null});
+      if(error) throw error;
+      flash('Essai prolongé.'); await refresh();
+    }});
+  });
+  $('aConvertTrial') && ($('aConvertTrial').onclick=()=>{
+    confirmAction({ title:'Convertir en abonnement actif', body:'L\'essai se termine et l\'abonnement devient actif immédiatement.', confirmLabel:'Convertir', onConfirm: async()=>{
+      const {error}=await sb.rpc('admin_convert_trial_to_active',{p_subscription_id:sub.id});
+      if(error) throw error;
+      flash('Essai converti en abonnement actif.'); await refresh();
+    }});
+  });
+  $('aAttachAddon') && ($('aAttachAddon').onclick=()=>{
+    const available=allAddons.filter(a=>!activeAddons.some(x=>x.addon_id===a.id));
+    if(!available.length){ flash('Aucune option disponible à attribuer.','w'); return; }
+    formModal({ title:'Attribuer une option', confirmLabel:'Attribuer', bodyHtml:`
+      <div class="fld"><label>Option *</label><select id="f_addon">${available.map(a=>`<option value="${a.id}">${esc(a.name)}</option>`).join('')}</select></div>
+      <div class="fld"><label>Motif</label><input id="f_reason"></div>
+    `, onConfirm: async()=>{
+      const {error}=await sb.rpc('admin_attach_addon',{p_hotel_id:sub.hotel_id,p_addon_id:$('f_addon').value,p_reason:$('f_reason').value.trim()||null});
+      if(error) throw error;
+      flash('Option attribuée.'); await refresh();
+    }});
+  });
+  document.querySelectorAll('[data-detach]').forEach(b=>b.onclick=()=>{
+    formModal({ title:'Retirer l\'option', danger:true, confirmLabel:'Retirer', bodyHtml:`<div class="fld"><label>Motif *</label><input id="f_reason"></div>`,
+      onConfirm: async()=>{
+        const reason=$('f_reason').value.trim();
+        if(!reason) throw new Error('Un motif est requis.');
+        const {error}=await sb.rpc('admin_detach_addon',{p_hotel_addon_subscription_id:b.dataset.detach,p_reason:reason});
+        if(error) throw error;
+        flash('Option retirée.'); await refresh();
+      }});
+  });
+  $('aObserve') && ($('aObserve').onclick=async()=>{
+    const userId=$('resolveUser').value, appCode=$('resolveApp').value;
+    if(!userId){ flash('Choisissez un utilisateur.','w'); return; }
+    const {data,error}=await sb.rpc('admin_resolve_app_access',{p_user_id:userId,p_hotel_id:sub.hotel_id,p_app_code:appCode,p_mode:'observe'});
+    if(error){ flash(errorLabel(error.message),'e'); return; }
+    const causes=(data.causes||[]).map(c=>`<span class="tag amber">${esc(causeLabel(c))}</span>`).join(' ');
+    $('accessResolution').innerHTML=`
+      <div class="kv"><span>Droit théorique</span><b>${data.theoretical_access?'Accordé':'Refusé'}</b></div>
+      <div class="kv"><span>Accès effectif</span><b>${data.actual_access?'Accordé':'Refusé'}</b></div>
+      <div class="kv"><span>Écart</span><b>${data.diverges?'Oui':'Non'}</b></div>
+      ${causes?`<div style="margin-top:6px">${causes}</div>`:''}
+    `;
+  });
+  $('aEnforce') && ($('aEnforce').onclick=async()=>{
+    const userId=$('resolveUser').value, appCode=$('resolveApp').value;
+    if(!userId){ flash('Choisissez un utilisateur.','w'); return; }
+    confirmAction({ title:'Appliquer les droits (enforce)', danger:true,
+      body:'Cette action tenterait de synchroniser l\'accès réel sur le droit théorique calculé. Le mode enforce est actuellement verrouillé côté serveur tant que la normalisation des abonnements (Phase 2E) n\'est pas terminée — cf. ADR-010 §1.',
+      confirmLabel:'Tenter quand même', onConfirm: async()=>{
+        const {error}=await sb.rpc('admin_resolve_app_access',{p_user_id:userId,p_hotel_id:sub.hotel_id,p_app_code:appCode,p_mode:'enforce'});
+        if(error) throw error;
+        flash('Droits appliqués.'); await refresh();
+      }});
+  });
+}
+
+/* ---- Catalogue des offres ---- */
+async function renderPlanCatalog(el){
+  el.innerHTML='<div class="loading"><i class="fa-solid fa-circle-notch fa-spin"></i> Chargement…</div>';
+  const {data:plans,error}=await sb.from('subscription_plans').select('*').order('sort_order');
+  if(error) throw error;
+  const rows=(plans||[]).filter(p=>!p.archived_at || subsFilterStatus==='__show_archived__');
+  const archived=(plans||[]).filter(p=>p.archived_at);
+  el.innerHTML=`
+    <div class="phead"><div class="sub">${fmtNum(rows.length)} plan(s) actif(s) ou inactif(s) · ${fmtNum(archived.length)} archivé(s)</div>
+      <div class="actions"><button class="btn p" id="addPlan"><i class="fa-solid fa-plus"></i> Nouveau plan</button></div>
+    </div>
+    <div class="tblwrap"><table class="tbl">
+      <thead><tr><th>Plan</th><th>Mensuel</th><th>Annuel</th><th>Essai</th><th>Portée</th><th>Statut</th><th>Actions</th></tr></thead>
+      <tbody>${rows.length?rows.map(rowPlanHtml).join(''):'<tr><td colspan="7" class="empty">Aucun plan.</td></tr>'}</tbody>
+    </table></div>
+    ${archived.length?`<h3 style="margin-top:18px;font-size:13px;color:var(--muted)">Plans archivés</h3>
+    <div class="tblwrap"><table class="tbl">
+      <thead><tr><th>Plan</th><th>Archivé le</th><th>Motif</th><th>Actions</th></tr></thead>
+      <tbody>${archived.map(p=>`<tr>
+        <td>${esc(p.name)}</td><td class="muted">${fmtDate(p.archived_at)}</td><td class="muted">${esc(p.archived_reason||'—')}</td>
+        <td><button data-unarchive="${p.id}" title="Désarchiver"><i class="fa-solid fa-box-open"></i></button></td>
+      </tr>`).join('')}</tbody>
+    </table></div>`:''}
+  `;
+  $('addPlan').onclick=()=>openPlanDrawer(null);
+  el.querySelectorAll('[data-editplan]').forEach(b=>b.onclick=()=>openPlanDrawer(plans.find(p=>p.id===b.dataset.editplan)));
+  el.querySelectorAll('[data-toggleactive]').forEach(b=>b.onclick=()=>{
+    const plan=plans.find(p=>p.id===b.dataset.toggleactive);
+    const nextActive=!plan.is_active;
+    confirmAction({ title:nextActive?'Activer le plan':'Désactiver le plan',
+      body:nextActive?'Le plan redevient utilisable.':'Le plan ne sera plus commercialisable tant qu\'il est inactif.',
+      danger:!nextActive, confirmLabel:'Confirmer', onConfirm: async()=>{
+        const {error}=await sb.rpc('admin_set_plan_active',{p_plan_id:plan.id,p_is_active:nextActive});
+        if(error) throw error;
+        flash('Plan mis à jour.'); renderPlanCatalog(el);
+      }});
+  });
+  el.querySelectorAll('[data-archiveplan]').forEach(b=>b.onclick=()=>{
+    formModal({ title:'Archiver le plan', danger:true, confirmLabel:'Archiver', bodyHtml:`<div class="fld"><label>Motif *</label><input id="f_reason"></div>`,
+      onConfirm: async()=>{
+        const reason=$('f_reason').value.trim();
+        if(!reason) throw new Error('Un motif est requis.');
+        const {error}=await sb.rpc('admin_set_plan_archived',{p_plan_id:b.dataset.archiveplan,p_archived:true,p_reason:reason});
+        if(error) throw error;
+        flash('Plan archivé.'); renderPlanCatalog(el);
+      }});
+  });
+  el.querySelectorAll('[data-unarchive]').forEach(b=>b.onclick=()=>{
+    confirmAction({ title:'Désarchiver le plan', body:'Le plan redevient actif mais restera non commercialisable jusqu\'à revue.', confirmLabel:'Désarchiver', onConfirm: async()=>{
+      const {error}=await sb.rpc('admin_set_plan_archived',{p_plan_id:b.dataset.unarchive,p_archived:false});
+      if(error) throw error;
+      flash('Plan désarchivé.'); renderPlanCatalog(el);
+    }});
+  });
+  el.querySelectorAll('[data-modules]').forEach(b=>b.onclick=()=>openPlanModulesDrawer(plans.find(p=>p.id===b.dataset.modules)));
+}
+function rowPlanHtml(p){
+  return `<tr>
+    <td><b>${esc(p.name)}</b><div class="muted" style="font-size:11.5px">${esc(p.slug)}</div></td>
+    <td>${fmtMoney(p.price_monthly)}</td>
+    <td>${fmtMoney(p.price_annual)}</td>
+    <td>${p.trial_days??'—'} j</td>
+    <td><span class="tag ${p.plan_scope==='internal'?'amber':'gray'}">${p.plan_scope==='internal'?'Interne':'Public'}</span></td>
+    <td><span class="tag ${p.is_active?'green':'red'}">${p.is_active?'Actif':'Inactif'}</span>${p.is_commercializable?' <span class="tag green">Commercialisable</span>':''}</td>
+    <td>
+      <button data-editplan="${p.id}" title="Modifier"><i class="fa-regular fa-pen-to-square"></i></button>
+      <button data-modules="${p.id}" title="Applications incluses"><i class="fa-solid fa-cubes"></i></button>
+      <button data-toggleactive="${p.id}" title="${p.is_active?'Désactiver':'Activer'}"><i class="fa-solid ${p.is_active?'fa-toggle-on':'fa-toggle-off'}"></i></button>
+      <button data-archiveplan="${p.id}" title="Archiver"><i class="fa-regular fa-box-archive"></i></button>
+    </td>
+  </tr>`;
+}
+function openPlanDrawer(plan){
+  const isEdit=!!plan;
+  openDrawer(`
+    <div class="dh"><button class="close" id="dClose"><i class="fa-solid fa-xmark"></i></button><h2>${isEdit?'Modifier le plan':'Nouveau plan'}</h2></div>
+    <div class="sec">
+      <div class="fld"><label>Nom *</label><input id="f_name" value="${esc(plan?.name||'')}"></div>
+      ${!isEdit?`<div class="fld"><label>Slug *</label><input id="f_slug" placeholder="ex: flow-starter"></div>`:''}
+      <div class="fld"><label>Description</label><input id="f_desc" value="${esc(plan?.description||'')}"></div>
+      <div class="row2">
+        <div class="fld"><label>Prix mensuel (€ HT)</label><input id="f_pm" type="number" step="0.01" value="${plan?.price_monthly??0}"></div>
+        <div class="fld"><label>Prix annuel (€ HT)</label><input id="f_pa" type="number" step="0.01" value="${plan?.price_annual??0}"></div>
+      </div>
+      <div class="row2">
+        <div class="fld"><label>Essai (jours)</label><input id="f_trial" type="number" value="${plan?.trial_days??14}"></div>
+        <div class="fld"><label>Ordre d'affichage</label><input id="f_sort" type="number" value="${plan?.sort_order??0}"></div>
+      </div>
+      <div class="row2">
+        <div class="fld"><label>Chambres max</label><input id="f_rooms" type="number" value="${plan?.max_rooms??''}"></div>
+        <div class="fld"><label>Utilisateurs max</label><input id="f_users" type="number" value="${plan?.max_users??''}"></div>
+      </div>
+      <div class="fld"><label>Hôtels max</label><input id="f_hotels" type="number" value="${plan?.max_hotels??1}"></div>
+    </div>
+    <div class="dfoot"><button class="btn g" id="dCancel">Annuler</button><button class="btn p" id="dSave">${isEdit?'Enregistrer':'Créer'}</button></div>
+  `);
+  $('dClose').onclick=closeDrawer; $('dCancel').onclick=closeDrawer;
+  $('dSave').onclick=async()=>{
+    const name=$('f_name').value.trim();
+    if(!name){ flash('Le nom est requis.','e'); return; }
+    $('dSave').disabled=true;
+    try{
+      if(isEdit){
+        const {error}=await sb.rpc('admin_update_plan',{
+          p_plan_id:plan.id, p_name:name, p_description:$('f_desc').value||null,
+          p_price_monthly:Number($('f_pm').value||0), p_price_annual:Number($('f_pa').value||0),
+          p_trial_days:Number($('f_trial').value||14), p_max_rooms:$('f_rooms').value?Number($('f_rooms').value):null,
+          p_max_users:$('f_users').value?Number($('f_users').value):null, p_max_hotels:Number($('f_hotels').value||1),
+          p_sort_order:Number($('f_sort').value||0),
+        });
+        if(error) throw error;
+      } else {
+        const slug=$('f_slug').value.trim();
+        if(!slug){ flash('Le slug est requis.','e'); $('dSave').disabled=false; return; }
+        const {error}=await sb.rpc('admin_create_plan',{
+          p_name:name, p_slug:slug, p_description:$('f_desc').value||null,
+          p_price_monthly:Number($('f_pm').value||0), p_price_annual:Number($('f_pa').value||0),
+          p_trial_days:Number($('f_trial').value||14), p_max_rooms:$('f_rooms').value?Number($('f_rooms').value):null,
+          p_max_users:$('f_users').value?Number($('f_users').value):null, p_max_hotels:Number($('f_hotels').value||1),
+          p_sort_order:Number($('f_sort').value||0),
+        });
+        if(error) throw error;
+      }
+      flash(isEdit?'Plan mis à jour.':'Plan créé.'); closeDrawer(); renderView();
+    }catch(e){ flash(errorLabel(e.message),'e'); }
+    finally{ $('dSave').disabled=false; }
+  };
+}
+async function openPlanModulesDrawer(plan){
+  const [{data:apps},{data:modules}]=await Promise.all([
+    sb.from('platform_apps').select('id,code,name').order('name'),
+    sb.from('plan_modules').select('app_id').eq('plan_id',plan.id).eq('is_active',true),
+  ]);
+  const includedIds=new Set((modules||[]).map(m=>m.app_id));
+  openDrawer(`
+    <div class="dh"><button class="close" id="dClose"><i class="fa-solid fa-xmark"></i></button><h2>Applications incluses — ${esc(plan.name)}</h2></div>
+    <div class="sec">
+      ${(apps||[]).map(a=>`<label style="display:flex;align-items:center;gap:8px;padding:6px 0">
+        <input type="checkbox" data-app="${a.id}" ${includedIds.has(a.id)?'checked':''}> ${esc(a.name)}
+      </label>`).join('')}
+    </div>
+    <div class="dfoot"><button class="btn g" id="dCancel">Annuler</button><button class="btn p" id="dSave">Enregistrer</button></div>
+  `);
+  $('dClose').onclick=closeDrawer; $('dCancel').onclick=closeDrawer;
+  $('dSave').onclick=async()=>{
+    const ids=[...document.querySelectorAll('[data-app]:checked')].map(i=>i.dataset.app);
+    $('dSave').disabled=true;
+    try{
+      const {error}=await sb.rpc('admin_set_plan_modules',{p_plan_id:plan.id,p_app_ids:ids});
+      if(error) throw error;
+      flash('Applications mises à jour.'); closeDrawer(); renderView();
+    }catch(e){ flash(errorLabel(e.message),'e'); }
+    finally{ $('dSave').disabled=false; }
+  };
+}
+
+/* =====================================================================
+   Facturation (Lot 4) — facturation PLATEFORME (Flowtym -> hôtels), distincte de la
+   facturation hôtel -> client final (module Checkout, hors périmètre ici).
+   ===================================================================== */
+let billingTab='list', billingPage=0, billingSort={key:'created_at',dir:'desc'};
+let billingFilterStatus='', billingFilterHotel='', billingFilterOverdue='';
+
+async function renderBilling(el){
+  el.innerHTML=`<div class="page">
+    <div class="phead"><div><h1>Facturation</h1><div class="sub">Facturation de la plateforme Flowtym aux hôtels</div></div></div>
+    <div class="tabs">
+      <button class="tab ${billingTab==='list'?'on':''}" data-tab="list">Factures</button>
+      <button class="tab ${billingTab==='dashboard'?'on':''}" data-tab="dashboard">Tableau de bord</button>
+    </div>
+    <div id="billingBody"></div>
+  </div>`;
+  el.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{ billingTab=b.dataset.tab; renderBilling(el); });
+  const body=$('billingBody');
+  if(billingTab==='dashboard') await renderBillingDashboard(body);
+  else await renderInvoiceList(body);
+}
+
+async function renderInvoiceList(el){
+  el.innerHTML='<div class="loading"><i class="fa-solid fa-circle-notch fa-spin"></i> Chargement…</div>';
+  const [{data:rows,error:iErr},{data:hotels,error:hErr},{data:subs}]=await Promise.all([
+    sb.rpc('admin_list_platform_invoices'),
+    sb.from('hotels').select('id,name,status,company,address,siret,tva_number,email,billing_email'),
+    sb.from('hotel_subscriptions').select('id,hotel_id,plan_id,status'),
+  ]);
+  if(iErr) throw iErr; if(hErr) throw hErr;
+  const hotelById=Object.fromEntries((hotels||[]).map(h=>[h.id,h]));
+
+  let list=rows||[];
+  if(searchQuery.trim()){
+    const q=searchQuery.trim().toLowerCase();
+    list=list.filter(r=>[r.hotel_name,r.number].filter(Boolean).some(v=>String(v).toLowerCase().includes(q)));
+  }
+  if(billingFilterStatus) list=list.filter(r=>r.status===billingFilterStatus);
+  if(billingFilterHotel) list=list.filter(r=>r.hotel_id===billingFilterHotel);
+  if(billingFilterOverdue==='yes') list=list.filter(r=>isInvoiceOverdue(r));
+  list=sortRows(list, billingSort.key, billingSort.dir);
+
+  const pageSize=20, pageCount=Math.max(1,Math.ceil(list.length/pageSize));
+  billingPage=Math.min(billingPage,pageCount-1);
+  const pageRows=list.slice(billingPage*pageSize,(billingPage+1)*pageSize);
+
+  el.innerHTML=`
+    <div class="phead" style="margin-top:14px">
+      <div class="sub">${fmtNum(list.length)} facture(s)</div>
+      <div class="actions">
+        <button class="btn g" id="exportInvoices"><i class="fa-solid fa-download"></i> Exporter CSV</button>
+        <button class="btn p" id="newInvoice"><i class="fa-solid fa-plus"></i> Nouvelle facture</button>
+      </div>
+    </div>
+    <div class="filters">
+      <select id="fBStatus"><option value="">Tous les statuts</option>${Object.entries(INVOICE_STATUS_LABEL).map(([k,l])=>`<option value="${k}" ${billingFilterStatus===k?'selected':''}>${l}</option>`).join('')}</select>
+      <select id="fBHotel"><option value="">Tous les hôtels</option>${(hotels||[]).map(h=>`<option value="${h.id}" ${billingFilterHotel===h.id?'selected':''}>${esc(h.name)}</option>`).join('')}</select>
+      <select id="fBOverdue"><option value="">Échéance : tous</option><option value="yes" ${billingFilterOverdue==='yes'?'selected':''}>En retard uniquement</option></select>
+    </div>
+    <div class="tblwrap"><table class="tbl">
+      <thead><tr>
+        <th data-k="hotel_name">Hôtel</th><th>Numéro</th><th data-k="status">Statut</th><th>État financier</th>
+        <th data-k="amount_ttc">Montant TTC</th><th>Réglé</th><th>Solde</th>
+        <th data-k="due_date">Échéance</th><th data-k="created_at">Créée le</th><th>Actions</th>
+      </tr></thead>
+      <tbody>${pageRows.length?pageRows.map(rowInvoiceHtml).join(''):`<tr><td colspan="10" class="empty">Aucune facture${searchQuery?' pour cette recherche':''}.</td></tr>`}</tbody>
+    </table></div>
+    <div class="pager">
+      <span>Page ${billingPage+1} / ${pageCount}</span>
+      <button id="bPrev" ${billingPage===0?'disabled':''}>‹ Précédent</button>
+      <button id="bNext" ${billingPage>=pageCount-1?'disabled':''}>Suivant ›</button>
+    </div>
+  `;
+  el.querySelectorAll('th[data-k]').forEach(th=>th.onclick=()=>{
+    const k=th.dataset.k;
+    billingSort = billingSort.key===k ? {key:k,dir:billingSort.dir==='asc'?'desc':'asc'} : {key:k,dir:'asc'};
+    renderInvoiceList(el);
+  });
+  $('fBStatus').onchange=e=>{ billingFilterStatus=e.target.value; billingPage=0; renderInvoiceList(el); };
+  $('fBHotel').onchange=e=>{ billingFilterHotel=e.target.value; billingPage=0; renderInvoiceList(el); };
+  $('fBOverdue').onchange=e=>{ billingFilterOverdue=e.target.value; billingPage=0; renderInvoiceList(el); };
+  $('bPrev')&&($('bPrev').onclick=()=>{ billingPage--; renderInvoiceList(el); });
+  $('bNext')&&($('bNext').onclick=()=>{ billingPage++; renderInvoiceList(el); });
+  $('exportInvoices').onclick=()=>downloadCSV('factures.csv', list, [
+    {label:'Hôtel',get:r=>r.hotel_name},{label:'Numéro',get:r=>r.number||'(proforma)'},
+    {label:'Statut',get:r=>invoiceStatusBadge(r.status).label},{label:'Montant TTC',get:r=>r.amount_ttc},
+    {label:'Réglé',get:r=>r.paid_amount},{label:'Solde',get:r=>r.balance},
+    {label:'Échéance',get:r=>fmtDate(r.due_date)},{label:'Créée le',get:r=>fmtDate(r.created_at)},
+  ]);
+  $('newInvoice').onclick=()=>openCreateInvoiceModal(hotels||[], subs||[], ()=>renderInvoiceList(el));
+  el.querySelectorAll('[data-open-inv]').forEach(b=>b.onclick=()=>openInvoiceDrawer(b.dataset.openInv, hotelById, ()=>renderBilling($('view'))));
+}
+
+function rowInvoiceHtml(r){
+  const st=invoiceStatusBadge(r.status);
+  const fs=financialStateBadge(r.financial_state);
+  return `<tr>
+    <td><b>${esc(r.hotel_name)}</b></td>
+    <td>${esc(r.number||'(proforma)')}</td>
+    <td><span class="tag ${st.cls}">${esc(st.label)}</span></td>
+    <td><span class="tag ${fs.cls}">${esc(fs.label)}</span></td>
+    <td>${fmtMoney(r.amount_ttc, r.currency)}</td>
+    <td>${fmtMoney(r.paid_amount, r.currency)}</td>
+    <td><b>${fmtMoney(r.balance, r.currency)}</b></td>
+    <td class="muted">${fmtDate(r.due_date)}</td>
+    <td class="muted">${fmtDate(r.created_at)}</td>
+    <td><button data-open-inv="${r.id}" title="Ouvrir la fiche"><i class="fa-regular fa-eye"></i></button></td>
+  </tr>`;
+}
+
+function openCreateInvoiceModal(hotels, subs, onDone){
+  const activeHotels=(hotels||[]).filter(h=>h.status!=='archived');
+  formModal({
+    title:'Nouvelle facture (proforma)',
+    bodyHtml:`
+      <div class="fld"><label>Hôtel *</label><select id="ci_hotel">${activeHotels.map(h=>`<option value="${h.id}">${esc(h.name)}</option>`).join('')}</select></div>
+      <div class="fld"><label>Abonnement lié (optionnel)</label><select id="ci_sub"><option value="">Aucun</option>${(subs||[]).map(s=>`<option value="${s.id}" data-hotel="${s.hotel_id}">${s.id.slice(0,8)}… (${esc(s.status)})</option>`).join('')}</select></div>
+      <div class="row2">
+        <div class="fld"><label>Début de période</label><input type="date" id="ci_start"></div>
+        <div class="fld"><label>Fin de période</label><input type="date" id="ci_end"></div>
+      </div>
+      <div class="row2">
+        <div class="fld"><label>Montant HT (€) *</label><input type="number" id="ci_ht" step="0.01" min="0"></div>
+        <div class="fld"><label>Taux TVA (%)</label><input type="number" id="ci_tva" value="20" step="0.1" min="0"></div>
+      </div>
+      <div class="fld"><label>Échéance</label><input type="date" id="ci_due"></div>
+      <div class="fld"><label>Notes</label><textarea id="ci_notes"></textarea></div>
+    `,
+    confirmLabel:'Créer la proforma',
+    onConfirm: async()=>{
+      const hotel_id=$('ci_hotel').value;
+      const subscription_id=$('ci_sub').value||null;
+      const amount_ht=parseFloat($('ci_ht').value);
+      if(!amount_ht || amount_ht<=0){ throw new Error('Le montant HT doit être positif.'); }
+      const {error}=await sb.rpc('admin_create_platform_invoice',{
+        p_hotel_id:hotel_id, p_subscription_id:subscription_id,
+        p_period_start:$('ci_start').value||null, p_period_end:$('ci_end').value||null,
+        p_amount_ht:amount_ht, p_tva_rate:parseFloat($('ci_tva').value)||20,
+        p_due_date:$('ci_due').value||null, p_notes:$('ci_notes').value.trim()||null,
+      });
+      if(error) throw error;
+      flash('Facture proforma créée.'); onDone && onDone();
+    }
+  });
+}
+
+async function openInvoiceDrawer(invoiceId, hotelById, onChange){
+  openDrawer(`<div class="dh"><button class="close" id="dClose"><i class="fa-solid fa-xmark"></i></button><h2>Chargement…</h2></div>`);
+  $('dClose').onclick=closeDrawer;
+  const {data:detail,error}=await sb.rpc('admin_get_platform_invoice_detail',{p_invoice_id:invoiceId});
+  if(error){ flash(errorLabel(error.message),'e'); closeDrawer(); return; }
+  renderInvoiceDrawerBody(detail, onChange);
+}
+
+function renderInvoiceDrawerBody(detail, onChange){
+  const inv=detail.invoice, hotel=detail.hotel, sub=detail.subscription;
+  const payments=detail.payments||[], creditNotes=detail.credit_notes||[], history=detail.history||[];
+  const credited=inv.credited_ttc!=null?Number(inv.credited_ttc):creditNotes.filter(c=>c.status==='issued').reduce((s,c)=>s+Number(c.amount_ttc),0);
+  const balance=inv.balance!=null?Number(inv.balance):Number(inv.amount_ttc)-Number(inv.paid_amount)-credited;
+  const st=invoiceStatusBadge(inv.status);
+  const fs=financialStateBadge(inv.financial_state);
+  const acts=billingActionsForStatus(inv.status, inv.paid_amount);
+  const overdue=inv.financial_state==='overdue';
+
+  openDrawer(`
+    <div class="dh"><button class="close" id="dClose"><i class="fa-solid fa-xmark"></i></button>
+      <h2>${esc(hotel.name)} — ${esc(inv.number||'Proforma')}</h2>
+      <div class="role"><span class="tag ${st.cls}">${esc(st.label)}</span> <span class="tag ${fs.cls}">${esc(fs.label)}</span></div>
+    </div>
+
+    <div class="sec"><h4>Détails</h4>
+      <div class="kv"><span>Montant HT</span><b>${fmtMoney(inv.amount_ht, inv.currency)}</b></div>
+      <div class="kv"><span>TVA (${inv.tva_rate}%)</span><b>${fmtMoney(inv.tva_amount, inv.currency)}</b></div>
+      <div class="kv"><span>Montant TTC</span><b>${fmtMoney(inv.amount_ttc, inv.currency)}</b></div>
+      <div class="kv"><span>Réglé</span><b>${fmtMoney(inv.paid_amount, inv.currency)}</b></div>
+      <div class="kv"><span>Avoirs émis</span><b>${fmtMoney(credited, inv.currency)}</b></div>
+      <div class="kv"><span>Solde</span><b>${fmtMoney(balance, inv.currency)}</b></div>
+      <div class="kv"><span>Période</span><b>${inv.period_start?fmtDate(inv.period_start)+' → '+fmtDate(inv.period_end):'—'}</b></div>
+      <div class="kv"><span>Échéance</span><b>${fmtDate(inv.due_date)}</b></div>
+      <div class="kv"><span>Émise le</span><b>${fmtDateTime(inv.issued_at)}</b></div>
+      ${sub?`<div class="kv"><span>Abonnement lié</span><b>${esc(sub.id.slice(0,8))}… (${esc(sub.status)})</b></div>`:''}
+      ${inv.notes?`<div class="kv"><span>Notes</span><b>${esc(inv.notes)}</b></div>`:''}
+      <div class="actrow">
+        ${acts.canIssue?'<button class="btn p" id="iIssue"><i class="fa-solid fa-paper-plane"></i> Émettre</button>':''}
+        ${acts.canCancel?'<button class="btn d" id="iCancel"><i class="fa-solid fa-ban"></i> Annuler</button>':''}
+        <button class="btn g" id="iPrint"><i class="fa-solid fa-print"></i> Imprimer / enregistrer en PDF</button>
+      </div>
+      ${overdue && sub?`<div class="actrow"><button class="btn d" id="iSuspend"><i class="fa-solid fa-pause"></i> Suspendre l'abonnement pour impayé</button></div>`:''}
+    </div>
+
+    <div class="sec"><h4>Coordonnées de facturation</h4>
+      <div class="kv"><span>Raison sociale</span><b>${esc(inv.bill_to_name||hotel.company||hotel.name)}</b></div>
+      <div class="kv"><span>Adresse</span><b>${esc(inv.bill_to_address||hotel.address||'—')}</b></div>
+      <div class="kv"><span>TVA</span><b>${esc(inv.bill_to_vat||hotel.tva_number||'—')}</b></div>
+      <div class="kv"><span>Email de facturation</span><b>${esc(inv.bill_to_email||hotel.billing_email||hotel.email||'—')}</b></div>
+      ${inv.status==='proforma'?'<p class="muted" style="font-size:11.5px;margin-top:6px">Aperçu basé sur la fiche hôtel actuelle — figé définitivement à l\'émission.</p>':''}
+    </div>
+
+    <div class="sec"><h4>Paiements (${payments.length})</h4>
+      ${payments.length?payments.map(p=>{
+        const pst=paymentStatusBadge(p.status);
+        return `<div class="it" style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px dashed var(--line)">
+          <div><div class="nm">${fmtMoney(p.amount, p.currency)} · ${esc(paymentMethodLabel(p.method))}</div><div class="sub" style="font-size:11px;color:var(--muted)">${esc(p.reference||'')} · ${fmtDateTime(p.payment_date)}${p.reversal_reason?' · Renversé : '+esc(p.reversal_reason):''}</div></div>
+          <div style="text-align:right"><span class="tag ${pst.cls}">${esc(pst.label)}</span>
+            ${p.status==='pending'?`<div style="margin-top:4px"><button class="btn sm g" data-confirm-pay="${p.id}">Confirmer</button> <button class="btn sm d" data-fail-pay="${p.id}">Échec</button></div>`:''}
+            ${p.status==='recorded'?`<div style="margin-top:4px"><button class="btn sm d" data-reverse-pay="${p.id}">Renverser</button></div>`:''}
+          </div>
+        </div>`;
+      }).join(''):'<div class="empty" style="padding:14px">Aucun paiement.</div>'}
+      ${acts.canRecordPayment?'<div class="actrow"><button class="btn g" id="iRecordPayment"><i class="fa-solid fa-hand-holding-dollar"></i> Enregistrer un paiement</button></div>':''}
+    </div>
+
+    <div class="sec"><h4>Avoirs (${creditNotes.length})</h4>
+      ${creditNotes.length?creditNotes.map(c=>{
+        const cst=creditNoteStatusBadge(c.status);
+        return `<div class="it" style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px dashed var(--line)">
+          <div><div class="nm">${esc(c.number)} — ${fmtMoney(c.amount_ttc, c.currency)}</div><div class="sub" style="font-size:11px;color:var(--muted)">${esc(c.reason)}</div></div>
+          <div style="text-align:right"><span class="tag ${cst.cls}">${esc(cst.label)}</span>${c.status==='issued'?`<div style="margin-top:4px"><button class="btn sm d" data-void-cn="${c.id}">Annuler</button></div>`:''}</div>
+        </div>`;
+      }).join(''):'<div class="empty" style="padding:14px">Aucun avoir.</div>'}
+      ${acts.canCreateCreditNote?'<div class="actrow"><button class="btn g" id="iCreateCreditNote"><i class="fa-regular fa-file-lines"></i> Émettre un avoir</button></div>':''}
+    </div>
+
+    <div class="sec"><h4>Historique</h4>
+      <div class="tlist">
+        ${history.length?history.slice(0,50).map(h=>`<div class="it"><div><div class="nm">${esc(historyActionLabel(h.action))}</div><div class="sub">${esc(h.admin_email||'—')}</div></div><div class="right">${fmtDateTime(h.created_at)}</div></div>`).join(''):'<div class="empty" style="padding:14px">Aucun événement.</div>'}
+      </div>
+    </div>
+  `);
+
+  $('dClose').onclick=closeDrawer;
+  const refresh=()=>{ closeDrawer(); onChange && onChange(); };
+
+  $('iIssue')&&($('iIssue').onclick=()=>confirmAction({
+    title:'Émettre la facture', body:'Un numéro définitif sera attribué et les coordonnées de facturation seront figées. Action irréversible.',
+    confirmLabel:'Émettre',
+    onConfirm: async()=>{ const {error}=await sb.rpc('admin_issue_platform_invoice',{p_invoice_id:inv.id}); if(error) throw error; flash('Facture émise.'); refresh(); }
+  }));
+  $('iCancel')&&($('iCancel').onclick=()=>{
+    formModal({
+      title:'Annuler la facture', danger:true,
+      bodyHtml:'<div class="fld"><label>Motif *</label><textarea id="cx_reason"></textarea></div>',
+      confirmLabel:'Annuler la facture',
+      onConfirm: async()=>{
+        const reason=$('cx_reason').value.trim();
+        if(!reason) throw new Error('Un motif est requis.');
+        const {error}=await sb.rpc('admin_cancel_platform_invoice',{p_invoice_id:inv.id,p_reason:reason});
+        if(error) throw error;
+        flash('Facture annulée.'); refresh();
+      }
+    });
+  });
+  $('iPrint').onclick=()=>printInvoice(inv, hotel);
+  $('iSuspend')&&($('iSuspend').onclick=()=>confirmAction({
+    title:'Suspendre l\'abonnement pour impayé', danger:true,
+    body:`L'hôtel ${esc(hotel.name)} perdra l'accès à la plateforme jusqu'à réactivation manuelle. Le motif sera consigné avec la référence de cette facture.`,
+    confirmLabel:'Suspendre',
+    onConfirm: async()=>{
+      const {error}=await sb.rpc('admin_suspend_subscription_for_nonpayment',{p_subscription_id:sub.id,p_invoice_id:inv.id,p_reason:null});
+      if(error) throw error;
+      flash('Abonnement suspendu pour impayé.'); refresh();
+    }
+  }));
+
+  $('iRecordPayment')&&($('iRecordPayment').onclick=()=>{
+    formModal({
+      title:'Enregistrer un paiement',
+      bodyHtml:`
+        <div class="fld"><label>Montant (€) *</label><input type="number" id="rp_amount" step="0.01" min="0" value="${balance}"></div>
+        <div class="fld"><label>Méthode</label><select id="rp_method">${Object.entries(PAYMENT_METHOD_LABEL).map(([k,l])=>`<option value="${k}">${l}</option>`).join('')}</select></div>
+        <div class="fld"><label>Référence</label><input id="rp_ref"></div>
+        <div class="fld"><label>Statut</label><select id="rp_status"><option value="recorded">Enregistré (encaissé)</option><option value="pending">En attente de confirmation</option></select></div>
+      `,
+      confirmLabel:'Enregistrer',
+      onConfirm: async()=>{
+        const amount=parseFloat($('rp_amount').value);
+        if(!amount || amount<=0) throw new Error('Le montant doit être positif.');
+        const {error}=await sb.rpc('admin_record_platform_payment',{
+          p_invoice_id:inv.id, p_amount:amount, p_method:$('rp_method').value,
+          p_reference:$('rp_ref').value.trim()||null, p_status:$('rp_status').value, p_notes:null,
+        });
+        if(error) throw error;
+        flash('Paiement enregistré.'); refresh();
+      }
+    });
+  });
+  document.querySelectorAll('[data-confirm-pay]').forEach(b=>b.onclick=()=>confirmAction({
+    title:'Confirmer ce paiement', body:'Le paiement sera marqué comme encaissé.', confirmLabel:'Confirmer',
+    onConfirm: async()=>{ const {error}=await sb.rpc('admin_update_platform_payment_status',{p_payment_id:b.dataset.confirmPay,p_status:'recorded'}); if(error) throw error; flash('Paiement confirmé.'); refresh(); }
+  }));
+  document.querySelectorAll('[data-fail-pay]').forEach(b=>b.onclick=()=>confirmAction({
+    title:'Marquer ce paiement en échec', danger:true, body:'Ce paiement ne sera pas comptabilisé.', confirmLabel:'Marquer en échec',
+    onConfirm: async()=>{ const {error}=await sb.rpc('admin_update_platform_payment_status',{p_payment_id:b.dataset.failPay,p_status:'failed'}); if(error) throw error; flash('Paiement marqué en échec.'); refresh(); }
+  }));
+  document.querySelectorAll('[data-reverse-pay]').forEach(b=>b.onclick=()=>{
+    formModal({
+      title:'Renverser ce paiement', danger:true,
+      bodyHtml:'<p style="margin-bottom:10px">Le montant sera retiré du réglé de la facture (chèque rejeté, virement annulé...).</p><div class="fld"><label>Motif *</label><textarea id="rv_pay_reason"></textarea></div>',
+      confirmLabel:'Renverser',
+      onConfirm: async()=>{
+        const reason=$('rv_pay_reason').value.trim();
+        if(!reason) throw new Error('Un motif est requis.');
+        const {error}=await sb.rpc('admin_reverse_platform_payment',{p_payment_id:b.dataset.reversePay,p_reason:reason});
+        if(error) throw error;
+        flash('Paiement renversé.'); refresh();
+      }
+    });
+  });
+
+  $('iCreateCreditNote')&&($('iCreateCreditNote').onclick=()=>{
+    formModal({
+      title:'Émettre un avoir',
+      bodyHtml:`
+        <div class="row2">
+          <div class="fld"><label>Montant HT (€) *</label><input type="number" id="cn_ht" step="0.01" min="0"></div>
+          <div class="fld"><label>TVA (€)</label><input type="number" id="cn_tva" step="0.01" min="0" value="0"></div>
+        </div>
+        <div class="fld"><label>Motif *</label><textarea id="cn_reason"></textarea></div>
+      `,
+      confirmLabel:'Émettre l\'avoir',
+      onConfirm: async()=>{
+        const ht=parseFloat($('cn_ht').value); const reason=$('cn_reason').value.trim();
+        if(!ht || ht<=0) throw new Error('Le montant HT doit être positif.');
+        if(!reason) throw new Error('Un motif est requis.');
+        const {error}=await sb.rpc('admin_create_platform_credit_note',{p_invoice_id:inv.id,p_amount_ht:ht,p_tva_amount:parseFloat($('cn_tva').value)||0,p_reason:reason});
+        if(error) throw error;
+        flash('Avoir émis.'); refresh();
+      }
+    });
+  });
+  document.querySelectorAll('[data-void-cn]').forEach(b=>b.onclick=()=>{
+    formModal({
+      title:'Annuler cet avoir', danger:true,
+      bodyHtml:'<div class="fld"><label>Motif *</label><textarea id="vc_reason"></textarea></div>',
+      confirmLabel:'Annuler l\'avoir',
+      onConfirm: async()=>{
+        const reason=$('vc_reason').value.trim();
+        if(!reason) throw new Error('Un motif est requis.');
+        const {error}=await sb.rpc('admin_void_platform_credit_note',{p_credit_note_id:b.dataset.voidCn,p_reason:reason});
+        if(error) throw error;
+        flash('Avoir annulé.'); refresh();
+      }
+    });
+  });
+}
+
+// Export PDF : rendu navigateur (window.print()) sur une zone dédiée, sans librairie ni service
+// externe — pdf_url reste réservé pour un futur stockage réel une fois un prestataire connecté.
+function printInvoice(inv, hotel){
+  const area=$('invoicePrintArea');
+  area.innerHTML=`
+    <div class="ip-h"><div><h1>Facture ${esc(inv.number||'(proforma)')}</h1><div>${fmtDate(inv.issued_at||inv.created_at)}</div></div>
+      <div><b>Flowtym RH</b></div></div>
+    <div><b>Facturé à :</b> ${esc(inv.bill_to_name||hotel.company||hotel.name)}<br>${esc(inv.bill_to_address||hotel.address||'')}<br>TVA : ${esc(inv.bill_to_vat||hotel.tva_number||'—')}</div>
+    <table class="ip-tbl"><thead><tr><th>Description</th><th>HT</th><th>TVA</th><th>TTC</th></tr></thead>
+      <tbody><tr><td>Abonnement plateforme ${inv.period_start?'('+fmtDate(inv.period_start)+' → '+fmtDate(inv.period_end)+')':''}</td>
+        <td>${fmtMoney(inv.amount_ht, inv.currency)}</td><td>${fmtMoney(inv.tva_amount, inv.currency)}</td><td>${fmtMoney(inv.amount_ttc, inv.currency)}</td></tr></tbody>
+    </table>
+    <div class="ip-tot">Total TTC : <b>${fmtMoney(inv.amount_ttc, inv.currency)}</b></div>
+  `;
+  window.print();
+}
+
+async function renderBillingDashboard(el){
+  el.innerHTML='<div class="loading"><i class="fa-solid fa-circle-notch fa-spin"></i> Chargement…</div>';
+  const {data:k,error}=await sb.rpc('platform_billing_dashboard_kpis');
+  if(error) throw error;
+  const byStatus=k.invoices_by_status||{};
+  el.innerHTML=`
+    <div class="kpis" style="margin-top:14px">
+      <div class="kpi v"><div class="ic"><i class="fa-regular fa-file-lines"></i></div><div class="n">${fmtMoney(k.total_billed_ttc)}</div><div class="l">Total facturé (TTC)</div></div>
+      <div class="kpi g"><div class="ic"><i class="fa-solid fa-hand-holding-dollar"></i></div><div class="n">${fmtMoney(k.total_collected)}</div><div class="l">Total encaissé</div></div>
+      <div class="kpi a"><div class="ic"><i class="fa-solid fa-triangle-exclamation"></i></div><div class="n">${fmtMoney(k.total_overdue)}</div><div class="l">Impayés</div><div class="sub">${fmtNum(k.overdue_invoice_count)} facture(s) en retard</div></div>
+      <div class="kpi b"><div class="ic"><i class="fa-regular fa-file-lines"></i></div><div class="n">${fmtMoney(k.total_credited)}</div><div class="l">Total avoirs émis</div></div>
+    </div>
+    <div class="cols2">
+      <div class="box"><h3><i class="fa-regular fa-file-lines"></i> Factures par statut</h3>
+        <div class="tlist">
+          ${Object.entries(INVOICE_STATUS_LABEL).map(([k2,l])=>`<div class="it"><div class="nm">${l}</div><div class="right"><span class="tag ${invoiceStatusBadge(k2).cls}">${fmtNum(byStatus[k2]||0)}</span></div></div>`).join('')}
+        </div>
+      </div>
+      <div class="box"><h3><i class="fa-solid fa-ban"></i> Abonnements suspendus</h3>
+        <div class="tlist">
+          <div class="it"><div class="nm">Total suspendus</div><div class="right"><span class="tag gray">${fmtNum(k.subscriptions_suspended_total)}</span></div></div>
+          <div class="it"><div class="nm">Dont pour impayé</div><div class="right"><span class="tag red">${fmtNum(k.subscriptions_suspended_nonpayment)}</span></div></div>
+          <div class="it"><div class="nm">Paiements en attente de confirmation</div><div class="right"><span class="tag amber">${fmtNum(k.pending_payments_count)}</span></div></div>
+        </div>
+      </div>
+    </div>
+    <div class="stub" style="margin-top:18px">
+      <div class="ic"><i class="fa-solid fa-file-invoice"></i></div><h2>Facturation électronique</h2>
+      <p>Module en préparation — Phase 2.</p>
+      <div class="note">Le modèle est déjà compatible (TVA/SIRET par facture, coordonnées figées à l'émission). L'intégration réelle (Chorus Pro, PDP, Stripe, GoCardless, SEPA) n'est pas encore connectée.</div>
+    </div>
+  `;
+}
+
+/* =====================================================================
+   Audit (Lot 5) — filtré, paginé côté serveur, JSON présenté lisiblement
+   ===================================================================== */
+let auditPage=0, auditPageSize=25, auditTotal=0;
+let auditFilterAction='', auditFilterLevel='', auditFilterHotel='', auditFilterGroup='', auditFilterEntity='', auditDateFrom='', auditDateTo='';
+
+async function renderAudit(el){
+  el.innerHTML='<div class="loading"><i class="fa-solid fa-circle-notch fa-spin"></i> Chargement…</div>';
+  const [{data:hotels},{data:groups}]=await Promise.all([
+    sb.from('hotels').select('id,name'),
+    sb.from('hotel_groups').select('id,name').neq('status','archived'),
+  ]);
+  const {data:rows,error}=await sb.rpc('admin_list_platform_audit_log',{
+    p_search: searchQuery.trim()||null, p_admin_email:null,
+    p_hotel_id: auditFilterHotel||null, p_group_id: auditFilterGroup||null,
+    p_entity: auditFilterEntity||null, p_action: auditFilterAction||null, p_level: auditFilterLevel||null,
+    p_date_from: auditDateFrom?new Date(auditDateFrom).toISOString():null,
+    p_date_to: auditDateTo?new Date(auditDateTo+'T23:59:59').toISOString():null,
+    p_limit: auditPageSize, p_offset: auditPage*auditPageSize,
+  });
+  if(error) throw error;
+  auditTotal=rows?.[0]?.total_count?Number(rows[0].total_count):0;
+  const pageCount=Math.max(1,Math.ceil(auditTotal/auditPageSize));
+  const entities=['user','user_hotels','hotel','platform_admin','platform_invoice','platform_setting'];
+  const actions=['user.invite','user.grant_hotel','user.revoke_hotel','user.change_role','user.suspend','user.reactivate',
+    'platform_admin.grant','platform_admin.revoke','hotel.update','group.attach_hotel','group.detach_hotel',
+    'invoice.create_proforma','invoice.issue','invoice.cancel','payment.record','payment.update_status','payment.reverse',
+    'credit_note.create','credit_note.void','setting.update'];
+
+  el.innerHTML=`<div class="page">
+    <div class="phead"><div><h1>Audit</h1><div class="sub">Journal des actions Super Admin — immuable, ${fmtNum(auditTotal)} événement(s)</div></div>
+      <div class="actions"><button class="btn g" id="exportAudit"><i class="fa-solid fa-download"></i> Exporter CSV (page)</button></div>
+    </div>
+    <div class="filters">
+      <input type="date" id="fDateFrom" value="${esc(auditDateFrom)}" title="Depuis">
+      <input type="date" id="fDateTo" value="${esc(auditDateTo)}" title="Jusqu'à">
+      <select id="fHotel"><option value="">Tous les hôtels</option>${(hotels||[]).map(h=>`<option value="${h.id}" ${auditFilterHotel===h.id?'selected':''}>${esc(h.name)}</option>`).join('')}</select>
+      <select id="fGroup"><option value="">Tous les groupes</option>${(groups||[]).map(g=>`<option value="${g.id}" ${auditFilterGroup===g.id?'selected':''}>${esc(groupNameOr(g.name))}</option>`).join('')}</select>
+      <select id="fEntity"><option value="">Tous les objets</option>${entities.map(e=>`<option value="${e}" ${auditFilterEntity===e?'selected':''}>${esc(e)}</option>`).join('')}</select>
+      <select id="fAction"><option value="">Toutes les actions</option>${actions.map(a=>`<option value="${a}" ${auditFilterAction===a?'selected':''}>${esc(historyActionLabel(a))}</option>`).join('')}</select>
+      <select id="fLevel"><option value="">Tous niveaux</option><option value="info" ${auditFilterLevel==='info'?'selected':''}>Info</option><option value="warn" ${auditFilterLevel==='warn'?'selected':''}>Avertissement</option><option value="error" ${auditFilterLevel==='error'?'selected':''}>Échec</option></select>
+    </div>
+    <div class="tblwrap"><table class="tbl">
+      <thead><tr><th>Date</th><th>Admin</th><th>Action</th><th>Objet</th><th>Hôtel</th><th>Groupe</th><th>Niveau</th><th>Détails</th></tr></thead>
+      <tbody>${rows?.length?rows.map(r=>`
+        <tr>
+          <td class="muted">${fmtDateTime(r.created_at)}</td>
+          <td>${esc(r.admin_email||'—')}</td>
+          <td><b>${esc(historyActionLabel(r.action))}</b></td>
+          <td>${esc(r.entity||'—')}</td>
+          <td>${esc(r.hotel_name||'—')}</td>
+          <td>${esc(r.group_name?groupNameOr(r.group_name):'—')}</td>
+          <td><span class="tag ${r.level==='error'?'red':r.level==='warn'?'amber':'gray'}">${esc(r.level)}</span></td>
+          <td><button data-payload="${r.id}" title="Voir le détail"><i class="fa-regular fa-eye"></i></button></td>
+        </tr>`).join(''):'<tr><td colspan="8" class="empty">Aucun événement pour ces filtres.</td></tr>'}</tbody>
+    </table></div>
+    <div class="pager">
+      <span>Page ${auditPage+1} / ${pageCount} (${fmtNum(auditTotal)} au total)</span>
+      <button id="aPrev" ${auditPage===0?'disabled':''}>‹ Précédent</button>
+      <button id="aNext" ${auditPage>=pageCount-1?'disabled':''}>Suivant ›</button>
+    </div>
+  </div>`;
+  $('fDateFrom').onchange=e=>{ auditDateFrom=e.target.value; auditPage=0; renderAudit(el); };
+  $('fDateTo').onchange=e=>{ auditDateTo=e.target.value; auditPage=0; renderAudit(el); };
+  $('fHotel').onchange=e=>{ auditFilterHotel=e.target.value; auditPage=0; renderAudit(el); };
+  $('fGroup').onchange=e=>{ auditFilterGroup=e.target.value; auditPage=0; renderAudit(el); };
+  $('fEntity').onchange=e=>{ auditFilterEntity=e.target.value; auditPage=0; renderAudit(el); };
+  $('fAction').onchange=e=>{ auditFilterAction=e.target.value; auditPage=0; renderAudit(el); };
+  $('fLevel').onchange=e=>{ auditFilterLevel=e.target.value; auditPage=0; renderAudit(el); };
+  $('aPrev').onclick=()=>{ auditPage--; renderAudit(el); };
+  $('aNext').onclick=()=>{ auditPage++; renderAudit(el); };
+  $('exportAudit').onclick=()=>downloadCSV('audit.csv', rows||[], [
+    {label:'Date',get:r=>fmtDateTime(r.created_at)},{label:'Admin',get:r=>r.admin_email},{label:'Action',get:r=>historyActionLabel(r.action)},
+    {label:'Objet',get:r=>r.entity},{label:'Hôtel',get:r=>r.hotel_name},{label:'Groupe',get:r=>r.group_name},{label:'Niveau',get:r=>r.level},
+  ]);
+  el.querySelectorAll('[data-payload]').forEach(b=>b.onclick=()=>{
+    const row=(rows||[]).find(r=>r.id===b.dataset.payload);
+    const entries=Object.entries(row.payload||{});
+    $('modal').innerHTML=`<h3>${esc(historyActionLabel(row.action))}</h3>
+      <div class="kv"><span>Date</span><b>${fmtDateTime(row.created_at)}</b></div>
+      <div class="kv"><span>Administrateur</span><b>${esc(row.admin_email||'—')}</b></div>
+      ${row.ip_address?`<div class="kv"><span>Adresse IP</span><b>${esc(row.ip_address)}</b></div>`:''}
+      ${entries.length?`<h4 style="margin:14px 0 8px;font-size:11px;text-transform:uppercase;color:var(--muted)">Détails</h4>${entries.map(([k,v])=>`<div class="kv"><span>${esc(k)}</span><b>${esc(formatPayloadValue(v))}</b></div>`).join('')}`:''}
+      <details style="margin-top:12px"><summary style="cursor:pointer;font-size:12px;color:var(--muted)">Voir le JSON brut</summary>
+        <pre style="background:#fafafe;border:1px solid var(--line);border-radius:10px;padding:14px;font-size:12px;white-space:pre-wrap;max-height:280px;overflow:auto;margin-top:8px">${esc(JSON.stringify(row.payload||{},null,2))}</pre>
+      </details>
+      <div class="mact"><button class="btn g" id="mCancel">Fermer</button></div>`;
+    $('modalbg').classList.add('on');
+    $('mCancel').onclick=()=>$('modalbg').classList.remove('on');
+  });
+}
+
+/* =====================================================================
+   Paramètres plateforme (Lot 5) — les 16 clés existantes uniquement
+   ===================================================================== */
+const SETTING_CATEGORY={
+  platform_name:'Identité', support_email:'Identité', terms_url:'Identité',
+  default_currency:'Configuration', default_billing_cycle:'Configuration', default_commitment:'Configuration',
+  default_tva_rate:'Configuration', billing_email:'Configuration',
+  trial_duration_days:'Essais', max_trial_days:'Essais', min_trial_days:'Essais', max_trial_extensions:'Essais',
+  dunning_days_before:'Relances', churn_alert_rate:'Objectifs', mrr_target:'Objectifs', arr_target:'Objectifs',
+};
+function settingLabel(key){ return key.replace(/_/g,' ').replace(/^./,c=>c.toUpperCase()); }
+
+async function renderSettings(el){
+  el.innerHTML='<div class="loading"><i class="fa-solid fa-circle-notch fa-spin"></i> Chargement…</div>';
+  const {data,error}=await sb.from('platform_settings').select('*').order('key');
+  if(error) throw error;
+  const byCategory={};
+  (data||[]).forEach(s=>{ const cat=SETTING_CATEGORY[s.key]||'Autres'; (byCategory[cat]=byCategory[cat]||[]).push(s); });
+
+  el.innerHTML=`<div class="page">
+    <div class="phead"><div><h1>Paramètres plateforme</h1><div class="sub">${fmtNum((data||[]).length)} paramètre(s) — toute modification est validée, auditée et réservée au Super Admin</div></div></div>
+    ${Object.entries(byCategory).map(([cat,settings])=>`
+      <div class="box" style="margin-bottom:16px">
+        <h3><i class="fa-solid fa-gear"></i> ${esc(cat)}</h3>
+        <div class="tlist">
+          ${settings.map(s=>`<div class="it">
+            <div><div class="nm">${esc(settingLabel(s.key))}</div><div class="sub">${esc(s.description||'')}</div></div>
+            <div class="right" style="display:flex;align-items:center;gap:10px">
+              <span>${esc(typeof s.value==='object'?JSON.stringify(s.value):String(s.value))}</span>
+              <button class="btn sm g" data-edit-setting="${esc(s.key)}">Modifier</button>
+            </div>
+          </div>`).join('')}
+        </div>
+      </div>
+    `).join('')}
+  </div>`;
+
+  el.querySelectorAll('[data-edit-setting]').forEach(b=>b.onclick=()=>{
+    const setting=(data||[]).find(s=>s.key===b.dataset.editSetting);
+    const type=settingValueType(setting.key);
+    const currentDisplay=type==='array'?(setting.value||[]).join(', '):(typeof setting.value==='string'?setting.value:setting.value);
+    formModal({
+      title:`Modifier « ${settingLabel(setting.key)} »`,
+      bodyHtml:`
+        <p class="muted" style="font-size:12.5px;margin-bottom:10px">${esc(setting.description||'')}</p>
+        <div class="fld"><label>Nouvelle valeur${type==='array'?' (nombres séparés par des virgules)':''}</label><input id="sv_value" value="${esc(currentDisplay)}"></div>
+        <div class="fld"><label>Motif (optionnel)</label><input id="sv_reason" placeholder="Consigné dans l'audit"></div>
+        <div class="err" id="sv_err"></div>
+      `,
+      confirmLabel:'Enregistrer',
+      onConfirm: async()=>{
+        const raw=$('sv_value').value;
+        const validation=validateSettingValue(setting.key, raw);
+        if(!validation.valid){ throw new Error(validation.error); }
+        const {error}=await sb.rpc('admin_update_platform_setting',{p_key:setting.key,p_value:JSON.stringify(validation.value),p_reason:$('sv_reason').value.trim()||null});
+        if(error) throw error;
+        flash('Paramètre mis à jour.'); renderSettings(el);
+      }
+    });
+  });
+}
+
+/* =====================================================================
+   Supervision (Lot 5) — honnête : "Non supervisé" plutôt qu'un faux badge vert
+   ===================================================================== */
+async function renderSupervision(el){
+  el.innerHTML='<div class="loading"><i class="fa-solid fa-circle-notch fa-spin"></i> Chargement…</div>';
+  const {data:s,error}=await sb.rpc('admin_supervision_status');
+  if(error) throw error;
+  const notSupervised=()=>'<span class="tag gray">Non supervisé</span>';
+  el.innerHTML=`<div class="page">
+    <div class="phead"><div><h1>Supervision</h1><div class="sub">État technique de la plateforme — uniquement ce qui est réellement mesurable aujourd'hui</div></div></div>
+    <div class="cols2">
+      <div class="box"><h3><i class="fa-solid fa-database"></i> Base de données</h3>
+        <div class="tlist">
+          <div class="it"><div class="nm">Connexion</div><div class="right">${s.database_connected?'<span class="tag green">Connectée</span>':notSupervised()}</div></div>
+          <div class="it"><div class="nm">Dernière migration appliquée</div><div class="right"><b>${esc(s.last_migration_name||'—')}</b></div></div>
+          <div class="it"><div class="nm">Appliquée le</div><div class="right">${fmtDateTime(s.last_migration_at)}</div></div>
+        </div>
+      </div>
+      <div class="box"><h3><i class="fa-solid fa-code-branch"></i> Déploiement</h3>
+        <div class="tlist">
+          <div class="it"><div class="nm">Version frontend</div><div class="right"><b>Lot 5 — RC1 en préparation</b></div></div>
+          <div class="it"><div class="nm">Tâches planifiées (cron)</div><div class="right">${s.scheduled_tasks_known?`<span class="tag gray">${fmtNum(s.scheduled_tasks_count)}</span>`:notSupervised()}</div></div>
+          <div class="it"><div class="nm">Webhooks configurés</div><div class="right">${s.webhooks_configured?'<span class="tag green">Oui</span>':'<span class="tag gray">Aucun à ce jour</span>'}</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="box" style="margin-top:16px"><h3><i class="fa-solid fa-triangle-exclamation"></i> Signaux non encore instrumentés</h3>
+      <div class="tlist">
+        <div class="it"><div class="nm">Erreurs de mutation (RPC)</div><div class="right">${s.mutation_error_monitoring_available?'':notSupervised()}</div></div>
+        <div class="it"><div class="nm">Erreurs Edge Functions</div><div class="right">${s.edge_function_error_monitoring_available?'':notSupervised()}</div></div>
+      </div>
+      <p class="muted" style="font-size:12px;margin-top:10px">Ces deux signaux nécessitent une instrumentation dédiée (journalisation systématique des échecs) non construite à ce jour — dette documentée dans le dossier RC1, jamais simulée ici par un faux badge vert.</p>
+    </div>
+  </div>`;
+}
+
+boot();
+</script>
+</body>
+</html>
