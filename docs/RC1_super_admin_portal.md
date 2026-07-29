@@ -27,6 +27,7 @@ une nouvelle migration corrective, jamais par un script inverse).
 | `sql/74_super_admin_phase2d_lot3b_users_frontend_support.sql` | Lot 3b | Support frontend module Utilisateurs | Appliqué |
 | `sql/75_super_admin_phase2e_lot4_billing.sql` | Lot 4 | Schéma facturation plateforme, RPC facture/paiement/avoir | Appliqué |
 | `sql/76_super_admin_phase2f_lot5_dashboard_audit_settings_supervision.sql` | Lot 5 | Réserves Lot 4 + Dashboard/Alertes/Audit/Paramètres/Supervision | Appliqué (validé 26/26, commit `c749a2e`) |
+| `sql/77_super_admin_rc1_acl_hygiene.sql` | RC1 (stabilisation) | REVOKE/GRANT sur `admin_set_default_hotel`/`grant_superadmin_on_new_hotel` — aucun changement de comportement | Appliqué, vérifié non-destructivement (cf. B.3) |
 
 Chaque fichier possède un test SQL versionné correspondant sous `sql/tests/` (sauf 68/69/70/71/72,
 antérieurs à l'introduction de ce pattern — validés à l'époque par script combiné en transaction
@@ -143,37 +144,57 @@ aucun oubli détecté.
 Les 5 sont fermées sur les 4 rôles clients — conforme au doctrine du projet (jamais de `GRANT`
 sur un helper interne, quel que soit le rôle).
 
-### B.3 Fonctions historiques hors périmètre — écarts ACL réels détectés
+### B.3 Fonctions historiques hors périmètre — écarts ACL analysés et corrigés
 
-Ces fonctions **pré-existent à ce projet** (Lot 0 n'a fait que les auditer, pas les créer) et
-présentent un profil ACL différent du modèle Super Admin. Documentées ici, non corrigées (hors
-mandat des lots livrés) :
+Analyse détaillée demandée par le CTO avant merge (signature, owner, ACL brute via `proacl`,
+présence de garde interne, usage, risque réel, décision). Les deux écarts identifiés en première
+passe ont été **vérifiés en profondeur (lecture du corps de fonction, pas seulement du nom) puis
+corrigés** par `sql/77_super_admin_rc1_acl_hygiene.sql` (appliqué en production), un correctif de
+sécurité pur autorisé pendant le freeze, sans changement de comportement :
 
-- **`admin_set_default_hotel(p_user_id, p_hotel_id)`** — `anon_exec=true`,
-  `authenticated_exec=true`, `service_role_exec=true`. Malgré son préfixe `admin_`, ce n'est
-  **pas** une fonction Super Admin : c'est un self-service permettant à un utilisateur hôtel de
-  définir son propre hôtel par défaut (le nom est trompeur). Recommandation RC1 : soit la
-  renommer (`user_set_default_hotel`) pour lever l'ambiguïté avec le préfixe `admin_*`, soit
-  documenter explicitement l'exception dans le code. Ne bloque pas la RC1 (le corps de fonction
-  vérifie en interne `auth.uid() = p_user_id`, donc pas de faille — juste une incohérence de
-  nommage/attente ACL).
+- **`admin_set_default_hotel(p_user_id uuid, p_hotel_id uuid)`** — `RETURNS void`, owner
+  `postgres`, `SECURITY DEFINER`. **Correction d'une erreur de la première passe de ce dossier** :
+  ce n'est **pas** une fonction self-service comme initialement supposé sans lecture du code — la
+  lecture du corps de fonction confirme qu'elle contient bien
+  `IF NOT public.is_platform_admin() THEN RAISE EXCEPTION ... '42501'` : c'est une **véritable
+  mutation Super Admin** (elle permet de définir l'hôtel par défaut d'un utilisateur *arbitraire*,
+  pas seulement de l'appelant). ACL brute avant correctif : `{=X/postgres,...,anon=X/postgres,
+  authenticated=X/postgres,service_role=X/postgres}` — c'est-à-dire un grant PUBLIC (donc anon/
+  authenticated/service_role) jamais révoqué depuis sa création, seule fonction `admin_*` du
+  projet dans ce cas. **Usage** : fonction frontend potentielle (pas appelée par `admin.html`
+  aujourd'hui, mais exposée). **Risque réel avant correctif** : faible mais réel — un appelant
+  anonyme pouvait invoquer la fonction (elle aurait échoué avec 42501 grâce à la garde interne,
+  donc aucune exploitation possible), mais la défense en profondeur (ACL fermée) manquait,
+  contrairement aux 61 autres fonctions `admin_*`. **Décision : A — correction obligatoire avant
+  merge**, appliquée : `REVOKE ALL ... FROM PUBLIC, anon, service_role; GRANT EXECUTE ... TO
+  authenticated;`. Vérifié après coup : `anon_exec=false`, `authenticated_exec=true`,
+  `service_role_exec=false`, `public_exec_via_acl=false`.
+- **`grant_superadmin_on_new_hotel()`** — `RETURNS trigger`, owner `postgres`,
+  `SECURITY DEFINER`, fonction du trigger `trg_grant_superadmin_on_new_hotel`
+  (`AFTER INSERT ON hotels`, cf. section D.6), **pas une RPC**. Corps de fonction confirmé :
+  référence `NEW.id`/`NEW.name`, non défini hors contexte trigger — Postgres refuse
+  structurellement tout appel direct d'une fonction `RETURNS trigger` en dehors d'un déclenchement
+  de trigger, indépendamment de son ACL. **Risque réel : nul, prouvé** (protection au niveau du
+  moteur, pas seulement applicative). ACL brute avant correctif : même grant PUBLIC jamais
+  révoqué. **Usage** : interne (trigger uniquement), aucun usage frontend. **Décision : le risque
+  nul rendait ceci une dette B (acceptable après RC1) au sens strict, mais corrigé quand même par
+  cohérence et par prudence** (coût nul, même migration que ci-dessus) :
+  `REVOKE ALL ... FROM PUBLIC, anon, authenticated, service_role;`. **Vérifié non-destructivement**
+  après application : un test en transaction `BEGIN...ROLLBACK` confirme que le trigger continue
+  de fonctionner normalement après le `REVOKE EXECUTE` (l'insertion d'une nouvelle ligne dans
+  `hotels` déclenche toujours l'attribution automatique au Super Admin actif) — la révocation
+  d'EXECUTE sur une fonction n'affecte jamais son invocation par le mécanisme de trigger, qui
+  s'exécute indépendamment des privilèges du rôle appelant sur la fonction elle-même.
 - **`org_create_hotel` / `org_update_hotel` / `org_set_hotel_status` / `org_detach_hotel` /
   `org_get` / `org_provision`** — ouvertes à `anon`/`authenticated`/`service_role` par design :
   ce sont les RPC self-service tenant utilisées par `index.html`, **non liées au portail Super
-  Admin**, hors périmètre de ce chantier.
+  Admin**, hors périmètre de ce chantier. Non modifiées.
 - **`is_platform_admin()` / `platform_admin_role()` / `platform_dashboard_kpis()`** — ouvertes à
   tous les rôles par design : ce sont des fonctions de lecture bon marché (retournent
   `false`/`null` pour un non-admin) utilisées comme garde en amont par le frontend lui-même ;
-  aucune donnée sensible n'est retournée à un appelant non-admin.
-- **`grant_superadmin_on_new_hotel()`** — c'est la fonction du **trigger**
-  `trg_grant_superadmin_on_new_hotel` (déclenché `AFTER INSERT ON hotels`, cf. section D), pas
-  une RPC. Elle est néanmoins listée avec `anon_exec=true` par défaut de privilège Postgres sur
-  fonction non révoquée explicitement. Un appel direct via `rpc()` échouerait de toute façon (elle
-  référence `NEW`, disponible seulement en contexte trigger), donc pas de risque d'exploitation
-  réelle, mais l'hygiène ACL est incomplète. **Correctif mineur à prévoir en RC1 ou post-RC1** :
-  `REVOKE ALL ON FUNCTION grant_superadmin_on_new_hotel() FROM PUBLIC, anon, authenticated,
-  service_role;` (ne change rien au comportement du trigger, qui s'exécute avec les privilèges du
-  propriétaire de la fonction, pas ceux de l'appelant).
+  aucune donnée sensible n'est retournée à un appelant non-admin. Non modifiées.
+
+**Aucun écart ACL restant ouvert dans le périmètre du portail Super Admin après ce correctif.**
 
 ### B.4 Tables sensibles — ACL vérifiée
 
@@ -271,6 +292,18 @@ entier dépasse le mandat de ce projet et risque de casser des flux anonymes lé
 audités ici (portails de signature, auto-check-in...). Recommandation : **ne pas traiter avant
 RC1**, et si un traitement est décidé, le faire comme un chantier dédié avec son propre audit des
 flux anonymes existants.
+
+### D.8 Vérification ciblée — `group_move_cancellations` / `group_move_replacements` (findings advisors Checkout)
+
+Vérification demandée avant merge : aucune fonction `admin_*`/`platform_*` du portail Super
+Admin, aucune vue nommée `admin*`, et aucune ligne d'`admin.html` ne référencent ces deux tables.
+Confirmé par deux requêtes directes (`pg_get_functiondef` sur toutes les fonctions
+`admin_*`/`platform_*` + `pg_views.definition`, et `grep` sur `admin.html` et les 10 fichiers de
+migration Super Admin) : **zéro occurrence**. Les deux seules fonctions qui les référencent dans
+tout le schéma sont `group_move_cancel_applied` et `group_move_replace_applied` — le workflow de
+remplacement du module Planning de groupe (Checkout), sans lien avec le portail Super Admin.
+**Conclusion : risque strictement confiné au module Checkout, aucun chemin d'exposition via le
+portail Super Admin. Dette documentée, non traitée dans cette branche (hors mandat).**
 
 ---
 
@@ -375,10 +408,11 @@ charge sans erreur JS sur le parcours testé.
   `edge_function_error_monitoring_available` restent honnêtement `false` — aucune instrumentation
   réelle n'existe (une `RAISE EXCEPTION` fait un rollback avant tout log d'erreur possible ; aucun
   pipeline d'erreur Edge Function n'existe). Pas de faux badge vert affiché à la place.
-- Correctifs ACL d'hygiène sur `admin_set_default_hotel` (renommage) et
-  `grant_superadmin_on_new_hotel` (revoke explicite) — cf. B.3.
 - Constat transversal anon/table-level (D.7) — décision CTO requise avant tout traitement, portée
   bien au-delà de ce projet.
+
+*(Les deux écarts ACL sur `admin_set_default_hotel` et `grant_superadmin_on_new_hotel`, initialement
+listés ici, ont été corrigés avant merge — cf. B.3 et `sql/77_super_admin_rc1_acl_hygiene.sql`.)*
 
 ---
 
