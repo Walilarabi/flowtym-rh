@@ -793,7 +793,7 @@ function renderShell(){
     goView('hotels');
     const [{data:groups},{data:plans}]=await Promise.all([
       sb.from('hotel_groups').select('id,name,status'),
-      sb.from('subscription_plans').select('id,name,is_active'),
+      sb.from('subscription_plans').select('id,name,is_active').eq('plan_scope','public'),
     ]);
     setTimeout(()=>openHotelDrawer(null,groups,plans),50);
   };
@@ -996,11 +996,12 @@ function goToAlertEntity(alert){
    ===================================================================== */
 let hotelsPage=0, hotelsSort={key:'name',dir:'asc'}, hotelsFilterStatus='', hotelsFilterGroup='', hotelsFilterPlan='', hotelsFilterSub='', hotelsFilterTrial='';
 async function renderHotels(el){
-  const [{data:hotels,error:hErr},{data:groups,error:gErr},{data:subs},{data:plans},{data:users}]=await Promise.all([
+  const [{data:hotels,error:hErr},{data:groups,error:gErr},{data:subs},{data:plans},{data:publicPlans},{data:users}]=await Promise.all([
     sb.from('hotels').select('id,name,city,country,status,group_id,hotel_code,total_rooms,phone,email,siret,tva_number,company,stars,currency,timezone,address,zip,website,created_at,updated_at'),
     sb.from('hotel_groups').select('id,name,status'),
     sb.from('hotel_subscriptions').select('hotel_id,status,trial_ends_at,plan_id'),
     sb.from('subscription_plans').select('id,name'),
+    sb.from('subscription_plans').select('id,name,is_active').eq('plan_scope','public'),
     sb.from('users').select('id,hotel_id,is_active'),
   ]);
   if(hErr) throw hErr; if(gErr) throw gErr;
@@ -1077,7 +1078,7 @@ async function renderHotels(el){
   $('fTrial').onchange=e=>{ hotelsFilterTrial=e.target.value; hotelsPage=0; renderHotels(el); };
   $('hPrev').onclick=()=>{ hotelsPage--; renderHotels(el); };
   $('hNext').onclick=()=>{ hotelsPage++; renderHotels(el); };
-  $('addHotel').onclick=()=>openHotelDrawer(null,groups,plans);
+  $('addHotel').onclick=()=>openHotelDrawer(null,groups,publicPlans);
   $('exportHotels').onclick=()=>downloadCSV('hotels.csv', rows, [
     {label:'Nom',get:r=>r.name},{label:'Ville',get:r=>r.city},{label:'Statut',get:r=>hotelStatusBadge(r.status).label},
     {label:'Groupe',get:r=>r._group?groupNameOr(r._group.name):''},{label:'Plan',get:r=>r._plan?.name||''},
@@ -1881,7 +1882,9 @@ let subsFilterGroup='', subsFilterPlan='', subsFilterStatus='', subsFilterTrial=
 
 async function renderSubscriptions(el){
   el.innerHTML=`<div class="page">
-    <div class="phead"><div><h1>Abonnements</h1><div class="sub">Cycle de vie des abonnements et applications par hôtel</div></div></div>
+    <div class="phead"><div><h1>Abonnements</h1><div class="sub">Cycle de vie des abonnements et applications par hôtel</div></div>
+      <div class="actions"><button class="btn g" id="runExpiredTrials"><i class="fa-solid fa-hourglass-end"></i> Traiter les essais expirés</button></div>
+    </div>
     <div class="tabs">
       <button class="tab ${subsTab==='list'?'on':''}" data-tab="list">Abonnements</button>
       <button class="tab ${subsTab==='catalog'?'on':''}" data-tab="catalog">Catalogue des offres</button>
@@ -1889,6 +1892,15 @@ async function renderSubscriptions(el){
     <div id="subsBody"></div>
   </div>`;
   el.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{ subsTab=b.dataset.tab; renderSubscriptions(el); });
+  $('runExpiredTrials').onclick=()=>{
+    confirmAction({ title:'Traiter les essais expirés', body:'Applique immédiatement le traitement de fin d\'essai (essais dont la date est dépassée) à tous les hôtels concernés. Déclenchement manuel, consigné dans les journaux plateforme — ne modifie aucun essai dont la date n\'est pas encore atteinte.', confirmLabel:'Traiter maintenant', onConfirm: async()=>{
+      const {data,error}=await sb.rpc('admin_run_expired_trials_processing');
+      if(error) throw error;
+      const r=(data&&data[0])||{processed_subscriptions:0,processed_app_subscriptions:0,skipped_locked:0};
+      flash(`Traitement effectué : ${r.processed_subscriptions} abonnement(s) et ${r.processed_app_subscriptions} accès application(s) traités${r.skipped_locked?`, ${r.skipped_locked} ignoré(s) (en cours de traitement concurrent)`:''}.`);
+      renderSubscriptions(el);
+    }});
+  };
   const body=$('subsBody');
   if(subsTab==='catalog') await renderPlanCatalog(body);
   else await renderSubscriptionsList(body);
@@ -1905,6 +1917,9 @@ async function renderSubscriptionsList(el){
   if(hErr) throw hErr; if(sErr) throw sErr;
   const groupById=Object.fromEntries((groups||[]).map(g=>[g.id,g]));
   const planById=Object.fromEntries((plans||[]).map(p=>[p.id,p]));
+  const legacyPlan=(plans||[]).find(p=>p.slug==='legacy-pilot');
+  const subscribedHotelIds=new Set((subs||[]).map(s=>s.hotel_id));
+  const orphanHotels=(hotels||[]).filter(h=>h.status!=='archived' && !subscribedHotelIds.has(h.id));
 
   let rows=(subs||[]).map(s=>{
     const hotel=(hotels||[]).find(h=>h.id===s.hotel_id);
@@ -1933,6 +1948,17 @@ async function renderSubscriptionsList(el){
   const pageRows=rows.slice(subsPage*pageSize,(subsPage+1)*pageSize);
 
   el.innerHTML=`
+    ${orphanHotels.length?`
+    <div class="box" style="border-color:var(--amber);margin-bottom:16px">
+      <h3><i class="fa-solid fa-triangle-exclamation" style="color:var(--amber)"></i> ${orphanHotels.length} hôtel(s) sans abonnement principal</h3>
+      <p class="muted" style="font-size:13px;margin:4px 0 10px">Ces hôtels sont opérationnels mais n'ont aucune ligne d'abonnement — ils n'apparaissent dans aucun cycle de facturation. Régularisez-les via un accès interne (Legacy Pilot) en attendant une décision commerciale définitive, ou créez un abonnement commercial depuis leur fiche (vue Hôtels).</p>
+      <div class="it" style="flex-wrap:wrap;gap:8px">${orphanHotels.map(h=>`
+        <div class="tag gray" style="padding:6px 10px;display:flex;align-items:center;gap:8px">
+          ${esc(h.name)}
+          <button class="btn g" style="padding:2px 8px;font-size:12px" data-regularize="${h.id}">Régulariser (Legacy Pilot)</button>
+        </div>`).join('')}
+      </div>
+    </div>` : ''}
     <div class="filters">
       <select id="fGroup"><option value="">Tous les groupes</option>${(groups||[]).map(g=>`<option value="${g.id}" ${subsFilterGroup===g.id?'selected':''}>${esc(groupNameOr(g.name))}</option>`).join('')}</select>
       <select id="fPlan"><option value="">Tous les plans</option>${(plans||[]).map(p=>`<option value="${p.id}" ${subsFilterPlan===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}</select>
@@ -1972,6 +1998,26 @@ async function renderSubscriptionsList(el){
   $('sPrev')&&($('sPrev').onclick=()=>{ subsPage--; renderSubscriptionsList(el); });
   $('sNext')&&($('sNext').onclick=()=>{ subsPage++; renderSubscriptionsList(el); });
   el.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>openSubscriptionDrawer(rows.find(r=>r.id===b.dataset.open)));
+  el.querySelectorAll('[data-regularize]').forEach(b=>b.onclick=()=>{
+    const hotel=orphanHotels.find(h=>h.id===b.dataset.regularize);
+    if(!legacyPlan){ flash('Aucun plan interne « Legacy Pilot » n\'existe dans le catalogue. Créez-le depuis le Catalogue des offres avant de régulariser un hôtel.','e'); return; }
+    formModal({ title:`Régulariser ${hotel.name} (Legacy Pilot)`, confirmLabel:'Régulariser', bodyHtml:`
+      <p class="muted" style="font-size:13px">Crée un abonnement interne (hors catalogue commercial) pour cet hôtel, actif immédiatement, sans engagement de facturation. Cette action est tracée dans l'audit et exige une date de revue future.</p>
+      <div class="fld"><label>Plan</label><input value="${esc(legacyPlan.name)}" disabled></div>
+      <div class="fld"><label>Motif de régularisation *</label><input id="f_reason" placeholder="Ex : hôtel actif historique sans abonnement, régularisation décidée par le CTO"></div>
+      <div class="fld"><label>Date de revue *</label><input id="f_review" type="date"></div>
+      <div class="fld"><label>Justification tarifaire *</label><input id="f_price" placeholder="Ex : accès gratuit temporaire en attendant une décision commerciale"></div>
+    `, onConfirm: async()=>{
+      const reason=$('f_reason').value.trim(), review=$('f_review').value, price=$('f_price').value.trim();
+      if(!reason||!review||!price){ throw new Error('Tous les champs sont requis.'); }
+      const {error}=await sb.rpc('admin_regularize_legacy_subscription',{
+        p_hotel_id:hotel.id, p_plan_id:legacyPlan.id, p_reason:reason,
+        p_review_due_at:new Date(review).toISOString(), p_price_justification:price,
+      });
+      if(error) throw error;
+      flash('Hôtel régularisé (Legacy Pilot).'); renderSubscriptionsList(el);
+    }});
+  });
 }
 
 function rowSubscriptionHtml(s){
@@ -2005,7 +2051,7 @@ async function openSubscriptionDrawer(sub){
   const [{data:hotel},{data:plan},{data:allPlans},{data:events},{data:addons},{data:allAddons},{data:appAccess},{data:apps}]=await Promise.all([
     sb.from('hotels').select('id,name,group_id').eq('id',sub.hotel_id).maybeSingle(),
     sb.from('subscription_plans').select('*').eq('id',sub.plan_id).maybeSingle(),
-    sb.from('subscription_plans').select('id,name,is_active,archived_at').order('sort_order'),
+    sb.from('subscription_plans').select('id,name,is_active,archived_at').eq('plan_scope','public').order('sort_order'),
     sb.from('hotel_subscription_events').select('*').eq('subscription_id',sub.id).order('created_at',{ascending:false}),
     sb.from('hotel_addon_subscriptions').select('*, add_ons(name,app_id)').eq('hotel_id',sub.hotel_id),
     sb.from('add_ons').select('id,name,app_id').eq('is_active',true),
