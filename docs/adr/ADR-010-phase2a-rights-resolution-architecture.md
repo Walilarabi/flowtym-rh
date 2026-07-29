@@ -137,6 +137,54 @@ traité comme une erreur bloquante.
 
 ---
 
+## 6. Unicité de l'abonnement principal — hypothèse métier et évolution future
+
+**Décision** : la contrainte `hotel_subscriptions_hotel_id_key` (`UNIQUE (hotel_id)`) est
+**préexistante en production**, non ajoutée par la Phase 2A, et **n'est pas modifiée**
+(arbitrage CTO explicite lors de la revue contradictoire du commit `0319d7f`).
+
+**Hypothèse métier qu'elle impose** : *une seule ligne `hotel_subscriptions` par hôtel, à
+tout instant*. Concrètement, un hôtel ne peut avoir qu'un seul contrat commercial principal
+actif, en essai, suspendu, expiré ou annulé simultanément — pas d'historique de périodes
+contractuelles successives dans cette même table (un renouvellement, une conversion d'essai,
+un changement de plan sont tous des *mutations* de la ligne existante via
+`_hotel_subscription_transition`/les RPC de cycle de vie, jamais de nouvelles lignes).
+
+Cette hypothèse est cohérente avec le périmètre Phase 2A : `hotel_subscription_events` porte
+déjà la responsabilité de tracer l'historique des *transitions*, indépendamment du nombre de
+lignes dans `hotel_subscriptions`. La contrainte `UNIQUE` protège l'invariant « un hôtel =
+un abonnement principal » au niveau base, pas seulement par la vérification applicative
+`IF EXISTS (...)` des RPC de création — une course entre deux créations concurrentes
+échouerait proprement sur cette contrainte plutôt que de produire deux lignes.
+
+**Si le modèle devait évoluer pour conserver plusieurs périodes contractuelles distinctes**
+(ex. un historique complet de contrats successifs avec dates de début/fin propres, plutôt
+qu'un seul contrat mutable) — décision hors périmètre de ce lot — la contrainte `UNIQUE
+(hotel_id)` devrait être retirée de `hotel_subscriptions`, et une nouvelle table dédiée
+introduite, par exemple :
+
+```sql
+-- Esquisse, NON implémentée, à concevoir séparément si cette évolution est un jour décidée :
+CREATE TABLE hotel_subscription_periods (
+  id uuid PRIMARY KEY,
+  hotel_id uuid NOT NULL REFERENCES hotels(id),
+  plan_id uuid NOT NULL REFERENCES subscription_plans(id),
+  period_starts_at timestamptz NOT NULL,
+  period_ends_at timestamptz,          -- NULL = période en cours
+  -- ... mêmes colonnes snapshot_* que hotel_subscriptions aujourd'hui
+  EXCLUDE USING gist (hotel_id WITH =, tstzrange(period_starts_at, period_ends_at) WITH &&)
+  -- contrainte d'exclusion : empêche deux périodes qui se chevauchent pour le même hôtel,
+  -- remplaçant UNIQUE (hotel_id) par une unicité "au plus une période active à la fois"
+);
+```
+
+`hotel_subscriptions` deviendrait alors soit une vue sur la période en cours de
+`hotel_subscription_periods`, soit serait progressivement dépréciée en sa faveur — migration
+de données réelle, non triviale, à traiter comme un lot à part entière avec sa propre
+validation CTO, pas une extension incrémentale de la Phase 2A.
+
+---
+
 ## Impacts futurs
 
 - Toute nouvelle cause de divergence ajoutée au résolveur doit suivre le même principe :

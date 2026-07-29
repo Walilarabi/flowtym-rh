@@ -182,11 +182,43 @@ ALTER TABLE public.hotel_subscriptions
 -- Distinct de platform_logs (flux d'audit transverse à toute la plateforme) : timeline
 -- dédiée, exploitable directement par le futur drawer "Historique" (Phase 2D) sans filtrer
 -- le flux global. Écrite uniquement par des fonctions SECURITY DEFINER (section 7/8).
+--
+-- Correction CTO (revue contradictoire du commit 0319d7f, arbitrage A) : les 2 FK de
+-- cette table utilisaient ON DELETE CASCADE dans la version précédente. Inspection des 2
+-- contraintes, une par une — aucun remplacement aveugle :
+--
+--   Contrainte : hotel_subscription_events_subscription_id_fkey
+--   Table/colonne parentes : public.hotel_subscriptions(id)
+--   Comportement précédent : ON DELETE CASCADE (si la ligne hotel_subscriptions parente
+--     est supprimée physiquement, tout son historique disparaît silencieusement avec elle)
+--   Comportement cible : ON DELETE RESTRICT
+--   Justification métier : hotel_subscriptions n'est jamais supprimée physiquement dans la
+--     doctrine du projet (archivage/changement de statut uniquement — ADR-009 §11) ; mais
+--     si ce principe était un jour violé par erreur, CASCADE détruirait silencieusement un
+--     historique commercial/légal. RESTRICT transforme une violation de la doctrine en une
+--     erreur bloquante visible (FK), au lieu d'une perte de données silencieuse — conforme à
+--     « un historique d'abonnement ne doit jamais être supprimé automatiquement ».
+--
+--   Contrainte : hotel_subscription_events_hotel_id_fkey
+--   Table/colonne parentes : public.hotels(id)
+--   Comportement précédent : ON DELETE CASCADE (même risque, au niveau de l'hôtel entier :
+--     supprimer un hôtel aurait supprimé tout l'historique de tous ses abonnements)
+--   Comportement cible : ON DELETE RESTRICT
+--   Justification métier : identique — un hôtel doit être archivé (hotels.status='archived'),
+--     jamais supprimé physiquement, tant qu'il possède un historique d'abonnement. RESTRICT
+--     rend cette exigence exécutoire au niveau base plutôt que déclarative uniquement.
+--
+-- Aucun autre FK sur cette table (2 seulement : subscription_id, hotel_id) — inspection
+-- exhaustive, pas de remplacement partiel.
 
 CREATE TABLE IF NOT EXISTS public.hotel_subscription_events (
   id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  subscription_id   uuid NOT NULL REFERENCES public.hotel_subscriptions(id) ON DELETE CASCADE,
-  hotel_id          uuid NOT NULL REFERENCES public.hotels(id) ON DELETE CASCADE,
+  subscription_id   uuid NOT NULL
+    CONSTRAINT hotel_subscription_events_subscription_id_fkey
+    REFERENCES public.hotel_subscriptions(id) ON DELETE RESTRICT,
+  hotel_id          uuid NOT NULL
+    CONSTRAINT hotel_subscription_events_hotel_id_fkey
+    REFERENCES public.hotels(id) ON DELETE RESTRICT,
   event_type        text NOT NULL,
   from_status       text,
   to_status         text,
@@ -232,15 +264,32 @@ CREATE TRIGGER trg_hotel_subscription_events_no_delete BEFORE DELETE ON public.h
 -- ============================================================================
 -- 6. Index de performance (scans de la résolution des droits / expiration des essais)
 -- ============================================================================
+-- Corrections CTO (revue contradictoire, arbitrages C et D) :
+--
+--   idx_hs_hotel_id RETIRÉ (arbitrage C). Inspection : hotel_subscriptions porte déjà
+--   `hotel_subscriptions_hotel_id_key`, un index UNIQUE btree sur (hotel_id) seul, sans
+--   prédicat, sans colonne incluse — préexistant en production, non ajouté par cette
+--   migration. Comparaison colonne par colonne : même colonne (hotel_id), même ordre (une
+--   seule colonne), même méthode d'accès (btree), aucun prédicat des deux côtés, aucune
+--   colonne incluse des deux côtés → strictement redondant. L'index existant de la
+--   contrainte UNIQUE dessert déjà toute requête `WHERE hotel_id = ...`. Aucun index de
+--   production existant n'est supprimé par ce retrait : celui-ci n'a jamais été appliqué.
+--
+--   idx_hs_attribution_type RETIRÉ (arbitrage D). Aucune requête de ce lot (RPC, résolveur,
+--   rapport d'observation) ne filtre sur attribution_type — index spéculatif sans preuve de
+--   besoin, sur une colonne à cardinalité binaire ('commercial'/'internal_regularization')
+--   et une table d'une ligne aujourd'hui. Requête future qui pourrait le justifier, si elle
+--   se matérialise : un futur tableau de bord Phase 2D « abonnements de régularisation
+--   interne à revoir » du type
+--     SELECT * FROM hotel_subscriptions
+--      WHERE attribution_type = 'internal_regularization' AND review_due_at < now();
+--   — à réévaluer avec un EXPLAIN réel sur des volumes réels si/quand cette requête existe,
+--   pas avant.
 
 CREATE INDEX IF NOT EXISTS idx_hs_status_trial_ends
   ON public.hotel_subscriptions (status, trial_ends_at) WHERE status = 'trial';
 CREATE INDEX IF NOT EXISTS idx_has_status_trial_ends
   ON public.hotel_app_subscriptions (status, trial_ends_at) WHERE status = 'trial';
-CREATE INDEX IF NOT EXISTS idx_hs_attribution_type
-  ON public.hotel_subscriptions (attribution_type);
-CREATE INDEX IF NOT EXISTS idx_hs_hotel_id
-  ON public.hotel_subscriptions (hotel_id);
 
 -- ============================================================================
 -- 7. Helper interne — machine à états unique du cycle de vie (catégorie 2)
@@ -948,8 +997,12 @@ BEGIN
   IF NOT public.is_platform_admin() THEN
     RAISE EXCEPTION 'Accès refusé : réservé au super administrateur' USING errcode = '42501';
   END IF;
-  IF p_mode NOT IN ('observe', 'enforce') THEN
-    RAISE EXCEPTION 'Mode invalide : observe ou enforce attendu' USING errcode = '22023';
+  -- Correction CTO (revue contradictoire, arbitrage F) : `p_mode NOT IN (...)` évalue à NULL
+  -- (donc ne déclenche jamais l'exception) quand p_mode est NULL — piège classique de NOT IN
+  -- avec NULL en SQL. Un appel avec p_mode NULL retombait silencieusement en comportement
+  -- observe au lieu d'être rejeté. IS NULL est vérifié explicitement en premier, avant NOT IN.
+  IF p_mode IS NULL OR p_mode NOT IN ('observe', 'enforce') THEN
+    RAISE EXCEPTION 'Mode invalide : observe ou enforce attendu (NULL non accepté)' USING errcode = '22023';
   END IF;
   IF p_mode = 'enforce' THEN
     -- Verrou volontaire et explicite. Ne pas retirer ce bloc sans validation CTO documentée
@@ -1078,25 +1131,86 @@ $function$;
 --     $$select public.process_expired_subscription_trials();$$);
 
 -- ============================================================================
--- 11. GRANTS — RPC admin (catégorie 1, gardées en interne par is_platform_admin())
+-- 11. ACL des RPC frontend (catégorie 1/4, gardées en interne) — corrigé (arbitrage B)
 -- ============================================================================
+-- Correction CTO (revue contradictoire du commit 0319d7f) : la version précédente ne
+-- contenait qu'un GRANT TO authenticated par fonction, sans REVOKE FROM PUBLIC préalable.
+-- PostgreSQL accorde EXECUTE à PUBLIC par défaut à la création d'une fonction — ce grant
+-- implicite n'était jamais retiré, rendant les 17 fonctions ci-dessous techniquement
+-- exécutables par `anon` (sans conséquence exploitable, chacune étant gardée en interne par
+-- is_platform_admin() ou, pour resolve_my_app_access, par un repli sûr sur auth.uid() NULL —
+-- mais incohérent avec le verrouillage explicite déjà appliqué aux 3 helpers internes de la
+-- section 7/9/10). Chaque fonction reçoit maintenant un REVOKE ALL FROM PUBLIC explicite
+-- avant son GRANT, avec la signature exacte (types, sans les noms de paramètres — la
+-- signature qu'utilise PostgreSQL pour résoudre une fonction surchargée).
+--
+-- Doctrine appliquée (ne pas confondre) :
+--   RPC frontend (catégorie 1, 16 fonctions admin_* + admin_resolve_app_access) :
+--     REVOKE ALL FROM PUBLIC, puis GRANT EXECUTE TO authenticated, ET garde interne
+--     is_platform_admin() en première ligne du corps — vérifiée présente pour les 16.
+--   RPC frontend self-service (catégorie 4, resolve_my_app_access) : idem ACL, mais garde
+--     interne différente (repli sur auth.uid(), pas de vérification is_platform_admin(),
+--     car destinée à tout utilisateur authentifié résolvant SES PROPRES droits).
+--   Helper interne (catégorie 2/3, _hotel_subscription_transition, _resolve_app_access_core,
+--     process_expired_subscription_trials, sections 7/9/10) : REVOKE ALL FROM PUBLIC, anon,
+--     authenticated, service_role — AUCUN GRANT client, inchangé par cette correction.
+--
+-- Chaque mutation sensible de ces 16 RPC catégorie 1 est auditée de façon atomique, dans la
+-- même transaction que l'écriture métier : soit via un INSERT direct dans
+-- hotel_subscription_events (admin_create_subscription, admin_regularize_legacy_subscription),
+-- soit via l'appel au helper _hotel_subscription_transition qui centralise cette écriture
+-- (les 9 autres RPC de cycle de vie) — vérifié fonction par fonction, aucune mutation sans
+-- écriture d'événement correspondante.
 
+REVOKE ALL ON FUNCTION public.admin_create_subscription(uuid, uuid, text, numeric, text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.admin_create_subscription(uuid, uuid, text, numeric, text, text) TO authenticated;
+
+REVOKE ALL ON FUNCTION public.admin_regularize_legacy_subscription(uuid, uuid, text, timestamptz, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.admin_regularize_legacy_subscription(uuid, uuid, text, timestamptz, text) TO authenticated;
+
+REVOKE ALL ON FUNCTION public.admin_update_price_snapshot(uuid, numeric, numeric, text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.admin_update_price_snapshot(uuid, numeric, numeric, text, text) TO authenticated;
+
+REVOKE ALL ON FUNCTION public.admin_extend_trial(uuid, timestamptz, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.admin_extend_trial(uuid, timestamptz, text) TO authenticated;
+
+REVOKE ALL ON FUNCTION public.admin_convert_trial_to_active(uuid, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.admin_convert_trial_to_active(uuid, text) TO authenticated;
+
+REVOKE ALL ON FUNCTION public.admin_suspend_subscription(uuid, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.admin_suspend_subscription(uuid, text) TO authenticated;
+
+REVOKE ALL ON FUNCTION public.admin_reactivate_subscription(uuid, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.admin_reactivate_subscription(uuid, text) TO authenticated;
+
+REVOKE ALL ON FUNCTION public.admin_renew_subscription(uuid, date, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.admin_renew_subscription(uuid, date, text) TO authenticated;
+
+REVOKE ALL ON FUNCTION public.admin_cancel_subscription_immediate(uuid, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.admin_cancel_subscription_immediate(uuid, text) TO authenticated;
+
+REVOKE ALL ON FUNCTION public.admin_schedule_subscription_cancellation(uuid, timestamptz, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.admin_schedule_subscription_cancellation(uuid, timestamptz, text) TO authenticated;
+
+REVOKE ALL ON FUNCTION public.admin_revert_scheduled_cancellation(uuid, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.admin_revert_scheduled_cancellation(uuid, text) TO authenticated;
+
+REVOKE ALL ON FUNCTION public.admin_attach_addon(uuid, uuid, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.admin_attach_addon(uuid, uuid, text) TO authenticated;
+
+REVOKE ALL ON FUNCTION public.admin_detach_addon(uuid, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.admin_detach_addon(uuid, text) TO authenticated;
+
+REVOKE ALL ON FUNCTION public.admin_resolve_app_access(uuid, uuid, text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.admin_resolve_app_access(uuid, uuid, text, text) TO authenticated;
+
+REVOKE ALL ON FUNCTION public.admin_rights_divergence_report() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.admin_rights_divergence_report() TO authenticated;
+
+REVOKE ALL ON FUNCTION public.admin_run_expired_trials_processing() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.admin_run_expired_trials_processing() TO authenticated;
+
+REVOKE ALL ON FUNCTION public.resolve_my_app_access(uuid, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.resolve_my_app_access(uuid, text) TO authenticated;
 
 -- Fin de migration. Aucune donnée existante modifiée. Aucun plan Legacy Pilot inséré.
