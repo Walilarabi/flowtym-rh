@@ -377,6 +377,72 @@ function hotelActionsForStatus(status){
 }
 
 /* =====================================================================
+   Helpers purs — Utilisateurs et Accès (Lot 3, mirror exact de tests/lib/adminHelpers.js)
+   ===================================================================== */
+const HOTEL_ROLE_LABEL={
+  direction:'Direction', admin_hotel:'Administrateur hôtel', comptabilite:'Comptabilité',
+  revenue_manager:'Revenue manager', reception:'Réception', gouvernante:'Gouvernante',
+  femme_de_chambre:'Femme de chambre', maintenance:'Maintenance', breakfast:'Petit-déjeuner',
+};
+function hotelRoleLabel(role){ return HOTEL_ROLE_LABEL[role]||role||'—'; }
+
+const PLATFORM_ROLE_LABEL={super_admin:'Super Admin', billing_admin:'Administrateur facturation', support_agent:'Agent support'};
+function platformRoleLabel(role){ return PLATFORM_ROLE_LABEL[role]||role||'—'; }
+
+// Statut de COMPTE uniquement (jamais confondu avec le statut d'un accès hôtel précis, ni avec
+// le statut de l'hôtel lui-même, ni avec celui d'un abonnement) : désactivé > invitation en
+// attente/expirée > actif. Le seuil "expirée" est un indicateur d'UI (ancienneté de l'invitation
+// Supabase, dont la validité réelle est un paramètre de projet non piloté ici), pas une vraie
+// invalidation technique du lien.
+const INVITE_STALE_DAYS=14;
+function accountStatus({is_active, email_confirmed_at, invited_at}, nowMs){
+  if(is_active===false) return 'deactivated';
+  if(!email_confirmed_at){
+    if(invited_at){
+      const now=nowMs||Date.now();
+      const days=(now-new Date(invited_at).getTime())/86400000;
+      if(days>INVITE_STALE_DAYS) return 'expired_invite';
+    }
+    return 'pending_invite';
+  }
+  return 'active';
+}
+const ACCOUNT_STATUS_LABEL={active:'Actif', deactivated:'Désactivé', pending_invite:'Invitation en attente', expired_invite:'Invitation ancienne'};
+const ACCOUNT_STATUS_CLASS={active:'green', deactivated:'red', pending_invite:'amber', expired_invite:'gray'};
+function accountStatusBadge(status){ return {label:ACCOUNT_STATUS_LABEL[status]||status, cls:ACCOUNT_STATUS_CLASS[status]||'gray'}; }
+
+// Rôle "principal" affiché en liste : Super Admin plateforme prime (jamais confondu avec un
+// rôle hôtel), sinon le rôle de l'hôtel par défaut, sinon aucun rôle.
+function primaryRoleLabel(u){
+  if(u.is_super_admin) return 'Super Admin';
+  const hotels=u.hotels||[];
+  const def=hotels.find(h=>h.is_default)||hotels[0];
+  return def ? hotelRoleLabel(def.role) : '—';
+}
+
+// Phrase d'impact affichée avant un retrait d'accès hôtel — jamais un simple "Confirmer ?" pour
+// une action à fort impact (exigence CTO). Distingue le cas "encore d'autres hôtels" du cas
+// "c'était son dernier hôtel".
+function revokeHotelImpactMessage(hotelName, otherHotelNames){
+  if(!otherHotelNames || !otherHotelNames.length){
+    return `Cet utilisateur perdra l'accès à l'hôtel <b>${esc(hotelName)}</b> et n'aura plus aucun accès hôtel après cette action.`;
+  }
+  return `Cet utilisateur perdra l'accès à l'hôtel <b>${esc(hotelName)}</b>, mais conservera ses accès aux autres établissements (${otherHotelNames.map(esc).join(', ')}).`;
+}
+
+// Détecte le refus serveur "retrait laisserait l'hôtel sans administrateur" pour proposer un
+// remplaçant côté UI, sans dupliquer la logique de garde-fou (qui reste 100% côté RPC).
+function isLastHotelAdminError(message){ return String(message||'').includes('sans administrateur'); }
+
+const ACTION_HISTORY_LABEL={
+  'user.invite':'Invitation envoyée', 'user.grant_hotel':'Accès hôtel accordé', 'user.revoke_hotel':'Accès hôtel retiré',
+  'user.change_role':'Rôle hôtel modifié', 'user.suspend':'Compte désactivé', 'user.reactivate':'Compte réactivé',
+  'platform_admin.grant':'Rôle plateforme accordé', 'platform_admin.revoke':'Rôle plateforme retiré',
+  'invite_user':'Invitation envoyée (par un administrateur hôtel)',
+};
+function historyActionLabel(action){ return ACTION_HISTORY_LABEL[action]||action||'—'; }
+
+/* =====================================================================
    Toast / drawer / confirm
    ===================================================================== */
 let toastT=null;
@@ -1144,59 +1210,409 @@ function openGroupDrawer(group, allHotels){
 }
 
 /* =====================================================================
-   Utilisateurs
+   Utilisateurs et Accès (Lot 3)
    ===================================================================== */
+let usersPage=0, usersSort={key:'_sortName',dir:'asc'};
+let usersFilterStatus='', usersFilterRole='', usersFilterHotel='', usersFilterGroup='', usersFilterPending='', usersFilterSuper='';
+
 async function renderUsers(el){
-  const [{data:rows,error:uErr},{data:unlinked,error:ulErr}]=await Promise.all([
+  el.innerHTML='<div class="loading"><i class="fa-solid fa-circle-notch fa-spin"></i> Chargement…</div>';
+  const [{data:rows,error:uErr},{data:unlinked,error:ulErr},{data:hotels},{data:groups}]=await Promise.all([
     sb.rpc('admin_list_user_access'),
     sb.rpc('admin_list_unlinked_auth_users'),
+    sb.from('hotels').select('id,name,status,group_id'),
+    sb.from('hotel_groups').select('id,name,status'),
   ]);
   if(uErr) throw uErr;
-  let list=rows||[];
+  const hotelById=Object.fromEntries((hotels||[]).map(h=>[h.id,h]));
+
+  let list=(rows||[]).map(u=>{
+    const groupIds=new Set((u.hotels||[]).map(h=>hotelById[h.hotel_id]?.group_id).filter(Boolean));
+    return {...u,
+      _status: accountStatus(u),
+      _primaryRole: primaryRoleLabel(u),
+      _sortName: (u.full_name||u.email||'').toLowerCase(),
+      _groupIds: groupIds,
+    };
+  });
+
   if(searchQuery.trim()){
     const q=searchQuery.trim().toLowerCase();
-    list=list.filter(u=>[u.email,u.full_name].filter(Boolean).some(v=>String(v).toLowerCase().includes(q)));
+    list=list.filter(u=>[u.email,u.full_name,...(u.hotels||[]).map(h=>h.hotel_name),...(u.group_names||[])]
+      .filter(Boolean).some(v=>String(v).toLowerCase().includes(q)));
   }
+  if(usersFilterStatus) list=list.filter(u=>u._status===usersFilterStatus);
+  if(usersFilterRole==='super_admin') list=list.filter(u=>u.is_super_admin);
+  else if(usersFilterRole) list=list.filter(u=>(u.hotels||[]).some(h=>h.role===usersFilterRole));
+  if(usersFilterHotel) list=list.filter(u=>(u.hotels||[]).some(h=>h.hotel_id===usersFilterHotel));
+  if(usersFilterGroup) list=list.filter(u=>u._groupIds.has(usersFilterGroup));
+  if(usersFilterPending==='yes') list=list.filter(u=>u._status==='pending_invite'||u._status==='expired_invite');
+  if(usersFilterSuper==='yes') list=list.filter(u=>u.is_super_admin);
+  list=sortRows(list, usersSort.key, usersSort.dir);
+
+  const pageSize=20, pageCount=Math.max(1,Math.ceil(list.length/pageSize));
+  usersPage=Math.min(usersPage,pageCount-1);
+  const pageRows=list.slice(usersPage*pageSize,(usersPage+1)*pageSize);
+
   el.innerHTML=`<div class="page">
-    <div class="phead"><div><h1>Utilisateurs</h1><div class="sub">${fmtNum(list.length)} utilisateur(s) sur l'ensemble des hôtels</div></div>
-      <div class="actions"><button class="btn g" id="exportUsers"><i class="fa-solid fa-download"></i> Exporter CSV</button></div>
+    <div class="phead"><div><h1>Utilisateurs</h1><div class="sub">${fmtNum(list.length)} utilisateur(s) sur l'ensemble de la plateforme</div></div>
+      <div class="actions">
+        <button class="btn g" id="exportUsers"><i class="fa-solid fa-download"></i> Exporter CSV</button>
+        <button class="btn p" id="inviteUserBtn"><i class="fa-solid fa-user-plus"></i> Inviter un utilisateur</button>
+      </div>
+    </div>
+    <div class="filters">
+      <select id="fUStatus"><option value="">Tous les statuts</option>${Object.entries(ACCOUNT_STATUS_LABEL).map(([k,l])=>`<option value="${k}" ${usersFilterStatus===k?'selected':''}>${l}</option>`).join('')}</select>
+      <select id="fURole"><option value="">Tous les rôles</option><option value="super_admin" ${usersFilterRole==='super_admin'?'selected':''}>Super Admin</option>${Object.entries(HOTEL_ROLE_LABEL).map(([k,l])=>`<option value="${k}" ${usersFilterRole===k?'selected':''}>${l}</option>`).join('')}</select>
+      <select id="fUHotel"><option value="">Tous les hôtels</option>${(hotels||[]).map(h=>`<option value="${h.id}" ${usersFilterHotel===h.id?'selected':''}>${esc(h.name)}</option>`).join('')}</select>
+      <select id="fUGroup"><option value="">Tous les groupes</option>${(groups||[]).filter(g=>g.status!=='archived').map(g=>`<option value="${g.id}" ${usersFilterGroup===g.id?'selected':''}>${esc(groupNameOr(g.name))}</option>`).join('')}</select>
+      <select id="fUPending"><option value="">Invitation : tous</option><option value="yes" ${usersFilterPending==='yes'?'selected':''}>En attente uniquement</option></select>
+      <select id="fUSuper"><option value="">Super Admin : tous</option><option value="yes" ${usersFilterSuper==='yes'?'selected':''}>Super Admin uniquement</option></select>
     </div>
     <div class="tblwrap"><table class="tbl">
-      <thead><tr><th>Utilisateur</th><th>Rôle global</th><th>Hôtels</th><th>Statut</th><th>Dernière connexion</th><th>Actions</th></tr></thead>
-      <tbody>${list.length?list.map(u=>`
-        <tr>
-          <td><b>${esc(u.full_name||u.email)}</b><div class="muted" style="font-size:11.5px">${esc(u.email)}</div></td>
-          <td>${esc(u.global_role||'—')}</td>
-          <td>${(u.hotels||[]).map(h=>`<span class="tag ${h.is_default?'blue':'gray'}" title="${esc(h.role)}">${esc(h.hotel_name)}</span>`).join(' ')||'<span class="muted">Aucun</span>'}</td>
-          <td><span class="tag ${u.is_active?'green':'red'}">${u.is_active?'Actif':'Suspendu'}</span></td>
-          <td>${fmtDateTime(u.last_login_at)}</td>
-          <td><button data-toggle="${u.user_id}|${!u.is_active}" title="${u.is_active?'Suspendre':'Réactiver'}"><i class="fa-solid ${u.is_active?'fa-user-slash':'fa-user-check'}"></i></button></td>
-        </tr>`).join(''):`<tr><td colspan="6" class="empty">Aucun utilisateur${searchQuery?' pour cette recherche':''}.</td></tr>`}</tbody>
+      <thead><tr>
+        <th data-k="_sortName">Utilisateur</th><th>Email</th><th data-k="_status">Statut</th><th>Rôle principal</th>
+        <th>Hôtels accessibles</th><th>Groupe</th><th data-k="last_login_at">Dernière connexion</th>
+        <th data-k="invited_at">Invité le</th><th data-k="updated_at">Modifié le</th><th>Actions</th>
+      </tr></thead>
+      <tbody>${pageRows.length?pageRows.map(rowUserHtml).join(''):`<tr><td colspan="10" class="empty">Aucun utilisateur${searchQuery?' pour cette recherche':''}.</td></tr>`}</tbody>
     </table></div>
+    <div class="pager">
+      <span>Page ${usersPage+1} / ${pageCount}</span>
+      <button id="uPrev" ${usersPage===0?'disabled':''}>‹ Précédent</button>
+      <button id="uNext" ${usersPage>=pageCount-1?'disabled':''}>Suivant ›</button>
+    </div>
     ${!ulErr && unlinked?.length ? `
     <div class="box" style="margin-top:18px">
       <h3><i class="fa-solid fa-user-clock"></i> Comptes non liés (${unlinked.length})</h3>
-      <p class="muted" style="font-size:12.5px;margin-bottom:12px">Comptes ayant créé un accès (auth) mais sans profil applicatif associé — inscriptions incomplètes ou anciens comptes à réconcilier.</p>
+      <p class="muted" style="font-size:12.5px;margin-bottom:12px">Comptes ayant créé un accès (auth) mais sans profil applicatif ni rôle plateforme associé — inscriptions incomplètes ou anciens comptes à réconcilier.</p>
       <div class="tlist">${unlinked.map(a=>`<div class="it"><div><div class="nm">${esc(a.email)}</div><div class="sub">Créé le ${fmtDate(a.created_at)}</div></div><div class="right">Dernière connexion : ${fmtDateTime(a.last_sign_in_at)}</div></div>`).join('')}</div>
     </div>`:''}
   </div>`;
+
+  el.querySelectorAll('th[data-k]').forEach(th=>th.onclick=()=>{
+    const k=th.dataset.k;
+    usersSort = usersSort.key===k ? {key:k,dir:usersSort.dir==='asc'?'desc':'asc'} : {key:k,dir:'asc'};
+    renderUsers(el);
+  });
+  $('fUStatus').onchange=e=>{ usersFilterStatus=e.target.value; usersPage=0; renderUsers(el); };
+  $('fURole').onchange=e=>{ usersFilterRole=e.target.value; usersPage=0; renderUsers(el); };
+  $('fUHotel').onchange=e=>{ usersFilterHotel=e.target.value; usersPage=0; renderUsers(el); };
+  $('fUGroup').onchange=e=>{ usersFilterGroup=e.target.value; usersPage=0; renderUsers(el); };
+  $('fUPending').onchange=e=>{ usersFilterPending=e.target.value; usersPage=0; renderUsers(el); };
+  $('fUSuper').onchange=e=>{ usersFilterSuper=e.target.value; usersPage=0; renderUsers(el); };
+  $('uPrev')&&($('uPrev').onclick=()=>{ usersPage--; renderUsers(el); });
+  $('uNext')&&($('uNext').onclick=()=>{ usersPage++; renderUsers(el); });
   $('exportUsers').onclick=()=>downloadCSV('utilisateurs.csv', list, [
-    {label:'Nom',get:r=>r.full_name},{label:'Email',get:r=>r.email},{label:'Rôle',get:r=>r.global_role},
-    {label:'Statut',get:r=>r.is_active?'Actif':'Suspendu'},{label:'Hôtels',get:r=>(r.hotels||[]).map(h=>h.hotel_name).join(', ')},
+    {label:'Nom',get:r=>r.full_name||''},{label:'Email',get:r=>r.email},
+    {label:'Statut',get:r=>accountStatusBadge(r._status).label},{label:'Rôle principal',get:r=>r._primaryRole},
+    {label:'Hôtels',get:r=>(r.hotels||[]).map(h=>h.hotel_name).join(', ')},
+    {label:'Groupe',get:r=>(r.group_names||[]).join(', ')},
+    {label:'Invité le',get:r=>fmtDateTime(r.invited_at)},{label:'Modifié le',get:r=>fmtDateTime(r.updated_at)},
   ]);
-  el.querySelectorAll('[data-toggle]').forEach(b=>b.onclick=()=>{
-    const [id,nextActiveStr]=b.dataset.toggle.split('|');
-    const nextActive = nextActiveStr==='true';
+  $('inviteUserBtn').onclick=()=>openInviteUserModal(hotels||[], ()=>renderUsers(el));
+  el.querySelectorAll('[data-open-user]').forEach(b=>b.onclick=()=>{
+    const row=list.find(u=>(u.user_id||('pa:'+u.auth_id))===b.dataset.openUser);
+    openUserDrawer(row, hotels||[], groups||[], ()=>renderView());
+  });
+}
+
+function rowUserHtml(u){
+  const st=accountStatusBadge(u._status);
+  const hotelTags=(u.hotels||[]).slice(0,3).map(h=>`<span class="tag ${h.is_default?'blue':'gray'}" title="${esc(hotelRoleLabel(h.role))}">${esc(h.hotel_name)}</span>`).join(' ');
+  const hotelMore=(u.hotels||[]).length>3?` <span class="tag gray">+${(u.hotels||[]).length-3}</span>`:'';
+  const groupTags=(u.group_names||[]).map(g=>`<span class="tag gray">${esc(groupNameOr(g))}</span>`).join(' ')||'<span class="muted">—</span>';
+  const rowKey = u.user_id || ('pa:'+u.auth_id);
+  return `<tr>
+    <td>
+      <div style="display:flex;align-items:center;gap:9px">
+        <div class="av" style="width:28px;height:28px;font-size:10.5px;background:${avColor(u.email)}">${initials(u.full_name||u.email)}</div>
+        <div><b>${esc(u.full_name||'(sans nom)')}</b>${u.is_super_admin?' <i class="fa-solid fa-shield-halved" style="color:var(--violet)" title="Super Admin"></i>':''}${u.is_platform_only?'<div class="muted" style="font-size:11px">Compte plateforme (sans profil hôtel)</div>':''}</div>
+      </div>
+    </td>
+    <td>${esc(u.email)}</td>
+    <td><span class="tag ${st.cls}">${esc(st.label)}</span></td>
+    <td>${esc(u._primaryRole)}</td>
+    <td>${hotelTags||'<span class="muted">Aucun</span>'}${hotelMore}</td>
+    <td>${groupTags}</td>
+    <td class="muted">${fmtDateTime(u.last_login_at)}</td>
+    <td class="muted">${fmtDateTime(u.invited_at)}</td>
+    <td class="muted">${fmtDateTime(u.updated_at)}</td>
+    <td><button data-open-user="${rowKey}" title="Ouvrir la fiche"><i class="fa-regular fa-eye"></i></button></td>
+  </tr>`;
+}
+
+/* ---- Invitation d'un utilisateur (via l'Edge Function invite-user, jamais de service_role côté client) ---- */
+function openInviteUserModal(hotels, onDone){
+  const activeHotels=(hotels||[]).filter(h=>h.status!=='archived');
+  formModal({
+    title:'Inviter un utilisateur',
+    bodyHtml:`
+      <div class="fld"><label>Hôtel *</label><select id="iv_hotel">${activeHotels.map(h=>`<option value="${h.id}">${esc(h.name)}</option>`).join('')}</select></div>
+      <div class="fld"><label>Rôle *</label><select id="iv_role">${Object.entries(HOTEL_ROLE_LABEL).map(([k,l])=>`<option value="${k}">${l}</option>`).join('')}</select></div>
+      <div class="row2">
+        <div class="fld"><label>Nom complet</label><input id="iv_name" placeholder="Optionnel"></div>
+        <div class="fld"><label>E-mail *</label><input id="iv_email" type="email"></div>
+      </div>
+      <p class="muted" style="font-size:12px">En tant que Super Admin, vous pouvez inviter sur n'importe quel hôtel — y compris le premier administrateur d'un hôtel qui n'en a encore aucun.</p>
+    `,
+    confirmLabel:'Envoyer l\'invitation',
+    onConfirm: async()=>{
+      const hotel_id=$('iv_hotel').value, role=$('iv_role').value, full_name=$('iv_name').value.trim(), email=$('iv_email').value.trim();
+      if(!email){ throw new Error('L\'e-mail est requis.'); }
+      const {data,error}=await sb.functions.invoke('invite-user',{body:{email, full_name, role, hotel_id, access_type:'manager'}});
+      if(error){ throw new Error(data?.error || error.message); }
+      if(data?.error) throw new Error(data.error);
+      flash(data?.already_existed ? 'Utilisateur existant : accès accordé et notifié.' : 'Invitation envoyée.');
+      onDone && onDone();
+    }
+  });
+}
+
+/* ---- Fiche détaillée d'un utilisateur (5 sections) ---- */
+async function openUserDrawer(row, allHotels, allGroups, onChange){
+  if(!row){ flash('Utilisateur introuvable.','e'); return; }
+  openDrawer(`<div class="dh"><button class="close" id="dClose"><i class="fa-solid fa-xmark"></i></button><h2>Chargement…</h2></div>`);
+  $('dClose').onclick=closeDrawer;
+
+  if(row.is_platform_only){
+    renderUserDrawerPlatformOnly(row, onChange);
+    return;
+  }
+  const {data:detail,error}=await sb.rpc('admin_get_user_detail',{p_user_id:row.user_id});
+  if(error){ flash(errorLabel(error.message),'e'); closeDrawer(); return; }
+  renderUserDrawerBody(row, detail, allHotels, allGroups, onChange);
+}
+
+function renderUserDrawerPlatformOnly(row, onChange){
+  openDrawer(`
+    <div class="dh"><button class="close" id="dClose"><i class="fa-solid fa-xmark"></i></button>
+      <h2>${esc(row.full_name||row.email)}</h2>
+      <div class="role"><span class="tag blue">Super Admin</span> · Compte plateforme sans profil hôtel</div>
+    </div>
+    <div class="sec"><h4>Identité</h4>
+      <div class="kv"><span>Email</span><b>${esc(row.email)}</b></div>
+      <div class="kv"><span>Rôle plateforme</span><b>${esc(platformRoleLabel(row.platform_role))}</b></div>
+      <div class="kv"><span>Dernière connexion</span><b>${fmtDateTime(row.last_login_at)}</b></div>
+      <p class="muted" style="font-size:12px;margin-top:8px">Ce compte n'a aucune fiche employé (public.users) — c'est un rôle plateforme pur. Aucun accès hôtel ne peut lui être attribué directement sous cette forme (limite documentée du Lot 3 ; nécessiterait de créer d'abord un profil employé).</p>
+      <div class="actrow">
+        <button class="btn d" id="uDemote"><i class="fa-solid fa-user-shield"></i> Retirer le rôle Super Admin</button>
+      </div>
+    </div>
+  `);
+  $('dClose').onclick=closeDrawer;
+  $('uDemote').onclick=()=>openRevokePlatformAdminModal(row.auth_id, onChange);
+}
+
+function renderUserDrawerBody(row, detail, allHotels, allGroups, onChange){
+  const id=detail.identity, hotelAcc=detail.hotel_access||[], groupAcc=detail.group_access||[];
+  const platform=detail.platform_role, history=detail.history||[];
+  const status=accountStatusBadge(accountStatus({is_active:id.is_active, email_confirmed_at:id.email_confirmed_at, invited_at:id.invited_at}));
+  const attachableHotels=(allHotels||[]).filter(h=>h.status!=='archived' && !hotelAcc.some(a=>a.hotel_id===h.id));
+  const attachableGroups=(allGroups||[]).filter(g=>g.status!=='archived');
+
+  openDrawer(`
+    <div class="dh"><button class="close" id="dClose"><i class="fa-solid fa-xmark"></i></button>
+      <h2>${esc(id.full_name||id.email)}</h2>
+      <div class="role"><span class="tag ${status.cls}">${esc(status.label)}</span>${platform?` · <span class="tag blue">${esc(platformRoleLabel(platform.role))}</span>`:''}</div>
+    </div>
+
+    <div class="sec"><h4>A. Identité</h4>
+      <div class="kv"><span>Email</span><b>${esc(id.email)}</b></div>
+      <div class="kv"><span>Créé le</span><b>${fmtDateTime(id.created_at)}</b></div>
+      <div class="kv"><span>Invité le</span><b>${fmtDateTime(id.invited_at)}</b></div>
+      <div class="kv"><span>Confirmé le</span><b>${id.accepted_at?fmtDateTime(id.accepted_at):'Pas encore confirmé'}</b></div>
+      <div class="kv"><span>Dernière connexion</span><b>${fmtDateTime(id.last_login_at)}</b></div>
+      <div class="kv"><span>Modifié le</span><b>${fmtDateTime(id.updated_at)}</b></div>
+      <div class="actrow">
+        ${id.is_active?'<button class="btn d" id="uDeactivate"><i class="fa-solid fa-user-slash"></i> Désactiver</button>':'<button class="btn g" id="uReactivate"><i class="fa-solid fa-user-check"></i> Réactiver</button>'}
+        <button class="btn g" id="uResetPwd"><i class="fa-regular fa-key"></i> Réinitialiser le mot de passe</button>
+        ${status.label==='Invitation en attente'||status.label==='Invitation ancienne'?'<button class="btn g" id="uResend"><i class="fa-regular fa-paper-plane"></i> Renvoyer l\'invitation</button>':''}
+      </div>
+    </div>
+
+    <div class="sec"><h4>B. Accès hôtels (${hotelAcc.length})</h4>
+      ${hotelAcc.length?hotelAcc.map(h=>`
+        <div class="hchip" style="align-items:flex-start;flex-direction:column;gap:6px">
+          <div style="display:flex;justify-content:space-between;width:100%;align-items:center">
+            <span><b>${esc(h.hotel_name)}</b>${h.is_default?' <span class="tag blue">Par défaut</span>':''}${h.hotel_status==='archived'?' <span class="tag gray">Hôtel archivé</span>':''}</span>
+            <button class="btn sm d" data-revoke-hotel="${h.hotel_id}">Retirer</button>
+          </div>
+          <div class="muted" style="font-size:11.5px">Accordé le ${fmtDateTime(h.granted_at)}${h.granted_by_name?' par '+esc(h.granted_by_name):''}${h.group_name?' · Groupe '+esc(groupNameOr(h.group_name)):''}</div>
+          <div style="display:flex;gap:6px;align-items:center">
+            <select data-role-hotel="${h.hotel_id}" style="padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:8px">
+              ${Object.entries(HOTEL_ROLE_LABEL).map(([k,l])=>`<option value="${k}" ${h.role===k?'selected':''}>${l}</option>`).join('')}
+            </select>
+            <button class="btn sm g" data-apply-role="${h.hotel_id}">Appliquer le rôle</button>
+          </div>
+        </div>`).join(''):'<div class="empty" style="padding:14px">Aucun accès hôtel.</div>'}
+      <div class="actrow">
+        <select id="uAddHotel" style="flex:1">${attachableHotels.length?attachableHotels.map(h=>`<option value="${h.id}">${esc(h.name)}</option>`).join(''):'<option value="">Aucun hôtel disponible</option>'}</select>
+        <select id="uAddHotelRole">${Object.entries(HOTEL_ROLE_LABEL).map(([k,l])=>`<option value="${k}">${l}</option>`).join('')}</select>
+        <button class="btn g" id="uAddHotelBtn" ${!attachableHotels.length?'disabled':''}>Ajouter un accès</button>
+      </div>
+    </div>
+
+    <div class="sec"><h4>C. Accès groupe (${groupAcc.length})</h4>
+      ${groupAcc.length?groupAcc.map(g=>`<div class="kv"><span>${esc(groupNameOr(g.group_name))}</span><b>${g.accessible_hotel_count}/${g.total_hotel_count} hôtel(s)</b></div>`).join(''):'<div class="empty" style="padding:14px">Aucun accès groupe dérivé de ses hôtels actuels.</div>'}
+      <p class="muted" style="font-size:11.5px;margin:8px 0">Action en masse : accorde ou retire l'accès sur tous les hôtels ACTUELS du groupe choisi (un hôtel qui rejoindrait le groupe plus tard n'hérite pas rétroactivement).</p>
+      <div class="actrow">
+        <select id="uGroupSel">${attachableGroups.map(g=>`<option value="${g.id}">${esc(groupNameOr(g.name))}</option>`).join('')}</select>
+        <select id="uGroupRole">${Object.entries(HOTEL_ROLE_LABEL).map(([k,l])=>`<option value="${k}">${l}</option>`).join('')}</select>
+        <button class="btn g" id="uGroupGrant">Accorder sur le groupe</button>
+        <button class="btn d" id="uGroupRevoke">Retirer sur le groupe</button>
+      </div>
+    </div>
+
+    <div class="sec"><h4>D. Rôle plateforme</h4>
+      ${platform?`
+        <div class="kv"><span>Rôle</span><b>${esc(platformRoleLabel(platform.role))}</b></div>
+        <div class="kv"><span>Statut</span><b>${platform.is_active?'Actif':'Inactif'}</b></div>
+        <div class="actrow">${platform.is_active?'<button class="btn d" id="uDemote"><i class="fa-solid fa-user-shield"></i> Retirer le rôle Super Admin</button>':'<button class="btn g" id="uPromote"><i class="fa-solid fa-user-shield"></i> Repromouvoir Super Admin</button>'}</div>
+      `:`<div class="empty" style="padding:14px">Aucun rôle plateforme.</div><div class="actrow"><button class="btn g" id="uPromote"><i class="fa-solid fa-user-shield"></i> Promouvoir Super Admin</button></div>`}
+    </div>
+
+    <div class="sec"><h4>E. Historique</h4>
+      <div class="tlist">
+        ${history.length?history.slice(0,50).map(h=>`<div class="it"><div><div class="nm">${esc(historyActionLabel(h.action))}</div><div class="sub">${esc(h.admin_email||'—')}</div></div><div class="right">${fmtDateTime(h.created_at)}</div></div>`).join(''):'<div class="empty" style="padding:14px">Aucun événement.</div>'}
+      </div>
+    </div>
+  `);
+
+  $('dClose').onclick=closeDrawer;
+  const refresh=()=>{ closeDrawer(); onChange && onChange(); };
+
+  $('uDeactivate')&&($('uDeactivate').onclick=()=>confirmAction({
+    title:'Désactiver cet utilisateur', danger:true,
+    body:`Cet utilisateur perdra immédiatement tout accès (hôtels : ${hotelAcc.map(h=>esc(h.hotel_name)).join(', ')||'aucun'}). Action réversible à tout moment.`,
+    confirmLabel:'Désactiver',
+    onConfirm: async()=>{ const {error}=await sb.rpc('admin_set_user_status',{p_user_id:row.user_id,p_active:false}); if(error) throw error; flash('Utilisateur désactivé.'); refresh(); }
+  }));
+  $('uReactivate')&&($('uReactivate').onclick=()=>confirmAction({
+    title:'Réactiver cet utilisateur', body:'L\'utilisateur retrouve immédiatement tous ses accès existants.', confirmLabel:'Réactiver',
+    onConfirm: async()=>{ const {error}=await sb.rpc('admin_set_user_status',{p_user_id:row.user_id,p_active:true}); if(error) throw error; flash('Utilisateur réactivé.'); refresh(); }
+  }));
+  $('uResetPwd').onclick=()=>confirmAction({
+    title:'Réinitialiser le mot de passe', body:`Un e-mail de réinitialisation sera envoyé à ${esc(id.email)}.`, confirmLabel:'Envoyer',
+    onConfirm: async()=>{ const {error}=await sb.auth.resetPasswordForEmail(id.email); if(error) throw error; flash('E-mail de réinitialisation envoyé.'); }
+  });
+  $('uResend')&&($('uResend').onclick=()=>{
+    const primary=hotelAcc.find(h=>h.is_default)||hotelAcc[0];
+    if(!primary){ flash('Aucun hôtel associé : impossible de renvoyer une invitation.','e'); return; }
     confirmAction({
-      title: nextActive ? 'Réactiver cet utilisateur' : 'Suspendre cet utilisateur',
-      body: nextActive ? 'L\'utilisateur retrouvera son accès immédiatement.' : 'L\'utilisateur perdra son accès immédiatement. Action réversible.',
-      confirmLabel: nextActive?'Réactiver':'Suspendre', danger:!nextActive,
+      title:'Renvoyer l\'invitation', body:`Un nouveau lien sera envoyé à ${esc(id.email)} pour l'hôtel ${esc(primary.hotel_name)}.`, confirmLabel:'Renvoyer',
       onConfirm: async()=>{
-        const {error}=await sb.rpc('admin_set_user_status',{p_user_id:id,p_active:nextActive});
-        if(error) throw error;
-        flash('Statut mis à jour.'); renderUsers(el);
+        const {data,error}=await sb.functions.invoke('invite-user',{body:{email:id.email, full_name:id.full_name, role:primary.role, hotel_id:primary.hotel_id, access_type:'manager'}});
+        if(error) throw new Error(data?.error||error.message);
+        if(data?.error) throw new Error(data.error);
+        flash('Invitation renvoyée.');
       }
     });
+  });
+
+  el_bindHotelAccessActions(row, hotelAcc, refresh);
+
+  $('uAddHotelBtn')&&($('uAddHotelBtn').onclick=()=>{
+    const hotelId=$('uAddHotel').value, role=$('uAddHotelRole').value;
+    if(!hotelId) return;
+    confirmAction({
+      title:'Ajouter un accès hôtel', body:`L'utilisateur pourra se connecter à cet hôtel avec le rôle « ${esc(hotelRoleLabel(role))} ».`, confirmLabel:'Ajouter',
+      onConfirm: async()=>{ const {error}=await sb.rpc('admin_grant_hotel',{p_user_id:row.user_id,p_hotel_id:hotelId,p_role:role}); if(error) throw error; flash('Accès hôtel ajouté.'); refresh(); }
+    });
+  });
+
+  $('uGroupGrant').onclick=()=>{
+    const groupId=$('uGroupSel').value, role=$('uGroupRole').value;
+    if(!groupId) return;
+    confirmAction({
+      title:'Accorder l\'accès sur tout le groupe', body:'L\'utilisateur recevra le rôle choisi sur chaque hôtel actuel de ce groupe.', confirmLabel:'Accorder',
+      onConfirm: async()=>{ const {error}=await sb.rpc('admin_grant_hotel_group_access',{p_user_id:row.user_id,p_group_id:groupId,p_role:role}); if(error) throw error; flash('Accès groupe accordé.'); refresh(); }
+    });
+  };
+  $('uGroupRevoke').onclick=()=>{
+    const groupId=$('uGroupSel').value;
+    if(!groupId) return;
+    confirmAction({
+      title:'Retirer l\'accès sur tout le groupe', danger:true, body:'L\'utilisateur perdra l\'accès à chaque hôtel actuel de ce groupe (les autres accès hors groupe sont conservés).', confirmLabel:'Retirer',
+      onConfirm: async()=>{ const {error}=await sb.rpc('admin_revoke_hotel_group_access',{p_user_id:row.user_id,p_group_id:groupId}); if(error) throw error; flash('Accès groupe retiré.'); refresh(); }
+    });
+  };
+
+  $('uPromote')&&($('uPromote').onclick=()=>confirmAction({
+    title:'Promouvoir Super Admin', body:'Cet utilisateur pourra administrer toute la plateforme (tous les hôtels, tous les groupes).', confirmLabel:'Promouvoir',
+    onConfirm: async()=>{ const {error}=await sb.rpc('admin_grant_platform_admin',{p_auth_id:id.auth_id,p_role:'super_admin'}); if(error) throw error; flash('Rôle Super Admin accordé.'); refresh(); }
+  }));
+  $('uDemote')&&($('uDemote').onclick=()=>openRevokePlatformAdminModal(id.auth_id, refresh));
+}
+
+// Actions sur un accès hôtel précis (retrait avec garde du dernier admin + changement de rôle) —
+// factorisé pour être réutilisé par la fiche normale et pourrait l'être par la fiche plateforme.
+function el_bindHotelAccessActions(row, hotelAcc, refresh){
+  document.querySelectorAll('[data-revoke-hotel]').forEach(b=>b.onclick=()=>{
+    const hotelId=b.dataset.revokeHotel;
+    const h=hotelAcc.find(x=>x.hotel_id===hotelId);
+    const others=hotelAcc.filter(x=>x.hotel_id!==hotelId).map(x=>x.hotel_name);
+    confirmAction({
+      title:`Retirer l'accès à ${h.hotel_name}`, danger:true,
+      body: revokeHotelImpactMessage(h.hotel_name, others),
+      confirmLabel:'Retirer',
+      onConfirm: async()=>{
+        const {error}=await sb.rpc('admin_revoke_hotel',{p_user_id:row.user_id,p_hotel_id:hotelId});
+        if(error){
+          if(isLastHotelAdminError(error.message)){
+            closeDrawer();
+            // Différé : confirmAction() referme modalbg juste après la résolution de onConfirm,
+            // ce qui écraserait immédiatement une nouvelle modale ouverte de façon synchrone ici.
+            setTimeout(()=>openReplacementNeededModal(row.user_id, hotelId, h.hotel_name, refresh), 0);
+            return;
+          }
+          throw error;
+        }
+        flash('Accès retiré.'); refresh();
+      }
+    });
+  });
+  document.querySelectorAll('[data-apply-role]').forEach(b=>b.onclick=()=>{
+    const hotelId=b.dataset.applyRole;
+    const sel=document.querySelector(`[data-role-hotel="${hotelId}"]`);
+    const role=sel.value;
+    const h=hotelAcc.find(x=>x.hotel_id===hotelId);
+    if(role===h.role) return;
+    confirmAction({
+      title:'Changer le rôle', body:`Nouveau rôle sur ${esc(h.hotel_name)} : ${esc(hotelRoleLabel(role))}.`, confirmLabel:'Appliquer',
+      onConfirm: async()=>{ const {error}=await sb.rpc('admin_set_hotel_role',{p_user_id:row.user_id,p_hotel_id:hotelId,p_role:role}); if(error) throw error; flash('Rôle mis à jour.'); refresh(); }
+    });
+  });
+}
+
+function openReplacementNeededModal(userId, hotelId, hotelName, refresh){
+  formModal({
+    title:'Un remplaçant est requis',
+    bodyHtml:`<p style="margin-bottom:12px">Ce retrait laisserait <b>${esc(hotelName)}</b> sans administrateur (direction ou administrateur hôtel). Choisissez un remplaçant pour cet hôtel — il recevra le rôle « Administrateur hôtel » avant le retrait.</p>
+      <div class="fld"><label>ID utilisateur remplaçant (depuis la liste Utilisateurs)</label><input id="rp_user" placeholder="Copiez l'identifiant depuis une autre fiche"></div>`,
+    confirmLabel:'Retirer avec remplacement', danger:true,
+    onConfirm: async()=>{
+      const replacementId=$('rp_user').value.trim();
+      if(!replacementId){ throw new Error('Un remplaçant est requis.'); }
+      const {error}=await sb.rpc('admin_revoke_hotel',{p_user_id:userId,p_hotel_id:hotelId,p_replacement_user_id:replacementId});
+      if(error) throw error;
+      flash('Accès retiré, remplaçant promu administrateur hôtel.'); refresh();
+    }
+  });
+}
+
+function openRevokePlatformAdminModal(authId, refresh){
+  formModal({
+    title:'Retirer le rôle Super Admin',
+    bodyHtml:`<div class="fld"><label>Motif *</label><textarea id="rv_reason" placeholder="Obligatoire — consigné dans l'historique"></textarea></div>`,
+    confirmLabel:'Retirer', danger:true,
+    onConfirm: async()=>{
+      const reason=$('rv_reason').value.trim();
+      if(!reason){ throw new Error('Un motif est requis.'); }
+      const {error}=await sb.rpc('admin_revoke_platform_admin',{p_auth_id:authId,p_reason:reason});
+      if(error) throw error;
+      flash('Rôle Super Admin retiré.'); refresh();
+    }
   });
 }
 

@@ -117,9 +117,65 @@ function hotelActionsForStatus(status) {
   };
 }
 
+/* =====================================================================
+   Helpers purs — Utilisateurs et Accès (Lot 3, mirror exact de admin.html)
+   ===================================================================== */
+const HOTEL_ROLE_LABEL = {
+  direction: 'Direction', admin_hotel: 'Administrateur hôtel', comptabilite: 'Comptabilité',
+  revenue_manager: 'Revenue manager', reception: 'Réception', gouvernante: 'Gouvernante',
+  femme_de_chambre: 'Femme de chambre', maintenance: 'Maintenance', breakfast: 'Petit-déjeuner',
+};
+function hotelRoleLabel(role) { return HOTEL_ROLE_LABEL[role] || role || '—'; }
+
+const PLATFORM_ROLE_LABEL = { super_admin: 'Super Admin', billing_admin: 'Administrateur facturation', support_agent: 'Agent support' };
+function platformRoleLabel(role) { return PLATFORM_ROLE_LABEL[role] || role || '—'; }
+
+const INVITE_STALE_DAYS = 14;
+function accountStatus({ is_active, email_confirmed_at, invited_at }, nowMs) {
+  if (is_active === false) return 'deactivated';
+  if (!email_confirmed_at) {
+    if (invited_at) {
+      const now = nowMs || Date.now();
+      const days = (now - new Date(invited_at).getTime()) / 86400000;
+      if (days > INVITE_STALE_DAYS) return 'expired_invite';
+    }
+    return 'pending_invite';
+  }
+  return 'active';
+}
+const ACCOUNT_STATUS_LABEL = { active: 'Actif', deactivated: 'Désactivé', pending_invite: 'Invitation en attente', expired_invite: 'Invitation ancienne' };
+const ACCOUNT_STATUS_CLASS = { active: 'green', deactivated: 'red', pending_invite: 'amber', expired_invite: 'gray' };
+function accountStatusBadge(status) { return { label: ACCOUNT_STATUS_LABEL[status] || status, cls: ACCOUNT_STATUS_CLASS[status] || 'gray' }; }
+
+function primaryRoleLabel(u) {
+  if (u.is_super_admin) return 'Super Admin';
+  const hotels = u.hotels || [];
+  const def = hotels.find(h => h.is_default) || hotels[0];
+  return def ? hotelRoleLabel(def.role) : '—';
+}
+
+function revokeHotelImpactMessage(hotelName, otherHotelNames) {
+  if (!otherHotelNames || !otherHotelNames.length) {
+    return `Cet utilisateur perdra l'accès à l'hôtel <b>${hotelName}</b> et n'aura plus aucun accès hôtel après cette action.`;
+  }
+  return `Cet utilisateur perdra l'accès à l'hôtel <b>${hotelName}</b>, mais conservera ses accès aux autres établissements (${otherHotelNames.join(', ')}).`;
+}
+
+function isLastHotelAdminError(message) { return String(message || '').includes('sans administrateur'); }
+
+const ACTION_HISTORY_LABEL = {
+  'user.invite': 'Invitation envoyée', 'user.grant_hotel': 'Accès hôtel accordé', 'user.revoke_hotel': 'Accès hôtel retiré',
+  'user.change_role': 'Rôle hôtel modifié', 'user.suspend': 'Compte désactivé', 'user.reactivate': 'Compte réactivé',
+  'platform_admin.grant': 'Rôle plateforme accordé', 'platform_admin.revoke': 'Rôle plateforme retiré',
+  'invite_user': 'Invitation envoyée (par un administrateur hôtel)',
+};
+function historyActionLabel(action) { return ACTION_HISTORY_LABEL[action] || action || '—'; }
+
 module.exports = {
   hotelStatusBadge, subscriptionStatusBadge, trialDaysRemaining,
   fmtMoney, fmtNum, groupNameOr, sortRows, errorLabel,
   attributionTypeBadge, addonStatusBadge, causeLabel, eventTypeLabel, actionsForStatus,
   hotelActionsForStatus,
+  hotelRoleLabel, platformRoleLabel, accountStatus, accountStatusBadge, primaryRoleLabel,
+  revokeHotelImpactMessage, isLastHotelAdminError, historyActionLabel,
 };

@@ -4,6 +4,8 @@ const {
   fmtMoney, fmtNum, groupNameOr, sortRows, errorLabel,
   attributionTypeBadge, addonStatusBadge, causeLabel, eventTypeLabel, actionsForStatus,
   hotelActionsForStatus,
+  hotelRoleLabel, platformRoleLabel, accountStatus, accountStatusBadge, primaryRoleLabel,
+  revokeHotelImpactMessage, isLastHotelAdminError, historyActionLabel,
 } = require('./lib/adminHelpers');
 
 describe('Super Admin — hotelStatusBadge()', () => {
@@ -226,5 +228,126 @@ describe('Super Admin — filtres Hôtels (logique pure reproduite)', () => {
   test('hôtel autonome (group_id null) affiché distinctement d\'un hôtel de groupe', () => {
     const autonomous = hotels.filter(h => !h.group_id);
     expect(autonomous.map(h => h.name)).toEqual(['Beta']);
+  });
+});
+
+describe('Super Admin — hotelRoleLabel() / platformRoleLabel()', () => {
+  test('mappe chaque rôle hôtel connu vers un libellé français', () => {
+    expect(hotelRoleLabel('direction')).toBe('Direction');
+    expect(hotelRoleLabel('admin_hotel')).toBe('Administrateur hôtel');
+    expect(hotelRoleLabel('femme_de_chambre')).toBe('Femme de chambre');
+  });
+  test('rôle hôtel inconnu ou vide retombe proprement', () => {
+    expect(hotelRoleLabel('mystere')).toBe('mystere');
+    expect(hotelRoleLabel(null)).toBe('—');
+  });
+  test('mappe chaque rôle plateforme connu vers un libellé français', () => {
+    expect(platformRoleLabel('super_admin')).toBe('Super Admin');
+    expect(platformRoleLabel('billing_admin')).toBe('Administrateur facturation');
+    expect(platformRoleLabel('support_agent')).toBe('Agent support');
+  });
+});
+
+describe('Super Admin — accountStatus() (jamais confondu avec le statut hôtel/abonnement)', () => {
+  const now = new Date('2026-07-29T12:00:00Z').getTime();
+  test('compte désactivé prime sur tout le reste', () => {
+    expect(accountStatus({ is_active: false, email_confirmed_at: null, invited_at: null }, now)).toBe('deactivated');
+    expect(accountStatus({ is_active: false, email_confirmed_at: '2026-01-01T00:00:00Z' }, now)).toBe('deactivated');
+  });
+  test('email confirmé et compte actif -> actif', () => {
+    expect(accountStatus({ is_active: true, email_confirmed_at: '2026-07-01T00:00:00Z' }, now)).toBe('active');
+  });
+  test('invitation récente non confirmée -> en attente', () => {
+    expect(accountStatus({ is_active: true, email_confirmed_at: null, invited_at: '2026-07-25T00:00:00Z' }, now)).toBe('pending_invite');
+  });
+  test('invitation non confirmée sans date -> en attente (jamais "expirée" sans référence de date)', () => {
+    expect(accountStatus({ is_active: true, email_confirmed_at: null, invited_at: null }, now)).toBe('pending_invite');
+  });
+  test('invitation non confirmée de plus de 14 jours -> ancienne (indicateur UI, pas une vraie expiration technique)', () => {
+    expect(accountStatus({ is_active: true, email_confirmed_at: null, invited_at: '2026-07-01T00:00:00Z' }, now)).toBe('expired_invite');
+  });
+  test('is_active null (compte plateforme pur) ne déclenche pas "désactivé"', () => {
+    expect(accountStatus({ is_active: null, email_confirmed_at: '2026-07-01T00:00:00Z' }, now)).toBe('active');
+  });
+});
+
+describe('Super Admin — accountStatusBadge()', () => {
+  test('mappe chaque statut vers un libellé et une classe distincts', () => {
+    expect(accountStatusBadge('active')).toEqual({ label: 'Actif', cls: 'green' });
+    expect(accountStatusBadge('deactivated')).toEqual({ label: 'Désactivé', cls: 'red' });
+    expect(accountStatusBadge('pending_invite')).toEqual({ label: 'Invitation en attente', cls: 'amber' });
+    expect(accountStatusBadge('expired_invite')).toEqual({ label: 'Invitation ancienne', cls: 'gray' });
+  });
+});
+
+describe('Super Admin — primaryRoleLabel() (Super Admin jamais confondu avec un rôle hôtel)', () => {
+  test('Super Admin plateforme prime toujours, même avec des accès hôtel', () => {
+    expect(primaryRoleLabel({ is_super_admin: true, hotels: [{ role: 'reception', is_default: true }] })).toBe('Super Admin');
+  });
+  test('sans rôle plateforme : rôle de l\'hôtel par défaut', () => {
+    expect(primaryRoleLabel({ is_super_admin: false, hotels: [{ role: 'reception', is_default: false }, { role: 'direction', is_default: true }] })).toBe('Direction');
+  });
+  test('sans hôtel par défaut explicite, retombe sur le premier hôtel', () => {
+    expect(primaryRoleLabel({ is_super_admin: false, hotels: [{ role: 'gouvernante', is_default: false }] })).toBe('Gouvernante');
+  });
+  test('aucun accès du tout -> tiret', () => {
+    expect(primaryRoleLabel({ is_super_admin: false, hotels: [] })).toBe('—');
+  });
+});
+
+describe('Super Admin — revokeHotelImpactMessage() (impact explicite avant action à fort impact)', () => {
+  test('avec d\'autres hôtels : précise que les autres accès sont conservés', () => {
+    const msg = revokeHotelImpactMessage('Folkestone Opéra', ['Hôtel Rivoli', 'Hôtel Nation']);
+    expect(msg).toContain('Folkestone Opéra');
+    expect(msg).toContain('conservera ses accès aux autres établissements');
+    expect(msg).toContain('Hôtel Rivoli');
+  });
+  test('sans autre hôtel : avertit que l\'utilisateur perdra tout accès', () => {
+    const msg = revokeHotelImpactMessage('Folkestone Opéra', []);
+    expect(msg).toContain('n\'aura plus aucun accès hôtel');
+    expect(msg).not.toContain('conservera');
+  });
+});
+
+describe('Super Admin — isLastHotelAdminError()', () => {
+  test('détecte le message serveur du garde-fou dernier administrateur', () => {
+    expect(isLastHotelAdminError('Ce retrait laisserait l\'hôtel sans administrateur (direction/admin_hotel) — fournissez un remplaçant')).toBe(true);
+  });
+  test('ne se déclenche pas sur une autre erreur', () => {
+    expect(isLastHotelAdminError('Accès hôtel introuvable pour cet utilisateur')).toBe(false);
+    expect(isLastHotelAdminError(null)).toBe(false);
+  });
+});
+
+describe('Super Admin — historyActionLabel()', () => {
+  test('mappe chaque action journalisée vers un libellé lisible', () => {
+    expect(historyActionLabel('user.grant_hotel')).toBe('Accès hôtel accordé');
+    expect(historyActionLabel('user.revoke_hotel')).toBe('Accès hôtel retiré');
+    expect(historyActionLabel('user.change_role')).toBe('Rôle hôtel modifié');
+    expect(historyActionLabel('platform_admin.grant')).toBe('Rôle plateforme accordé');
+    expect(historyActionLabel('platform_admin.revoke')).toBe('Rôle plateforme retiré');
+  });
+  test('action inconnue retombe sur la valeur brute', () => {
+    expect(historyActionLabel('unknown.action')).toBe('unknown.action');
+  });
+});
+
+describe('Super Admin — filtres Utilisateurs (logique pure reproduite)', () => {
+  const users = [
+    { user_id: 'u1', email: 'a@x.com', is_super_admin: true, hotels: [], group_names: [] },
+    { user_id: 'u2', email: 'b@x.com', is_super_admin: false, hotels: [{ hotel_id: 'h1', hotel_name: 'Alpha', role: 'direction' }], group_names: ['Groupe A'] },
+    { user_id: 'u3', email: 'c@x.com', is_super_admin: false, hotels: [{ hotel_id: 'h2', hotel_name: 'Beta', role: 'reception' }], group_names: [] },
+  ];
+  test('filtre "Super Admin uniquement" isole les comptes plateforme', () => {
+    expect(users.filter(u => u.is_super_admin).map(u => u.user_id)).toEqual(['u1']);
+  });
+  test('filtre par rôle hôtel ignore les Super Admin sans cet accès', () => {
+    expect(users.filter(u => u.hotels.some(h => h.role === 'reception')).map(u => u.user_id)).toEqual(['u3']);
+  });
+  test('filtre par hôtel isole les utilisateurs ayant un accès à cet hôtel précis', () => {
+    expect(users.filter(u => u.hotels.some(h => h.hotel_id === 'h1')).map(u => u.user_id)).toEqual(['u2']);
+  });
+  test('filtre par groupe isole les utilisateurs dont un hôtel appartient à ce groupe', () => {
+    expect(users.filter(u => u.group_names.includes('Groupe A')).map(u => u.user_id)).toEqual(['u2']);
   });
 });
