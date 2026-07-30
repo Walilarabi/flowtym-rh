@@ -1,4 +1,4 @@
-// CI — vérifie la syntaxe JS des scripts inline (index.html, portal.html) et
+// CI — vérifie la syntaxe JS des scripts inline (index.html, portal.html, admin.html) et
 // signale le code de debug résiduel (debugger). Tolère le top-level await des
 // scripts type="module" (revalide en enveloppant dans une fonction async).
 import { readFileSync } from 'node:fs';
@@ -11,7 +11,7 @@ function checkSyntax(code) {
     catch (e2) { return e.message; }
   }
 }
-for (const file of ['index.html', 'portal.html']) {
+for (const file of ['index.html', 'portal.html', 'admin.html']) {
   const html = readFileSync(file, 'utf8');
   const re = /<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi;
   let m, i = 0;
