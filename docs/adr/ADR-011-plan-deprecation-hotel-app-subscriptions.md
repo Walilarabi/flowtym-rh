@@ -1,7 +1,9 @@
 # ADR-011 — Plan de dépréciation de `hotel_app_subscriptions`
 
 **Statut** : Approuvé sur le principe — **Phase 1 (retrait du consommateur "portail Super
-Admin") exécutée par la PR #18**, en attente de merge. Les phases suivantes (observation de
+Admin") exécutée par la PR #18, mergée dans `main` le 30/07/2026** (squash `9b62d6f`),
+migration `sql/79` appliquée en production et déploiement Vercel production confirmé
+(`dpl_6x4mTrAVbFraBP8mk3khTJvgL6Bc`). Les phases suivantes (observation de
 `invite-hotel-primary-contact`, retrait de `current_user_has_app()`, archivage, suppression)
 restent des chantiers distincts, non ouverts, chacun nécessitant sa propre validation CTO.
 
@@ -46,6 +48,17 @@ Résumé des faits établis par introspection directe de la base de production
 - Volumétrie réelle : 2 lignes (Folkestone RH/PMS), contre 24 lignes `user_app_access` et 5
   lignes `hotel_subscriptions` — elle ne peut structurellement pas être le mécanisme qui donne
   accès à la majorité des utilisateurs réels.
+- **Constat post-déploiement (30/07/2026, 10:53:57 UTC)** : les logs `platform_logs` montrent
+  qu'un déclenchement réel de « Traiter les essais expirés » a eu lieu **une minute avant**
+  l'application de la migration `sql/79` (10:55:04 UTC), donc encore via l'ancienne
+  `process_expired_subscription_trials()`. Ce déclenchement a fait passer les 2 lignes
+  Folkestone de `trial` à `expired` (`app_subscription_trial_expired`, entités
+  `52e01d0a-788f-4ad8-a6c9-507bd5e6eaa3` et `ba771ec3-8695-4cf0-8536-6261b4cdbee5`) — c'est
+  précisément l'écart préview/exécution que cette PR corrige, pris sur le fait en production.
+  L'abonnement principal Folkestone (`hotel_subscriptions`) n'a pas été affecté (`trial`,
+  échéance 28/08/2026, inchangée). Conformément à la décision CTO du 30/07/2026, ces 2 lignes
+  ne sont **pas** corrigées manuellement : elles restent en l'état, leur sort relève
+  exclusivement de la phase d'archivage (§4) de ce plan.
 
 **Conséquence** : la dépréciation ne consiste pas à retirer un système actif, mais à clore
 formellement un système déjà inerte en pratique — avec un seul point d'incertitude résiduel
@@ -81,7 +94,7 @@ sans attendre :
 
 | # | Contenu | Précondition | Statut |
 |---|---|---|---|
-| N | `sql/79_super_admin_p0_trial_app_access_coherence.sql` (PR #18) : crée `process_expired_hotel_subscription_trials()` (hotel_subscriptions uniquement) et repointe `admin_run_expired_trials_processing()` vers elle. **N'édite pas** `process_expired_subscription_trials()` — la laisse intacte, orpheline (0 appelant). Migration additive au sens strict : aucune donnée existante modifiée, `hotel_app_subscriptions` non touchée. | Contrat de prévisualisation (prévisualisation = exécution = `hotel_subscriptions`) validé par le CTO. | ✅ **Exécuté** (en attente de merge de la PR #18). |
+| N | `sql/79_super_admin_p0_trial_app_access_coherence.sql` (PR #18) : crée `process_expired_hotel_subscription_trials()` (hotel_subscriptions uniquement) et repointe `admin_run_expired_trials_processing()` vers elle. **N'édite pas** `process_expired_subscription_trials()` — la laisse intacte, orpheline (0 appelant). Migration additive au sens strict : aucune donnée existante modifiée, `hotel_app_subscriptions` non touchée. | Contrat de prévisualisation (prévisualisation = exécution = `hotel_subscriptions`) validé par le CTO. | ✅ **Exécuté** — PR #18 mergée (`9b62d6f`), migration appliquée en production, déploiement Vercel confirmé (`dpl_6x4mTrAVbFraBP8mk3khTJvgL6Bc`). Post-vérification : ACL correcte (`process_expired_hotel_subscription_trials` réservée à `postgres`, aucun grant `authenticated`/`anon`), 0 job `pg_cron`, 0 fonction publique référençant encore l'ancienne `process_expired_subscription_trials()`. |
 | N+1 | Ajoute une instrumentation temporaire sur `invite-hotel-primary-contact` (log distinct de `hotel_primary_contact_invited`, déclenché même en cas d'échec de la fonction) OU désactive la fonction (`supabase functions delete` / passage en `status: inactive` si l'outil le permet) — décision de méthode à trancher au moment de l'exécution, pas ici. | Validation CTO explicite du présent plan (obtenue sur le principe ; reste à ouvrir comme chantier). | Non commencé. |
 | N+2 | `DROP FUNCTION public.current_user_has_app(text)` — dernier chemin de lecture, déjà sans appelant réel (cf. Contexte). | Phase N+1 confirmée : 0 invocation réelle de `invite-hotel-primary-contact` sur la fenêtre d'observation (critère précis en §7). | Non commencé. |
 | N+3 | Archive les lignes réelles restantes (stratégie détaillée en §4), puis `DROP TABLE public.hotel_app_subscriptions`. | Archivage vérifié restituable (§4) + fenêtre de sécurité post-N+2 écoulée sans anomalie signalée. | Non commencé. |
