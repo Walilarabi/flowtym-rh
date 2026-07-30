@@ -185,9 +185,14 @@ button,select,input,textarea{font-family:inherit}
 .modalbg{position:fixed;inset:0;background:rgba(14,16,28,.48);display:none;z-index:150;align-items:center;justify-content:center;padding:20px}
 .modalbg.on{display:flex}
 .modal{background:#fff;border-radius:18px;width:min(440px,94vw);box-shadow:0 32px 80px rgba(0,0,0,.22);padding:24px}
+.modal.wide{width:min(720px,94vw);max-height:86vh;display:flex;flex-direction:column}
 .modal h3{font-size:16px;font-weight:800;margin-bottom:8px}
 .modal p{color:var(--ink2);font-size:13.5px;line-height:1.5;margin-bottom:18px}
 .modal .mact{display:flex;gap:10px;justify-content:flex-end}
+.modal .mscroll{overflow-y:auto;flex:1;margin:0 -4px 14px;padding:0 4px}
+.modal .msummary{background:var(--red-bg);color:var(--red);border-radius:12px;padding:12px 14px;font-size:13.5px;font-weight:700;margin-bottom:14px;line-height:1.5}
+.modal .msummary.ok{background:var(--green-bg);color:var(--green)}
+.modal .mwarn{background:var(--amber-bg);color:var(--amber);border-radius:10px;padding:8px 12px;font-size:12.5px;font-weight:600;margin-bottom:12px}
 
 /* ---- accès refusé ---- */
 .deny{height:100vh;display:grid;place-items:center}
@@ -1880,6 +1885,70 @@ function openRevokePlatformAdminModal(authId, refresh){
 let subsTab='list', subsPage=0, subsSort={key:'_hotelName',dir:'asc'};
 let subsFilterGroup='', subsFilterPlan='', subsFilterStatus='', subsFilterTrial='';
 
+// Prévisualisation stricte (lecture seule, admin_preview_expired_trials_processing) avant tout
+// clic sur "Traiter les essais expirés". Portée volontairement limitée à hotel_subscriptions
+// (l'abonnement principal) — décision ADR-011 (plan de dépréciation de
+// hotel_app_subscriptions) : aucune nouvelle logique métier ne doit raisonner sur cette table
+// legacy. Le traitement réel (process_expired_subscription_trials, inchangé) continue lui de
+// traiter aussi hotel_app_subscriptions — ce résidu de portée disparaîtra avec elle une fois le
+// moteur legacy retiré (cf. ADR-011). Le bouton de confirmation reste désactivé tant que la
+// prévisualisation n'est pas chargée, et si elle ne comporte aucune ligne.
+function openExpiredTrialsPreviewModal(el){
+  $('modal').className='modal wide';
+  $('modal').innerHTML=`<h3>Traiter les essais expirés</h3>
+    <div class="loading" style="padding:30px 0"><i class="fa-solid fa-circle-notch fa-spin"></i> Analyse des essais expirés…</div>
+    <div class="mact"><button class="btn g" id="mCancel">Annuler</button><button class="btn d" id="mOk" disabled>Traiter maintenant</button></div>`;
+  $('modalbg').classList.add('on');
+  $('mCancel').onclick=()=>{ $('modalbg').classList.remove('on'); $('modal').className='modal'; };
+  (async()=>{
+    let rows=[];
+    try{
+      const {data,error}=await sb.rpc('admin_preview_expired_trials_processing');
+      if(error) throw error;
+      rows=data||[];
+    }catch(e){
+      $('modal').innerHTML=`<h3>Traiter les essais expirés</h3>
+        <p>${esc(errorLabel(e.message))}</p>
+        <div class="mact"><button class="btn g" id="mCancel">Fermer</button></div>`;
+      $('mCancel').onclick=()=>{ $('modalbg').classList.remove('on'); $('modal').className='modal'; };
+      return;
+    }
+    const hotelCount=new Set(rows.map(r=>r.hotel_id)).size;
+    const summary=rows.length
+      ? `<div class="msummary">Cette action va expirer :<br>
+          • ${rows.length} abonnement${rows.length>1?'s':''} principal${rows.length>1?'aux':''}<br>
+          • ${hotelCount} hôtel${hotelCount>1?'s':''} concerné${hotelCount>1?'s':''}</div>`
+      : `<div class="msummary ok"><i class="fa-solid fa-circle-check"></i> Aucune action nécessaire — aucun essai n'a dépassé sa date d'échéance.</div>`;
+    const detailRows=rows.map(r=>`<div class="it" style="align-items:flex-start">
+        <div><div class="nm">${esc(r.hotel_name)} — Abonnement principal</div>
+          <div class="sub">Échéance ${fmtDateTime(r.trial_ends_at)} · ${r.days_since_expiry>=1?Math.floor(r.days_since_expiry)+' j de retard':'expiré aujourd\'hui'}</div>
+        </div>
+        <div class="right"><span class="tag red">expired</span></div>
+      </div>`).join('');
+    const detail=rows.length?`<div class="mscroll">${detailRows}</div>`:'';
+    $('modal').innerHTML=`<h3>Traiter les essais expirés</h3>
+      ${summary}
+      <p>Déclenchement manuel, consigné dans les journaux plateforme — ne modifie aucun essai dont la date n'est pas encore atteinte. Chaque ligne ci-dessous est recalculée et revalidée au moment du traitement (la prévisualisation n'est pas une garantie transactionnelle absolue).</p>
+      ${detail}
+      <div class="mact"><button class="btn g" id="mCancel">Annuler</button><button class="btn d" id="mOk" ${rows.length?'':'disabled'}>Traiter maintenant</button></div>`;
+    $('mCancel').onclick=()=>{ $('modalbg').classList.remove('on'); $('modal').className='modal'; };
+    $('mOk').onclick=async()=>{
+      $('mOk').disabled=true; $('mCancel').disabled=true;
+      try{
+        const {data,error}=await sb.rpc('admin_run_expired_trials_processing');
+        if(error) throw error;
+        const r=(data&&data[0])||{processed_subscriptions:0,skipped_locked:0};
+        flash(`Traitement effectué : ${r.processed_subscriptions} abonnement(s) principal(aux) traité(s)${r.skipped_locked?`, ${r.skipped_locked} ignoré(s) (en cours de traitement concurrent)`:''}.`);
+        $('modalbg').classList.remove('on'); $('modal').className='modal';
+        renderSubscriptions(el);
+      }catch(e){
+        flash(errorLabel(e.message),'e');
+        $('mOk').disabled=false; $('mCancel').disabled=false;
+      }
+    };
+  })();
+}
+
 async function renderSubscriptions(el){
   el.innerHTML=`<div class="page">
     <div class="phead"><div><h1>Abonnements</h1><div class="sub">Cycle de vie des abonnements et applications par hôtel</div></div>
@@ -1892,15 +1961,7 @@ async function renderSubscriptions(el){
     <div id="subsBody"></div>
   </div>`;
   el.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{ subsTab=b.dataset.tab; renderSubscriptions(el); });
-  $('runExpiredTrials').onclick=()=>{
-    confirmAction({ title:'Traiter les essais expirés', body:'Applique immédiatement le traitement de fin d\'essai (essais dont la date est dépassée) à tous les hôtels concernés. Déclenchement manuel, consigné dans les journaux plateforme — ne modifie aucun essai dont la date n\'est pas encore atteinte.', confirmLabel:'Traiter maintenant', onConfirm: async()=>{
-      const {data,error}=await sb.rpc('admin_run_expired_trials_processing');
-      if(error) throw error;
-      const r=(data&&data[0])||{processed_subscriptions:0,processed_app_subscriptions:0,skipped_locked:0};
-      flash(`Traitement effectué : ${r.processed_subscriptions} abonnement(s) et ${r.processed_app_subscriptions} accès application(s) traités${r.skipped_locked?`, ${r.skipped_locked} ignoré(s) (en cours de traitement concurrent)`:''}.`);
-      renderSubscriptions(el);
-    }});
-  };
+  $('runExpiredTrials').onclick=()=>openExpiredTrialsPreviewModal(el);
   const body=$('subsBody');
   if(subsTab==='catalog') await renderPlanCatalog(body);
   else await renderSubscriptionsList(body);
