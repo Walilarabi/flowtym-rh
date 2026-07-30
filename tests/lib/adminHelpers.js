@@ -47,6 +47,45 @@ function sortRows(rows, key, dir) {
   });
 }
 
+// Attache groupe/abonnement/plan/nombre d'utilisateurs à chaque hôtel — pure, sans appel réseau.
+function buildHotelRows(hotels, groups, subs, plans, users) {
+  const groupById = Object.fromEntries((groups || []).map(g => [g.id, g]));
+  const planById = Object.fromEntries((plans || []).map(p => [p.id, p]));
+  const subByHotel = Object.fromEntries((subs || []).map(s => [s.hotel_id, s]));
+  return (hotels || []).map(h => ({
+    ...h, _group: groupById[h.group_id] || null, _sub: subByHotel[h.id] || null,
+    _plan: subByHotel[h.id] ? planById[subByHotel[h.id].plan_id] : null,
+    _userCount: (users || []).filter(u => u.hotel_id === h.id && u.is_active).length,
+  }));
+}
+
+// Recherche insensible à la casse sur nom/raison sociale/ville/code/e-mail — chaîne vide = pas de filtre.
+function filterHotelsBySearch(rows, query) {
+  const q = String(query || '').trim().toLowerCase();
+  if (!q) return rows;
+  return rows.filter(h => [h.name, h.company, h.city, h.hotel_code, h.email].filter(Boolean).some(v => String(v).toLowerCase().includes(q)));
+}
+
+// Pagination pure — recale la page demandée dans les bornes valides (0..pageCount-1).
+function paginateRows(rows, page, pageSize) {
+  const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
+  const safePage = Math.min(Math.max(0, page || 0), pageCount - 1);
+  return { pageRows: rows.slice(safePage * pageSize, (safePage + 1) * pageSize), pageCount, page: safePage };
+}
+
+// Libellé neutre par vue pour un échec de CHARGEMENT de page — jamais le message technique brut
+// (SQL/PostgREST) renvoyé par le backend. Miroir de VIEW_LOAD_ERROR_LABEL + renderView() (admin.html).
+const VIEW_LOAD_ERROR_LABEL = {
+  dashboard: 'le tableau de bord', hotels: 'la liste des hôtels', groups: 'la liste des groupes',
+  users: 'la liste des utilisateurs', subscriptions: 'la liste des abonnements',
+  billing: 'la facturation', audit: "le journal d'audit", settings: 'les paramètres',
+  supervision: 'la supervision',
+};
+function viewLoadErrorMessage(view) {
+  const label = VIEW_LOAD_ERROR_LABEL[view] || 'cette page';
+  return `Impossible de charger ${label}. Veuillez réessayer.`;
+}
+
 function errorLabel(msg) {
   const map = {
     NOM_VIDE: 'Le nom est requis.',
@@ -269,6 +308,7 @@ function formatPayloadValue(v) {
 module.exports = {
   hotelStatusBadge, subscriptionStatusBadge, trialDaysRemaining,
   fmtMoney, fmtNum, groupNameOr, sortRows, errorLabel,
+  buildHotelRows, filterHotelsBySearch, paginateRows, viewLoadErrorMessage,
   attributionTypeBadge, addonStatusBadge, causeLabel, eventTypeLabel, actionsForStatus,
   hotelActionsForStatus,
   hotelRoleLabel, platformRoleLabel, accountStatus, accountStatusBadge, primaryRoleLabel,
