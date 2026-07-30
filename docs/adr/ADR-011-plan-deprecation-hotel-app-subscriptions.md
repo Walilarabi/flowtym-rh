@@ -1,8 +1,21 @@
 # ADR-011 — Plan de dépréciation de `hotel_app_subscriptions`
 
-**Statut** : Proposé — plan à valider par le CTO avant ouverture du chantier d'exécution.
-Ce document ne contient **aucune migration exécutable** : il planifie un chantier futur,
-distinct de celui qui l'a fait naître (P0 cohérence essai/accès applicatifs, PR #18).
+**Statut** : Approuvé sur le principe — **Phase 1 (retrait du consommateur "portail Super
+Admin") exécutée par la PR #18**, en attente de merge. Les phases suivantes (observation de
+`invite-hotel-primary-contact`, retrait de `current_user_has_app()`, archivage, suppression)
+restent des chantiers distincts, non ouverts, chacun nécessitant sa propre validation CTO.
+
+**Amendement du 30/07/2026** : le contrat de la prévisualisation exigeait que "prévisualisation
+manuelle = exécution manuelle = `hotel_subscriptions` uniquement" — un écart entre ce que la
+prévisualisation annonçait (uniquement l'abonnement principal) et ce que l'exécution réelle
+modifiait (l'abonnement principal **et** `hotel_app_subscriptions`, via l'ancienne
+`process_expired_subscription_trials()`) a été jugé inacceptable pour une action Super Admin.
+La PR #18 retire donc ce consommateur interne : `admin_run_expired_trials_processing()` appelle
+désormais une fonction dédiée, `process_expired_hotel_subscription_trials()`, qui ne touche que
+`hotel_subscriptions`. C'est la première étape **effective** de la Phase "retrait des
+consommateurs internes" prévue en §1/§3 ci-dessous — décrite ici avec la précision que ce
+chantier appelait, le reste (`current_user_has_app`, l'Edge Function, l'archivage, la
+suppression) demeurant à l'état de plan.
 
 **Portée** : complète ADR-009 (architecture générale du portail) et ADR-010 (résolution des
 droits, Phase 2A) sur un point qu'aucun des deux ne tranchait : l'avenir de la table
@@ -43,25 +56,36 @@ d'observation avant toute suppression de schéma.
 
 ## 1. Étapes techniques de dépréciation
 
-Cinq phases séquentielles, chacune un jalon distinct nécessitant sa propre validation CTO
-avant de passer à la suivante — aucune ne peut être fusionnée avec la précédente :
+Six phases, chacune un jalon distinct nécessitant sa propre validation CTO avant de passer à
+la suivante. La phase 1 se scinde en deux sous-étapes indépendantes l'une de l'autre — le
+retrait du consommateur "portail" ne dépend techniquement pas de l'observation de l'Edge
+Function externe (aucun lien de cause entre les deux), c'est pourquoi il a pu être exécuté
+sans attendre :
 
-1. **Gel et observation** de l'unique chemin d'écriture externe (`invite-hotel-primary-contact`).
-2. **Retrait des consommateurs internes** (`process_expired_subscription_trials`,
-   `current_user_has_app`) une fois la phase 1 confirmée sans invocation réelle.
+1. **Retrait des consommateurs internes, sous-étape 1a — le portail Super Admin**
+   — ✅ **Exécuté (PR #18)**. `admin_run_expired_trials_processing()` n'appelle plus
+   `process_expired_subscription_trials()` (qui touchait aussi `hotel_app_subscriptions`) mais
+   `process_expired_hotel_subscription_trials()`, dédiée à `hotel_subscriptions` uniquement.
+   L'ancienne fonction reste en base, intacte, non supprimée — simplement sans appelant.
+1bis. **Gel et observation** de l'unique chemin d'écriture externe restant
+   (`invite-hotel-primary-contact`) — *non commencé, chantier distinct*.
+2. **Retrait des consommateurs internes, sous-étape 1b — `current_user_has_app()`**
+   — *non commencé*, à traiter une fois la phase 1bis confirmée sans invocation réelle (par
+   prudence de méthode : clore l'observation du seul chemin d'écriture avant de retirer le
+   dernier chemin de lecture, même si les deux sont techniquement indépendants).
 3. **Archivage** des lignes réelles existantes (actuellement 2 : Folkestone RH/PMS).
-4. **Suppression du schéma** (`DROP TABLE`), après une fenêtre de sécurité post-phase 2.
+4. **Suppression du schéma** (`DROP TABLE`), après une fenêtre de sécurité post-étape 2.
 5. **Amendement documentaire** (ADR-010 et le présent document, clôturés).
 
-## 2. Migrations successives (planifiées, non écrites)
+## 2. Migrations successives
 
-| # | Contenu | Précondition |
-|---|---|---|
-| N+1 | Ajoute une instrumentation temporaire sur `invite-hotel-primary-contact` (log distinct de `hotel_primary_contact_invited`, déclenché même en cas d'échec de la fonction) OU désactive la fonction (`supabase functions delete` / passage en `status: inactive` si l'outil le permet) — décision de méthode à trancher au moment de l'exécution, pas ici. | Validation CTO explicite du présent plan. |
-| N+2 | Retire la seconde boucle de `process_expired_subscription_trials()` (celle qui traite `hotel_app_subscriptions`) — migration **additive au sens strict** : ne touche pas la boucle `hotel_subscriptions`, ne modifie aucune donnée existante, ne change pas la signature de retour de la fonction (`processed_app_subscriptions` peut rester à 0 en permanence, ou la colonne être retirée dans une migration séparée si le contrat d'appel doit changer). | Phase 1 confirmée : 0 invocation réelle sur la fenêtre d'observation (critère précis en §7). |
-| N+3 | `DROP FUNCTION public.current_user_has_app(text)`. | Idem N+2 — les deux peuvent être combinées dans une seule migration si validées ensemble. |
-| N+4 | Archive les lignes réelles restantes (stratégie détaillée en §4), puis `DROP TABLE public.hotel_app_subscriptions`. | Archivage vérifié restituable (§4) + fenêtre de sécurité post-N+2/N+3 écoulée sans anomalie signalée. |
-| N+5 | Migration purement documentaire : amendement d'ADR-010 (§7 ci-dessous), clôture du présent ADR-011 avec statut "Exécuté". | N+4 appliquée et vérifiée en production. |
+| # | Contenu | Précondition | Statut |
+|---|---|---|---|
+| N | `sql/79_super_admin_p0_trial_app_access_coherence.sql` (PR #18) : crée `process_expired_hotel_subscription_trials()` (hotel_subscriptions uniquement) et repointe `admin_run_expired_trials_processing()` vers elle. **N'édite pas** `process_expired_subscription_trials()` — la laisse intacte, orpheline (0 appelant). Migration additive au sens strict : aucune donnée existante modifiée, `hotel_app_subscriptions` non touchée. | Contrat de prévisualisation (prévisualisation = exécution = `hotel_subscriptions`) validé par le CTO. | ✅ **Exécuté** (en attente de merge de la PR #18). |
+| N+1 | Ajoute une instrumentation temporaire sur `invite-hotel-primary-contact` (log distinct de `hotel_primary_contact_invited`, déclenché même en cas d'échec de la fonction) OU désactive la fonction (`supabase functions delete` / passage en `status: inactive` si l'outil le permet) — décision de méthode à trancher au moment de l'exécution, pas ici. | Validation CTO explicite du présent plan (obtenue sur le principe ; reste à ouvrir comme chantier). | Non commencé. |
+| N+2 | `DROP FUNCTION public.current_user_has_app(text)` — dernier chemin de lecture, déjà sans appelant réel (cf. Contexte). | Phase N+1 confirmée : 0 invocation réelle de `invite-hotel-primary-contact` sur la fenêtre d'observation (critère précis en §7). | Non commencé. |
+| N+3 | Archive les lignes réelles restantes (stratégie détaillée en §4), puis `DROP TABLE public.hotel_app_subscriptions`. | Archivage vérifié restituable (§4) + fenêtre de sécurité post-N+2 écoulée sans anomalie signalée. | Non commencé. |
+| N+4 | Migration purement documentaire : amendement d'ADR-010 (§6 ci-dessous), clôture du présent ADR-011 avec statut "Exécuté". | N+3 appliquée et vérifiée en production. | Non commencé. |
 
 Chaque migration reste individuellement re-jouable en transaction `BEGIN...ROLLBACK` avant
 application réelle, conformément à la doctrine déjà appliquée sur ce dossier (P0 précédent).
@@ -74,10 +98,12 @@ application réelle, conformément à la doctrine déjà appliquée sur ce dossi
   cette fenêtre, la phase suivante est suspendue et le cas est traité individuellement (qui
   appelle cette fonction, pour quel usage, migration de cet appelant vers
   `admin_create_hotel_with_subscription` avant de poursuivre).
-- **Retrait des consommateurs internes → Archivage/Suppression** : aucune régression détectée
-  sur les tests SQL/Jest/Playwright après retrait de `current_user_has_app` et de la seconde
-  boucle de `process_expired_subscription_trials` — fenêtre de sécurité supplémentaire
-  proposée : 14 jours en production avant la migration N+4.
+- **Retrait des consommateurs internes → Archivage/Suppression** : le retrait du consommateur
+  "portail" (migration N, déjà exécuté) ne déclenche par lui-même aucune fenêtre de sécurité
+  supplémentaire — il ne change rien pour `hotel_app_subscriptions` elle-même, seulement pour
+  son ancien appelant. La fenêtre de sécurité s'applique au retrait de `current_user_has_app`
+  (N+2) : aucune régression détectée sur les tests SQL/Jest/Playwright après son retrait —
+  proposée à 14 jours en production avant la migration N+3.
 - **Chaque bascule est un acte CTO explicite**, documenté dans le commit qui l'exécute — jamais
   une continuation automatique d'une phase à l'autre.
 
@@ -109,19 +135,20 @@ la phase d'observation — traité comme une anomalie, cf. §3).
 
 ## 5. Critères de suppression définitive
 
-La migration N+4 (`DROP TABLE`) ne doit être exécutée que si **toutes** les conditions
+La migration N+3 (`DROP TABLE`) ne doit être exécutée que si **toutes** les conditions
 suivantes sont vérifiées simultanément :
 
-1. Fenêtre d'observation de la phase 1 écoulée sans invocation réelle de
+1. Retrait du consommateur "portail" (migration N) mergé et déployé sans anomalie — déjà
+   satisfait dès le merge de la PR #18.
+2. Fenêtre d'observation de la phase N+1 écoulée sans invocation réelle de
    `invite-hotel-primary-contact` (§3).
-2. `current_user_has_app()` et la seconde boucle de `process_expired_subscription_trials()`
-   retirées depuis au moins la fenêtre de sécurité définie en §3, sans anomalie signalée
-   (support, audit, ou alerte plateforme).
-3. Archivage exécuté et vérifié restituable (une requête de contrôle post-archivage doit
+3. `current_user_has_app()` retirée (migration N+2) depuis au moins la fenêtre de sécurité
+   définie en §3, sans anomalie signalée (support, audit, ou alerte plateforme).
+4. Archivage exécuté et vérifié restituable (une requête de contrôle post-archivage doit
    confirmer que chaque ligne source a son équivalent exact dans l'archive, avant le `DROP`).
-4. Aucune nouvelle ligne `hotel_app_subscriptions` apparue depuis le début de la phase
+5. Aucune nouvelle ligne `hotel_app_subscriptions` apparue depuis le début de la phase
    d'observation (sinon, reprise du cas au §3).
-5. Validation CTO explicite portant sur cette migration précise — pas une validation
+6. Validation CTO explicite portant sur cette migration précise — pas une validation
    générique du présent plan.
 
 ## 6. Impacts sur ADR-010
@@ -135,10 +162,10 @@ suivantes sont vérifiées simultanément :
 - **§2 (verrouillage `SKIP LOCKED`)** : sans impact — ne concerne que le comportement de
   `process_expired_subscription_trials` sur les lignes `hotel_subscriptions`, boucle
   conservée.
-- **§3 (activation du job planifié)** : sans impact direct, mais une fois la migration N+2
-  appliquée, la précondition « `process_expired_subscription_trials` ne doit plus produire
-  d'effet sur une table dont l'état cible n'est pas défini » devient plus simple à vérifier
-  (une seule table concernée au lieu de deux).
+- **§3 (activation du job planifié)** : sans impact direct, mais la migration N (déjà exécutée)
+  simplifie déjà la précondition « le traitement des essais expirés ne doit plus produire
+  d'effet sur une table dont l'état cible n'est pas défini » — `admin_run_expired_trials_processing`
+  ne concerne plus que `hotel_subscriptions`, une seule table au lieu de deux.
 - **§4 (doctrine de régularisation)** : continue de s'appliquer telle quelle à
   `hotel_subscriptions` (le cas Folkestone y reste un exemple de référence) ; ne s'étend pas à
   `hotel_app_subscriptions`, qui sort du périmètre de cette doctrine une fois supprimée.
@@ -150,20 +177,20 @@ perpétuelle).
 
 ## 7. Critères de validation avant suppression (checklist d'exécution)
 
-À produire comme preuve, au moment de proposer la migration N+4 au CTO :
+À produire comme preuve, au moment de proposer la migration N+3 au CTO :
 
+- [x] Migration N (retrait du consommateur "portail") mergée et déployée sans anomalie.
 - [ ] Requête d'audit `platform_logs`/logs d'invocation Edge Function couvrant l'intégralité
       de la fenêtre d'observation (§3), montrant 0 invocation réelle.
-- [ ] Confirmation que `current_user_has_app` et la seconde boucle de
-      `process_expired_subscription_trials` sont retirées depuis au moins la fenêtre de
+- [ ] Confirmation que `current_user_has_app()` est retirée depuis au moins la fenêtre de
       sécurité définie, sans ticket support ni alerte plateforme associée.
 - [ ] Résultat de la requête de contrôle post-archivage (comptage lignes source = lignes
       archivées, colonne par colonne sur un échantillon).
-- [ ] Suite SQL rejouée en transaction `BEGIN...ROLLBACK` sur la migration N+4 elle-même,
+- [ ] Suite SQL rejouée en transaction `BEGIN...ROLLBACK` sur la migration N+3 elle-même,
       confirmant qu'aucune contrainte (`pg_constraint.confrelid`) ne bloque le `DROP`.
-- [ ] Jest complet + smoke test manuel du portail Super Admin (aucune référence résiduelle à
-      `hotel_app_subscriptions` dans `admin.html`, déjà vrai depuis la PR #18 amendée).
-- [ ] Validation CTO explicite, documentée dans le commit de la migration N+4.
+- [x] Jest complet (499/499) + tests SQL en transaction `ROLLBACK` (14/14, PR #18) confirmant
+      qu'aucune ligne `hotel_app_subscriptions` n'est modifiée par le portail Super Admin.
+- [ ] Validation CTO explicite, documentée dans le commit de la migration N+3.
 
 ---
 

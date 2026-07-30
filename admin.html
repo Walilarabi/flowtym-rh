@@ -1937,8 +1937,8 @@ function openExpiredTrialsPreviewModal(el){
       try{
         const {data,error}=await sb.rpc('admin_run_expired_trials_processing');
         if(error) throw error;
-        const r=(data&&data[0])||{processed_subscriptions:0,processed_app_subscriptions:0,skipped_locked:0};
-        flash(`Traitement effectué : ${r.processed_subscriptions} abonnement(s) et ${r.processed_app_subscriptions} accès application(s) traités${r.skipped_locked?`, ${r.skipped_locked} ignoré(s) (en cours de traitement concurrent)`:''}.`);
+        const r=(data&&data[0])||{processed_subscriptions:0,skipped_locked:0};
+        flash(`Traitement effectué : ${r.processed_subscriptions} abonnement(s) principal(aux) traité(s)${r.skipped_locked?`, ${r.skipped_locked} ignoré(s) (en cours de traitement concurrent)`:''}.`);
         $('modalbg').classList.remove('on'); $('modal').className='modal';
         renderSubscriptions(el);
       }catch(e){
