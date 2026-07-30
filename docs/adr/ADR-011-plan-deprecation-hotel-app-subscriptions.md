@@ -48,22 +48,65 @@ Résumé des faits établis par introspection directe de la base de production
 - Volumétrie réelle : 2 lignes (Folkestone RH/PMS), contre 24 lignes `user_app_access` et 5
   lignes `hotel_subscriptions` — elle ne peut structurellement pas être le mécanisme qui donne
   accès à la majorité des utilisateurs réels.
-- **Constat post-déploiement (30/07/2026, 10:53:57 UTC)** : les logs `platform_logs` montrent
-  qu'un déclenchement réel de « Traiter les essais expirés » a eu lieu **une minute avant**
-  l'application de la migration `sql/79` (10:55:04 UTC), donc encore via l'ancienne
-  `process_expired_subscription_trials()`. Ce déclenchement a fait passer les 2 lignes
-  Folkestone de `trial` à `expired` (`app_subscription_trial_expired`, entités
-  `52e01d0a-788f-4ad8-a6c9-507bd5e6eaa3` et `ba771ec3-8695-4cf0-8536-6261b4cdbee5`) — c'est
-  précisément l'écart préview/exécution que cette PR corrige, pris sur le fait en production.
-  L'abonnement principal Folkestone (`hotel_subscriptions`) n'a pas été affecté (`trial`,
-  échéance 28/08/2026, inchangée). Conformément à la décision CTO du 30/07/2026, ces 2 lignes
-  ne sont **pas** corrigées manuellement : elles restent en l'état, leur sort relève
-  exclusivement de la phase d'archivage (§4) de ce plan.
+- **État figé des 2 lignes réelles** : `expired` depuis le 30/07/2026 — voir la section
+  « Événement historique de référence » ci-dessous pour l'origine exacte de ce statut et la
+  raison pour laquelle il ne sera pas corrigé manuellement.
 
 **Conséquence** : la dépréciation ne consiste pas à retirer un système actif, mais à clore
 formellement un système déjà inerte en pratique — avec un seul point d'incertitude résiduel
 (un appelant externe non identifiable depuis ce dépôt), traité ci-dessous par une phase
 d'observation avant toute suppression de schéma.
+
+---
+
+## Événement historique de référence
+
+Section de référence pour quiconque relira ce document dans plusieurs mois et se demandera
+pourquoi les 2 lignes `hotel_app_subscriptions` de Folkestone existent encore, en statut
+`expired`, alors que la table n'a plus aucun consommateur portail actif.
+
+**Le déclenchement du 30/07/2026, 10:53:57 UTC.** Un dernier déclenchement réel de
+« Traiter les essais expirés » a eu lieu depuis le portail Super Admin, **une minute avant**
+l'application de la migration `sql/79` (10:55:04 UTC) — donc encore par l'ancien moteur,
+`admin_run_expired_trials_processing()` appelant alors `process_expired_subscription_trials()`.
+Preuve (`platform_logs`, entrées horodatées `10:53:57.923691+00`, admin
+`walilarabi@gmail.com`) :
+
+- `trial_processing.manual_trigger` (`entity=system`, `entity_id=manual`) — le déclenchement lui-même.
+- `app_subscription_trial_expired` sur l'entité `52e01d0a-788f-4ad8-a6c9-507bd5e6eaa3`
+  (`hotel_app_subscription`), `hotel_id=02b9eb0e-89ef-45de-ba8e-20d4b41c500c` (Folkestone opera).
+- `app_subscription_trial_expired` sur l'entité `ba771ec3-8695-4cf0-8536-6261b4cdbee5`
+  (`hotel_app_subscription`), même hôtel.
+
+**C'est le dernier traitement ayant utilisé l'ancien moteur.** Les déclenchements suivants
+(10:54:01, 10:54:06 UTC — toujours avant `sql/79`) ne produisent plus aucune ligne
+`app_subscription_trial_expired` : il n'y avait déjà plus rien à traiter côté
+`hotel_app_subscriptions` pour ce moteur. Depuis l'application de `sql/79` (10:55:04 UTC),
+`process_expired_subscription_trials()` n'a plus aucun appelant (confirmé par introspection
+`pg_proc`/`pg_get_functiondef` le jour du merge de la PR #18) : ce déclenchement du 10:53:57
+est, et restera, le dernier de son espèce.
+
+**Effet sur les données.** Les 2 lignes `hotel_app_subscriptions` de Folkestone sont passées de
+`trial` à `expired` à cet instant précis. L'abonnement principal Folkestone
+(`hotel_subscriptions`) n'a pas été affecté : il est resté (et reste) `trial`, échéance fixée
+au 28/08/2026 (décision CTO du 29/07/2026, cf. ADR-010 §4). C'est exactement la classe de
+désynchronisation preview/exécution que la PR #18 rend structurellement impossible pour
+l'avenir — capturée ici sur le fait, une minute avant que le correctif ne l'empêche.
+
+**Décision : aucune correction manuelle.** Conformément à la décision CTO du 30/07/2026, ces 2
+lignes sont **volontairement conservées dans leur état historique** (`expired`). Elles ne
+seront :
+
+- ni synchronisées avec `hotel_subscriptions` ;
+- ni remises à `trial` ;
+- ni supprimées isolément ;
+- ni corrigées par un `UPDATE` manuel, quelle qu'en soit la justification.
+
+**Leur seul traitement futur légitime** est celui prévu par la phase d'archivage (§4) puis la
+migration N+3 (`DROP TABLE public.hotel_app_subscriptions`, §2 et §5) de ce plan — au même
+titre que le reste du contenu de la table, sans traitement spécial. Aucune urgence : ces lignes
+sont inertes (cf. Contexte), leur statut `expired` n'a aucun effet fonctionnel observé (aucune
+policy RLS ni code ne les consulte, cf. Contexte).
 
 ---
 

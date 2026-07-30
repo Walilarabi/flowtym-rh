@@ -1,5 +1,39 @@
 # Flowtym RH — Changelog
 
+## v1.5.2 — Portail Super Admin : contrat prévisualisation = exécution (essais expirés)
+
+### Cause
+Le traitement réel déclenché depuis `/admin` (« Traiter les essais expirés »,
+`admin_run_expired_trials_processing`) continuait à modifier `hotel_app_subscriptions`
+sous le capot via l'ancienne `process_expired_subscription_trials()`, alors que la
+prévisualisation (`admin_preview_expired_trials_processing`) ne l'annonçait plus —
+écart entre ce qu'une action Super Admin annonce et ce qu'elle exécute réellement,
+jugé inacceptable par le CTO. Capturé sur le fait en production le 30/07/2026 à
+10:53:57 UTC (un dernier déclenchement via l'ancien moteur, une minute avant
+l'application du correctif) : les 2 lignes `hotel_app_subscriptions` de Folkestone
+sont passées de `trial` à `expired` sans que la prévisualisation ne l'ait annoncé.
+
+### Correctif
+`sql/79_super_admin_p0_trial_app_access_coherence.sql` (PR #18) : nouvelle fonction
+dédiée `process_expired_hotel_subscription_trials()`, qui reprend à l'identique la
+logique `hotel_subscriptions` de l'ancienne fonction (même prédicat, même
+verrouillage `FOR UPDATE SKIP LOCKED`, même audit) sans la seconde boucle
+`hotel_app_subscriptions`. `admin_run_expired_trials_processing()` l'appelle
+désormais à sa place. Contrat rétabli : prévisualisation manuelle = exécution
+manuelle = `hotel_subscriptions` uniquement. `process_expired_subscription_trials()`
+reste en base intacte mais orpheline (0 appelant, vérifié par introspection
+`pg_proc`) — sa suppression relève d'une phase ultérieure.
+
+Première étape effective du plan de dépréciation `docs/adr/ADR-011-plan-deprecation-hotel-app-subscriptions.md`
+(retrait du consommateur « portail » vis-à-vis de `hotel_app_subscriptions`). Les 2
+lignes Folkestone restent volontairement en l'état (`expired`), non corrigées
+manuellement — voir ADR-011, section « Événement historique de référence ».
+
+### Tests
+14/14 scénarios SQL (`sql/tests/phase2b_p0_trial_coherence.sql`) en transaction
+`BEGIN...ROLLBACK` sur la production réelle, 499/499 Jest. Déployé en production et
+vérifié : ACL correcte, 0 job `pg_cron`, 0 appelant restant de l'ancienne fonction.
+
 ## v1.5.1 — Hotfix : statut MAD absent du menu Pointage RH
 
 ### Cause
