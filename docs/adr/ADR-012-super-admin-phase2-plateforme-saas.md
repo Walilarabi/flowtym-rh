@@ -1,47 +1,66 @@
 # ADR-012 — Phase 2 du Super Admin : plateforme SaaS de gestion commerciale et opérationnelle
 
-**Statut** : Proposé, round 2 — révision architecturale demandée après un premier retour
-favorable sur l'orientation générale. Toujours en attente de validation définitive. Aucune
-migration, aucune RPC, aucun code frontend n'a été écrit à ce stade — ni au round 1, ni dans
-cette révision.
+**Statut** : Round 3 — **Phase 2 officiellement lancée par décision CTO** (2026-07-30), structurée
+en **6 lots** dans un ordre imposé, plus un chantier Paiements explicitement reporté. Ce round
+intègre les décisions de lancement reçues telles quelles. **Toujours en attente de validation
+finale avant tout développement** — y compris le Lot 1, qui ne modifie pourtant le comportement
+d'aucun système existant. Aucune migration, aucune RPC, aucun code frontend n'a été écrit à ce
+stade, à aucun round.
 
-**Portée** : six domaines, dans l'ordre de développement demandé — Paiements, Licences,
-Périodes d'essai, Statistiques, Support, Supervision avancée.
+**Portée** : six lots, dans l'ordre de développement imposé par le CTO — Lot 1 (fondations
+Support), Lot 2 (`platform_notifications`), Lot 3 (Licences), Lot 4 (Essais), Lot 5 (Support —
+back-office puis portail hôtel), Lot 6 (Statistiques). Paiements reporté, note d'architecture
+métier seule dans ce round.
 
-**Ce qui a changé depuis le round 1** :
-1. Le lot de fondation Support (rétro-versionnement) est détaillé au niveau DDL complet —
-   contraintes, index, triggers, grants, policies, fonctions, séquence — et devient
-   explicitement le premier chantier technique de toute la Phase 2 (§2.5, §3.5, §6-PR01/02/03).
-2. La qualification de la faille `help_articles`/`support_tickets` a été retirée tant qu'elle
-   n'était pas démontrée. Un test réel a été exécuté en base (rôle `anon`, en transaction,
-   annulé) — résultat en §2.5.4. Le durcissement ACL est désormais une PR distincte du
-   rétro-versionnement, justifiée par ce test, pas par une supposition.
-3. Les 7 décisions CTO du round 1 ont reçu une réponse (§5) — reprises une à une pour
-   vérification qu'aucune n'a été oubliée.
-4. `platform_notifications` est spécifiée à un niveau opérationnel complet (§3.0).
-5. Chaque métrique Statistiques est formellement définie (source, formule, fréquence, fuseau,
-   traitement des annulations/avoirs/changements de plan, rejouabilité) — §3.4.
-6. Les questions métier Paiements sont listées avant tout choix de prestataire, avec le
-   contexte déjà connu de l'architecture existante — §3.1.
-7. Le plan de PR est réorganisé dans l'ordre demandé, avec fiche complète par PR (objectif,
-   fichiers, dépendances, migrations, risques, tests, critères d'acceptation, rollback) — §6.
+**Ce qui change dans ce round (round 2 → round 3)** :
+1. Le document est réorganisé selon la structure en **6 lots** communiquée par le CTO, dans
+   l'ordre exact demandé — les fiches PR du §6 sont regroupées et renumérotées en conséquence
+   (voir table de correspondance round 2 → round 3 en tête de §6). Aucune migration n'ayant
+   jamais été appliquée sous les anciens numéros, cette renumérotation n'a aucun effet sur la
+   production.
+2. **Lot 4 (Essais)** est complété : trois paliers de notification explicites (J-7/J-3/J-1),
+   une RPC de prévisualisation et une RPC d'exécution manuelle au prédicat strictement
+   identique — absent du round 2, qui ne spécifiait qu'un palier générique (§3.3).
+3. **Lot 5 (Support)** est scindé, comme demandé, en **deux PR strictement indépendantes** —
+   back-office (triage, assignation, priorité, **réponses**) et portail hôtel (création,
+   **suivi**, **pièces jointes**). Les réponses et les pièces jointes n'existaient pas au round
+   2 (qui ne couvrait que le triage de statut) : nouvelles tables `support_ticket_replies` et
+   `support_ticket_attachments`, nouveau bucket Storage — §3.5.8/§3.5.9.
+4. **Lot 6 (Statistiques)** reçoit la définition formelle du **score de santé plateforme**,
+   laissée en suspens au round 2 (« inchangé depuis le round 1 », jamais redétaillée) — §3.4.
+5. **Règle transverse ajoutée par le CTO** : chaque fiche PR doit désormais couvrir
+   explicitement 8 champs obligatoires — objectif, dépendances, migration, **reconstruction**,
+   tests, rollback, **smoke test**, **documentation**. Les deux premiers étaient déjà couverts
+   implicitement (tests incluait parfois la reconstruction) ; les trois nouveaux sont désormais
+   des champs séparés et systématiques dans toutes les fiches du §6 — voir gabarit en tête de
+   §6.
+6. **Paiements** : confirmé reporté. La note d'architecture métier demandée par le CTO
+   (qui facture, hôtel ou groupe, périodicité, TVA, prorata, avoirs, remboursements,
+   résiliation, export comptable) est déjà le contenu du §3.1 depuis le round 1 — ce round
+   la reconfirme comme le livrable attendu et n'ajoute aucun choix de prestataire ni aucune
+   migration.
+7. **Supervision avancée** (round 2 §2.6/§3.6, PR-11 « CMS + Sentry ») **ne fait pas partie
+   des 6 lots communiqués par le CTO pour ce lancement.** Ce n'est pas un retrait de contenu —
+   la matière reste documentée en annexe (§8) — mais elle sort du plan actif tant qu'elle n'est
+   pas explicitement reprogrammée. Aucun numéro de migration ne lui est réservé dans ce round.
 
 ---
 
 ## 0. Méthode
 
 Round 1 : audit factuel par 5 recherches parallèles + lecture directe des ADR/RC1/roadmap.
-Round 2 (cette révision) : introspection complémentaire ciblée sur `support_tickets`/
-`help_articles` (contraintes, index, triggers, séquence, fonctions associées) et **un test
-d'intrusion réel, exécuté en base**, pour qualifier précisément l'exposition `anon` — décrit
-en §2.5.4. Le test a été conduit en transaction (`BEGIN ... ROLLBACK`), avec `SET LOCAL ROLE
-anon` pour endosser exactement le rôle Postgres utilisé par PostgREST pour les requêtes non
-authentifiées (l'appel REST direct depuis le sandbox était bloqué par la politique réseau,
-comme documenté pour `*.vercel.app` ailleurs dans ce projet — `SET ROLE` teste la même
-mécanique de permission, au niveau où elle est réellement appliquée par Postgres). Vérifié
-après coup : zéro résidu en production (`support_tickets` : 0 ligne, `help_articles` : 8
-lignes inchangées, aucun titre `ANON*`). Effet de bord mineur et sans impact fonctionnel signalé
-en §2.5.4 (compteur de séquence).
+Round 2 : introspection complémentaire ciblée sur `support_tickets`/`help_articles` et un test
+d'intrusion réel exécuté en base (§2.5.4, inchangé, non rejoué dans ce round).
+Round 3 (cette révision) : aucune nouvelle introspection de l'existant n'était nécessaire pour
+les Lots 1 à 3 et 6 (l'état de production n'a pas changé depuis le round 2, hors la fusion de la
+PR #20 — correctif frontend pur, sans aucune migration, sans effet sur ce périmètre). Pour les
+Lots 4 et 5, introspection ciblée effectuée : recherche exhaustive de tables `%ticket%`/
+`%reply%`/`%message%`/`%attachment%` existantes (résultat : aucune table de réponses ni de
+pièces jointes pour `support_tickets` — confirme que ce sont de vraies additions, pas une
+duplication) et inventaire des buckets Storage existants (`communication-attachments`,
+`contracts`, `hr-documents`, `hr-templates`, `portal-documents` — aucun dédié au Support), pour
+concevoir §3.5.8/§3.5.9 par cohérence avec les patterns déjà en production (`ota_dispute_messages`/
+`ota_dispute_attachments`, `communication_attachments`) plutôt que par improvisation.
 
 ---
 
@@ -54,19 +73,29 @@ en §2.5.4 (compteur de séquence).
 - **Audit** : `platform_logs` via `_platform_log()` (admin) ou `_platform_log_system()`
   (système/trigger/cron) ; table événementielle métier dédiée quand un cycle de vie le
   justifie.
-- **Tables sensibles / soft-delete** : jamais de `DELETE` sur une entité journalisée.
+- **Tables sensibles / soft-delete** : jamais de `DELETE` sur une entité journalisée. Étendu
+  dans ce round aux tables conversationnelles (§3.5.8) : une réponse de ticket est elle-même
+  une entité journalisée par nature — **append-only**, aucune policy `UPDATE`/`DELETE`.
 - **Tests** : `sql/tests/<domaine>.sql`, `BEGIN` / fixtures `pg_temp.zz_*` / blocs
   `DO $$...EXCEPTION WHEN OTHERS...END $$` / `RAISE EXCEPTION` si FAIL / `ROLLBACK`.
 - **Nommage migrations** : `sql/NN_<domaine>_<description>.sql`. Dernier existant : `sql/79`.
   **La Phase 2 commence à `sql/80`.**
 - **Numérotation ADR** : dernier existant `ADR-011`. Ce document est **ADR-012**.
 - **Doctrine cron** (ADR-010 §3) : jamais activé dans la même migration que la fonctionnalité.
-  Migration séparée + validation CTO explicite et distincte.
+  Migration séparée + validation CTO explicite et distincte. **Confirmé par le lancement de ce
+  round : le cron reste désactivé pour le Lot 4** (instruction explicite du CTO).
 - **Leçon du P0 (PR #18)** : toute action de traitement par lot doit exposer une RPC de
-  prévisualisation dont le prédicat est strictement identique à celui de l'exécution.
-- **Principe du moindre privilège** (précisé dans cette révision) : un écart entre grants et
-  RLS ne se corrige qu'après avoir démontré, par un test réel, ce que l'écart permet
-  effectivement — jamais par supposition. Voir §2.5.4.
+  prévisualisation dont le prédicat est strictement identique à celui de l'exécution. **Ce
+  round applique ce principe explicitement au Lot 4** (§3.3) — c'est la même doctrine que
+  `admin_preview_expired_trials_processing`/`admin_run_expired_trials_processing`, réappliquée
+  aux notifications d'essai.
+- **Principe du moindre privilège** : un écart entre grants et RLS ne se corrige qu'après avoir
+  démontré, par un test réel, ce que l'écart permet effectivement — jamais par supposition.
+  Voir §2.5.4.
+- **Doctrine snapshot** (déjà appliquée aux factures — `bill_to_*`) : reprise pour
+  `platform_notifications.recipient_email`/`template_payload` (round 2, inchangé) et pour
+  `support_ticket_replies.author_label` (nouveau, round 3, §3.5.8) — un auteur ou destinataire
+  historique ne doit jamais dépendre d'une résolution différée par jointure.
 
 ---
 
@@ -88,21 +117,22 @@ par module, pas de système de quota ni de clé de licence.
 
 Cycle complet sur `hotel_subscriptions` (`sql/70`, `sql/79`, ADR-011), preview/exécution
 cohérentes depuis le P0. Cron jamais activé (0 job `pg_cron` en production). Aucune
-notification avant expiration.
+notification avant expiration — c'est précisément l'objet du Lot 4 (§3.3).
 
 ### 2.4 Statistiques — inchangé depuis le round 1
 
 `admin_platform_overview_kpis`/`admin_platform_alerts`/`admin_rights_divergence_report`
 (`sql/76`). Aucun agrégat ni série temporelle — tout est recalculé à la volée. Pas de
-MRR/ARR/churn réel, pas de delta période, pas de score de santé.
+MRR/ARR/churn réel, pas de delta période, pas de score de santé — c'est précisément l'objet du
+Lot 6 (§3.4).
 
-### 2.5 Support — inventaire technique complet (rétro-versionnement)
+### 2.5 Support — inventaire technique complet (rétro-versionnement, Lot 1)
 
 **Rappel du constat central** : `support_tickets` et `help_articles` existent réellement en
 production (introspection directe de `hzrzkvdebaadditvbqis`) mais **ne sont versionnées dans
 aucun fichier `sql/`**. C'est le même type de dette que celle déjà documentée par ADR-011 pour
-d'autres objets bootstrappés hors migration. C'est traité ici comme le **premier risque** de la
-Phase 2, avant tout développement nouveau (voir §3.5, §6-PR01/02/03).
+d'autres objets bootstrappés hors migration. C'est **le Lot 1, priorité absolue** de la Phase 2,
+avant tout développement nouveau (voir §3.5, §6 — Lot 1).
 
 #### 2.5.1 `support_tickets` — inventaire exact
 
@@ -116,6 +146,12 @@ Phase 2, avant tout développement nouveau (voir §3.5, §6-PR01/02/03).
 `status text NOT NULL DEFAULT 'nouveau'`, `assigned_to text`, `claude_response text`,
 `classification text`, `created_at timestamptz NOT NULL DEFAULT now()`,
 `updated_at timestamptz NOT NULL DEFAULT now()`, `risk_score text`, `diagnostic_details jsonb`.
+
+**Note round 3** : la colonne `attachment_url text` (singulier) et le champ libre
+`claude_response text` restent **inchangés par le rétro-versionnement** (Lot 1, à l'identique).
+Le Lot 5 (§3.5.8/§3.5.9) les complète par des tables dédiées (pièces jointes multiples,
+réponses structurées) sans les supprimer ni les réinterpréter — `attachment_url`/
+`claude_response` restent lisibles pour l'historique des tickets créés avant le Lot 5.
 
 **Contraintes** :
 - `support_tickets_pkey` — `PRIMARY KEY (id)`.
@@ -159,8 +195,7 @@ rétro-versionnement, §3.5.1) : `anon`, `authenticated`, `service_role`, `postg
 **Contraintes** : `help_articles_pkey` — `PRIMARY KEY (id)` **uniquement**. Aucun `CHECK`,
 aucune `FOREIGN KEY` (y compris sur `created_by`/`updated_by`, qui ne référencent
 formellement rien), aucune contrainte `UNIQUE` sur `slug`. Ce constat est noté ici comme un
-**fait**, pas encore comme une recommandation de correction — voir §3.5.1 sur la distinction
-entre rétro-versionnement à l'identique et durcissement ultérieur.
+**fait**, pas encore comme une recommandation de correction.
 
 **Index** : `help_articles_pkey` (id), `idx_help_articles_module` (module, sort_order),
 `idx_help_articles_published` (is_published, module).
@@ -177,15 +212,15 @@ entre rétro-versionnement à l'identique et durcissement ultérieur.
   — trois fonctions trigger, `LANGUAGE plpgsql`, `SET search_path TO 'pg_catalog','public'`,
   **aucune n'est `SECURITY DEFINER`** (elles s'exécutent avec les droits du rôle appelant, pas
   de contournement de privilège possible via ces triggers).
-- `platform_admin_role()` — **déjà existante**, créée hors du périmètre Support (probablement
-  en même temps que `platform_admins`), réutilisée telle quelle par la policy d'écriture de
-  `help_articles`. `STABLE SECURITY DEFINER`, retourne le `role` de l'admin connecté ou `NULL`.
+- `platform_admin_role()` — déjà existante, `STABLE SECURITY DEFINER`, retourne le `role` de
+  l'admin connecté ou `NULL`.
 - `is_platform_admin()` — déjà existante (ADR-009), réutilisée par les policies de
-  `support_tickets`.
+  `support_tickets` et par toutes les nouvelles RPC de ce document.
 - **Aucune RPC `admin_*` ne référence ni `support_tickets` ni `help_articles`** — confirmé par
-  recherche exhaustive sur la définition de toutes les fonctions `public.*`. Le portail
-  interagirait aujourd'hui, s'il était câblé, en accès table direct — ce qui contredit la
-  doctrine RPC-only de la Phase 1 (§1).
+  recherche exhaustive. Le portail interagirait aujourd'hui, s'il était câblé, en accès table
+  direct — ce qui contredit la doctrine RPC-only de la Phase 1 (§1). Le Lot 5 (back-office)
+  introduit les premières RPC ; le Lot 5 (portail) évalue si l'accès table direct (RLS
+  `support_insert`) reste suffisant ou si une RPC dédiée est préférable (§3.5.9).
 
 #### 2.5.4 Matrice ACL/RLS — test réel exécuté
 
@@ -201,77 +236,76 @@ entre rétro-versionnement à l'identique et durcissement ultérieur.
 | `support_tickets` | `support_update` | UPDATE | public | idem |
 | `support_tickets` | `support_insert` | INSERT | public | idem (`WITH CHECK`) |
 
-**Test réel** (rôle Postgres `anon`, en transaction, annulée — `sql/tests/` reprendra ce
-scénario) :
+**Test réel** (rôle Postgres `anon`, en transaction, annulée) :
 
 | # | Action testée | Résultat observé | Interprétation |
 |---|---|---|---|
 | 1 | `SELECT` sur `help_articles` (anon) | 8 lignes visibles | Les 8 articles publiés sont lisibles — **conforme à la policy `is_published = true`**, comportement voulu par la clause elle-même |
 | 2 | `SELECT` sur `help_articles` où `is_published = false` (anon) | 0 ligne visible | Les brouillons restent invisibles à un utilisateur non admin |
 | 3 | `INSERT` sur `help_articles` (anon) | **Bloqué** — `42501 new row violates row-level security policy` | La RLS neutralise le grant table-level trop large |
-| 4 | `UPDATE` sur un article publié (anon) | 0 ligne affectée (pas d'erreur, filtrage silencieux) | La RLS neutralise le grant ; comportement Postgres normal pour un `UPDATE` dont la clause `USING` ne matche aucune ligne |
+| 4 | `UPDATE` sur un article publié (anon) | 0 ligne affectée (pas d'erreur, filtrage silencieux) | La RLS neutralise le grant ; comportement Postgres normal |
 | 5 | `DELETE` sur un article publié (anon) | 0 ligne affectée | Idem |
-| 6 | `SELECT` sur `support_tickets` (anon), avec une ligne marqueur insérée par `postgres` juste avant | 0 ligne visible malgré la ligne existante côté serveur | La RLS filtre intégralement — aucune fuite, même en présence de données réelles |
+| 6 | `SELECT` sur `support_tickets` (anon), avec une ligne marqueur insérée par `postgres` juste avant | 0 ligne visible malgré la ligne existante côté serveur | La RLS filtre intégralement — aucune fuite |
 | 7 | `INSERT` sur `support_tickets` avec un `hotel_id` réel (anon) | **Bloqué** — `42501 new row violates row-level security policy` | Le `WITH CHECK` sur `user_hotels`/`auth.uid()` bloque toute insertion anonyme |
 | 8 | `UPDATE` sur la ligne marqueur (anon) | 0 ligne affectée | Idem #4 |
 
 **Conclusion, par la classification demandée** :
 
-- **`support_tickets`** : *privilèges inutilement larges mais bloqués par RLS.* Les grants
-  table-level (`anon` a INSERT/SELECT/UPDATE/DELETE) sont plus larges que nécessaire, mais
-  **aucune donnée n'est lisible ni modifiable par un utilisateur anonyme** — testé, pas
-  supposé. Aucun contournement `SECURITY DEFINER` n'existe (aucune RPC ne touche cette table).
-- **`help_articles`, écriture (INSERT/UPDATE/DELETE)** : *privilèges inutilement larges mais
-  bloqués par RLS* — même conclusion que `support_tickets`, testé et confirmé.
-- **`help_articles`, lecture des articles publiés** : *configuration conforme.* La policy
-  `is_published = true OR is_platform_admin()` est explicitement écrite pour rendre le contenu
-  publié lisible sans authentification — c'est un centre d'aide, une lecture publique du
-  contenu publié est un choix de conception légitime pour ce type d'objet, pas une fuite.
-  Aucune donnée sensible n'est exposée par cette policy (pas de PII, pas de donnée hôtel).
+- **`support_tickets`** : *privilèges inutilement larges mais bloqués par RLS.* Aucune donnée
+  n'est lisible ni modifiable par un utilisateur anonyme — testé, pas supposé.
+- **`help_articles`, écriture** : *privilèges inutilement larges mais bloqués par RLS.*
+- **`help_articles`, lecture des articles publiés** : *configuration conforme,* lecture
+  publique volontaire d'un centre d'aide, aucune donnée sensible exposée.
 
 **Verdict global : aucune exposition effectivement exploitable détectée.** Le durcissement
-proposé en §3.5.1/§6-PR03 (`REVOKE` des grants `anon` en excès) reste recommandé au nom du
-principe de moindre privilège et de la doctrine déjà en vigueur ailleurs dans le projet (« ne
-jamais reposer sur la RLS seule »), **mais uniquement comme mesure de défense en profondeur,
-pas comme correctif d'urgence** — et dans une PR séparée du rétro-versionnement à l'identique
-(§3.5.1), pour ne jamais mélanger « remettre sous contrôle du dépôt » et « changer un
-comportement ».
+proposé en §3.5.1/§6 (Lot 1, PR-03) reste recommandé au nom du principe de moindre privilège,
+**mais uniquement comme mesure de défense en profondeur**, dans une PR séparée du
+rétro-versionnement à l'identique.
 
 **Effet de bord du test, transparence complète** : la séquence `support_ticket_seq` a
-probablement avancé d'une unité pendant le test (voir §2.5.1) — sans conséquence, sans donnée
-créée ni exposée en production (vérifié après coup : `support_tickets` = 0 ligne,
-`help_articles` = 8 lignes inchangées, aucun titre `ANON*`).
+probablement avancé d'une unité pendant le test — sans conséquence, sans donnée créée ni
+exposée en production (vérifié après coup : `support_tickets` = 0 ligne, `help_articles` = 8
+lignes inchangées, aucun titre `ANON*`).
 
 #### 2.5.5 Comparaison dépôt / production
 
 | Objet | Dans `sql/` | En production | Action |
 |---|---|---|---|
-| Table `support_tickets` | Absente | Présente (0 ligne) | À verser à l'identique (§3.5.1) |
+| Table `support_tickets` | Absente | Présente (0 ligne) | À verser à l'identique (Lot 1) |
 | Table `help_articles` | Absente | Présente (8 lignes publiées) | À verser à l'identique |
 | Séquence `support_ticket_seq` | Absente | Présente | À verser à l'identique |
 | 3 fonctions trigger (§2.5.3) | Absentes | Présentes | À verser à l'identique |
 | 7 policies RLS (§2.5.4) | Absentes | Présentes | À verser à l'identique |
 | Rôle `support_agent` dans `platform_admins.role` CHECK | Présent (`sql/73`) | Présent | Déjà cohérent, aucune action |
-| `STUB_INFO.support` dans `admin.html:755` | — | — | Description inexacte (« lecture seule ») à corriger dans la PR RPC de triage, pas dans le rétro-versionnement |
+| `STUB_INFO.support` dans `admin.html:755` | — | — | Description inexacte (« lecture seule ») à corriger dans le Lot 5, pas dans le Lot 1 |
+| Table `support_ticket_replies` | Absente | **Absente aussi** | Nouvelle création, Lot 5 (§3.5.8) — pas un rétro-versionnement |
+| Table `support_ticket_attachments` | Absente | **Absente aussi** | Nouvelle création, Lot 5 (§3.5.9) — pas un rétro-versionnement |
+| Bucket Storage `support-ticket-attachments` | Absent | **Absent aussi** | Nouvelle création, Lot 5 (§3.5.9) |
 
-**Non liés, confirmés hors-sujet** (inchangé) : `portal_requests`/`portal_messages` (RH
-interne), `aide.html` (statique, RH), `maintenance_tickets` (PMS/Housekeeping).
+**Non liés, confirmés hors-sujet** : `portal_requests`/`portal_messages` (RH interne),
+`aide.html` (statique, RH), `maintenance_tickets` (PMS/Housekeeping),
+`ota_dispute_messages`/`ota_dispute_attachments`/`communication_attachments` (autres domaines,
+réutilisés uniquement comme **référence de conception**, jamais comme dépendance — §3.5.8/§3.5.9).
 
-### 2.6 Supervision avancée — inchangé depuis le round 1
+### 2.6 Supervision avancée — hors périmètre de ce lancement (voir §8)
 
 `admin_supervision_status()` honnête, `admin_list_platform_audit_log()`. Pas de monitoring
-d'erreurs réel, pas d'historique d'incidents, `webhooks_configured` toujours `false`.
+d'erreurs réel, pas d'historique d'incidents, `webhooks_configured` toujours `false`. **Ce
+domaine ne fait pas partie des 6 lots communiqués pour ce lancement** — état inchangé, détail
+technique conservé en annexe (§8), aucun développement prévu dans ce round.
 
 ### 2.7 Infrastructure transverse déjà disponible
 
-Resend (`RESEND_API_KEY`, pattern `supabase/functions/sig-send`) — à réutiliser pour tout
-envoi d'email Phase 2, jamais un second prestataire.
+Resend (`RESEND_API_KEY`, pattern `supabase/functions/sig-send`) — à réutiliser pour tout envoi
+d'email Phase 2, jamais un second prestataire. Buckets Storage privés déjà en production comme
+référence de pattern pour le Lot 5 (§3.5.9) : `hr-documents` (10 Mo, PDF/JPEG/PNG/HEIC/WEBP),
+`portal-documents` (20 Mo, PDF/images/Word).
 
 ---
 
-## 3. Architecture proposée, par domaine
+## 3. Architecture proposée, par lot
 
-### 3.0 Fondation transverse — `platform_notifications`
+### 3.0 Fondation transverse — `platform_notifications` (Lot 2)
 
 **Nature** : une file métier de notifications, pas une file de tâches générique. Chaque ligne
 représente une notification à envoyer à un destinataire identifié, pour une raison métier
@@ -287,476 +321,623 @@ identifiée, jamais une tâche différée arbitraire.
 | `reference_id` | `uuid NOT NULL` | Id de l'objet source |
 | `dedupe_key` | `text NOT NULL UNIQUE` | Clé d'idempotence métier — ex. `dunning:<invoice_id>:<offset>`, `trial:<subscription_id>:<jours>`, `support:<ticket_id>:<status>:<updated_at ISO>` |
 | `channel` | `text NOT NULL DEFAULT 'email' CHECK IN ('email')` | Un seul canal en V1, colonne prête pour en ajouter sans migration de schéma |
-| `recipient_email` | `text NOT NULL` | Snapshot de l'adresse au moment de la création — jamais résolu dynamiquement à l'envoi (cohérent avec la doctrine `bill_to_*`/snapshot déjà appliquée aux factures) |
-| `template` | `text NOT NULL` | Identifiant du gabarit de contenu (ex. `dunning_reminder`, `trial_ending_soon`, `ticket_status_changed`) — le contenu HTML/texte n'est pas stocké en base, il vit dans l'Edge Function, versionné avec le code |
-| `template_payload` | `jsonb NOT NULL DEFAULT '{}'` | Variables injectées dans le gabarit (montant, date, nom d'hôtel…) — snapshot au moment de la création, jamais recalculé à l'envoi |
-| `status` | `text NOT NULL DEFAULT 'pending' CHECK IN ('pending','sending','sent','failed','abandoned')` | `sending` distingue explicitement « en cours d'envoi » de `pending`, pour la gestion de la concurrence (voir plus bas) |
+| `recipient_email` | `text NOT NULL` | Snapshot de l'adresse au moment de la création — jamais résolu dynamiquement à l'envoi |
+| `template` | `text NOT NULL` | Identifiant du gabarit de contenu — le contenu HTML/texte vit dans l'Edge Function, versionné avec le code |
+| `template_payload` | `jsonb NOT NULL DEFAULT '{}'` | Variables injectées dans le gabarit — snapshot au moment de la création |
+| `status` | `text NOT NULL DEFAULT 'pending' CHECK IN ('pending','sending','sent','failed','abandoned')` | `sending` distingue explicitement « en cours d'envoi » de `pending` |
 | `attempts` | `integer NOT NULL DEFAULT 0` | Nombre de tentatives d'envoi déjà effectuées |
-| `max_attempts` | `integer NOT NULL DEFAULT 3` | Borne — au-delà, `status` passe à `abandoned`, jamais de boucle infinie |
-| `next_attempt_at` | `timestamptz` | `NULL` si pas de nouvelle tentative prévue ; sinon date/heure du prochain essai (backoff, ex. 5 min / 30 min / 2 h) |
+| `max_attempts` | `integer NOT NULL DEFAULT 3` | Borne — au-delà, `status` passe à `abandoned` |
+| `next_attempt_at` | `timestamptz` | `NULL` si pas de nouvelle tentative prévue ; sinon date/heure du prochain essai (backoff) |
 | `last_error` | `text` | Message d'erreur de la dernière tentative échouée |
-| `final_error` | `text` | Rempli seulement quand `status = 'abandoned'` — distinct de `last_error` pour ne jamais perdre la cause d'abandon même si une tentative ultérieure était encore tentée entre-temps |
+| `final_error` | `text` | Rempli seulement quand `status = 'abandoned'` |
 | `created_at` | `timestamptz NOT NULL DEFAULT now()` | |
-| `processed_at` | `timestamptz` | Horodatage du dernier traitement (tentative, réussie ou non) |
+| `processed_at` | `timestamptz` | Horodatage du dernier traitement |
 | `sent_at` | `timestamptz` | Rempli uniquement en cas de succès effectif |
 | `failed_at` | `timestamptz` | Rempli uniquement au passage en `abandoned` |
 
 **Statuts et transitions** : `pending → sending → (sent | pending-avec-next_attempt_at | abandoned)`.
-Jamais de transition directe `pending → sent` sans passer par `sending` (voir concurrence
-ci-dessous).
+Jamais de transition directe `pending → sent` sans passer par `sending`.
 
 **Concurrence** : le passage à `sending` se fait par un `UPDATE ... SET status='sending'
-WHERE id = ? AND status = 'pending' RETURNING id` — si deux exécutions concurrentes du
-traitement des notifications tentent la même ligne, une seule obtient la ligne mise à jour (la
-seconde `UPDATE` ne matche plus rien, `RETURNING` vide, elle passe à la suivante). Aucun verrou
-consultatif nécessaire, le motif `UPDATE ... WHERE status='pending'` suffit — plus simple que
-`FOR UPDATE SKIP LOCKED` pour ce cas (pas de boucle de traitement séquentielle par ligne
-nécessaire ici, contrairement au traitement des essais expirés).
+WHERE id = ? AND status = 'pending' RETURNING id` — aucun verrou consultatif nécessaire.
 
-**Comportement en cas de nouvel envoi** (ex. un ticket change deux fois de statut avant que la
-première notification ne soit traitée) : le `dedupe_key` inclut la valeur qui change
-(`support:<ticket_id>:<status>:<updated_at>`) — deux changements de statut produisent deux
-`dedupe_key` distincts, donc deux notifications légitimes, pas une collision. Une tentative de
-notifier deux fois *le même* événement (même clé) échoue sur la contrainte `UNIQUE
-(dedupe_key)` — l'insertion est absorbée silencieusement (`ON CONFLICT (dedupe_key) DO
-NOTHING`), pas une erreur remontée à l'appelant.
+**Idempotence** : le `dedupe_key` inclut la valeur qui change — deux événements distincts
+produisent deux clés distinctes ; une tentative de notifier deux fois le même événement échoue
+sur `UNIQUE (dedupe_key)`, absorbée silencieusement (`ON CONFLICT (dedupe_key) DO NOTHING`).
 
 **RLS et grants** : aucun accès client, ni `anon` ni `authenticated`. Uniquement `service_role`
-(Edge Function) en écriture et un accès admin en lecture seule via une future RPC
-`admin_list_notifications` si un écran de supervision des envois est utile (non prioritaire,
-pas dans le lot initial). `REVOKE ALL FROM PUBLIC, anon, authenticated` — grant `service_role`
-uniquement pour l'écriture, pas de RLS nécessaire tant qu'aucun rôle client n'y accède
-directement.
+(Edge Function) en écriture. `REVOKE ALL FROM PUBLIC, anon, authenticated`.
 
-**Politique de rétention** : proposition — conserver 90 jours en table active, au-delà un
-archivage ou une purge (à trancher lors de la PR, pas dans cet ADR, car cela dépend d'une
-politique de conservation des données personnelles — `recipient_email` est une donnée
-personnelle — qui doit rester cohérente avec la politique déjà appliquée ailleurs dans le
-projet, ex. GDPR purge déjà existante pour les documents invités, migration `r3_gdpr_purge_guest_documents`).
-Pas de suppression automatique proposée dans la première PR — la table démarre sans purge, la
-purge est un chantier explicite ultérieur si le volume le justifie.
+**Politique de rétention** : proposition — conserver 90 jours en table active, purge non
+automatisée en V1 (chantier explicite ultérieur si le volume le justifie).
 
 **Edge Function `platform-send-notification`** : point d'appel unique à Resend, `service_role`
-uniquement, jamais invocable depuis le client. Marque `sending` avant l'appel réseau, `sent`/
-`pending`+`next_attempt_at`/`abandoned` après, selon le résultat.
+uniquement, jamais invocable depuis le client. Marque `sending` avant l'appel réseau,
+`sent`/`pending`+`next_attempt_at`/`abandoned` après, selon le résultat. **Journal d'envoi** :
+la table elle-même (`status`/`attempts`/`sent_at`/`last_error`/`final_error`) constitue le
+journal — pas de table séparée, pour ne jamais dissocier l'état d'une notification de son
+historique de tentatives.
 
-### 3.1 Paiements — décisions métier avant choix de prestataire
+### 3.1 Paiements — décisions métier avant choix de prestataire (reporté)
 
-Avant tout choix de prestataire (Stripe ou autre — décision CTO différée, §5), les questions
-métier suivantes doivent être tranchées, avec le contexte déjà connu de l'architecture
-existante :
+**Confirmé par le lancement de ce round : ce chantier est reporté.** Le tableau ci-dessous
+**est** la note d'architecture métier demandée par le CTO avant tout développement — déjà
+produite depuis le round 1, reconfirmée ici comme le livrable attendu, sans qu'aucun choix de
+prestataire ni aucune ligne de code ne soit ajouté dans ce round.
 
 | Question | Contexte déjà existant | Statut |
 |---|---|---|
-| Client facturé : hôtel ou groupe ? | `hotel_subscriptions` a `UNIQUE(hotel_id)` — **un abonnement par hôtel**, pas par groupe. La facturation consolidée par groupe (roadmap #26) impliquerait une refonte du modèle. | **Non tranché** — la Phase 2 conserve par défaut la facturation par établissement (aucun changement de modèle proposé) sauf décision contraire explicite |
+| Client facturé : hôtel ou groupe ? | `hotel_subscriptions` a `UNIQUE(hotel_id)` — **un abonnement par hôtel**, pas par groupe. La facturation consolidée par groupe (roadmap #26) impliquerait une refonte du modèle. | **Non tranché** — la Phase 2 conserve par défaut la facturation par établissement sauf décision contraire explicite |
 | Facturation consolidée ou par établissement ? | Découle directement de la ligne précédente | Par établissement, par défaut |
-| Périodicité | `platform_invoices.period_start/period_end` existent déjà, génériques (pas de fréquence imposée en base) | **Non tranché** — mensuel, trimestriel, annuel ? |
+| Périodicité | `platform_invoices.period_start/period_end` existent déjà, génériques | **Non tranché** — mensuel, trimestriel, annuel ? |
 | Engagement (durée minimale) | Aucune notion de durée d'engagement dans `hotel_subscriptions` aujourd'hui | **Non tranché** |
-| Prorata (changement de plan en cours de période) | `admin_change_subscription_plan` applique le changement **immédiatement**, sans proratisation ni régularisation de facture | **Non tranché** — la Phase 2 introduit-elle un prorata, ou le changement de plan reste-t-il un nouveau départ de facturation propre ? |
-| TVA | `platform_invoices.tva_rate/tva_amount` déjà gérés (taux unique par facture) | Déjà couvert, pas de nouvelle décision nécessaire sauf TVA multi-taux |
-| Changement de plan | RPC déjà existante (`admin_change_subscription_plan`), immédiat, sans lien automatique avec la facturation | Voir prorata ci-dessus |
-| Impayé | `admin_suspend_subscription_for_nonpayment` déjà existant (wrapper au-dessus de `admin_suspend_subscription`) | Déjà couvert |
+| Prorata (changement de plan en cours de période) | `admin_change_subscription_plan` applique le changement **immédiatement**, sans proratisation | **Non tranché** |
+| TVA | `platform_invoices.tva_rate/tva_amount` déjà gérés (taux unique par facture) | Déjà couvert, sauf besoin de TVA multi-taux |
+| Impayé | `admin_suspend_subscription_for_nonpayment` déjà existant | Déjà couvert |
 | Suspension | `admin_suspend_subscription`/`admin_reactivate_subscription` déjà existants | Déjà couvert |
 | Résiliation | `admin_cancel_subscription_immediate`/`admin_schedule_subscription_cancellation` déjà existants | Déjà couvert |
 | Avoirs | `platform_credit_notes` déjà existant, jamais fusionné dans la facture | Déjà couvert |
-| Remboursements | Aucun mécanisme aujourd'hui — un avoir documente une créance annulée, pas un flux d'argent sortant réel | **Non tranché** — un remboursement réel (vers le moyen de paiement d'origine) est-il dans le périmètre Phase 2, ou seulement l'avoir documentaire ? Dépend directement du choix de prestataire |
-| Export comptable | Rien n'existe aujourd'hui (pas de format FEC, pas d'export vers un outil comptable) | **Non tranché**, hors du périmètre des 3 PR Paiements déjà esquissées (§6), à cadrer séparément si prioritaire |
-| Source de vérité | `platform_invoices`/`platform_payments` = source de vérité de la facturation plateforme ; `hotel_subscriptions` = source de vérité de l'accès/droit, volontairement distincte (même principe que la séparation déjà actée par ADR-011 entre accès et facturation) | Déjà couvert, à confirmer que la Phase 2 ne mélange pas les deux |
+| Remboursements | Aucun mécanisme aujourd'hui — un avoir documente une créance annulée, pas un flux d'argent sortant réel | **Non tranché** — dépend directement du choix de prestataire |
+| Export comptable | Rien n'existe aujourd'hui (pas de format FEC, pas d'export) | **Non tranché**, à cadrer séparément |
+| Source de vérité | `platform_invoices`/`platform_payments` = source de vérité de la facturation ; `hotel_subscriptions` = source de vérité de l'accès/droit, volontairement distincte | Déjà couvert |
 
-**Position de cet ADR** : ne pas construire d'abstraction multi-prestataires en V1. Le schéma
-`platform_payment_intents`/`platform_payment_provider_events` proposé au round 1 reste
-volontairement simple (un `provider` texte, pas une couche d'adaptateurs), mais son
-*implémentation* (Edge Function, format de webhook) sera spécifique au prestataire choisi —
-pas généraliste par anticipation. Détail technique inchangé depuis le round 1, résumé en §3.1
-et non redupliqué ici.
+**Position de cet ADR** : ne pas construire d'abstraction multi-prestataires en V1. Détail
+technique (`platform_payment_intents`/`platform_payment_provider_events`) en §6 (PR-11),
+volontairement non développé tant que le prestataire n'est pas choisi.
 
-### 3.2 Licences — décidé : observation, comptage et alertes uniquement
+### 3.2 Licences — Lot 3 : observation, comptage et alertes uniquement
 
-Confirmé par décision CTO (§5) : aucun blocage automatique en V1. Architecture inchangée
-depuis le round 1 — `admin_list_license_usage()` (comptage réel vs `snapshot_limits`) +
-nouveau type d'alerte `license_quota_exceeded` dans `admin_platform_alerts()`. Aucune nouvelle
-table. Ne touche jamais `hotel_app_subscriptions`.
+Confirmé par décision CTO (§5) et reconfirmé par ce lancement : **aucun blocage automatique en
+V1.** `admin_list_license_usage()` (comptage réel vs `snapshot_limits`) + nouveau type d'alerte
+`license_quota_exceeded` dans `admin_platform_alerts()`. Aucune nouvelle table. Ne touche jamais
+`hotel_app_subscriptions`.
 
-### 3.3 Périodes d'essai — décidé : cron non activé pour le moment
+### 3.3 Essais — Lot 4 : notifications J-7/J-3/J-1, preview, run manuel, cron désactivé
 
-Confirmé par décision CTO (§5) : **le cron d'expiration des essais n'est pas activé dans ce
-cycle de Phase 2.** La PR-09 du round 1 (« activation du cron ») est retirée du plan de
-réalisation (§6) — elle redevient un simple chantier futur documenté (comme il l'était déjà
-avant le round 1, cf. ADR-010 §3), pas une PR planifiée. Seule reste au plan : la notification
-« essai bientôt expiré » (§3.0, réutilise `trial_ending_soon` déjà détecté par
-`admin_platform_alerts`), qui ne nécessite aucun cron — elle peut être déclenchée manuellement
-ou lors de la consultation du dashboard, exactement comme le traitement des essais expirés
-reste aujourd'hui 100 % manuel.
+**Confirmé par le lancement de ce round** : trois paliers de notification explicites, une RPC
+de prévisualisation, une RPC d'exécution manuelle — **le cron reste désactivé**, cohérent avec
+ADR-010 §3 et avec la doctrine « jamais de cron dans la même migration que la fonctionnalité ».
 
-### 3.4 Statistiques — définitions formelles
+**Paliers** : J-7, J-3, J-1 avant `hotel_subscriptions.trial_ends_at` (essais actifs
+uniquement, `status = 'trial'`). Chaque palier produit un `dedupe_key` distinct —
+`trial:<subscription_id>:7`, `trial:<subscription_id>:3`, `trial:<subscription_id>:1` — de sorte
+qu'un même essai reçoit au plus une notification par palier, jamais une répétition à chaque
+exécution manuelle.
+
+**Prédicat partagé** (doctrine P0, réappliquée ici) : preview et exécution interrogent
+**exactement** la même requête — `hotel_subscriptions` en `status = 'trial'`, où
+`trial_ends_at::date - current_date` vaut 7, 3 ou 1, et où le `dedupe_key` correspondant n'existe
+pas encore dans `platform_notifications`. Seule diffère l'action finale : `SELECT` pour la
+preview, `INSERT ... ON CONFLICT (dedupe_key) DO NOTHING` pour l'exécution.
+
+- **`admin_preview_trial_ending_notifications()`** — lecture seule, retourne pour chaque essai
+  concerné : hôtel, palier (7/3/1), `trial_ends_at`, email destinataire résolu, et si une
+  notification pour ce `dedupe_key` existe déjà (auquel cas elle est listée comme « déjà
+  envoyée », pas comme « à envoyer » — même logique de transparence que
+  `admin_preview_expired_trials_processing`).
+- **`admin_run_trial_ending_notifications()`** — même prédicat, insère réellement dans
+  `platform_notifications` (`category = 'trial_ending'`, `template = 'trial_ending_soon'`),
+  retourne le nombre de notifications effectivement créées (les doublons silencieusement
+  absorbés par `ON CONFLICT` ne comptent pas comme des échecs).
+
+**Déclenchement** : bouton admin manuel en V1 (dashboard ou écran Abonnements), **pas de cron**
+— strictement identique en esprit à « Traiter les essais expirés », qui reste lui aussi 100 %
+manuel après le P0.
+
+### 3.4 Statistiques — Lot 6 : définitions formelles, y compris score de santé plateforme
 
 Toutes les métriques ci-dessous partagent : **fuseau horaire proposé Europe/Paris** pour la
-définition du « jour métier » (siège Flowtym en France, ancré sur les données déjà observées) —
-**à confirmer explicitement par le CTO**, ce n'est pas un point purement technique. **Fréquence
-de calcul V1 : à la demande** (déclenchement manuel via `admin_recompute_platform_metrics`,
-pas de cron — cohérent avec la décision §3.3 de ne pas activer de nouveau cron dans ce cycle).
-**Recalcul historique** : la RPC de recalcul accepte une date passée en paramètre et
-reconstitue l'état à cette date à partir de `hotel_subscription_events` (event-sourcing), pas
-seulement l'état courant — condition nécessaire pour que `platform_metrics_daily` reste
-corrigible si un bug de calcul est détecté après coup, sans jamais retoucher silencieusement
-une ligne déjà écrite (nouvel appel = nouvelle ligne recalculée, `UPDATE` explicite et
-journalisé, jamais un `UPDATE` muet).
+définition du « jour métier » — **à confirmer explicitement par le CTO**. **Fréquence de calcul
+V1 : à la demande** (`admin_recompute_platform_metrics`, pas de cron, cohérent avec le Lot 4).
+**Recalcul historique** : la RPC accepte une date passée et reconstitue l'état à cette date à
+partir de `hotel_subscription_events` (event-sourcing) — condition nécessaire pour que
+`platform_metrics_daily` reste corrigible sans jamais retoucher silencieusement une ligne déjà
+écrite.
 
 | Métrique | Source | Formule | Traitement annulations/avoirs/changements de plan |
 |---|---|---|---|
-| **MRR contractuel** | `hotel_subscriptions` (`status='active'`) + `snapshot_price` + `hotel_addon_subscriptions` actifs | Somme des prix récurrents figés (snapshot) des abonnements actifs à la date calculée | Une résiliation/suspension sort immédiatement le montant du MRR à sa date d'effet réelle (`hotel_subscription_events`) ; un changement de plan applique le nouveau `snapshot_price` à sa date d'effet, sans proratisation (mesure de rythme, pas un montant facturé) ; les avoirs n'affectent pas le MRR contractuel (il ne dépend pas de la facturation réelle) |
-| **MRR facturé** | `platform_invoices` (`status='issued'`) | Montant HT des factures émises sur la période, ramené à une base mensuelle si la périodicité n'est pas mensuelle (proratisation sur `period_start`/`period_end`) | Reflète la facturation réelle, peut diverger du contractuel en cas de décalage de date d'émission |
-| **MRR encaissé** | `platform_payments` (`status='recorded'`) | Somme des paiements enregistrés dans le mois, indépendamment de la période qu'ils soldent (comptabilité de caisse) | Un avoir réduit le montant net du **mois d'émission de l'avoir** (proposition par défaut, à confirmer CTO si une autre convention est préférée) |
-| **ARR** | Dérivé du MRR contractuel | `MRR contractuel × 12` | Recalculé à chaque recalcul du MRR contractuel, pas une mesure indépendante |
-| **Churn logo** | `hotel_subscription_events` (événements de résiliation) | Nombre d'hôtels résiliés (pas suspendus) sur la période ÷ nombre d'hôtels actifs en début de période | Ne compte que la résiliation définitive, pas la suspension temporaire pour impayé |
-| **Churn revenu** | `hotel_subscription_events` + `snapshot_price` avant/après | MRR contractuel perdu (résiliations + rétrogradations de plan) sur la période ÷ MRR contractuel en début de période | Distingue explicitement du churn logo — un gros client qui rétrograde pèse dans le churn revenu sans compter dans le churn logo |
-| **Conversion des essais** | `hotel_subscription_events` (événement de conversion, écrit par `admin_convert_trial_to_active`) | Essais convertis en actif sur la période ÷ (essais convertis + essais expirés) sur la même période | — |
-| **Hôtels actifs** | Réutilise **exactement** la définition déjà utilisée par `admin_platform_overview_kpis` | — | Volontairement pas de seconde définition — évite deux chiffres « hôtels actifs » divergents dans deux écrans |
-| **Utilisateurs actifs** | Idem — réutilise la définition déjà utilisée par `admin_platform_overview_kpis` | — | Idem |
+| **MRR contractuel** | `hotel_subscriptions` (`status='active'`) + `snapshot_price` + `hotel_addon_subscriptions` actifs | Somme des prix récurrents figés des abonnements actifs à la date calculée | Résiliation/suspension sort immédiatement le montant à sa date d'effet réelle ; changement de plan applique le nouveau `snapshot_price` sans proratisation ; avoirs sans effet (indépendant de la facturation réelle) |
+| **MRR facturé** | `platform_invoices` (`status='issued'`) | Montant HT des factures émises sur la période, ramené à une base mensuelle si périodicité ≠ mensuelle | Reflète la facturation réelle, peut diverger du contractuel |
+| **MRR encaissé** | `platform_payments` (`status='recorded'`) | Somme des paiements enregistrés dans le mois (comptabilité de caisse) | Un avoir réduit le montant net du mois d'émission de l'avoir (proposition par défaut, à confirmer CTO) |
+| **ARR** | Dérivé du MRR contractuel | `MRR contractuel × 12` | Recalculé à chaque recalcul du MRR contractuel |
+| **Churn logo** | `hotel_subscription_events` (résiliations) | Hôtels résiliés (pas suspendus) sur la période ÷ hôtels actifs en début de période | Ne compte que la résiliation définitive |
+| **Churn revenu** | `hotel_subscription_events` + `snapshot_price` avant/après | MRR contractuel perdu (résiliations + rétrogradations) ÷ MRR contractuel en début de période | Distinct du churn logo |
+| **Conversion des essais** | `hotel_subscription_events` (conversion, écrit par `admin_convert_trial_to_active`) | Essais convertis ÷ (essais convertis + essais expirés) sur la période | — |
+| **Hôtels actifs** | Réutilise **exactement** la définition déjà utilisée par `admin_platform_overview_kpis` | — | Pas de seconde définition — évite deux chiffres divergents |
+| **Utilisateurs actifs** | Idem — réutilise la définition existante | — | Idem |
+| **Score de santé plateforme** (nouveau, round 3) | Composite des 4 lignes ci-dessous | Voir détail immédiatement en dessous | Recalculé à chaque `admin_recompute_platform_metrics` |
 
-Score de santé hôtel (§3.4 round 1, inchangé), rapport de divergence de droits (frontend seul,
-inchangé), anomalies et facturation consolidée par groupe (hors périmètre v1, inchangé).
+**Score de santé plateforme — définition formelle (proposition V1, à valider explicitement par
+le CTO — absente du round 2)**. Objectif : un seul indicateur 0–100 pour le dashboard, composé
+de signaux déjà produits ailleurs dans ce document, sans inventer de nouvelle source de donnée :
 
-### 3.5 Support — lot de fondation détaillé (premier chantier technique de la Phase 2)
+| Sous-score | Poids | Calcul | Source |
+|---|---|---|---|
+| Rétention | 40 % | `100 − (churn_logo_période × 100)`, plancher 0 | Churn logo (ligne ci-dessus) |
+| Croissance MRR | 25 % | `(MRR_contractuel_période − MRR_contractuel_période_précédente) / MRR_contractuel_période_précédente`, normalisé sur `[-1;+1] → [0;100]`, borné | MRR contractuel (ligne ci-dessus) |
+| Support | 20 % | `100 − (tickets ouverts depuis plus de 5 jours ouvrés parmi les tickets non `resolu`/`ferme` ÷ tickets ouverts total × 100)` | `support_tickets` (Lot 5) |
+| Conformité licences | 15 % | `100 − (hôtels avec alerte `license_quota_exceeded` active ÷ hôtels actifs × 100)` | Alertes Lot 3 |
 
-**3.5.1 — Rétro-versionnement à l'identique** (PR-01, aucun changement de comportement) :
-verse dans `sql/80_...` la reproduction exacte de l'existant décrit en §2.5.1/§2.5.2/§2.5.3 —
-tables (`CREATE TABLE IF NOT EXISTS`, colonnes et types identiques), toutes les contraintes
-listées, tous les index, tous les triggers et leurs fonctions, la séquence, les 7 policies RLS
-mot pour mot, **et les grants actuels reproduits tels quels** (y compris les grants `anon`
-larges — ce n'est pas le rôle de cette PR de les changer). Objectif unique : que `sql/` décrive
+`score = 0.40×Rétention + 0.25×CroissanceMRR + 0.20×Support + 0.15×Licences`, arrondi à
+l'entier. **Dépendance explicite** : ce sous-score ne peut être calculé qu'une fois les Lots 3,
+5 et 6 tous livrés (il agrège leurs signaux) — voir dépendances de la fiche PR-09 en §6. Tant
+que le Lot 5 n'est pas livré, le sous-score Support est traité comme `100` par défaut (aucun
+signal disponible ≠ mauvais signal) — même logique que les signaux honnêtes déjà appliqués à
+`admin_supervision_status()`.
+
+Score de santé hôtel (round 1, inchangé, hors périmètre v1), rapport de divergence de droits
+(frontend seul, inchangé), anomalies et facturation consolidée par groupe (hors périmètre v1,
+inchangé).
+
+### 3.5 Support — Lot 1 (fondation) et Lot 5 (fonctionnalités, 2 PR indépendantes)
+
+**3.5.1 — Rétro-versionnement à l'identique** (Lot 1, aucun changement de comportement) : verse
+dans `sql/80_...` la reproduction exacte de l'existant décrit en §2.5.1/§2.5.2/§2.5.3 — tables
+(`CREATE TABLE IF NOT EXISTS`, colonnes et types identiques), toutes les contraintes listées,
+tous les index, tous les triggers et leurs fonctions, la séquence, les 7 policies RLS mot pour
+mot, **et les grants actuels reproduits tels quels**. Objectif unique : que `sql/` décrive
 exactement ce qui tourne en production, ni plus ni moins.
 
-**3.5.2 — Tests de reconstruction** (PR-02) : fichier `sql/tests/support_retro_versioning.sql`
-qui (a) reconstruit le schéma depuis zéro dans une transaction et vérifie qu'il est identique
-(colonnes, contraintes, index) à ce qui est observé en production ; (b) rejoue le test de
-rôle `anon` du §2.5.4 de façon versionnée et répétable (les 8 scénarios du tableau), pour que
-toute régression future sur ces deux tables soit détectée automatiquement ; (c) vérifie que les
-`INSERT`/`UPDATE` d'un utilisateur hôtel lié via `user_hotels` fonctionnent bien sur ses propres
-tickets et échouent sur ceux d'un autre hôtel.
+**3.5.2 — Tests de reconstruction** (Lot 1) : fichier `sql/tests/support_retro_versioning.sql`
+qui (a) reconstruit le schéma depuis zéro dans une transaction et vérifie qu'il est identique à
+ce qui est observé en production ; (b) rejoue le test de rôle `anon` du §2.5.4 de façon
+versionnée et répétable ; (c) vérifie que les `INSERT`/`UPDATE` d'un utilisateur hôtel lié via
+`user_hotels` fonctionnent bien sur ses propres tickets et échouent sur ceux d'un autre hôtel.
 
-**3.5.3 — Durcissement ACL, si nécessaire** (PR-03, distincte, justifiée par le §2.5.4) :
-`REVOKE ALL ... FROM anon` sur les deux tables et sur la séquence (garde `authenticated`, qui
-en a besoin légitimement pour les hôtels et pour les admins). Ne change **aucune** policy RLS
-(elles sont déjà correctes). Test de non-régression : le scénario §2.5.4 rejoué doit donner
-exactement les mêmes résultats côté `authenticated` légitime, et confirmer qu'`anon` n'a même
-plus le grant table-level pour tenter quoi que ce soit (erreur `permission denied for table`
-au lieu de `new row violates row-level security policy` — un signal plus tôt dans la chaîne,
-défense en profondeur).
+**3.5.3 — Durcissement ACL, si nécessaire** (Lot 1, PR distincte, justifiée par le §2.5.4) :
+`REVOKE ALL ... FROM anon` sur les deux tables et sur la séquence (garde `authenticated`). Ne
+change **aucune** policy RLS.
 
-**3.5.4 — RPC de triage** (PR-09 au plan reordonné, §6) : inchangé depuis le round 1 —
-`admin_list_support_tickets`, `admin_get_support_ticket_detail`, `admin_update_support_ticket`,
-chaque mutation journalisée via `_platform_log`, correction de `STUB_INFO.support`.
+**3.5.4 — RPC de triage, assignation, priorité** (Lot 5, PR A — back-office) :
+`admin_list_support_tickets`, `admin_get_support_ticket_detail` (inclut désormais le fil de
+réponses non internes + internes, §3.5.8), `admin_update_support_ticket` (statut, priorité,
+`assigned_to`), chaque mutation journalisée via `_platform_log`, correction de
+`STUB_INFO.support`.
 
-**3.5.5 — RPC CMS `help_articles`** : inchangé depuis le round 1, même doctrine ACL.
+**3.5.5 — RPC réponses back-office** (Lot 5, PR A, nouveau détail round 3) :
+`admin_reply_support_ticket(ticket_id, body, is_internal_note)` — insère dans
+`support_ticket_replies` (§3.5.8) avec `author_type = 'super_admin'`. Si `is_internal_note =
+false`, insère en plus une notification `platform_notifications`
+(`category = 'support_ticket_update'`, `dedupe_key = 'support:<ticket_id>:reply:<reply_id>'`) à
+destination de `support_tickets.user_email` — réutilise le Lot 2. Si `is_internal_note = true`,
+aucune notification (note strictement interne, jamais visible côté hôtel).
 
-**3.5.6 — Création de ticket côté hôtel** (PR-10, décidée distincte — §5, décision Support V1) :
-point d'entrée dans `index.html`/`portal.html` permettant à un utilisateur hôtel de créer un
-ticket. Explicitement une PR séparée de la précédente (triage), livrée après, jamais dans le
-même lot — décision CTO confirmée en §5.
+**3.5.6 — Création de ticket, suivi et pièces jointes côté hôtel** (Lot 5, PR B — portail
+hôtel, décidée distincte de PR A, livrée après) : point d'entrée dans `index.html`/`portal.html`
+permettant à un utilisateur hôtel de créer un ticket, de consulter le fil de ses propres
+tickets (« suivi », réutilise `support_select`/nouvelle policy de lecture sur
+`support_ticket_replies` où `is_internal_note = false`), et d'ajouter des pièces jointes
+(§3.5.9). Accès table direct conservé pour la création (RLS `support_insert` déjà suffisante,
+confirmée par le test §2.5.4) ; une RPC `hotel_reply_support_ticket(ticket_id, body)` est en
+revanche nécessaire pour les réponses hôtel (garantit `author_type = 'hotel_user'` et
+déclenche la notification symétrique vers le Super Admin assigné — voir §3.5.8, RLS
+« append-only » qui interdit toute correction a posteriori d'une réponse, cohérente avec un
+accès table direct mais plus sûre en RPC pour fixer `author_type` et `author_label` côté
+serveur plutôt que de faire confiance à la valeur envoyée par le client).
 
-**3.5.7 — Notification de changement de statut** : inchangé depuis le round 1, réutilise §3.0.
+**3.5.7 — Notification de création/changement de statut** : inchangé depuis le round 1/2,
+réutilise §3.0 — `category = 'support_ticket_new'` à la création, `support_ticket_update` au
+changement de statut (déjà couvert), et maintenant aussi à chaque réponse (§3.5.5/§3.5.6).
 
-### 3.6 Supervision avancée — décidé : Sentry ne bloque pas la supervision native
+**3.5.8 — `support_ticket_replies` (nouveau, round 3)** — schéma détaillé, conçu par cohérence
+avec `ota_dispute_messages` déjà en production :
 
-Confirmé par décision CTO (§5) : la supervision native déjà en place
-(`admin_supervision_status`, `admin_list_platform_audit_log`) continue d'évoluer
-indépendamment de Sentry. La mise à jour honnête de `admin_supervision_status()` (signaux
-`mutation_error_monitoring_available`/`edge_function_error_monitoring_available` passés à
-`true`) n'est effectuée **que** le jour où Sentry (ou équivalent) est réellement câblé — tant
-que ce n'est pas le cas, les signaux restent `false`, honnêtes, et rien dans la Phase 2 ne
-dépend de Sentry pour livrer de la valeur de supervision. `platform_incidents` (stretch, Could)
-inchangé.
+| Colonne | Type | Rôle |
+|---|---|---|
+| `id` | `uuid PK DEFAULT gen_random_uuid()` | |
+| `ticket_id` | `uuid NOT NULL REFERENCES support_tickets(id) ON DELETE CASCADE` | |
+| `author_type` | `text NOT NULL CHECK IN ('super_admin','hotel_user')` | |
+| `author_user_id` | `uuid NOT NULL REFERENCES auth.users(id)` | |
+| `author_label` | `text NOT NULL` | Snapshot email/nom au moment de la réponse — jamais résolu par jointure a posteriori (doctrine snapshot, §1) |
+| `body` | `text NOT NULL CHECK (char_length(body) <= 4000)` | |
+| `is_internal_note` | `boolean NOT NULL DEFAULT false` | Note strictement admin, jamais visible côté hôtel |
+| `created_at` | `timestamptz NOT NULL DEFAULT now()` | |
+
+**Contrainte** : `CHECK (NOT is_internal_note OR author_type = 'super_admin')` — une note
+interne ne peut être créée que par un admin, jamais par un `hotel_user` (défense en profondeur,
+en plus de la garde applicative dans `hotel_reply_support_ticket` qui ne permet même pas de
+poser ce paramètre côté hôtel).
+
+**RLS** : `platform_admin_full_replies` (`is_platform_admin()`, ALL) ;
+`hotel_select_own_replies` (SELECT, `is_internal_note = false AND ticket_id IN (SELECT id FROM
+support_tickets WHERE hotel_id IN (SELECT hotel_id FROM user_hotels WHERE user_id =
+auth.uid()))`) ; pas de policy `INSERT` pour `authenticated` — **toute écriture passe par une
+RPC** (`admin_reply_support_ticket`/`hotel_reply_support_ticket`), jamais par accès table
+direct, pour garantir que `author_type`/`author_label` sont fixés côté serveur, pas par le
+client. **Append-only** : aucune policy `UPDATE`/`DELETE`, pour quiconque, y compris admin —
+une réponse envoyée fait partie de l'historique du ticket, elle ne se corrige pas, elle
+s'complète par une nouvelle réponse.
+
+**3.5.9 — `support_ticket_attachments` + bucket Storage (nouveau, round 3)** — schéma détaillé,
+conçu par cohérence avec `communication_attachments`/`ota_dispute_attachments` déjà en
+production, et avec le bucket privé `portal-documents` comme référence de configuration :
+
+| Colonne | Type | Rôle |
+|---|---|---|
+| `id` | `uuid PK DEFAULT gen_random_uuid()` | |
+| `ticket_id` | `uuid NOT NULL REFERENCES support_tickets(id) ON DELETE CASCADE` | |
+| `reply_id` | `uuid REFERENCES support_ticket_replies(id) ON DELETE CASCADE` | `NULL` si la pièce jointe est ajoutée à la création du ticket, renseigné si elle accompagne une réponse |
+| `storage_bucket` | `text NOT NULL DEFAULT 'support-ticket-attachments'` | |
+| `storage_path` | `text NOT NULL` | Convention `<hotel_id>/<ticket_id>/<uuid>-<filename>`, pour que la policy Storage puisse filtrer par préfixe sans jointure |
+| `original_filename` | `text NOT NULL` | |
+| `mime_type` | `text NOT NULL` | |
+| `size_bytes` | `bigint NOT NULL CHECK (size_bytes > 0 AND size_bytes <= 10485760)` | Limite 10 Mo, alignée sur `hr-documents` |
+| `uploaded_by` | `uuid NOT NULL REFERENCES auth.users(id)` | |
+| `created_at` | `timestamptz NOT NULL DEFAULT now()` | |
+
+**Bucket Storage `support-ticket-attachments`** : privé, `file_size_limit = 10485760`,
+`allowed_mime_types` alignés sur `portal-documents` (PDF, JPEG, PNG, HEIC, WEBP, GIF, Word).
+**Policies Storage** (écrites précisément pendant la PR, principe fixé ici) : upload/lecture
+autorisés uniquement si le préfixe du chemin (`<hotel_id>/...`) correspond à un hôtel de
+l'utilisateur (`user_hotels`) ou si l'appelant est `is_platform_admin()` — même logique de
+filtrage par préfixe que les buckets existants du projet. **RLS table** (`support_ticket_attachments`) :
+même structure que §3.5.8 (admin ALL, hôtel SELECT scoping par `ticket_id`/`hotel_id`, écriture
+par RPC uniquement — `admin_add_support_ticket_attachment`/`hotel_add_support_ticket_attachment`
+qui valident la ligne `storage.objects` correspondante existe avant d'insérer la ligne
+métadonnée, pour ne jamais référencer un fichier qui n'a pas été effectivement uploadé).
+
+### 3.6 Supervision avancée — hors périmètre de ce round (voir §8)
+
+Non incluse dans les 6 lots communiqués par le CTO pour ce lancement. Contenu conservé sans
+changement en annexe (§8), pour ne pas perdre la matière déjà produite au round 1/2.
 
 ---
 
 ## 4. Preuve de non-duplication
 
-Inchangée depuis le round 1 (voir tableau complet du document précédent) — aucune ligne n'est
-invalidée par cette révision. Deux lignes précisées :
-
-| Nouvelle brique | Domaine | S'appuie sur | Ne duplique pas |
+| Nouvelle brique | Lot | S'appuie sur | Ne duplique pas |
 |---|---|---|---|
-| Migration `sql/80` (rétro-versionnement) | Support | `support_tickets`/`help_articles` (schéma production, reproduit à l'identique) | Ne recrée rien — recopie ce qui existe, grants inclus, sans aucune amélioration cachée |
-| `REVOKE anon` (PR-03 Support) | Support | Le test réel du §2.5.4, pas une supposition | N'est plus fusionné avec le rétro-versionnement — décision distincte, justifiée par preuve |
+| Migration `sql/80` (rétro-versionnement) | Lot 1 | `support_tickets`/`help_articles` (schéma production, reproduit à l'identique) | Ne recrée rien — recopie ce qui existe, grants inclus |
+| `REVOKE anon` (`sql/81`) | Lot 1 | Le test réel du §2.5.4 | Décision distincte du rétro-versionnement, justifiée par preuve |
+| `platform_notifications` (`sql/82`) | Lot 2 | Rien d'existant — première file de notifications du projet | N'entre pas en collision avec Resend (reste le seul point d'envoi réel) |
+| `admin_list_license_usage` (`sql/83`) | Lot 3 | `snapshot_limits`/`plan_modules` existants | Ne recrée aucune table de licence, lecture seule |
+| `admin_{preview,run}_trial_ending_notifications` (`sql/84`) | Lot 4 | `hotel_subscriptions.trial_ends_at` existant + `platform_notifications` (Lot 2) | Ne touche jamais `hotel_app_subscriptions` (ADR-011), aucun cron |
+| `support_ticket_replies`/`support_ticket_attachments` (`sql/85`, `sql/86`) | Lot 5 | `support_tickets` existant, patterns `ota_dispute_messages`/`communication_attachments` | N'étend pas `support_tickets` elle-même (append-only séparé), ne remplace pas `attachment_url`/`claude_response` déjà versionnés au Lot 1 |
+| `platform_metrics_daily` (`sql/87`) | Lot 6 | `hotel_subscription_events`, `platform_invoices`, `platform_payments`, alertes Lot 3, tickets Lot 5 | Aucun recalcul de logique déjà exposée par `admin_platform_overview_kpis` pour hôtels/utilisateurs actifs |
 
 ---
 
-## 5. Les 7 décisions CTO — statut après ce round
+## 5. Décisions CTO — statut après ce round
 
-Reprise exacte des 7 décisions listées au round 1, pour vérification qu'aucune n'a été oubliée :
+1. **Prestataire de paiement** — **toujours différé**, confirmé explicitement par ce
+   lancement (Paiements reporté). Bloque toujours PR-11 (§6).
+2. **Licences — alerte seule ou blocage réel ?** — **Tranché et reconfirmé : observation,
+   comptage et alertes uniquement, aucun blocage automatique en V1** (Lot 3).
+3. **Activation du cron essais expirés** — **Tranché et reconfirmé : non activé.**
+4. **Cron dunning / recalcul quotidien des métriques** — cohérent avec la décision 3 :
+   **aucun cron activé dans ce cycle**, tout reste à déclenchement manuel.
+5. **Compte de monitoring d'erreurs (Sentry)** — **sans objet dans ce round** : la Supervision
+   avancée n'est pas incluse dans les 6 lots communiqués (§8).
+6. **Support — périmètre V1** — **Tranché et précisé par ce lancement : Lot 5 scindé en deux PR
+   strictement indépendantes** — PR A back-office (triage, assignation, priorité, réponses),
+   PR B portail hôtel (création, suivi, pièces jointes), PR B livrée après PR A.
+7. **`platform_incidents` (#35, Could)** — **sans objet dans ce round**, non inclus dans les 6
+   lots communiqués (§8).
 
-1. **Prestataire de paiement** (Stripe ou autre) — **toujours différée**, confirmé
-   explicitement : « décision différée jusqu'à validation du modèle commercial et
-   contractuel ». Bloque toujours PR-Paiements (§6). Les questions métier préalables sont
-   maintenant listées en §3.1.
-2. **Licences — alerte seule ou blocage réel ?** — **Tranché : observation, comptage et
-   alertes uniquement, aucun blocage automatique en V1.**
-3. **Activation du cron essais expirés** — **Tranché : ne pas l'activer pour le moment.**
-   Retiré du plan de réalisation (§6), reste un chantier futur documenté par ADR-010 §3.
-4. **Activation d'un cron pour le dunning / le recalcul quotidien des métriques** — cohérent
-   avec la décision 3 : **aucun cron n'est activé dans ce cycle**, dunning et métriques restent
-   à déclenchement manuel en V1 (§3.1, §3.4).
-5. **Compte de monitoring d'erreurs (Sentry)** — **Tranché : Sentry ne doit pas bloquer la
-   supervision native.** Reste une PR indépendante et optionnelle, sans dépendance du reste de
-   la Supervision avancée sur son activation.
-6. **Support — périmètre V1** — **Tranché : triage Super Admin d'abord, puis création de
-   ticket côté hôtel dans une PR distincte** (§3.5.6, §6-PR10).
-7. **`platform_incidents` (#35, Could)** — **Non explicitement tranché dans les instructions de
-   ce round.** Reste optionnelle, en fin de plan (§6), sans blocage du reste. À confirmer
-   explicitement si le CTO souhaite l'inclure ou la retirer du batch initial.
+**Nouvelles décisions actées par ce lancement (round 3)** :
 
-**Décision supplémentaire actée ce round** : `platform_notifications` — fondation transverse
-validée **sous réserve** d'idempotence (portée par `dedupe_key UNIQUE`), de gestion des
-tentatives (`attempts`/`max_attempts`/`next_attempt_at`), de rétention (proposition 90 jours,
-non automatisée en V1) et de traçabilité (`created_at`/`processed_at`/`sent_at`/`failed_at`,
-`last_error`/`final_error`) — toutes ces exigences sont désormais couvertes par le schéma
-détaillé en §3.0.
+8. **Lot 4 — 3 paliers de notification (J-7/J-3/J-1)** avec RPC `preview`/`run` au prédicat
+   identique, cron toujours désactivé — détaillé §3.3, seule décision explicitement chiffrée
+   par le CTO dans les instructions de lancement.
+9. **Lot 5 — réponses et pièces jointes** ajoutées au périmètre (absentes du round 2, qui ne
+   couvrait que le statut/assignation/priorité) — deux nouvelles tables + un bucket Storage,
+   détaillé §3.5.8/§3.5.9.
+10. **Lot 6 — score de santé plateforme** formellement défini (proposition V1, pondération à
+    valider explicitement par le CTO — §3.4) — absent du round 2.
+11. **Règle de fiche PR étendue** — chaque PR doit désormais documenter explicitement 8 champs :
+    objectif, dépendances, migration, **reconstruction**, tests, rollback, **smoke test**,
+    **documentation** — appliqué à toutes les fiches du §6.
+12. **Ordre imposé confirmé** : Lot 1 → Lot 2 → Lot 3 → Lot 4 → Lot 5 (PR A puis PR B) → Lot 6 →
+    Paiements (note seule, pas de développement).
 
-**Décision supplémentaire actée ce round** : `hotel_app_subscriptions` — confirmé qu'aucune
-nouvelle lecture, écriture ou dépendance n'est introduite par la Phase 2 (déjà le cas au round
-1, §3.2 et §4 — reconfirmé explicitement ici sans changement d'architecture).
+**Décisions round 2 reconfirmées sans changement** : `platform_notifications` (schéma détaillé
+§3.0), `hotel_app_subscriptions` (aucune nouvelle dépendance introduite par la Phase 2).
 
 ---
 
-## 6. Plan de réalisation — PR détaillées, ordre imposé
+## 6. Plan de réalisation — PR détaillées, par lot, ordre imposé
 
-Ordre respecté : (1) ADR-012 finalisée, (2) rétro-versionnement Support à l'identique, (3)
-tests reconstruction/RLS Support, (4) durcissement ACL si nécessaire, (5) fondation
-`platform_notifications`, (6) licences en observation, (7) notifications d'essais, (8)
-statistiques fondamentales, (9) support triage, (10) création ticket hôtel, (11) supervision
-native, (12) paiements après décisions métier.
+**Gabarit obligatoire de fiche PR (round 3)** — chaque PR ci-dessous documente explicitement les
+8 champs exigés par le CTO, dans cet ordre : **Objectif, Dépendances, Migration, Reconstruction,
+Tests, Rollback, Smoke test, Documentation** — complétés par deux champs de contexte hérités du
+gabarit round 2, **Fichiers concernés** et **Risques**, conservés car utiles à la revue mais non
+exigés explicitement par le CTO.
+
+**Table de correspondance round 2 → round 3** (renumérotation, aucune migration n'a jamais été
+appliquée sous les anciens numéros — sans effet sur la production) :
+
+| Round 2 | Round 3 | Changement |
+|---|---|---|
+| PR-00 | PR-00 | Inchangée |
+| PR-01/02/03 (`sql/80`/`sql/81`) | Lot 1 — PR-01/02/03 | Inchangées, regroupées sous « Lot 1 » |
+| PR-04 (`sql/82`) | Lot 2 — PR-04 | Inchangée |
+| PR-05 (`sql/83`) | Lot 3 — PR-05 | Inchangée |
+| PR-06 (`sql/84`) | Lot 4 — PR-06 | **Étendue** : 3 paliers + preview/run (§3.3) |
+| PR-07 (`sql/85`, Statistiques) | Lot 6 — PR-09 (`sql/87`) | **Déplacée après le Lot 5** (ordre CTO), **étendue** avec le score de santé |
+| PR-08 (écran divergence, frontend) | PR-10 | Inchangée, hors lot |
+| PR-09 (`sql/86`, triage) | Lot 5 — PR-07 (`sql/85`) | **Renommée « Lot 5 PR A »**, **étendue** avec les réponses |
+| PR-10 (création ticket hôtel) | Lot 5 — PR-08 (`sql/86`) | **Renommée « Lot 5 PR B »**, **étendue** avec suivi + pièces jointes |
+| PR-11 (CMS + Sentry, Supervision) | Retirée du plan actif | Voir §8, non incluse dans les 6 lots communiqués |
+| PR-12 (Paiements) | PR-11 | Renumérotée, toujours reportée |
 
 ### PR-00 — ADR-012 finalisée
-- **Objectif** : obtenir la validation explicite de cette architecture.
-- **Fichiers concernés** : `docs/adr/ADR-012-super-admin-phase2-plateforme-saas.md` (ce
-  document).
+- **Objectif** : obtenir la validation explicite de cette architecture, round 3, avant tout
+  développement.
 - **Dépendances** : aucune.
-- **Migrations** : aucune.
-- **Risques** : aucun (documentaire).
+- **Migration** : aucune.
+- **Reconstruction** : sans objet (document seul, aucun schéma modifié).
 - **Tests** : aucun.
-- **Critères d'acceptation** : validation explicite reçue du CTO, décision 7 (§5) tranchée.
 - **Rollback** : sans objet.
+- **Smoke test** : sans objet.
+- **Documentation** : ce document lui-même ; entrée `CHANGELOG.md` à ajouter au moment de la
+  validation finale (pas avant, pour ne pas documenter une décision non encore actée).
+- **Fichiers concernés** : `docs/adr/ADR-012-super-admin-phase2-plateforme-saas.md`.
+- **Critères d'acceptation** : validation explicite reçue du CTO sur ce round 3.
 
-### PR-01 — Rétro-versionnement Support à l'identique
-- **Objectif** : remettre `support_tickets`/`help_articles` sous contrôle du dépôt, sans
-  aucun changement de comportement.
-- **Fichiers concernés** : nouveau `sql/80_support_retro_versioning.sql`.
+### Lot 1 — Fondations Support (priorité absolue)
+
+#### Lot 1 — PR-01 — Rétro-versionnement Support à l'identique
+- **Objectif** : remettre `support_tickets`/`help_articles` sous contrôle du dépôt, sans aucun
+  changement de comportement.
 - **Dépendances** : PR-00.
-- **Migrations** : `CREATE TABLE IF NOT EXISTS` (colonnes/contraintes/index identiques à
-  §2.5.1/§2.5.2), recréation idempotente des 3 triggers/fonctions, de la séquence, des 7
-  policies RLS, et des grants actuels reproduits tels quels.
-- **Risques** : très faible — la migration doit être un **no-op** en production (les objets
-  existent déjà) ; le risque réel est une divergence entre ce qui est écrit et ce qui existe
-  réellement, d'où le PR-02 immédiatement après.
-- **Tests** : application en transaction `ROLLBACK` sur la production réelle (doctrine
-  standard du projet), vérification qu'aucun objet n'est recréé avec une définition différente
-  de l'existant (comparaison DDL avant/après).
-- **Critères d'acceptation** : migration appliquée sans erreur, `pg_get_functiondef`/
-  `pg_get_constraintdef` identiques avant/après sur les deux tables.
-- **Rollback** : `DROP` des objets nouvellement créés par la migration si elle a créé quoi que
-  ce soit qui n'existait pas déjà (ne devrait rien créer de nouveau par construction).
+- **Migration** : nouveau `sql/80_support_retro_versioning.sql` — `CREATE TABLE IF NOT EXISTS`
+  (colonnes/contraintes/index identiques à §2.5.1/§2.5.2), recréation idempotente des 3
+  triggers/fonctions, de la séquence, des 7 policies RLS, et des grants actuels reproduits tels
+  quels.
+- **Reconstruction** : la migration est ajoutée à la séquence rejouée par la reconstruction
+  versionnée du dépôt ; le job CI « DB — reconstruction dépôt + tests » doit rester vert après
+  ajout, avec ces deux tables désormais couvertes.
+- **Tests** : application en transaction `ROLLBACK` sur la production réelle, vérification
+  qu'aucun objet n'est recréé avec une définition différente de l'existant (comparaison DDL
+  avant/après, `pg_get_functiondef`/`pg_get_constraintdef` identiques).
+- **Rollback** : `DROP` des objets nouvellement créés si la migration a créé quoi que ce soit
+  qui n'existait pas déjà (ne devrait rien créer de nouveau par construction, puisque
+  `CREATE TABLE IF NOT EXISTS`).
+- **Smoke test** : lecture réelle en production (comme pratiqué pour la PR #20) confirmant que
+  `support_tickets`/`help_articles` restent interrogeables sans erreur après application.
+- **Documentation** : entrée `CHANGELOG.md`, mise à jour de ce document marquant Lot 1 PR-01
+  comme livré.
+- **Fichiers concernés** : nouveau `sql/80_support_retro_versioning.sql`.
+- **Risques** : très faible — la migration doit être un **no-op** en production.
 
-### PR-02 — Tests de reconstruction et de RLS Support
+#### Lot 1 — PR-02 — Tests de reconstruction et de RLS Support
 - **Objectif** : garantir la non-régression future sur ces deux tables, versionner le test
   d'intrusion `anon` du §2.5.4.
-- **Fichiers concernés** : nouveau `sql/tests/support_retro_versioning.sql`.
-- **Dépendances** : PR-01.
-- **Migrations** : aucune (fichier de test seul).
-- **Risques** : aucun (lecture/écriture en transaction annulée).
-- **Tests** : le fichier lui-même — 8 scénarios `anon` (§2.5.4) + scénarios `authenticated`
-  hôtel légitime (accès à ses propres tickets, refus sur ceux d'un autre hôtel) + scénario
-  admin (accès complet).
-- **Critères d'acceptation** : tous les scénarios PASS, exécutés en `BEGIN...ROLLBACK` sur la
-  production réelle.
+- **Dépendances** : Lot 1 PR-01.
+- **Migration** : aucune (fichier de test seul).
+- **Reconstruction** : ce fichier **est** le test de reconstruction — exécuté par la CI dédiée
+  à chaque modification future de ces deux tables.
+- **Tests** : nouveau `sql/tests/support_retro_versioning.sql` — 8 scénarios `anon` (§2.5.4) +
+  scénarios `authenticated` hôtel légitime (accès à ses propres tickets, refus sur ceux d'un
+  autre hôtel) + scénario admin (accès complet).
 - **Rollback** : sans objet (fichier de test, pas de modification durable).
+- **Smoke test** : exécution du fichier en `BEGIN...ROLLBACK` sur la production réelle,
+  confirmation zéro résidu après coup.
+- **Documentation** : entrée `CHANGELOG.md`.
+- **Fichiers concernés** : nouveau `sql/tests/support_retro_versioning.sql`.
+- **Risques** : aucun (lecture/écriture en transaction annulée).
 
-### PR-03 — Durcissement ACL Support (si confirmé nécessaire)
+#### Lot 1 — PR-03 — Durcissement ACL Support (si confirmé nécessaire)
 - **Objectif** : appliquer le principe de moindre privilège sur `support_tickets`/
-  `help_articles`, justifié par le test réel du §2.5.4 (pas par supposition).
+  `help_articles`, justifié par le test réel du §2.5.4.
+- **Dépendances** : Lot 1 PR-01, PR-02.
+- **Migration** : nouveau `sql/81_support_acl_hardening.sql` — `REVOKE ALL ... FROM anon` sur
+  les deux tables + la séquence `support_ticket_seq`. Aucune policy RLS modifiée.
+- **Reconstruction** : intégrée à la séquence rejouée par la reconstruction du dépôt.
+- **Tests** : rejeu du fichier PR-02, vérifiant que le résultat `anon` passe de « bloqué par
+  RLS » à « bloqué par grant » (erreur différente, plus précoce).
+- **Rollback** : `GRANT` inverse si un usage légitime d'`anon` était découvert a posteriori.
+- **Smoke test** : `has_table_privilege('anon', 'support_tickets', 'INSERT')` = `false` vérifié
+  directement en production après application, comportement `authenticated`/admin inchangé.
+- **Documentation** : entrée `CHANGELOG.md`.
 - **Fichiers concernés** : nouveau `sql/81_support_acl_hardening.sql`.
-- **Dépendances** : PR-01, PR-02 (le test de non-régression doit exister avant de durcir).
-- **Migrations** : `REVOKE ALL ... FROM anon` sur les deux tables + la séquence
-  `support_ticket_seq`. Aucune policy RLS modifiée.
-- **Risques** : faible — aucun flux légitime ne passe aujourd'hui par `anon` sur ces tables
-  (confirmé par §2.5.4), donc aucune régression fonctionnelle attendue.
-- **Tests** : rejeu du fichier PR-02, en vérifiant que le résultat `anon` passe de « bloqué par
-  RLS » à « bloqué par grant » (erreur différente, plus précoce), et que le comportement
-  `authenticated`/admin est strictement inchangé.
-- **Critères d'acceptation** : tests PASS, `has_table_privilege('anon', 'support_tickets',
-  'INSERT')` = `false` après migration.
-- **Rollback** : `GRANT` inverse si un usage légitime d'`anon` était découvert a posteriori
-  (jugé très improbable au vu du test, mais la stratégie de rollback doit rester explicite).
+- **Risques** : faible — aucun flux légitime ne passe aujourd'hui par `anon` sur ces tables.
 
-### PR-04 — Fondation `platform_notifications`
-- **Objectif** : livrer la file de notifications transverse spécifiée en §3.0.
-- **Fichiers concernés** : nouveau `sql/82_platform_notifications.sql`,
+### Lot 2 — Fondation `platform_notifications`
+- **Objectif** : livrer la file de notifications transverse spécifiée en §3.0, utilisée par tous
+  les domaines (Lot 4, Lot 5).
+- **Dépendances** : PR-00.
+- **Migration** : nouveau `sql/82_platform_notifications.sql` (schéma §3.0), `REVOKE ALL FROM
+  PUBLIC, anon, authenticated`, grant `service_role` uniquement ; nouvelle Edge Function
   `supabase/functions/platform-send-notification/index.ts`.
-- **Dépendances** : PR-00.
-- **Migrations** : `CREATE TABLE platform_notifications` (schéma §3.0), `REVOKE ALL FROM
-  PUBLIC, anon, authenticated`, grant `service_role` uniquement.
-- **Risques** : faible — aucune brique existante n'en dépend encore à ce stade (les PR
-  consommatrices viennent après).
-- **Tests** : insertion directe + appel de l'Edge Function en environnement de test (clé
-  Resend de test), vérification de l'idempotence via `dedupe_key` (deux insertions avec la
-  même clé → une seule ligne, `ON CONFLICT DO NOTHING`), vérification du passage
-  `pending → sending → sent/abandoned`.
-- **Critères d'acceptation** : idempotence démontrée par test, `attempts`/`max_attempts`
-  respectés (pas de tentative au-delà de la borne), aucun accès `anon`/`authenticated`
-  possible sur la table.
+- **Reconstruction** : intégrée à la séquence rejouée par la reconstruction du dépôt.
+- **Tests** : insertion directe + appel de l'Edge Function en environnement de test (clé Resend
+  de test), vérification de l'idempotence via `dedupe_key` (deux insertions avec la même clé →
+  une seule ligne), vérification du passage `pending → sending → sent/abandoned`.
 - **Rollback** : `DROP TABLE platform_notifications` si aucune brique n'en dépend encore (à
-  vérifier avant tout rollback si des PR consommatrices ont déjà été mergées).
+  vérifier avant tout rollback une fois les PR consommatrices — Lot 4, Lot 5 — mergées).
+- **Smoke test** : idempotence démontrée par test réel (deux appels identiques, une seule
+  notification effectivement envoyée), aucun accès `anon`/`authenticated` possible sur la
+  table, vérifié directement.
+- **Documentation** : entrée `CHANGELOG.md`, documentation de l'Edge Function.
+- **Fichiers concernés** : `sql/82_platform_notifications.sql`,
+  `supabase/functions/platform-send-notification/index.ts`.
+- **Risques** : faible — aucune brique existante n'en dépend encore à ce stade.
 
-### PR-05 — Licences en observation
-- **Objectif** : `admin_list_license_usage()` + alerte `license_quota_exceeded`.
-- **Fichiers concernés** : nouveau `sql/83_admin_license_usage.sql`.
-- **Dépendances** : PR-00 (aucune dépendance technique sur les PR Support/notifications).
-- **Migrations** : nouvelle RPC `admin_list_license_usage()`, extension de
-  `admin_platform_alerts()` avec le nouveau type d'alerte.
-- **Risques** : faible — lecture seule, aucun blocage (décision §5 confirmée).
-- **Tests** : scénarios avec un hôtel sous quota, un hôtel au-dessus, un hôtel sans limite
-  définie (`snapshot_limits` vide) — comportement attendu explicité pour chaque cas.
-- **Critères d'acceptation** : RPC gardée `is_platform_admin()`, aucune écriture, aucun
-  comportement bloquant démontrable par les tests.
-- **Rollback** : `DROP FUNCTION admin_list_license_usage()`, retrait du nouveau type d'alerte
-  dans `admin_platform_alerts()` (nouvelle version de la fonction sans ce cas).
-
-### PR-06 — Notification « essai bientôt expiré »
-- **Objectif** : notifier un hôtel avant l'expiration de son essai, sans cron (décision §5).
-- **Fichiers concernés** : nouvelle RPC dans `sql/84_trial_ending_notification.sql`.
-- **Dépendances** : PR-04 (`platform_notifications`).
-- **Migrations** : RPC qui lit `trial_ending_soon` (déjà détecté par `admin_platform_alerts`)
-  et insère dans `platform_notifications` avec `dedupe_key = 'trial:<subscription_id>:<jours>'`.
-  Déclenchement manuel en V1 (bouton admin ou appel lors de la consultation du dashboard) —
-  **pas de cron**.
-- **Risques** : faible.
-- **Tests** : un essai à J-7/J-3/J-1 ne génère qu'une seule notification par palier (test de
-  l'idempotence via `dedupe_key`).
-- **Critères d'acceptation** : aucune notification dupliquée sur relance manuelle répétée.
-- **Rollback** : `DROP FUNCTION`, aucune donnée `hotel_subscriptions` affectée (lecture seule
-  sur cette table).
-
-### PR-07 — Statistiques fondamentales
-- **Objectif** : `platform_metrics_daily` + `admin_recompute_platform_metrics` (manuel,
-  rejouable historiquement) + `admin_platform_metrics_series`, selon les définitions
-  formelles du §3.4.
-- **Fichiers concernés** : nouveau `sql/85_platform_metrics.sql`.
+### Lot 3 — Licences en observation
+- **Objectif** : `admin_list_license_usage()` + alerte `license_quota_exceeded`, lecture seule.
 - **Dépendances** : PR-00.
-- **Migrations** : nouvelle table `platform_metrics_daily`, deux nouvelles RPC.
-- **Risques** : moyen — le calcul du MRR/ARR/churn touche une logique métier nouvelle et
-  potentiellement disputée (voir divergences possibles entre MRR contractuel/facturé/encaissé,
-  §3.4) ; risque principal = un chiffre incorrect affiché au CTO, pas un risque de sécurité.
-- **Tests** : jeux de données synthétiques avec résiliations, changements de plan et avoirs
-  à des dates connues, vérifiant que chaque métrique du §3.4 produit le résultat attendu selon
-  sa formule exacte.
-- **Critères d'acceptation** : les 9 métriques du §3.4 correspondent à un calcul manuel de
-  référence sur un jeu de données de test.
-- **Rollback** : `DROP TABLE platform_metrics_daily`, `DROP FUNCTION` des deux RPC — aucune
-  autre table n'est modifiée par ce lot (lecture seule sur les tables sources).
+- **Migration** : nouveau `sql/83_admin_license_usage.sql` — nouvelle RPC
+  `admin_list_license_usage()`, extension de `admin_platform_alerts()`.
+- **Reconstruction** : intégrée à la séquence rejouée par la reconstruction du dépôt.
+- **Tests** : scénarios avec un hôtel sous quota, un hôtel au-dessus, un hôtel sans limite
+  définie (`snapshot_limits` vide).
+- **Rollback** : `DROP FUNCTION admin_list_license_usage()`, retrait du nouveau type d'alerte.
+- **Smoke test** : RPC appelée en production (lecture seule), résultat comparé à un comptage
+  manuel de référence sur un hôtel connu.
+- **Documentation** : entrée `CHANGELOG.md`.
+- **Fichiers concernés** : `sql/83_admin_license_usage.sql`.
+- **Risques** : faible — lecture seule, aucun blocage.
 
-### PR-08 — Écran divergence de droits (frontend seul)
-- **Objectif** : exposer `admin_rights_divergence_report()` (déjà existante) à l'écran.
-- **Fichiers concernés** : `admin.html` uniquement.
-- **Dépendances** : aucune (backend déjà livré en Phase 2A).
-- **Migrations** : aucune.
-- **Risques** : nul (lecture seule, backend inchangé).
-- **Tests** : Jest sur le helper d'affichage, smoke test visuel.
-- **Critères d'acceptation** : l'écran affiche exactement ce que retourne la RPC existante,
-  aucune logique métier dupliquée côté frontend.
-- **Rollback** : retrait de l'écran, aucun impact backend.
-
-### PR-09 — Support triage Super Admin
-- **Objectif** : RPC `admin_list_support_tickets`/`admin_get_support_ticket_detail`/
-  `admin_update_support_ticket` + correction `STUB_INFO.support` + écran `admin.html`.
-- **Fichiers concernés** : nouveau `sql/86_admin_support_triage.sql`, `admin.html`.
-- **Dépendances** : PR-01, PR-02, PR-03 (le lot de fondation Support doit être fermé avant
-  d'ajouter des RPC dessus).
-- **Migrations** : 3 nouvelles RPC, ACL standard, écriture `_platform_log` sur chaque mutation.
-- **Risques** : faible — aucune nouvelle table, ACL standard déjà maîtrisée par le projet.
-- **Tests** : scénarios triage complet (liste, détail, changement de statut, assignation),
-  vérification que chaque mutation produit une ligne `platform_logs`, rejet non-admin.
-- **Critères d'acceptation** : tests PASS, `STUB_INFO.support` corrigé.
-- **Rollback** : `DROP FUNCTION` des 3 RPC, aucune donnée `support_tickets` affectée par le
-  rollback (les RPC ne changent pas le schéma).
-
-### PR-10 — Création de ticket côté hôtel
-- **Objectif** : point d'entrée `index.html`/`portal.html` pour qu'un utilisateur hôtel crée
-  un ticket (décision §5 : distincte du triage, livrée après).
-- **Fichiers concernés** : `index.html` ou `portal.html` (à confirmer selon l'écran cible),
-  éventuellement une RPC `submit_support_ticket()` dédiée si l'accès table direct actuel
-  (RLS `support_insert`) est jugé insuffisant une fois PR-03 appliquée.
-- **Dépendances** : PR-01, PR-02, PR-03, PR-09 (le triage doit exister pour qu'un ticket créé
-  soit traité).
-- **Migrations** : éventuelle nouvelle RPC si nécessaire (à trancher pendant la PR).
+### Lot 4 — Notifications d'essai (J-7/J-3/J-1), cron désactivé
+- **Objectif** : notifier un hôtel avant l'expiration de son essai, aux trois paliers, avec
+  preview et exécution manuelle au prédicat identique — voir §3.3.
+- **Dépendances** : Lot 2 (`platform_notifications`).
+- **Migration** : nouveau `sql/84_trial_ending_notifications.sql` — RPC
+  `admin_preview_trial_ending_notifications()` et `admin_run_trial_ending_notifications()`,
+  prédicat partagé (§3.3). **Pas de cron.**
+- **Reconstruction** : intégrée à la séquence rejouée par la reconstruction du dépôt.
+- **Tests** : un essai à J-7/J-3/J-1 ne génère qu'une seule notification par palier (idempotence
+  `dedupe_key`) ; preview et run retournent la même liste d'hôtels concernés avant exécution ;
+  relance manuelle répétée ne produit aucun doublon.
+- **Rollback** : `DROP FUNCTION` des deux RPC, aucune donnée `hotel_subscriptions` affectée
+  (lecture seule sur cette table).
+- **Smoke test** : preview appelée en production (lecture seule) sur les essais réels en cours,
+  comparée manuellement à `trial_ends_at` de chaque hôtel concerné.
+- **Documentation** : entrée `CHANGELOG.md`, section « Essais » de ce document marquée livrée.
+- **Fichiers concernés** : `sql/84_trial_ending_notifications.sql`.
 - **Risques** : faible.
+
+### Lot 5 — Support (2 PR indépendantes)
+
+#### Lot 5 — PR A — Back-office (triage, assignation, priorité, réponses)
+- **Objectif** : `admin_list_support_tickets`/`admin_get_support_ticket_detail`/
+  `admin_update_support_ticket`/`admin_reply_support_ticket` + écran `admin.html` + correction
+  `STUB_INFO.support` — voir §3.5.4/§3.5.5/§3.5.8.
+- **Dépendances** : Lot 1 (PR-01/02/03 fermées), Lot 2 (notifications de réponse).
+- **Migration** : nouveau `sql/85_admin_support_triage.sql` — table `support_ticket_replies`
+  (§3.5.8), 4 nouvelles RPC, ACL standard, écriture `_platform_log` sur chaque mutation.
+- **Reconstruction** : intégrée à la séquence rejouée par la reconstruction du dépôt.
+- **Tests** : scénarios triage complet (liste, détail, changement de statut, assignation,
+  réponse visible, note interne invisible côté hôtel), vérification que chaque mutation produit
+  une ligne `platform_logs`, rejet non-admin, rejet d'une note interne créée par un `hotel_user`
+  (contrainte CHECK).
+- **Rollback** : `DROP FUNCTION` des 4 RPC, `DROP TABLE support_ticket_replies` si aucune
+  donnée réelle n'y a encore été écrite.
+- **Smoke test** : triage réel testé en production (lecture) + une réponse de test créée et
+  supprimée uniquement en transaction annulée (jamais en écriture réelle sans autorisation).
+- **Documentation** : entrée `CHANGELOG.md`, `STUB_INFO.support` corrigé dans `admin.html`.
+- **Fichiers concernés** : `sql/85_admin_support_triage.sql`, `admin.html`.
+- **Risques** : faible — ACL standard déjà maîtrisée par le projet, une seule table nouvelle.
+
+#### Lot 5 — PR B — Portail hôtel (création, suivi, pièces jointes)
+- **Objectif** : point d'entrée `index.html`/`portal.html` pour créer un ticket, suivre ses
+  tickets et joindre des fichiers — voir §3.5.6/§3.5.9. Livrée après PR A (décision §5).
+- **Dépendances** : Lot 1 (PR-01/02/03 fermées), Lot 5 PR A (le triage doit exister pour qu'un
+  ticket créé côté hôtel soit traité).
+- **Migration** : nouveau `sql/86_hotel_support_portal.sql` — table
+  `support_ticket_attachments` (§3.5.9), bucket Storage `support-ticket-attachments` + policies,
+  RPC `hotel_reply_support_ticket(ticket_id, body)`,
+  `hotel_add_support_ticket_attachment(ticket_id, reply_id, storage_path, ...)`.
+- **Reconstruction** : intégrée à la séquence rejouée par la reconstruction du dépôt.
 - **Tests** : un utilisateur hôtel peut créer un ticket pour son propre hôtel, pas pour un
-  autre ; Jest sur le formulaire.
-- **Critères d'acceptation** : ticket visible immédiatement côté triage Super Admin (PR-09).
-- **Rollback** : retrait du point d'entrée frontend ; si une RPC dédiée a été créée,
-  `DROP FUNCTION`.
+  autre ; peut répondre et joindre un fichier à son propre ticket, pas à celui d'un autre hôtel ;
+  ne voit jamais une note interne ; Jest sur le formulaire de création/réponse/upload.
+- **Rollback** : retrait du point d'entrée frontend, `DROP FUNCTION` des 2 RPC, `DROP TABLE
+  support_ticket_attachments` et suppression du bucket si aucune pièce jointe réelle n'a encore
+  été uploadée.
+- **Smoke test** : ticket visible immédiatement côté triage Super Admin (Lot 5 PR A) après
+  création côté hôtel, testé en production avec un ticket de test explicitement marqué et
+  nettoyé après vérification.
+- **Documentation** : entrée `CHANGELOG.md`.
+- **Fichiers concernés** : `index.html` ou `portal.html` (à confirmer selon l'écran cible),
+  `sql/86_hotel_support_portal.sql`.
+- **Risques** : faible — nouvelle table + bucket, mais RLS/policies calquées sur des patterns
+  déjà en production (`portal-documents`, `ota_dispute_attachments`).
 
-### PR-11 — Supervision native (RPC CMS `help_articles` + Sentry optionnel)
-- **Objectif** : RPC CMS `help_articles` (inchangé §3.5.5) ; en parallèle, Sentry frontend +
-  Edge Functions comme lot **indépendant et non bloquant** (décision §5).
-- **Fichiers concernés** : nouveau `sql/87_admin_help_articles_cms.sql`, `admin.html`,
-  optionnellement `supabase/functions/_shared/sentry.ts` si le compte Sentry est fourni avant
-  cette PR.
-- **Dépendances** : PR-01, PR-02, PR-03 pour la partie CMS ; aucune dépendance pour la partie
-  Sentry (peut être découplée dans le temps, décision §5).
-- **Migrations** : 4 nouvelles RPC CMS, ACL standard.
-- **Risques** : faible pour le CMS ; la partie Sentry dépend d'une décision CTO externe (§5,
-  point 5) non tranchée dans ce round.
-- **Tests** : scénarios CMS (créer/publier/archiver un article, rejet non-`support_agent`).
-- **Critères d'acceptation** : tests PASS ; `admin_supervision_status()` n'est mise à jour
-  (signaux passés à `true`) que si Sentry est réellement câblé, jamais avant.
-- **Rollback** : `DROP FUNCTION` des 4 RPC CMS ; retrait du SDK Sentry si intégré, sans impact
-  sur `admin_supervision_status()` qui revient à ses valeurs honnêtes par défaut.
+### Lot 6 — Statistiques fondamentales (y compris score de santé plateforme)
+- **Objectif** : `platform_metrics_daily` + `admin_recompute_platform_metrics` (manuel,
+  rejouable historiquement) + `admin_platform_metrics_series`, selon les définitions formelles
+  du §3.4, y compris le score de santé plateforme.
+- **Dépendances** : PR-00 techniquement seule requise pour les métriques financières (MRR/ARR/
+  churn/conversion) ; **le sous-score Support du score de santé dépend du Lot 5** et **le
+  sous-score Licences dépend du Lot 3** (défaut `100` tant qu'ils ne sont pas livrés, §3.4) —
+  livré en dernier dans l'ordre imposé précisément pour cette raison.
+- **Migration** : nouveau `sql/87_platform_metrics.sql` — nouvelle table
+  `platform_metrics_daily`, RPC de recalcul et de série temporelle, RPC de score de santé.
+- **Reconstruction** : intégrée à la séquence rejouée par la reconstruction du dépôt.
+- **Tests** : jeux de données synthétiques avec résiliations, changements de plan et avoirs à
+  des dates connues, vérifiant que chaque métrique du §3.4 (y compris chaque sous-score de
+  santé) produit le résultat attendu selon sa formule exacte.
+- **Rollback** : `DROP TABLE platform_metrics_daily`, `DROP FUNCTION` des RPC — aucune autre
+  table modifiée (lecture seule sur les tables sources).
+- **Smoke test** : recalcul réel en production comparé à un calcul manuel de référence sur les
+  données réelles (MRR, hôtels actifs).
+- **Documentation** : entrée `CHANGELOG.md`, formule du score de santé documentée dans l'écran
+  Dashboard (`admin.html`) pour que le CTO puisse la vérifier à l'œil.
+- **Fichiers concernés** : `sql/87_platform_metrics.sql`, `admin.html`.
+- **Risques** : moyen — le calcul du MRR/ARR/churn et du score de santé touche une logique
+  métier nouvelle et potentiellement disputée ; risque principal = un chiffre incorrect affiché
+  au CTO, pas un risque de sécurité.
 
-### PR-12 — Paiements (après décisions métier)
-- **Objectif** : les 3 livrables du §3.1 (round 1) — PDF réel, dunning réel, passerelle de
-  paiement — **une fois** les questions métier du §3.1 tranchées et le prestataire choisi.
-- **Fichiers concernés** : `sql/88+`, buckets Storage, Edge Functions dédiées.
-- **Dépendances** : PR-04 (`platform_notifications`, pour le dunning), décisions CTO §5 point 1
-  (prestataire) et les questions métier §3.1.
-- **Migrations** : détaillées au round 1 (§3.1) — `platform_dunning_log`,
-  `platform_payment_intents`, `platform_payment_provider_events`.
-- **Risques** : le plus élevé du plan (flux financier réel, webhook public, prestataire
-  externe) — à scinder en sous-PR au moment de l'exécution (PDF seul, puis dunning seul, puis
-  passerelle de paiement en dernier, la plus encadrée).
+### PR-10 — Écran divergence de droits (frontend seul, hors lot)
+- **Objectif** : exposer `admin_rights_divergence_report()` (déjà existante) à l'écran.
+- **Dépendances** : aucune (backend déjà livré en Phase 2A) — peut être fait à tout moment, non
+  bloquant pour les 6 lots.
+- **Migration** : aucune.
+- **Reconstruction** : sans objet (frontend seul).
+- **Tests** : Jest sur le helper d'affichage, smoke test visuel.
+- **Rollback** : retrait de l'écran, aucun impact backend.
+- **Smoke test** : écran ouvert en Preview, comparé à un appel RPC direct de référence.
+- **Documentation** : entrée `CHANGELOG.md`.
+- **Fichiers concernés** : `admin.html` uniquement.
+- **Risques** : nul (lecture seule, backend inchangé).
+
+### PR-11 — Paiements (reporté, après décisions métier et choix de prestataire)
+- **Objectif** : les 3 livrables du §3.1 — PDF réel, dunning réel, passerelle de paiement —
+  **une fois** les questions métier du §3.1 tranchées et le prestataire choisi. **Non planifié
+  dans ce round.**
+- **Dépendances** : Lot 2 (`platform_notifications`, pour le dunning), décision CTO sur le
+  prestataire, réponses aux questions métier §3.1.
+- **Migration** : détaillée au round 1 (§3.1 historique) — `platform_dunning_log`,
+  `platform_payment_intents`, `platform_payment_provider_events`, numérotation `sql/88+` au
+  moment du déblocage.
+- **Reconstruction** : à traiter au moment de l'exécution.
 - **Tests** : idempotence webhook stricte (`event_id` unique), vérification de signature
-  obligatoire, tests en transaction sur données réelles comme pour toutes les migrations
-  financières passées du projet.
-- **Critères d'acceptation** : à définir précisément une fois le prestataire choisi — pas
-  figés dans cet ADR.
+  obligatoire, tests en transaction sur données réelles.
 - **Rollback** : stratégie à détailler par sous-PR au moment de l'exécution, vu le niveau de
   risque — pas de rollback générique acceptable pour un flux financier réel.
+- **Smoke test** : à définir avec le prestataire choisi.
+- **Documentation** : ce document sera amendé (round 4+) une fois le prestataire choisi, avant
+  toute migration.
+- **Fichiers concernés** : `sql/88+`, buckets Storage, Edge Functions dédiées.
+- **Risques** : le plus élevé du plan (flux financier réel, webhook public, prestataire
+  externe) — à scinder en sous-PR au moment de l'exécution.
 
 ---
 
 ## 7. Points encore réellement bloquants
 
-1. **Choix du prestataire de paiement** — bloque PR-12 dans son intégralité. Différé
-   explicitement par le CTO (§5), pas une omission.
-2. **Compte de monitoring d'erreurs (Sentry ou équivalent)** — bloque uniquement la partie
-   Sentry de PR-11, ne bloque plus le reste de la Supervision avancée (décision §5).
-3. **`platform_incidents` (#35)** — inclusion ou non dans ce batch, non tranchée
-   explicitement dans les instructions reçues (§5, point 7) — à confirmer.
-4. **Questions métier Paiements du §3.1** (périodicité, engagement, prorata, remboursements,
-   export comptable) — non tranchées, préalables à toute écriture de code sur PR-12, même une
+1. **Choix du prestataire de paiement** — bloque PR-11 dans son intégralité. Différé
+   explicitement par le CTO, confirmé par ce lancement.
+2. **Questions métier Paiements du §3.1** (périodicité, engagement, prorata, remboursements,
+   export comptable) — non tranchées, préalables à toute écriture de code sur PR-11, même une
    fois le prestataire choisi.
-5. **Politique de rétention de `platform_notifications`** — proposition à 90 jours en §3.0,
-   non validée, sans impact bloquant sur le développement (peut démarrer sans purge, la purge
-   est un ajout ultérieur non structurant).
+3. **Politique de rétention de `platform_notifications`** — proposition à 90 jours en §3.0, non
+   validée, sans impact bloquant sur le développement (peut démarrer sans purge).
+4. **Pondération du score de santé plateforme** (§3.4) — proposition V1 (40/25/20/15), non
+   validée explicitement, sans impact bloquant sur le Lot 6 (les poids sont une constante
+   modifiable sans migration de schéma, uniquement dans le corps de la RPC).
+5. **Fuseau horaire du « jour métier »** (Europe/Paris, §3.4) — proposition non confirmée
+   explicitement, sans impact bloquant (valeur par défaut raisonnable, changeable avant Lot 6).
 
-Aucun autre point du round 1 ne reste ouvert sans réponse : les décisions 2, 3, 5, 6 du §5 sont
-tranchées, la décision 4 (dérivée de la 3) est cohérente, `platform_notifications` et
-`hotel_app_subscriptions` ont reçu une confirmation explicite.
+Aucun autre point des rounds précédents ne reste ouvert sans réponse : les décisions listées en
+§5 sont toutes tranchées ou explicitement reportées avec leur raison.
+
+---
+
+## 8. Annexe — Supervision avancée (hors périmètre de ce lancement)
+
+Conservé sans changement depuis le round 2, pour mémoire — **non inclus dans les 6 lots
+communiqués par le CTO pour ce lancement**, ne pas développer tant que ce domaine n'est pas
+explicitement reprogrammé :
+
+`admin_supervision_status()` honnête (signaux `mutation_error_monitoring_available`/
+`edge_function_error_monitoring_available` actuellement `false`, correctement — aucun Sentry ou
+équivalent n'est câblé), `admin_list_platform_audit_log()` déjà livré (Phase 1). Chantiers
+identifiés mais non planifiés : RPC CMS `help_articles` (créer/publier/archiver un article,
+même doctrine ACL que le reste du Support), intégration Sentry frontend + Edge Functions
+(dépend d'un compte externe non fourni), `platform_incidents` (stretch, Could, historique
+d'incidents). Si ce domaine est repris dans un round futur, il consommera les prochains numéros
+de migration disponibles après `sql/87` (ou après `sql/88+` si Paiements a été débloqué entre
+temps) — aucun numéro n'est réservé à l'avance pour ne pas figer un ordre non confirmé.
 
 ---
 
 ## Prochaine étape
 
-Ce document reste soumis pour validation. Conformément à l'instruction reçue, aucun
-développement n'est démarré et aucune PR technique n'est ouverte avant autorisation explicite
-— y compris pour PR-01 (rétro-versionnement), qui ne modifie pourtant le comportement d'aucun
-système existant.
+Ce document (round 3) reste soumis pour validation. Conformément à l'instruction reçue, aucun
+développement n'est démarré et aucune PR technique n'est ouverte avant autorisation explicite —
+y compris pour le Lot 1 (rétro-versionnement), qui ne modifie pourtant le comportement d'aucun
+système existant. Dès validation, l'ordre d'exécution est : Lot 1 (PR-01 → PR-02 → PR-03) → Lot
+2 → Lot 3 → Lot 4 → Lot 5 (PR A → PR B) → Lot 6 → Paiements (note seule, pas de code).
