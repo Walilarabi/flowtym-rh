@@ -360,6 +360,29 @@ function sortRows(rows, key, dir){
     return 0;
   });
 }
+// Attache groupe/abonnement/plan/nombre d'utilisateurs à chaque hôtel — pure, sans appel réseau.
+function buildHotelRows(hotels, groups, subs, plans, users){
+  const groupById=Object.fromEntries((groups||[]).map(g=>[g.id,g]));
+  const planById=Object.fromEntries((plans||[]).map(p=>[p.id,p]));
+  const subByHotel=Object.fromEntries((subs||[]).map(s=>[s.hotel_id,s]));
+  return (hotels||[]).map(h=>({
+    ...h, _group:groupById[h.group_id]||null, _sub:subByHotel[h.id]||null,
+    _plan:subByHotel[h.id]?planById[subByHotel[h.id].plan_id]:null,
+    _userCount:(users||[]).filter(u=>u.hotel_id===h.id && u.is_active).length,
+  }));
+}
+// Recherche insensible à la casse sur nom/raison sociale/ville/code/e-mail — chaîne vide = pas de filtre.
+function filterHotelsBySearch(rows, query){
+  const q=String(query||'').trim().toLowerCase();
+  if(!q) return rows;
+  return rows.filter(h=>[h.name,h.company,h.city,h.hotel_code,h.email].filter(Boolean).some(v=>String(v).toLowerCase().includes(q)));
+}
+// Pagination pure — recale la page demandée dans les bornes valides (0..pageCount-1).
+function paginateRows(rows, page, pageSize){
+  const pageCount=Math.max(1,Math.ceil(rows.length/pageSize));
+  const safePage=Math.min(Math.max(0,page||0),pageCount-1);
+  return { pageRows: rows.slice(safePage*pageSize,(safePage+1)*pageSize), pageCount, page: safePage };
+}
 
 /* =====================================================================
    Helpers purs — Abonnements/Applications (mirror exact de tests/lib/adminHelpers.js)
@@ -847,6 +870,17 @@ window.addEventListener('popstate',()=>{
   renderView();
 });
 
+// Libellé neutre par vue pour le message d'erreur de chargement de page — jamais le message
+// technique brut (SQL/PostgREST) renvoyé par le backend, qui reste uniquement dans la console
+// (cf. console.error ci-dessous). Ne concerne que l'échec de CHARGEMENT d'une page ; les erreurs
+// d'action (formulaires, boutons) continuent de passer par errorLabel(), qui traduit déjà les
+// codes métier connus et reste inchangé.
+const VIEW_LOAD_ERROR_LABEL={
+  dashboard:'le tableau de bord', hotels:'la liste des hôtels', groups:'la liste des groupes',
+  users:'la liste des utilisateurs', subscriptions:'la liste des abonnements',
+  billing:'la facturation', audit:"le journal d'audit", settings:'les paramètres',
+  supervision:'la supervision',
+};
 async function renderView(){
   const el=$('view');
   el.innerHTML='<div class="loading"><i class="fa-solid fa-circle-notch fa-spin"></i> Chargement…</div>';
@@ -862,8 +896,9 @@ async function renderView(){
     else if(view==='supervision') await renderSupervision(el);
     else renderStub(el, view);
   }catch(e){
-    console.error(e);
-    el.innerHTML=`<div class="page"><div class="box" style="color:var(--red)"><i class="fa-solid fa-triangle-exclamation"></i> ${esc(e.message||String(e))}</div></div>`;
+    console.error('[renderView]', view, e);
+    const label=VIEW_LOAD_ERROR_LABEL[view]||'cette page';
+    el.innerHTML=`<div class="page"><div class="box" style="color:var(--red)"><i class="fa-solid fa-triangle-exclamation"></i> Impossible de charger ${label}. Veuillez réessayer.</div></div>`;
   }
 }
 
@@ -1002,7 +1037,11 @@ function goToAlertEntity(alert){
 let hotelsPage=0, hotelsSort={key:'name',dir:'asc'}, hotelsFilterStatus='', hotelsFilterGroup='', hotelsFilterPlan='', hotelsFilterSub='', hotelsFilterTrial='';
 async function renderHotels(el){
   const [{data:hotels,error:hErr},{data:groups,error:gErr},{data:subs},{data:plans},{data:publicPlans},{data:users}]=await Promise.all([
-    sb.from('hotels').select('id,name,city,country,status,group_id,hotel_code,total_rooms,phone,email,siret,tva_number,company,stars,currency,timezone,address,zip,website,created_at,updated_at'),
+    // hotels n'a pas de colonne updated_at (jamais créée par aucune migration, ni en
+    // production) — ne jamais la réintroduire ici sans une migration dédiée (cf. sql/tests
+    // hotelsRegression). .order('id') donne un ordre de base déterministe, indépendant du tri
+    // choisi côté client (tri stable même en cas d'égalité sur la clé de tri active).
+    sb.from('hotels').select('id,name,city,country,status,group_id,hotel_code,total_rooms,phone,email,siret,tva_number,company,stars,currency,timezone,address,zip,website,created_at').order('id'),
     sb.from('hotel_groups').select('id,name,status'),
     sb.from('hotel_subscriptions').select('hotel_id,status,trial_ends_at,plan_id'),
     sb.from('subscription_plans').select('id,name'),
@@ -1010,19 +1049,9 @@ async function renderHotels(el){
     sb.from('users').select('id,hotel_id,is_active'),
   ]);
   if(hErr) throw hErr; if(gErr) throw gErr;
-  const groupById=Object.fromEntries((groups||[]).map(g=>[g.id,g]));
-  const planById=Object.fromEntries((plans||[]).map(p=>[p.id,p]));
-  const subByHotel=Object.fromEntries((subs||[]).map(s=>[s.hotel_id,s]));
 
-  let rows=(hotels||[]).map(h=>({
-    ...h, _group:groupById[h.group_id]||null, _sub:subByHotel[h.id]||null,
-    _plan:subByHotel[h.id]?planById[subByHotel[h.id].plan_id]:null,
-    _userCount:(users||[]).filter(u=>u.hotel_id===h.id && u.is_active).length,
-  }));
-  if(searchQuery.trim()){
-    const q=searchQuery.trim().toLowerCase();
-    rows=rows.filter(h=>[h.name,h.company,h.city,h.hotel_code,h.email].filter(Boolean).some(v=>String(v).toLowerCase().includes(q)));
-  }
+  let rows=buildHotelRows(hotels, groups, subs, plans, users);
+  rows=filterHotelsBySearch(rows, searchQuery);
   if(hotelsFilterStatus) rows=rows.filter(h=>h.status===hotelsFilterStatus);
   if(hotelsFilterGroup) rows=rows.filter(h=>h.group_id===hotelsFilterGroup);
   if(hotelsFilterPlan) rows=rows.filter(h=>h._sub?.plan_id===hotelsFilterPlan);
@@ -1035,9 +1064,9 @@ async function renderHotels(el){
   });
   rows=sortRows(rows,hotelsSort.key,hotelsSort.dir);
 
-  const pageSize=20, pageCount=Math.max(1,Math.ceil(rows.length/pageSize));
-  hotelsPage=Math.min(hotelsPage,pageCount-1);
-  const pageRows=rows.slice(hotelsPage*pageSize,(hotelsPage+1)*pageSize);
+  const pageSize=20;
+  const {pageRows,pageCount,page}=paginateRows(rows,hotelsPage,pageSize);
+  hotelsPage=page;
 
   el.innerHTML=`<div class="page">
     <div class="phead"><div><h1>Hôtels</h1><div class="sub">${fmtNum(rows.length)} hôtel(s)</div></div>
@@ -1060,9 +1089,9 @@ async function renderHotels(el){
     <div class="tblwrap"><table class="tbl">
       <thead><tr>
         <th data-k="name">Hôtel</th><th data-k="city">Ville</th><th data-k="_group">Groupe</th><th data-k="status">Statut</th>
-        <th>Plan</th><th>Abonnement</th><th>Essai / échéance</th><th>Utilisateurs</th><th data-k="updated_at">Modifié</th><th>Actions</th>
+        <th>Plan</th><th>Abonnement</th><th>Essai / échéance</th><th>Utilisateurs</th><th>Actions</th>
       </tr></thead>
-      <tbody>${pageRows.length?pageRows.map(rowHotelHtml).join(''):`<tr><td colspan="10" class="empty">Aucun hôtel${searchQuery?' pour cette recherche':''}.</td></tr>`}</tbody>
+      <tbody>${pageRows.length?pageRows.map(rowHotelHtml).join(''):`<tr><td colspan="9" class="empty">Aucun hôtel${searchQuery?' pour cette recherche':''}.</td></tr>`}</tbody>
     </table></div>
     <div class="pager">
       <span>Page ${hotelsPage+1} / ${pageCount}</span>
@@ -1115,7 +1144,6 @@ function rowHotelHtml(h){
     <td>${subBadge}</td>
     <td>${trialCell}</td>
     <td>${h._userCount}</td>
-    <td class="muted">${fmtDateTime(h.updated_at)}</td>
     <td>
       <button data-open="${h.id}" title="Ouvrir la fiche"><i class="fa-regular fa-eye"></i></button>
       <button data-edit="${h.id}" title="Modifier"><i class="fa-regular fa-pen-to-square"></i></button>
@@ -1250,7 +1278,6 @@ async function openHotelDetailDrawer(hotel){
       <div class="kv"><span>E-mail</span><b>${esc(hotel.email||'—')}</b></div>
       <div class="kv"><span>SIRET / TVA</span><b>${esc(hotel.siret||'—')} / ${esc(hotel.tva_number||'—')}</b></div>
       <div class="kv"><span>Créé le</span><b>${fmtDateTime(hotel.created_at)}</b></div>
-      <div class="kv"><span>Modifié le</span><b>${fmtDateTime(hotel.updated_at)}</b></div>
       <div class="actrow">
         <button class="btn g" id="hEdit"><i class="fa-regular fa-pen-to-square"></i> Modifier</button>
         <button class="btn g" id="hCopyUrl"><i class="fa-regular fa-copy"></i> Copier l'URL du portail</button>

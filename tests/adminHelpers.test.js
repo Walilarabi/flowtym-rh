@@ -2,6 +2,7 @@
 const {
   hotelStatusBadge, subscriptionStatusBadge, trialDaysRemaining,
   fmtMoney, fmtNum, groupNameOr, sortRows, errorLabel,
+  buildHotelRows, filterHotelsBySearch, paginateRows, viewLoadErrorMessage,
   attributionTypeBadge, addonStatusBadge, causeLabel, eventTypeLabel, actionsForStatus,
   hotelActionsForStatus,
   hotelRoleLabel, platformRoleLabel, accountStatus, accountStatusBadge, primaryRoleLabel,
@@ -95,6 +96,133 @@ describe('Super Admin — sortRows()', () => {
     const original = [...rows];
     sortRows(rows, 'name', 'asc');
     expect(rows).toEqual(original);
+  });
+});
+
+// Régression P0 : écran Hôtels — « column hotels.updated_at does not exist ».
+// hotels n'a pas de colonne updated_at (jamais créée par aucune migration, absente en
+// production) ; l'écran s'appuyait dessus (select, tri, affichage) et la requête entière
+// échouait, ce qui vidait la liste et cassait la recherche (filtrée côté client sur des
+// données jamais reçues). Ces tests couvrent la reconstruction des lignes, la recherche et
+// la pagination indépendamment du réseau.
+describe('Super Admin — Hôtels : buildHotelRows()', () => {
+  const groups = [{ id: 'g1', name: 'Groupe Paris', status: 'active' }];
+  const plans = [{ id: 'p1', name: 'Flow Starter' }];
+  const users = [
+    { id: 'u1', hotel_id: 'h1', is_active: true },
+    { id: 'u2', hotel_id: 'h1', is_active: false },
+    { id: 'u3', hotel_id: 'h2', is_active: true },
+  ];
+
+  test('hôtel avec groupe : _group résolu depuis group_id', () => {
+    const subs = [{ hotel_id: 'h1', status: 'trial', plan_id: 'p1' }];
+    const hotels = [{ id: 'h1', name: 'Au Royal Mad', group_id: 'g1' }];
+    const rows = buildHotelRows(hotels, groups, subs, plans, users);
+    expect(rows[0]._group).toEqual(groups[0]);
+    expect(rows[0]._plan).toEqual(plans[0]);
+    expect(rows[0]._userCount).toBe(1); // un seul utilisateur actif sur les deux de h1
+  });
+
+  test('hôtel sans groupe : _group est null (jamais undefined)', () => {
+    const hotels = [{ id: 'h2', name: 'Solo Hotel', group_id: null }];
+    const rows = buildHotelRows(hotels, groups, [], plans, users);
+    expect(rows[0]._group).toBeNull();
+    expect(rows[0]._sub).toBeNull();
+    expect(rows[0]._plan).toBeNull();
+    expect(rows[0]._userCount).toBe(1);
+  });
+
+  test('aucune donnée réseau : ne jette pas, retourne un tableau vide', () => {
+    expect(buildHotelRows(null, null, null, null, null)).toEqual([]);
+  });
+});
+
+describe('Super Admin — Hôtels : filterHotelsBySearch()', () => {
+  const rows = [
+    { name: 'Au Royal Mad', company: 'SAS Royal', city: 'Marrakech', hotel_code: 'AR001', email: 'contact@royal.ma' },
+    { name: 'Grand Hôtel du Havre', company: null, city: 'Le Havre', hotel_code: 'GH01', email: null },
+  ];
+
+  test('absence de terme de recherche : retourne toutes les lignes, inchangées', () => {
+    expect(filterHotelsBySearch(rows, '')).toBe(rows); // même référence, pas de copie inutile
+    expect(filterHotelsBySearch(rows, '   ')).toEqual(rows);
+  });
+
+  test('recherche exacte sur le nom', () => {
+    expect(filterHotelsBySearch(rows, 'Grand Hôtel du Havre')).toEqual([rows[1]]);
+  });
+
+  test('recherche partielle', () => {
+    expect(filterHotelsBySearch(rows, 'Royal Ma')).toEqual([rows[0]]);
+  });
+
+  test('insensible à la casse', () => {
+    expect(filterHotelsBySearch(rows, 'AU ROYAL MA')).toEqual([rows[0]]);
+    expect(filterHotelsBySearch(rows, 'au royal mad')).toEqual([rows[0]]);
+  });
+
+  test('cherche aussi dans raison sociale/ville/code/e-mail', () => {
+    expect(filterHotelsBySearch(rows, 'marrakech')).toEqual([rows[0]]);
+    expect(filterHotelsBySearch(rows, 'AR001')).toEqual([rows[0]]);
+    expect(filterHotelsBySearch(rows, 'royal.ma')).toEqual([rows[0]]);
+  });
+
+  test('aucun résultat : tableau vide, pas d\'erreur', () => {
+    expect(filterHotelsBySearch(rows, 'introuvable-xyz')).toEqual([]);
+  });
+
+  test('ne plante pas sur des champs manquants (company/email null)', () => {
+    expect(() => filterHotelsBySearch(rows, 'havre')).not.toThrow();
+    expect(filterHotelsBySearch(rows, 'havre')).toEqual([rows[1]]);
+  });
+});
+
+describe('Super Admin — Hôtels : paginateRows()', () => {
+  const rows = Array.from({ length: 45 }, (_, i) => ({ id: `h${i}` }));
+
+  test('première page : 20 lignes', () => {
+    const { pageRows, pageCount, page } = paginateRows(rows, 0, 20);
+    expect(pageRows).toHaveLength(20);
+    expect(pageRows[0].id).toBe('h0');
+    expect(pageCount).toBe(3);
+    expect(page).toBe(0);
+  });
+
+  test('dernière page : reste (45 - 40 = 5 lignes)', () => {
+    const { pageRows } = paginateRows(rows, 2, 20);
+    expect(pageRows).toHaveLength(5);
+    expect(pageRows[0].id).toBe('h40');
+  });
+
+  test('page hors bornes (ex. après un filtre qui réduit le total) : recalée sur la dernière page valide', () => {
+    const { pageRows, page, pageCount } = paginateRows(rows, 99, 20);
+    expect(page).toBe(pageCount - 1);
+    expect(pageRows.length).toBeGreaterThan(0);
+  });
+
+  test('tableau vide : une seule page, 0 ligne, jamais de division par zéro', () => {
+    const { pageRows, pageCount, page } = paginateRows([], 0, 20);
+    expect(pageRows).toEqual([]);
+    expect(pageCount).toBe(1);
+    expect(page).toBe(0);
+  });
+});
+
+describe('Super Admin — chargement de page : viewLoadErrorMessage() (gestion d\'erreur backend)', () => {
+  test('vue Hôtels : message neutre, jamais le détail SQL', () => {
+    expect(viewLoadErrorMessage('hotels')).toBe('Impossible de charger la liste des hôtels. Veuillez réessayer.');
+  });
+  test('ne contient jamais de fragment SQL/PostgREST typique', () => {
+    const msg = viewLoadErrorMessage('hotels');
+    expect(msg.toLowerCase()).not.toMatch(/column|does not exist|relation|sqlstate|postgrest/);
+  });
+  test('vue inconnue : repli générique, ne plante pas', () => {
+    expect(viewLoadErrorMessage('vue-future-inconnue')).toBe('Impossible de charger cette page. Veuillez réessayer.');
+  });
+  test('toutes les vues du menu ont un libellé neutre dédié', () => {
+    for (const v of ['dashboard', 'hotels', 'groups', 'users', 'subscriptions', 'billing', 'audit', 'settings', 'supervision']) {
+      expect(viewLoadErrorMessage(v)).not.toBe('Impossible de charger cette page. Veuillez réessayer.');
+    }
   });
 });
 
