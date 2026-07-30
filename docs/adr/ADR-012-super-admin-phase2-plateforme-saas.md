@@ -1,10 +1,14 @@
 # ADR-012 — Phase 2 du Super Admin : plateforme SaaS de gestion commerciale et opérationnelle
 
-**Statut** : Round 4 — **orientation générale approuvée par le CTO**, révision documentaire
-supplémentaire demandée sur 5 points précis avant toute validation finale. **Toujours en
-attente d'autorisation explicite avant tout développement** — y compris le Lot 1. Aucune
-migration, aucune RPC, aucun code frontend, aucune PR technique n'a été écrit(e)/ouvert(e) à ce
-stade, à aucun round.
+**Statut** : Round 4, architecture générale validée par le CTO — **Lot 1 PR-01 autorisé à
+démarrer**, aucune autre PR de Phase 2. **Round 5 (addendum documentaire ponctuel, sans
+développement)** : correction du traitement antivirus des pièces jointes Support (§3.5.8, §1,
+§7) — sans fournisseur antivirus réel, une pièce jointe ne peut plus jamais passer
+automatiquement à `clean` ; nouveau statut honnête `scan_pending`, terminal en V1. Cette
+correction s'applique par anticipation à la conception du Lot 5 (non développé dans ce round) —
+elle n'affecte ni ne retarde le Lot 1 PR-01, seule PR autorisée à ce stade. Aucune migration,
+aucune RPC, aucun code frontend, aucune PR technique n'a été écrit(e)/ouvert(e) à ce stade, à
+aucun round.
 
 **Portée** : six lots, dans l'ordre de développement imposé par le CTO — Lot 1 (fondations
 Support, désormais 2 PR strictement séparées), Lot 2 (`platform_notifications`), Lot 3
@@ -105,9 +109,11 @@ que ces patterns existants là où le CTO a demandé un niveau de détail supér
   dépendre d'une résolution différée par jointure.
 - **Doctrine des signaux honnêtes** (déjà appliquée à `admin_supervision_status()`) : un signal
   ou une capacité non réellement câblée reste explicitement `false`/absente plutôt que
-  simulée. **Reformulée par ce round** pour le statut `quarantined` des pièces jointes
-  (§3.5.8) : réservé dans le schéma, jamais atteint tant qu'aucun fournisseur antivirus n'est
-  choisi — un point ouvert documenté, pas une capacité livrée.
+  simulée. **Corrigée par le round 5** (§3.5.8) : sans fournisseur antivirus réellement câblé,
+  une pièce jointe **ne passe jamais automatiquement** à `clean` — `clean` signifie
+  exclusivement « scannée réellement et jugée saine », jamais « uploadée avec succès ». Tant
+  qu'aucun scanner n'est câblé, une pièce jointe reste indéfiniment `scan_pending`, statut
+  honnête à part entière, pas une étape transitoire vers un `clean` simulé.
 - **Séparation des audiences décisionnelles** (nouvelle formulation explicite, round 4) : un
   indicateur destiné à une décision commerciale (état de santé d'un client) et un indicateur
   destiné à une décision opérationnelle (disponibilité technique de la plateforme) ne sont
@@ -589,7 +595,7 @@ Storage directe pour un rôle client.**
 | `original_filename` | `text NOT NULL` | Affichage uniquement, assaini (séparateurs de chemin/caractères de contrôle retirés) — **jamais utilisé pour construire `storage_path`** |
 | `mime_type` | `text NOT NULL CHECK IN ('application/pdf','image/jpeg','image/png','image/heic','image/webp','image/gif','application/msword','application/vnd.openxmlformats-officedocument.wordprocessingml.document')` | Allowlist fermée, alignée sur `portal-documents` |
 | `size_bytes` | `bigint NOT NULL CHECK (size_bytes > 0 AND size_bytes <= 10485760)` | 10 Mo, alignée sur `hr-documents` |
-| `status` | `text NOT NULL DEFAULT 'pending_upload' CHECK IN ('pending_upload','uploaded','clean','quarantined','rejected')` | Voir cycle de vie ci-dessous |
+| `status` | `text NOT NULL DEFAULT 'pending_upload' CHECK IN ('pending_upload','uploaded','scan_pending','clean','quarantined','rejected')` | Voir cycle de vie ci-dessous — **corrigé round 5** : `clean` n'est atteignable que par un scan réel, jamais automatiquement |
 | `uploaded_by` | `uuid NOT NULL REFERENCES auth.users(id)` | |
 | `created_at` | `timestamptz NOT NULL DEFAULT now()` | |
 | `confirmed_at` | `timestamptz` | Rempli quand le serveur a **vérifié** que l'objet existe réellement dans Storage (jamais sur la seule foi du client) |
@@ -614,10 +620,12 @@ limitée)** :
 3. Edge Function `support-ticket-attachment-confirm` (`service_role`) : vérifie que l'appelant
    correspond à `uploaded_by` ; **interroge réellement l'API Storage** pour confirmer que
    l'objet existe à `storage_path` avec une taille cohérente avec `size_bytes` déclaré (jamais
-   une confirmation aveugle) ; passe `status='uploaded'`, `confirmed_at=now()` ; **en V1**
-   (aucun fournisseur antivirus choisi), transition automatique immédiate vers `status='clean'`
-   — documenté explicitement comme un **point ouvert** (voir plus bas), pas une capacité de
-   scan livrée.
+   une confirmation aveugle) ; passe `status='uploaded'`, `confirmed_at=now()`, **puis
+   immédiatement `status='scan_pending'`** — **corrigé round 5** : plus aucune transition
+   automatique vers `clean`. `clean` signifie exclusivement « scannée réellement et jugée
+   saine » ; tant qu'aucun scanner antivirus n'est câblé (aucun choisi dans ce round), une
+   pièce jointe reste `scan_pending` **indéfiniment** — voir conséquence fonctionnelle
+   explicite plus bas et point ouvert (§7).
 4. Une ligne `pending_upload` dont l'URL signée a expiré sans confirmation reste orpheline,
    exclue de toute lecture (`WHERE status='clean'`), sans nettoyage automatique en V1 (pas de
    cron, volume jugé négligeable) — acceptable, documenté, pas un chantier de cette PR.
@@ -625,9 +633,14 @@ limitée)** :
 **Lecture — URLs signées à durée limitée, jamais d'URL publique** : Edge Function
 `support-ticket-attachment-download-url(attachment_id)` — vérifie l'autorisation
 (`_can_access_support_ticket`), vérifie `status='clean' AND deleted_at IS NULL` (un fichier
-`pending_upload`/`quarantined`/`rejected`/supprimé n'est **jamais** téléchargeable), génère un
-`createSignedUrl` **TTL 10 minutes**, journalise l'accès (voir plus bas), retourne l'URL.
-Aucun `storage_path` n'est jamais exposé tel quel comme lien direct côté client.
+`pending_upload`/`uploaded`/`scan_pending`/`quarantined`/`rejected`/supprimé n'est **jamais**
+téléchargeable), génère un `createSignedUrl` **TTL 10 minutes**, journalise l'accès (voir plus
+bas), retourne l'URL. Aucun `storage_path` n'est jamais exposé tel quel comme lien direct côté
+client. **Conséquence fonctionnelle directe de la correction round 5** : tant qu'aucun
+fournisseur antivirus n'est câblé, `clean` n'est **jamais** atteint automatiquement — aucune
+pièce jointe n'est donc téléchargeable en pratique tant que ce choix n'est pas fait. C'est un
+compromis assumé (sécurité avant fonctionnalité), pas un oubli — voir §7 pour la décision à
+prendre avant l'ouverture réelle du Lot 5 PR-07.
 
 **Bucket Storage `support-ticket-attachments`** : `public=false`, `file_size_limit=10485760`,
 `allowed_mime_types` = liste ci-dessus. **Aucune policy `storage.objects` pour `anon` ni
@@ -660,13 +673,26 @@ politique de conservation formelle (probablement plus longue que 90 jours, pour 
 preuve en cas de litige support) n'est pas explicitement tranchée par le CTO — **point ouvert**
 (§7).
 
-**Traitement antivirus / quarantaine** : **aucun fournisseur choisi dans ce round.** Le schéma
-réserve la place (`status IN ('pending_upload','uploaded','clean','quarantined','rejected')`)
-mais en V1 le passage `uploaded → clean` est **automatique, sans scan réel** — traité comme un
-point ouvert explicite (§7), jamais présenté comme une capacité livrée (doctrine des signaux
-honnêtes, §1). Si un fournisseur est choisi ultérieurement (ex. ClamAV via Edge Function, ou
-service SaaS webhook), seule cette transition change de mécanisme — aucune migration de schéma
-nécessaire.
+**Traitement antivirus / quarantaine — corrigé round 5.** **Aucun fournisseur choisi dans ce
+round.** Le schéma réserve désormais 6 statuts honnêtes, chacun correspondant à un fait réel,
+jamais à une simulation :
+- `pending_upload` — ligne créée, upload pas encore confirmé ;
+- `uploaded` — objet Storage confirmé existant côté serveur (étape 3 ci-dessus), pas encore
+  transmis à un scanner ;
+- `scan_pending` — en attente d'un scan réel. **Statut par défaut et terminal en V1** tant
+  qu'aucun fournisseur antivirus n'est câblé — jamais une étape transitoire vers `clean` ;
+- `clean` — **atteint exclusivement après un scan réel positif.** Aucune transition
+  automatique `uploaded`/`scan_pending` → `clean` n'existe dans ce round (correction explicite
+  demandée : « sans véritable analyse antivirus, une pièce jointe ne doit jamais passer
+  automatiquement à `clean` ») ;
+- `quarantined` — atteint exclusivement après un scan réel négatif ;
+- `rejected` — ligne orpheline (URL signée expirée sans confirmation, §3.5.8 étape 4).
+
+Doctrine des signaux honnêtes (§1) appliquée strictement : `clean` n'est **jamais** une
+capacité simulée. Si un fournisseur est choisi ultérieurement (ex. ClamAV via Edge Function, ou
+service SaaS webhook), une nouvelle transition `scan_pending → clean|quarantined` est ajoutée
+(déclenchée par le résultat réel du scan) — aucune migration de schéma nécessaire, le statut
+`scan_pending` existe déjà pour l'accueillir.
 
 **Journalisation des accès et suppressions** — nouvelle table `support_ticket_attachment_access_log`
 (conçue par cohérence avec `attachment_access_log` déjà en production pour un autre domaine) :
@@ -1016,11 +1042,17 @@ changent pas, aucune migration n'ayant jamais été appliquée) :
    discriminant à améliorer ultérieurement.
 6. **Fuseau horaire du « jour métier »** (Europe/Paris, §3.4) — non confirmé explicitement,
    sans impact bloquant.
-7. **Fournisseur antivirus pour `support_ticket_attachments`** (§3.5.8) — aucun choisi ; le
-   passage `uploaded → clean` reste automatique en V1, sans scan réel. Sans impact bloquant sur
-   le Lot 5 PR-07 (le schéma est prêt à accueillir un scan asynchrone sans migration future),
-   mais un choix explicite (scanner ou accepter le risque en V1) devrait être acté par le CTO
-   avant l'ouverture réelle de cette PR.
+7. **Fournisseur antivirus pour `support_ticket_attachments`** (§3.5.8, **corrigé round 5**) —
+   aucun choisi. Depuis la correction round 5, `clean` n'est plus jamais atteint automatiquement
+   — toute pièce jointe reste `scan_pending` indéfiniment tant qu'aucun scanner n'est câblé, ce
+   qui signifie **qu'aucune pièce jointe n'est téléchargeable en pratique** (la RPC de lecture
+   exige `status='clean'`). **Devient bloquant pour la valeur livrée par le Lot 5 PR-07**
+   (pas pour sa sécurité, qui est le but recherché) : le CTO doit trancher avant l'ouverture
+   réelle de cette PR entre (a) choisir et câbler un fournisseur antivirus dans le même lot,
+   (b) accepter explicitement de livrer une PR-07 où l'upload fonctionne mais la lecture reste
+   bloquée jusqu'à un scanner ultérieur, ou (c) reporter PR-07 après ce choix. Le schéma
+   (`scan_pending`) est prêt à accueillir un scan asynchrone sans migration future dans les
+   trois cas.
 8. **Politique de rétention des pièces jointes Support** (§3.5.8) — pas de purge automatisée en
    V1, conservation indéfinie par défaut ; une politique formelle (probablement plus longue que
    les 90 jours de `platform_notifications`, pour valeur de preuve en cas de litige) reste à
