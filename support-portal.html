@@ -133,9 +133,6 @@ button,select,input,textarea{font-family:inherit}
 const SUPABASE_URL = "https://hzrzkvdebaadditvbqis.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh6cnprdmRlYmFhZGRpdHZicWlzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxMjEwMTQsImV4cCI6MjA5MjY5NzAxNH0.IDFFWHNNIeBReWRTeVj8RlRpyz5J4XaStFhGVEYEBU8";
 const FUNCTIONS_URL = "https://hzrzkvdebaadditvbqis.supabase.co/functions/v1";
-const ATTACHMENTS_BUCKET = "support-ticket-attachments";
-const MAX_ATTACH_BYTES = 10485760;
-const ALLOWED_MIME = ['application/pdf','image/jpeg','image/png','image/heic','image/webp','image/gif','application/msword','application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
 
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -323,13 +320,20 @@ window._openTicketDetail = async(id)=>{
     </div></div>`;
   }).join('') : '<div style="color:var(--ink2);font-size:12.5px;padding:8px 0">Aucun échange pour le moment.</div>';
 
+  // Stratégie A (choix explicite, documenté) : l'upload reste désactivé côté UI tant
+  // qu'aucun scanner antivirus réel n'est câblé côté backend (aucune pièce jointe
+  // téléversée ne peut alors jamais atteindre le statut 'clean', donc ne peut jamais
+  // être téléchargée — cf. Edge Function support-ticket-attachment-download-url et
+  // ADR-012 §3.5.8/§7). Plutôt que de laisser un bouton fonctionnel mener à un fichier
+  // définitivement inaccessible, l'ajout de pièce jointe est annoncé « bientôt
+  // disponible » et ne propose plus d'action d'upload. Les pièces jointes déjà
+  // existantes (le cas échéant) restent listées, en lecture seule.
   const attachHtml = attErr ? '' : `
     <div class="card-title" style="margin-top:16px"><i class="fa-solid fa-paperclip"></i>Pièces jointes</div>
     <div id="attachList">${(attachments||[]).length ? attachments.map(attachRow).join('') : '<div style="color:var(--ink2);font-size:12.5px">Aucune pièce jointe.</div>'}</div>
-    ${!closed?`<div class="fld" style="margin-top:8px">
-      <input type="file" id="attachFile" style="display:none" accept="${ALLOWED_MIME.join(',')}">
-      <button class="btn g full" onclick="document.getElementById('attachFile').click()"><i class="fa-solid fa-paperclip"></i> Ajouter une pièce jointe (10 Mo max)</button>
-    </div>`:''}
+    <div style="background:#f1f2f4;border-radius:10px;padding:10px 12px;font-size:12px;color:var(--ink2);margin-top:8px">
+      <i class="fa-solid fa-clock" style="margin-right:5px"></i>Pièces jointes bientôt disponibles — l'analyse antivirus des fichiers envoyés n'est pas encore active, l'ajout de pièce jointe est temporairement désactivé.
+    </div>
   `;
 
   openModal(`
@@ -361,11 +365,6 @@ window._openTicketDetail = async(id)=>{
         window._openTicketDetail(id);
       }catch(e){ flash('Erreur : '+e.message,'e'); btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-paper-plane"></i> Envoyer'; }
     };
-    const fileInput=$('attachFile');
-    if(fileInput) fileInput.onchange=async(e)=>{
-      const f=e.target.files[0]; if(!f) return;
-      await uploadAttachment(id, f);
-    };
   }
 };
 
@@ -378,35 +377,10 @@ function attachRow(a){
   </div>`;
 }
 
-async function uploadAttachment(ticketId, file){
-  if(file.size > MAX_ATTACH_BYTES){ flash('Fichier trop volumineux (10 Mo max)','e'); return; }
-  if(!ALLOWED_MIME.includes(file.type)){ flash('Type de fichier non autorisé','e'); return; }
-  flash('Envoi en cours…');
-  try{
-    const {data:{session:s}}=await sb.auth.getSession();
-    const reqResp = await fetch(`${FUNCTIONS_URL}/support-ticket-attachment-request-upload`,{
-      method:'POST',
-      headers:{'Authorization':`Bearer ${s.access_token}`,'Content-Type':'application/json','apikey':SUPABASE_ANON_KEY},
-      body:JSON.stringify({ticket_id:ticketId, original_filename:file.name, mime_type:file.type, size_bytes:file.size}),
-    });
-    const reqData = await reqResp.json();
-    if(!reqResp.ok) throw new Error(reqData.error || 'Impossible de préparer l\'envoi');
-
-    const {error:upErr} = await sb.storage.from(ATTACHMENTS_BUCKET).uploadToSignedUrl(reqData.storage_path, reqData.token, file);
-    if(upErr) throw upErr;
-
-    const confResp = await fetch(`${FUNCTIONS_URL}/support-ticket-attachment-confirm`,{
-      method:'POST',
-      headers:{'Authorization':`Bearer ${s.access_token}`,'Content-Type':'application/json','apikey':SUPABASE_ANON_KEY},
-      body:JSON.stringify({attachment_id:reqData.attachment_id}),
-    });
-    const confData = await confResp.json();
-    if(!confResp.ok) throw new Error(confData.error || 'Confirmation impossible');
-
-    flash('Pièce jointe envoyée ✓ (analyse antivirus en cours avant mise à disposition)');
-    window._openTicketDetail(ticketId);
-  }catch(e){ flash('Erreur : '+e.message, 'e'); }
-}
+// L'upload est désactivé côté UI (stratégie A, voir _openTicketDetail) tant qu'aucun
+// scanner antivirus réel n'est câblé côté backend — support-ticket-attachment-request-
+// upload/-confirm restent déployées et fonctionnelles côté serveur pour une réactivation
+// future, mais aucun appel n'est plus émis depuis ce portail.
 
 window._downloadAttachment = async(attachmentId)=>{
   try{

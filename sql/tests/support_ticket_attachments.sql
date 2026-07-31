@@ -11,6 +11,14 @@ BEGIN;
 \ir ../85_support_ticket_replies.sql
 \ir ../86_support_ticket_attachments.sql
 
+-- 0) Doctrine trois états de sql/86 (remplace les CREATE TABLE IF NOT EXISTS des deux
+--    tables) : le \ir ci-dessus vient de les créer (cas A). Rejouer le fichier sur des
+--    tables déjà conformes doit être un no-op silencieux (cas B) — les prédicats exacts
+--    des CHECK et le reste du contrat ont déjà été validés indépendamment en production
+--    (BEGIN...ROLLBACK) pendant l'écriture de cette migration.
+\ir ../86_support_ticket_attachments.sql
+DO $$ BEGIN RAISE NOTICE 'PASS cas B (tables déjà conformes) : second \ir de sql/86 exécuté sans exception.'; END $$;
+
 -- Fixtures : 2 tickets sur 2 hôtels réels distincts. Comptes hôtel réels et
 -- exclusifs à un seul hôtel chacun (vérifié via user_hotels : la plupart des
 -- comptes de ces deux hôtels de test ont accès aux deux, ce qui masquerait une
@@ -296,6 +304,84 @@ BEGIN
   IF v_public IS DISTINCT FROM false THEN RAISE EXCEPTION 'ECHEC CRITIQUE : re-upsert n''a pas restauré public=false après une dérive manuelle'; END IF;
   RAISE NOTICE 'PASS re-upsert idempotent restaure public=false même si le bucket avait dérivé vers public=true.';
 END $$;
+
+-- ============================================================================
+-- 11) admin_delete_support_ticket_attachment — suppression logique réservée au
+--     staff Support : motif obligatoire, journalisée (action=soft_deleted),
+--     disparaît de list_support_ticket_attachments, double-suppression rejetée,
+--     non-staff bloqué.
+-- ============================================================================
+RESET ROLE; RESET request.jwt.claims;
+SET LOCAL ROLE authenticated;
+SET LOCAL request.jwt.claims TO '{"sub":"7afa461c-71a9-4a89-bca0-9de08e405bc7"}';
+
+DO $$
+DECLARE v_attach_id uuid;
+BEGIN
+  SELECT id INTO v_attach_id FROM public.list_support_ticket_attachments('aaaaaaaa-0000-0000-0000-000000000001') LIMIT 1;
+  BEGIN
+    PERFORM public.admin_delete_support_ticket_attachment(v_attach_id, '');
+    RAISE EXCEPTION 'ECHEC CRITIQUE : suppression acceptée sans motif';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM LIKE 'MOTIF_REQUIS%' THEN RAISE NOTICE 'PASS motif obligatoire pour supprimer une pièce jointe.'; ELSE RAISE; END IF;
+  END;
+END $$;
+
+DO $$
+DECLARE v_attach_id uuid; v_count_before int; v_count_after int; v_log_count int;
+BEGIN
+  SELECT id INTO v_attach_id FROM public.list_support_ticket_attachments('aaaaaaaa-0000-0000-0000-000000000001') LIMIT 1;
+  SELECT count(*) INTO v_count_before FROM public.list_support_ticket_attachments('aaaaaaaa-0000-0000-0000-000000000001');
+
+  PERFORM public.admin_delete_support_ticket_attachment(v_attach_id, 'Fichier envoyé par erreur, doublon');
+
+  SELECT count(*) INTO v_count_after FROM public.list_support_ticket_attachments('aaaaaaaa-0000-0000-0000-000000000001');
+  IF v_count_after <> v_count_before - 1 THEN
+    RAISE EXCEPTION 'ECHEC : la pièce jointe supprimée est toujours listée (avant=%, après=%)', v_count_before, v_count_after;
+  END IF;
+  RAISE NOTICE 'PASS suppression logique effective : disparue de list_support_ticket_attachments (avant=%, après=%).', v_count_before, v_count_after;
+
+  BEGIN
+    PERFORM public.admin_delete_support_ticket_attachment(v_attach_id, 'Nouvelle tentative');
+    RAISE EXCEPTION 'ECHEC CRITIQUE : double suppression acceptée';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM LIKE 'DEJA_SUPPRIMEE%' THEN RAISE NOTICE 'PASS double suppression rejetée (DEJA_SUPPRIMEE).'; ELSE RAISE; END IF;
+  END;
+END $$;
+
+RESET ROLE; RESET request.jwt.claims;
+SET LOCAL ROLE service_role;
+DO $$
+DECLARE v_log_count int;
+BEGIN
+  SELECT count(*) INTO v_log_count FROM public.support_ticket_attachment_access_log
+  WHERE ticket_id = 'aaaaaaaa-0000-0000-0000-000000000001' AND action = 'soft_deleted';
+  IF v_log_count <> 1 THEN RAISE EXCEPTION 'ECHEC : % entrée(s) soft_deleted dans le journal (attendu 1)', v_log_count; END IF;
+  RAISE NOTICE 'PASS suppression journalisée dans support_ticket_attachment_access_log (action=soft_deleted).';
+END $$;
+
+RESET ROLE; RESET request.jwt.claims;
+UPDATE public.platform_admins SET role='billing_admin' WHERE auth_id='7afa461c-71a9-4a89-bca0-9de08e405bc7';
+SET LOCAL ROLE authenticated;
+SET LOCAL request.jwt.claims TO '{"sub":"7afa461c-71a9-4a89-bca0-9de08e405bc7"}';
+DO $$
+DECLARE v_attach_id uuid;
+BEGIN
+  RESET ROLE; RESET request.jwt.claims; SET LOCAL ROLE authenticated; SET LOCAL request.jwt.claims TO '{"sub":"dbd29861-b6cd-4c19-9237-59963f8f20c8"}';
+  SELECT id INTO v_attach_id FROM public.list_support_ticket_attachments('aaaaaaaa-0000-0000-0000-000000000001') LIMIT 1;
+  RESET ROLE; RESET request.jwt.claims; SET LOCAL ROLE authenticated; SET LOCAL request.jwt.claims TO '{"sub":"7afa461c-71a9-4a89-bca0-9de08e405bc7"}';
+  PERFORM public.admin_delete_support_ticket_attachment(v_attach_id, 'Tentative billing_admin');
+  RAISE EXCEPTION 'ECHEC CRITIQUE : billing_admin a pu supprimer une pièce jointe (hors périmètre Support)';
+EXCEPTION WHEN insufficient_privilege THEN RAISE NOTICE 'PASS billing_admin bloqué sur admin_delete_support_ticket_attachment (moindre privilège respecté).'; END $$;
+
+RESET ROLE; RESET request.jwt.claims;
+UPDATE public.platform_admins SET role='super_admin' WHERE auth_id='7afa461c-71a9-4a89-bca0-9de08e405bc7';
+
+DO $$ BEGIN
+  SET LOCAL ROLE anon;
+  PERFORM public.admin_delete_support_ticket_attachment('00000000-0000-0000-0000-000000000000', 'x');
+  RAISE EXCEPTION 'ECHEC CRITIQUE : anon a pu appeler admin_delete_support_ticket_attachment';
+EXCEPTION WHEN insufficient_privilege THEN RAISE NOTICE 'PASS anon bloqué sur admin_delete_support_ticket_attachment.'; END $$;
 
 RESET ROLE; RESET request.jwt.claims;
 DO $$ BEGIN RAISE NOTICE 'TOUS LES CONTROLES support_ticket_attachments (Lot 5B) PASSENT.'; END $$;
