@@ -11,6 +11,16 @@
 -- DELETE/UPDATE vérifie donc l'effet RÉEL (ROW_COUNT / relecture), jamais
 -- seulement l'absence d'exception SQL.
 --
+-- CORRECTIF IMPORTANT (voir sql/81 en-tête) : la première version de ce
+-- fichier construisait les fixtures hôtel A/B avec `public.users.id =
+-- auth_id` (même valeur), ce qui masquait entièrement un bug réel des
+-- policies support_select/insert/update (comparaison directe
+-- `user_hotels.user_id = auth.uid()`, alors que user_hotels.user_id
+-- référence public.users.id, PAS auth.users.id). Les fixtures ci-dessous
+-- utilisent désormais un `users.id` généré séparément de `auth_id`, exactement
+-- comme en production réelle, pour que ce test soit capable de détecter cette
+-- classe de régression à l'avenir.
+--
 -- 7 profils : anon, authenticated sans hôtel, authenticated hôtel A,
 -- authenticated hôtel B (hôtel différent), support_agent, super_admin,
 -- service_role. Tables : support_tickets, help_articles. Opérations :
@@ -28,13 +38,16 @@ INSERT INTO auth.users (id) VALUES
   ('00000000-aaaa-bbbb-cccc-000000000004'),
   ('00000000-aaaa-bbbb-cccc-000000000005');
 
+-- users.id volontairement DIFFÉRENT de auth_id (comme en production réelle) —
+-- c'est précisément la distinction que la première version de ce test ne
+-- vérifiait pas et qui masquait le bug corrigé dans sql/81.
 INSERT INTO public.users (id, auth_id, hotel_id, email, full_name, role, is_active) VALUES
-  ('00000000-aaaa-bbbb-cccc-000000000002','00000000-aaaa-bbbb-cccc-000000000002','b833efe8-c71e-4822-87a1-b9b6bf06f1e8','zz-acl-test-a@example.invalid','ACL Test Hotel A','reception', true),
-  ('00000000-aaaa-bbbb-cccc-000000000003','00000000-aaaa-bbbb-cccc-000000000003','f8de287f-e5db-497f-be0b-c0fcdb035822','zz-acl-test-b@example.invalid','ACL Test Hotel B','reception', true);
+  ('00000000-1111-aaaa-bbbb-000000000002','00000000-aaaa-bbbb-cccc-000000000002','b833efe8-c71e-4822-87a1-b9b6bf06f1e8','zz-acl-test-a@example.invalid','ACL Test Hotel A','reception', true),
+  ('00000000-1111-aaaa-bbbb-000000000003','00000000-aaaa-bbbb-cccc-000000000003','f8de287f-e5db-497f-be0b-c0fcdb035822','zz-acl-test-b@example.invalid','ACL Test Hotel B','reception', true);
 
 INSERT INTO public.user_hotels (hotel_id, user_id) VALUES
-  ('b833efe8-c71e-4822-87a1-b9b6bf06f1e8','00000000-aaaa-bbbb-cccc-000000000002'),
-  ('f8de287f-e5db-497f-be0b-c0fcdb035822','00000000-aaaa-bbbb-cccc-000000000003');
+  ('b833efe8-c71e-4822-87a1-b9b6bf06f1e8','00000000-1111-aaaa-bbbb-000000000002'),
+  ('f8de287f-e5db-497f-be0b-c0fcdb035822','00000000-1111-aaaa-bbbb-000000000003');
 
 INSERT INTO public.platform_admins (auth_id, email, full_name, role, is_active) VALUES
   ('00000000-aaaa-bbbb-cccc-000000000004','zz-acl-test-agent@example.invalid','ACL Test Agent','support_agent', true),
@@ -46,8 +59,15 @@ VALUES ('00000000-1111-2222-3333-444444444444','b833efe8-c71e-4822-87a1-b9b6bf06
 -- ===================== anon =====================
 RESET ROLE;
 SET LOCAL ROLE anon;
-INSERT INTO zz_acl_results VALUES ('anon','support_tickets','SELECT',
-  (SELECT count(*)>0 FROM public.support_tickets WHERE id='00000000-1111-2222-3333-444444444444'), 'attendu: false');
+-- Après durcissement (sql/81), anon perd le grant SELECT lui-même (REVOKE ALL) : la requête
+-- lève désormais "permission denied" au lieu de filtrer silencieusement à 0 ligne via RLS —
+-- les deux sont des refus valides, capturés ici de la même façon.
+DO $$ BEGIN
+  INSERT INTO zz_acl_results VALUES ('anon','support_tickets','SELECT',
+    (SELECT count(*)>0 FROM public.support_tickets WHERE id='00000000-1111-2222-3333-444444444444'), 'attendu: false (RLS ou grant)');
+EXCEPTION WHEN insufficient_privilege THEN
+  INSERT INTO zz_acl_results VALUES ('anon','support_tickets','SELECT', false, 'bloqué par grant (permission denied) — équivalent ou plus strict que RLS');
+END $$;
 DO $$ BEGIN
   INSERT INTO public.support_tickets (hotel_id, module, feature, description) VALUES ('b833efe8-c71e-4822-87a1-b9b6bf06f1e8','x','x','anon insert attempt');
   INSERT INTO zz_acl_results VALUES ('anon','support_tickets','INSERT', true, 'attendu: false (bloqué)');
@@ -250,7 +270,19 @@ BEGIN
   SELECT count(*) INTO v_unexpected FROM zz_acl_results WHERE profile IN ('anon','auth_no_hotel') AND table_name='support_tickets' AND operation IN ('SELECT','INSERT') AND allowed=true;
   IF v_unexpected > 0 THEN RAISE EXCEPTION 'ECHEC CRITIQUE : anon ou authenticated sans hôtel a accès aux tickets.'; END IF;
 
-  RAISE NOTICE 'TOUS LES CONTROLES CRITIQUES PASSENT.';
+  -- Assertions positives — c'est précisément ce que l'ancienne fixture (users.id=auth_id)
+  -- ne pouvait pas détecter comme faux : un utilisateur hôtel réel (users.id ≠ auth_id) doit
+  -- réellement pouvoir lire/créer/modifier les tickets de son propre hôtel.
+  SELECT count(*) INTO v_unexpected FROM zz_acl_results WHERE profile='auth_hotel_a' AND operation IN ('SELECT_own','INSERT_own_hotel') AND allowed=false;
+  IF v_unexpected > 0 THEN
+    RAISE EXCEPTION 'ECHEC CRITIQUE : un utilisateur hôtel légitime (users.id ≠ auth_id, comme en production réelle) ne peut plus lire/créer ses propres tickets — régression sur support_select/support_insert.';
+  END IF;
+  SELECT count(*) INTO v_unexpected FROM zz_acl_results WHERE profile='auth_hotel_a' AND operation='UPDATE_own' AND allowed=false;
+  IF v_unexpected > 0 THEN
+    RAISE EXCEPTION 'ECHEC CRITIQUE : un utilisateur hôtel légitime ne peut plus modifier son propre ticket — régression sur support_update.';
+  END IF;
+
+  RAISE NOTICE 'TOUS LES CONTROLES CRITIQUES PASSENT (y compris les accès légitimes, testés avec des fixtures users.id != auth_id représentatives de la production réelle).';
 END $$;
 
 ROLLBACK;
