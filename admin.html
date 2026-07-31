@@ -3349,10 +3349,10 @@ async function renderRightsDivergence(el){
       <div class="actions"><button class="btn g" id="exportRights"><i class="fa-solid fa-download"></i> Exporter CSV</button></div>
     </div>
     <div class="kpis">
-      <div class="kpi"><div class="lbl">Combinaisons analysées</div><div class="val">${fmtNum(total)}</div></div>
-      <div class="kpi"><div class="lbl">En divergence</div><div class="val" style="color:${divergent.length?'var(--red)':'var(--ink)'}">${fmtNum(divergent.length)}</div></div>
-      <div class="kpi"><div class="lbl">Taux de divergence</div><div class="val">${total?Math.round(divergent.length/total*100):0}%</div></div>
-      <div class="kpi"><div class="lbl">Calculé</div><div class="val" style="font-size:14px">${fmtDateTime(rightsComputedAt.toISOString())}</div></div>
+      <div class="kpi v"><div class="ic"><i class="fa-solid fa-code-compare"></i></div><div class="n">${fmtNum(total)}</div><div class="l">Combinaisons analysées</div></div>
+      <div class="kpi ${divergent.length?'a':'g'}"><div class="ic"><i class="fa-solid fa-triangle-exclamation"></i></div><div class="n">${fmtNum(divergent.length)}</div><div class="l">En divergence</div></div>
+      <div class="kpi b"><div class="ic"><i class="fa-solid fa-percent"></i></div><div class="n">${total?Math.round(divergent.length/total*100):0}%</div><div class="l">Taux de divergence</div></div>
+      <div class="kpi g"><div class="ic"><i class="fa-regular fa-clock"></i></div><div class="n" style="font-size:16px">${fmtDateTime(rightsComputedAt.toISOString())}</div><div class="l">Calculé</div></div>
     </div>
     <div class="note" style="margin-bottom:14px"><i class="fa-solid fa-circle-info"></i> Rapport calculé en temps réel à chaque ouverture (aucune valeur stockée/historisée) — ce n'est pas un journal, mais une photographie de l'instant présent. Le mode de correction automatique ("enforce") du résolveur est désactivé en dur côté base de données ; le durcir nécessite une décision CTO explicite et une régularisation complète (voir ADR-012).</div>
     <div class="filters">
