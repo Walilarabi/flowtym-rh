@@ -1,0 +1,66 @@
+name: Phase 2 — Recette d'acceptation staging
+
+# Déclenchement manuel UNIQUEMENT. Ne s'exécute jamais sur push ni pull_request — cette
+# recette agit contre un environnement réseau réel (branche de staging Supabase) et crée/
+# supprime des ressources réelles ; elle ne doit jamais partir sans une action humaine explicite.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_staging:
+        description: "Tape exactement YES pour confirmer que cette exécution cible bien le staging (jamais la production)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase2-staging-acceptance
+  cancel-in-progress: false
+
+jobs:
+  acceptance:
+    name: Recette staging Phase 2
+    runs-on: ubuntu-latest
+    # L'environnement GitHub "phase2-staging" doit être créé dans Settings → Environments,
+    # avec les 4 secrets ci-dessous attachés à CET environnement (pas en secrets de repo
+    # globaux) — voir scripts/qa/README.md pour la procédure exacte.
+    environment: phase2-staging
+    timeout-minutes: 30
+    steps:
+      - name: Vérifier la confirmation staging
+        run: |
+          if [[ "${{ github.event.inputs.confirm_staging }}" != "YES" ]]; then
+            echo "::error::confirm_staging doit valoir exactement YES. Annulation."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Installer jq
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq jq
+
+      - name: Exécuter la recette d'acceptation
+        id: acceptance
+        env:
+          PHASE2_STAGING_URL: ${{ secrets.PHASE2_STAGING_URL }}
+          PHASE2_STAGING_ANON_KEY: ${{ secrets.PHASE2_STAGING_ANON_KEY }}
+          PHASE2_STAGING_SERVICE_ROLE_KEY: ${{ secrets.PHASE2_STAGING_SERVICE_ROLE_KEY }}
+          PHASE2_NOTIFICATION_INTERNAL_KEY: ${{ secrets.PHASE2_NOTIFICATION_INTERNAL_KEY }}
+          CONFIRM_STAGING: ${{ github.event.inputs.confirm_staging }}
+          GITHUB_ENVIRONMENT_NAME: phase2-staging
+        run: bash scripts/qa/phase2-staging-acceptance.sh
+
+      - name: Publier l'artefact de résultat (assaini, sans secret)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-staging-acceptance-result
+          path: |
+            qa-results/phase2-staging-acceptance-result.json
+            qa-results/structural_diff.json
+          retention-days: 30
+          if-no-files-found: warn
