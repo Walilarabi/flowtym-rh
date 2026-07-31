@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flowtym — Support</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<style>
+/*
+  Lot 5 PR-07 (ADR-012 §3.5.5) : fichier indépendant, comme admin.html — feuille de
+  style dupliquée intentionnellement (variables/login/boutons), pas importée depuis
+  index.html/portal.html (aucun risque de régression sur ces deux apps).
+
+  Choix d'architecture (à formaliser dans ADR-012) : ce module N'EST PAS ajouté à
+  portal.html (portail salarié, table employees/portal_auth_id). Vérifié en
+  production : sur 6 comptes portail actifs, seuls 2 ont une ligne public.users
+  correspondante et 1 seul une ligne user_hotels assortie — le modèle d'autorisation
+  construit dans ce Lot (_can_access_support_ticket, RLS support_tickets/
+  support_ticket_replies) repose entièrement sur public.users.auth_id + user_hotels,
+  donc incompatible avec la majorité des comptes portail réels. Cette page réutilise
+  au contraire le MÊME modèle de compte que index.html (public.users/user_hotels,
+  signInWithPassword), via la RPC déjà existante pl_my_hotels() comme porte d'accès —
+  jamais ajoutée à index.html lui-même (monolithe fragile, cf. skill flowtym-
+  architecture), donc zéro risque de régression sur l'app hôtel existante.
+*/
+:root{
+  --violet:#8B5CF6;--violet-d:#7C3AED;--violet-bg:#ede9fe;
+  --ink:#1e2330;--ink2:#5b6172;--muted:#9aa0ad;--line:#eceef3;--bg:#f6f7f9;--card:#fff;
+  --green:#16a34a;--green-bg:#dcfce7;--red:#ef4444;--red-bg:#fee2e2;
+  --amber:#d97706;--amber-bg:#fef3c7;--blue:#2563eb;--blue-bg:#dbeafe;
+  --shadow:0 2px 8px rgba(0,0,0,.04);--r:16px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--ink);font-size:14px;-webkit-font-smoothing:antialiased}
+button,select,input,textarea{font-family:inherit}
+#root{min-height:100vh;display:flex;flex-direction:column}
+
+.login{min-height:100vh;display:grid;place-items:center;background:linear-gradient(135deg,#f6f7f9,#ede9fe);padding:16px}
+.lcard{background:#fff;border-radius:20px;padding:32px;width:100%;max-width:380px;box-shadow:0 24px 60px rgba(20,20,40,.08)}
+.lcard .mk{width:46px;height:46px;border-radius:12px;background:linear-gradient(135deg,var(--violet),var(--violet-d));display:grid;place-items:center;color:#fff;font-size:18px;margin-bottom:18px}
+.lcard h1{font-size:20px;font-weight:800;margin-bottom:4px}
+.lcard .sub{color:var(--ink2);font-size:13px;margin-bottom:22px}
+.fld{margin-bottom:13px}.fld label{display:block;font-size:11.5px;font-weight:600;color:var(--ink2);margin-bottom:5px}
+.fld input,.fld select,.fld textarea{width:100%;padding:11px 13px;border:1px solid var(--line);border-radius:10px;font-size:14px;font-family:inherit;color:var(--ink);background:#fff}
+.fld input:focus,.fld select:focus,.fld textarea:focus{outline:none;border-color:var(--violet);box-shadow:0 0 0 3px var(--violet-bg)}
+.fld textarea{resize:vertical;min-height:80px}
+.err{color:var(--red);font-size:12.5px;margin-top:10px;min-height:18px}
+
+.btn{border:0;border-radius:10px;padding:9px 14px;font-weight:600;font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:7px;transition:.15s;white-space:nowrap}
+.btn.p{background:var(--violet);color:#fff}.btn.p:hover{background:var(--violet-d)}
+.btn.g{background:#f4f2fd;color:var(--violet-d)}.btn.g:hover{background:var(--violet-bg)}
+.btn.d{background:var(--red-bg);color:var(--red)}.btn.d:hover{background:#fbcaca}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn.full{width:100%;justify-content:center;padding:11px}
+
+.top{background:#fff;border-bottom:1px solid var(--line);flex-shrink:0;position:sticky;top:0;z-index:10}
+.top-in{display:flex;align-items:center;gap:12px;padding:12px 18px;max-width:720px;margin:0 auto}
+.logo{display:flex;align-items:center;gap:10px;font-weight:800;font-size:15px}
+.logo .mk{width:32px;height:32px;border-radius:9px;background:linear-gradient(135deg,var(--violet),var(--violet-d));display:grid;place-items:center;color:#fff;font-size:14px}
+.spacer{flex:1}
+.hotelsel{padding:7px 10px;border:1px solid var(--line);border-radius:9px;font-size:12.5px;max-width:200px}
+
+.wrap{max-width:720px;margin:0 auto;padding:18px 16px 90px;width:100%}
+.page-title{font-size:19px;font-weight:800;margin-bottom:4px}
+.page-sub{font-size:13px;color:var(--ink2);margin-bottom:18px}
+.card{background:var(--card);border-radius:var(--r);padding:16px;box-shadow:var(--shadow);margin-bottom:14px}
+.card-title{font-size:12.5px;font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px;display:flex;align-items:center;gap:6px}
+
+.tk-row{display:flex;align-items:flex-start;gap:12px;padding:12px 0;border-bottom:1px solid var(--line);cursor:pointer}
+.tk-row:last-child{border-bottom:0}
+.tk-row:hover{background:#fafafe}
+.tk-icon{width:36px;height:36px;border-radius:10px;background:var(--violet-bg);color:var(--violet-d);display:grid;place-items:center;flex-shrink:0}
+.tk-body{flex:1;min-width:0}
+.tk-title{font-weight:700;font-size:13.5px;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tk-meta{font-size:11.5px;color:var(--ink2)}
+
+.tag{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap}
+.tag-nouveau{background:var(--violet-bg);color:var(--violet-d)}
+.tag-en_analyse,.tag-attente_utilisateur,.tag-en_correction{background:var(--amber-bg);color:var(--amber)}
+.tag-resolu{background:var(--green-bg);color:var(--green)}
+.tag-ferme{background:#f3f4f6;color:#6b7280}
+
+.empty{text-align:center;padding:48px 16px;color:var(--ink2)}
+.empty i{font-size:32px;margin-bottom:10px;display:block;opacity:.5}
+.loading{display:flex;align-items:center;justify-content:center;padding:48px 16px;color:var(--ink2);gap:10px;flex-direction:column}
+.spinner{width:26px;height:26px;border:3px solid var(--line);border-top-color:var(--violet);border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.fab{position:fixed;right:20px;bottom:24px;width:54px;height:54px;border-radius:50%;background:var(--violet);color:#fff;border:0;font-size:20px;box-shadow:0 8px 24px rgba(139,92,246,.4);cursor:pointer;display:grid;place-items:center;z-index:50}
+.fab:hover{background:var(--violet-d)}
+
+.modal-bg{display:none;position:fixed;inset:0;background:rgba(20,20,30,.4);z-index:100;align-items:flex-end;justify-content:center}
+.modal-bg.on{display:flex}
+@media(min-width:640px){.modal-bg{align-items:center}}
+.modal{background:#fff;border-radius:20px 20px 0 0;padding:22px 18px;width:100%;max-width:560px;max-height:92vh;overflow-y:auto}
+@media(min-width:640px){.modal{border-radius:20px}}
+.modal-title{font-size:17px;font-weight:800;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.modal-title .x{cursor:pointer;color:var(--ink2);font-size:16px}
+
+.thread-msg{display:flex;margin:8px 0}
+.thread-msg.mine{justify-content:flex-end}
+.thread-bubble{max-width:82%;background:#f1f2f4;color:var(--ink);border-radius:14px;padding:9px 12px}
+.thread-msg.mine .thread-bubble{background:var(--violet);color:#fff}
+.thread-meta{font-size:10px;opacity:.75;margin-bottom:3px}
+.thread-body{font-size:13px;white-space:pre-wrap}
+
+.attach-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px dashed var(--line)}
+.attach-row:last-child{border-bottom:0}
+.attach-icon{width:30px;height:30px;border-radius:8px;background:#f4f4f6;color:var(--ink2);display:grid;place-items:center;flex-shrink:0}
+.attach-name{font-size:12.5px;font-weight:600;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.attach-status{font-size:10.5px;color:var(--ink2)}
+
+.toast{position:fixed;left:50%;top:16px;transform:translateX(-50%) translateY(-60px);background:var(--ink);color:#fff;padding:10px 18px;border-radius:10px;font-size:13px;z-index:300;transition:.25s;opacity:0}
+.toast.on{transform:translateX(-50%) translateY(0);opacity:1}
+
+.deny{min-height:100vh;display:grid;place-items:center;background:var(--bg);padding:16px}
+.deny .card{background:#fff;border-radius:20px;padding:36px;max-width:420px;text-align:center;box-shadow:var(--shadow)}
+.deny .ic{width:56px;height:56px;border-radius:16px;background:var(--red-bg);color:var(--red);display:grid;place-items:center;margin:0 auto 18px;font-size:22px}
+.deny h1{font-size:18px;margin-bottom:8px}
+.deny p{color:var(--ink2);font-size:13.5px;margin-bottom:18px}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<div class="modal-bg" id="modalBg" onclick="if(event.target===this)closeModal()">
+  <div class="modal"><div id="modalBody"></div></div>
+</div>
+<div class="toast" id="toast"></div>
+<script type="module">
+const SUPABASE_URL = "https://hzrzkvdebaadditvbqis.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh6cnprdmRlYmFhZGRpdHZicWlzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxMjEwMTQsImV4cCI6MjA5MjY5NzAxNH0.IDFFWHNNIeBReWRTeVj8RlRpyz5J4XaStFhGVEYEBU8";
+const FUNCTIONS_URL = "https://hzrzkvdebaadditvbqis.supabase.co/functions/v1";
+const ATTACHMENTS_BUCKET = "support-ticket-attachments";
+const MAX_ATTACH_BYTES = 10485760;
+const ALLOWED_MIME = ['application/pdf','image/jpeg','image/png','image/heic','image/webp','image/gif','application/msword','application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function flash(msg,type){
+  const t=$('toast'); t.textContent=msg; t.style.background = type==='e' ? 'var(--red)' : 'var(--ink)';
+  t.classList.add('on'); clearTimeout(window._toastT); window._toastT=setTimeout(()=>t.classList.remove('on'),3200);
+}
+function openModal(html){ $('modalBody').innerHTML=html; $('modalBg').classList.add('on'); }
+function closeModal(){ $('modalBg').classList.remove('on'); }
+window.closeModal=closeModal;
+
+let sb=null, session=null, myHotels=[]; // [{id,name}]
+let currentHotelId=null;
+
+const MODULES = [
+  ['planning','Planning'], ['pointage','Pointage'], ['documents','Documents'],
+  ['demandes','Demandes / congés'], ['facturation','Facturation'], ['autre','Autre'],
+];
+const STATUS_LABEL = {nouveau:'Nouveau', en_analyse:'En analyse', attente_utilisateur:'En attente de votre réponse', en_correction:'En correction', resolu:'Résolu', ferme:'Fermé'};
+const ATTACH_STATUS_LABEL = {
+  pending_upload:'Envoi en attente', uploaded:'Envoyé, en attente d\'analyse', scan_pending:'Analyse antivirus en cours',
+  clean:'Disponible', quarantined:'Rejeté (analyse antivirus)', rejected:'Rejeté',
+};
+
+async function boot(){
+  const {createClient}=await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm');
+  sb=createClient(SUPABASE_URL,SUPABASE_ANON_KEY,{auth:{persistSession:true}});
+  await checkAuthAndRender();
+}
+
+async function checkAuthAndRender(){
+  const {data:sessData}=await sb.auth.getSession();
+  session=sessData?.session||null;
+  if(!session){ renderLogin(); return; }
+  const {data:hotelIds,error}=await sb.rpc('pl_my_hotels');
+  if(error){ renderLogin(error.message); return; }
+  if(!hotelIds || !hotelIds.length){ renderAccessDenied(); return; }
+  const {data:hotels}=await sb.from('hotels').select('id,name').in('id',hotelIds);
+  myHotels=(hotels||[]).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  currentHotelId = myHotels[0]?.id || null;
+  renderShell();
+}
+
+function renderLogin(err){
+  $('root').innerHTML=`<div class="login"><div class="lcard">
+    <div class="mk"><i class="fa-solid fa-headset"></i></div>
+    <h1>Support Flowtym</h1><div class="sub">Connectez-vous avec votre compte hôtel habituel.</div>
+    <div class="fld"><label>E-mail</label><input type="email" id="le" autocomplete="email"></div>
+    <div class="fld"><label>Mot de passe</label><input type="password" id="lp" autocomplete="current-password"></div>
+    <button class="btn p full" id="lb">Se connecter</button>
+    <div class="err" id="lerr">${esc(err||'')}</div></div></div>`;
+  $('lb').onclick=async()=>{
+    const e=$('le').value.trim(), p=$('lp').value;
+    if(!e||!p){$('lerr').textContent='E-mail et mot de passe requis.';return;}
+    $('lb').disabled=true; $('lerr').textContent='';
+    const {error}=await sb.auth.signInWithPassword({email:e,password:p});
+    $('lb').disabled=false;
+    if(error) $('lerr').textContent=error.message; else checkAuthAndRender();
+  };
+  $('lp').addEventListener('keydown',e=>{if(e.key==='Enter')$('lb').click();});
+}
+
+function renderAccessDenied(){
+  $('root').innerHTML=`<div class="deny"><div class="card">
+    <div class="ic"><i class="fa-solid fa-ban"></i></div>
+    <h1>Accès refusé</h1>
+    <p>Ce compte n'est rattaché à aucun établissement Flowtym. Le Support est réservé aux comptes déjà utilisés dans l'application principale.</p>
+    <button class="btn g" onclick="window._signOut()">Se déconnecter</button>
+  </div></div>`;
+}
+window._signOut = async()=>{ await sb.auth.signOut(); session=null; myHotels=[]; renderLogin(); };
+
+function renderShell(){
+  $('root').innerHTML=`
+    <div class="top"><div class="top-in">
+      <div class="logo"><div class="mk"><i class="fa-solid fa-headset"></i></div>Support</div>
+      <div class="spacer"></div>
+      ${myHotels.length>1?`<select class="hotelsel" id="hotelSel">${myHotels.map(h=>`<option value="${h.id}">${esc(h.name)}</option>`).join('')}</select>`:''}
+      <button class="btn g" onclick="window._signOut()"><i class="fa-solid fa-arrow-right-from-bracket"></i></button>
+    </div></div>
+    <div class="wrap">
+      <div class="page-title">Mes tickets Support</div>
+      <div class="page-sub">Signalez un problème ou suivez vos demandes en cours.</div>
+      <div id="tkList"><div class="loading"><div class="spinner"></div></div></div>
+    </div>
+    <button class="fab" onclick="window._openNewTicket()" title="Nouveau ticket"><i class="fa-solid fa-plus"></i></button>
+  `;
+  const hs=$('hotelSel');
+  if(hs) hs.onchange=()=>{ currentHotelId=hs.value; loadTickets(); };
+  loadTickets();
+}
+
+async function loadTickets(){
+  const el=$('tkList'); if(!el) return;
+  try{
+    const {data,error}=await sb.from('support_tickets').select('*').order('created_at',{ascending:false}).limit(100);
+    if(error) throw error;
+    const rows=(data||[]).filter(t=>!currentHotelId || t.hotel_id===currentHotelId);
+    if(!rows.length){
+      el.innerHTML=`<div class="card empty"><i class="fa-solid fa-inbox"></i>Aucun ticket pour le moment.<br><small>Utilisez le bouton + pour signaler un problème.</small></div>`;
+      return;
+    }
+    const open=rows.filter(t=>!['resolu','ferme'].includes(t.status));
+    const closed=rows.filter(t=>['resolu','ferme'].includes(t.status));
+    let h='';
+    if(open.length){ h+=`<div class="card"><div class="card-title"><i class="fa-solid fa-circle-dot"></i>En cours</div>${open.map(tkRow).join('')}</div>`; }
+    if(closed.length){ h+=`<div class="card"><div class="card-title"><i class="fa-solid fa-circle-check"></i>Clôturés</div>${closed.map(tkRow).join('')}</div>`; }
+    el.innerHTML=h;
+  }catch(e){ el.innerHTML=`<div style="color:var(--red);padding:16px;font-size:13px"><i class="fa-solid fa-triangle-exclamation"></i> ${esc(e.message)}</div>`; }
+}
+
+function tkRow(t){
+  const moduleLabel=(MODULES.find(m=>m[0]===t.module)||[t.module,t.module])[1];
+  const d=new Date(t.created_at).toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'});
+  return `<div class="tk-row" onclick="window._openTicketDetail('${t.id}')">
+    <div class="tk-icon"><i class="fa-solid fa-ticket"></i></div>
+    <div class="tk-body">
+      <div class="tk-title">${esc(t.ticket_number||moduleLabel)} — ${esc((t.description||'').slice(0,60))}</div>
+      <div class="tk-meta">${esc(moduleLabel)} · ${d}</div>
+    </div>
+    <span class="tag tag-${t.status}">${STATUS_LABEL[t.status]||t.status}</span>
+  </div>`;
+}
+
+window._openNewTicket = ()=>{
+  openModal(`
+    <div class="modal-title">Nouveau ticket <span class="x" onclick="closeModal()"><i class="fa-solid fa-xmark"></i></span></div>
+    ${myHotels.length>1?`<div class="fld"><label>Établissement</label>
+      <select id="ntHotel">${myHotels.map(h=>`<option value="${h.id}" ${h.id===currentHotelId?'selected':''}>${esc(h.name)}</option>`).join('')}</select></div>`:''}
+    <div class="fld"><label>Module concerné</label>
+      <select id="ntModule">${MODULES.map(([k,l])=>`<option value="${k}">${esc(l)}</option>`).join('')}</select></div>
+    <div class="fld"><label>Description du problème (500 caractères max)</label>
+      <textarea id="ntDesc" maxlength="500" placeholder="Décrivez ce qui ne fonctionne pas, ce que vous attendiez…"></textarea></div>
+    <div class="fld"><label>Urgence</label>
+      <select id="ntPriority">
+        <option value="faible">Faible</option>
+        <option value="moyen" selected>Moyenne</option>
+        <option value="eleve">Élevée</option>
+        <option value="bloquant">Bloquant (je ne peux plus travailler)</option>
+      </select></div>
+    <button class="btn p full" id="ntSubmit"><i class="fa-solid fa-paper-plane"></i> Envoyer</button>
+    <div class="err" id="nterr"></div>
+  `);
+  $('ntSubmit').onclick=submitNewTicket;
+};
+
+async function submitNewTicket(){
+  const btn=$('ntSubmit'); const errEl=$('nterr');
+  const hotelId = $('ntHotel')?.value || currentHotelId;
+  const moduleVal = $('ntModule').value;
+  const description = $('ntDesc').value.trim();
+  const priority = $('ntPriority').value;
+  if(!description){ errEl.textContent='La description est requise.'; return; }
+  btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Envoi…';
+  try{
+    const {data:{user}}=await sb.auth.getUser();
+    const {data,error}=await sb.from('support_tickets').insert({
+      hotel_id: hotelId, module: moduleVal, feature: moduleVal, problem_type: 'autre',
+      description, priority, user_email: user?.email || null, user_role: null,
+    }).select('id').single();
+    if(error) throw error;
+    flash('Ticket envoyé ✓');
+    closeModal();
+    currentHotelId = hotelId;
+    await loadTickets();
+    window._openTicketDetail(data.id);
+  }catch(e){ errEl.textContent = e.message; }
+  finally{ btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-paper-plane"></i> Envoyer'; }
+}
+
+window._openTicketDetail = async(id)=>{
+  const {data:t,error}=await sb.from('support_tickets').select('*').eq('id',id).maybeSingle();
+  if(error||!t){ flash('Ticket introuvable','e'); return; }
+  const {data:replies}=await sb.from('support_ticket_replies').select('*').eq('ticket_id',id).order('seq');
+  const {data:attachments,error:attErr}=await sb.rpc('list_support_ticket_attachments',{p_ticket_id:id});
+  const closed = t.status==='ferme';
+  const moduleLabel=(MODULES.find(m=>m[0]===t.module)||[t.module,t.module])[1];
+
+  const thread=(replies||[]).length ? (replies||[]).map(r=>{
+    const mine = r.author_type==='hotel_user';
+    const fmtDT=d=>new Date(d).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+    return `<div class="thread-msg ${mine?'mine':''}"><div class="thread-bubble">
+      <div class="thread-meta">${esc(r.author_label)} · ${fmtDT(r.created_at)}</div>
+      <div class="thread-body">${esc(r.body)}</div>
+    </div></div>`;
+  }).join('') : '<div style="color:var(--ink2);font-size:12.5px;padding:8px 0">Aucun échange pour le moment.</div>';
+
+  const attachHtml = attErr ? '' : `
+    <div class="card-title" style="margin-top:16px"><i class="fa-solid fa-paperclip"></i>Pièces jointes</div>
+    <div id="attachList">${(attachments||[]).length ? attachments.map(attachRow).join('') : '<div style="color:var(--ink2);font-size:12.5px">Aucune pièce jointe.</div>'}</div>
+    ${!closed?`<div class="fld" style="margin-top:8px">
+      <input type="file" id="attachFile" style="display:none" accept="${ALLOWED_MIME.join(',')}">
+      <button class="btn g full" onclick="document.getElementById('attachFile').click()"><i class="fa-solid fa-paperclip"></i> Ajouter une pièce jointe (10 Mo max)</button>
+    </div>`:''}
+  `;
+
+  openModal(`
+    <div class="modal-title">${esc(t.ticket_number||moduleLabel)} <span class="x" onclick="closeModal()"><i class="fa-solid fa-xmark"></i></span></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <span class="tag tag-${t.status}">${STATUS_LABEL[t.status]||t.status}</span>
+      <span style="font-size:11.5px;color:var(--ink2)">${esc(moduleLabel)}</span>
+    </div>
+    <p style="font-size:13.5px;margin-bottom:14px;white-space:pre-wrap">${esc(t.description)}</p>
+    <div class="card-title"><i class="fa-regular fa-comments"></i>Échanges</div>
+    <div id="thread" style="max-height:240px;overflow-y:auto;margin-bottom:10px">${thread}</div>
+    ${attachHtml}
+    ${closed
+      ? `<div style="background:#f1f2f4;border-radius:10px;padding:12px;font-size:12.5px;color:var(--ink2);margin-top:14px"><i class="fa-solid fa-lock" style="margin-right:5px"></i>Ce ticket est fermé, vous ne pouvez plus y répondre.</div>`
+      : `<div style="margin-top:14px">
+           <label style="font-size:11px;color:var(--ink2)">Répondre</label>
+           <textarea id="replyInput" maxlength="4000" rows="3" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:10px;padding:9px;font-size:13px;font-family:inherit;resize:vertical" placeholder="Votre message…"></textarea>
+           <button class="btn p full" id="replySend" style="margin-top:8px"><i class="fa-solid fa-paper-plane"></i> Envoyer</button>
+         </div>`}
+  `);
+
+  if(!closed){
+    $('replySend').onclick=async()=>{
+      const v=$('replyInput').value.trim(); if(!v) return;
+      const btn=$('replySend'); btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Envoi…';
+      try{
+        const {error}=await sb.rpc('hotel_reply_support_ticket',{p_ticket_id:id,p_body:v});
+        if(error) throw error;
+        window._openTicketDetail(id);
+      }catch(e){ flash('Erreur : '+e.message,'e'); btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-paper-plane"></i> Envoyer'; }
+    };
+    const fileInput=$('attachFile');
+    if(fileInput) fileInput.onchange=async(e)=>{
+      const f=e.target.files[0]; if(!f) return;
+      await uploadAttachment(id, f);
+    };
+  }
+};
+
+function attachRow(a){
+  return `<div class="attach-row">
+    <div class="attach-icon"><i class="fa-solid fa-file"></i></div>
+    <div class="attach-name">${esc(a.original_filename)}</div>
+    <div class="attach-status">${ATTACH_STATUS_LABEL[a.status]||a.status}</div>
+    ${a.status==='clean' ? `<button class="btn g" style="padding:5px 9px" onclick="window._downloadAttachment('${a.id}')"><i class="fa-solid fa-download"></i></button>` : ''}
+  </div>`;
+}
+
+async function uploadAttachment(ticketId, file){
+  if(file.size > MAX_ATTACH_BYTES){ flash('Fichier trop volumineux (10 Mo max)','e'); return; }
+  if(!ALLOWED_MIME.includes(file.type)){ flash('Type de fichier non autorisé','e'); return; }
+  flash('Envoi en cours…');
+  try{
+    const {data:{session:s}}=await sb.auth.getSession();
+    const reqResp = await fetch(`${FUNCTIONS_URL}/support-ticket-attachment-request-upload`,{
+      method:'POST',
+      headers:{'Authorization':`Bearer ${s.access_token}`,'Content-Type':'application/json','apikey':SUPABASE_ANON_KEY},
+      body:JSON.stringify({ticket_id:ticketId, original_filename:file.name, mime_type:file.type, size_bytes:file.size}),
+    });
+    const reqData = await reqResp.json();
+    if(!reqResp.ok) throw new Error(reqData.error || 'Impossible de préparer l\'envoi');
+
+    const {error:upErr} = await sb.storage.from(ATTACHMENTS_BUCKET).uploadToSignedUrl(reqData.storage_path, reqData.token, file);
+    if(upErr) throw upErr;
+
+    const confResp = await fetch(`${FUNCTIONS_URL}/support-ticket-attachment-confirm`,{
+      method:'POST',
+      headers:{'Authorization':`Bearer ${s.access_token}`,'Content-Type':'application/json','apikey':SUPABASE_ANON_KEY},
+      body:JSON.stringify({attachment_id:reqData.attachment_id}),
+    });
+    const confData = await confResp.json();
+    if(!confResp.ok) throw new Error(confData.error || 'Confirmation impossible');
+
+    flash('Pièce jointe envoyée ✓ (analyse antivirus en cours avant mise à disposition)');
+    window._openTicketDetail(ticketId);
+  }catch(e){ flash('Erreur : '+e.message, 'e'); }
+}
+
+window._downloadAttachment = async(attachmentId)=>{
+  try{
+    const {data:{session:s}}=await sb.auth.getSession();
+    const resp = await fetch(`${FUNCTIONS_URL}/support-ticket-attachment-download-url`,{
+      method:'POST',
+      headers:{'Authorization':`Bearer ${s.access_token}`,'Content-Type':'application/json','apikey':SUPABASE_ANON_KEY},
+      body:JSON.stringify({attachment_id:attachmentId}),
+    });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Téléchargement impossible');
+    window.open(data.signed_url, '_blank');
+  }catch(e){ flash('Erreur : '+e.message, 'e'); }
+};
+
+boot().catch(e=>{ document.body.innerHTML = `<div style="padding:32px;text-align:center;color:var(--red)">Erreur de démarrage : ${esc(e.message)}</div>`; });
+</script>
+</body>
+</html>

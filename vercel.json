@@ -8,6 +8,8 @@
     { "source": "/aide/(.*)",             "destination": "/aide.html" },
     { "source": "/admin",                 "destination": "/admin.html" },
     { "source": "/admin/(.*)",            "destination": "/admin.html" },
+    { "source": "/support",               "destination": "/support-portal.html" },
+    { "source": "/support/(.*)",          "destination": "/support-portal.html" },
     { "source": "/auth/callback",         "destination": "/index.html" },
     { "source": "/sw.js",                 "destination": "/sw.js" },
     { "source": "/(.*)",                  "destination": "/index.html" }
@@ -28,6 +30,12 @@
     },
     {
       "source": "/admin.html",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store, no-cache, must-revalidate" }
+      ]
+    },
+    {
+      "source": "/support-portal.html",
       "headers": [
         { "key": "Cache-Control", "value": "no-store, no-cache, must-revalidate" }
       ]
