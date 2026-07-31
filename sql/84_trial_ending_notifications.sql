@@ -13,9 +13,24 @@
 -- pour les abonnements status='trial'. Un abonnement activé, suspendu, expiré
 -- ou annulé (status <> 'trial') sort naturellement du prédicat.
 --
--- Idempotence : dedupe_key = 'trial:<subscription_id>:<threshold_days>' (format
--- imposé par ADR-012 §3.3), UNIQUE sur platform_notifications.dedupe_key
+-- Idempotence : dedupe_key = 'trial:<subscription_id>:<threshold_days>:<trial_ends_at
+-- normalisé en date civile Europe/Paris>', UNIQUE sur platform_notifications.dedupe_key
 -- (sql/82). Pas de renvoi après envoi réussi.
+--
+-- Écart assumé et documenté par rapport au format initial d'ADR-012 §3.3
+-- ('trial:<subscription_id>:<threshold_days>', sans la date) : ce format initial
+-- identifiait un PALIER PAR ABONNEMENT, jamais un cycle d'échéance réel — une
+-- prolongation ou un raccourcissement de l'essai (hotel_subscriptions.trial_ends_at
+-- modifié après un premier envoi) ne redonnait alors jamais lieu à un nouveau
+-- J-7/J-3/J-1 pour la nouvelle date, ce qui contredit l'attente métier réelle
+-- (revue de stabilisation CTO, item 10). La date d'échéance est intégrée à la clé,
+-- normalisée sur le même calcul de jour civil Europe/Paris que days_remaining
+-- ci-dessous (jamais un format de date différent, pour ne jamais diverger de la
+-- fenêtre d'éligibilité elle-même) : un changement de trial_ends_at fait donc
+-- naturellement réapparaître les paliers non encore notifiés pour la NOUVELLE
+-- échéance, sans jamais renvoyer un palier déjà notifié pour une échéance
+-- identique. La doctrine ADR-012 §3.3 doit être mise à jour en conséquence
+-- (voir ADR-012 canonique, §9 — revue de stabilisation).
 --
 -- Déclenchement manuel uniquement — aucun cron. Le prédicat n'exige pas un
 -- palier exact au jour près (days_remaining = threshold) mais days_remaining
@@ -27,12 +42,15 @@
 -- notification (paliers distincts, sémantique distincte), jamais fusionnés
 -- silencieusement.
 --
--- Comportement si la date d'essai change : dedupe_key ne contient pas la date
--- d'échéance (format imposé par l'ADR), seulement l'abonnement et le palier.
--- Un palier déjà notifié pour un abonnement ne sera donc jamais renotifié même
--- si trial_ends_at change ensuite — décision assumée et documentée ici (évite
--- le spam en cas d'ajustement mineur de date) ; seuls les paliers pas encore
--- notifiés se recalculent sur la nouvelle date à chaque exécution.
+-- Comportement si la date d'essai change : la date d'échéance (normalisée en
+-- jour civil Europe/Paris) fait partie de la clé d'idempotence — voir plus
+-- haut. Une prolongation ou un raccourcissement de trial_ends_at change donc
+-- le cycle identifié par la clé : les paliers déjà notifiés pour l'ANCIENNE
+-- échéance restent des lignes historiques intactes (jamais supprimées, jamais
+-- réutilisées), et les paliers dus pour la NOUVELLE échéance redeviennent
+-- éligibles normalement — y compris un palier dont le NUMÉRO DE JOURS est
+-- identique (ex. J-7 avant et après prolongation) mais dont la date réelle a
+-- changé : la clé les distingue correctement, aucune confusion possible.
 --
 -- Fuseau : comparaison de dates calendaires en Europe/Paris (jour civil),
 -- stockage strictement en UTC (timestamptz, comme le reste du schéma).
@@ -71,14 +89,14 @@ AS $function$
     t.threshold_days,
     (((hs.trial_ends_at AT TIME ZONE 'Europe/Paris')::date) - ((now() AT TIME ZONE 'Europe/Paris')::date))::integer AS days_remaining,
     coalesce(nullif(trim(h.billing_email), ''), nullif(trim(h.email), '')) AS recipient_email,
-    'trial:' || hs.id::text || ':' || t.threshold_days::text AS dedupe_key,
+    'trial:' || hs.id::text || ':' || t.threshold_days::text || ':' || to_char((hs.trial_ends_at AT TIME ZONE 'Europe/Paris')::date, 'YYYY-MM-DD') AS dedupe_key,
     EXISTS(
       SELECT 1 FROM public.platform_notifications pn
-      WHERE pn.dedupe_key = 'trial:' || hs.id::text || ':' || t.threshold_days::text
+      WHERE pn.dedupe_key = 'trial:' || hs.id::text || ':' || t.threshold_days::text || ':' || to_char((hs.trial_ends_at AT TIME ZONE 'Europe/Paris')::date, 'YYYY-MM-DD')
     ) AS already_sent,
     (
       SELECT pn.status FROM public.platform_notifications pn
-      WHERE pn.dedupe_key = 'trial:' || hs.id::text || ':' || t.threshold_days::text
+      WHERE pn.dedupe_key = 'trial:' || hs.id::text || ':' || t.threshold_days::text || ':' || to_char((hs.trial_ends_at AT TIME ZONE 'Europe/Paris')::date, 'YYYY-MM-DD')
     ) AS notification_status
   FROM public.hotel_subscriptions hs
   JOIN public.hotels h ON h.id = hs.hotel_id
