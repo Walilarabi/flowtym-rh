@@ -765,7 +765,7 @@ const MENU=[
   ]],
   ['Plateforme',[
     ['audit','Audit','fa-solid fa-shield-halved',true],
-    ['support','Support','fa-regular fa-life-ring',false],
+    ['support','Support','fa-regular fa-life-ring',true],
     ['settings','Paramètres plateforme','fa-solid fa-gear',true],
     ['supervision','Supervision','fa-solid fa-heart-pulse',true],
   ]],
@@ -775,7 +775,6 @@ const STUB_INFO={
   payments:{ic:'fa-solid fa-credit-card',desc:'Les paiements par facture se gèrent déjà depuis la fiche facture (module Facturation). Une vue transversale multi-factures (rapprochement bancaire, relances) arrive en Phase 2.'},
   licenses:{ic:'fa-solid fa-key',desc:'platform_apps, hotel_app_subscriptions et user_app_access existent déjà. Vue de gestion consolidée prévue en Phase 2.'},
   stats:{ic:'fa-solid fa-chart-line',desc:'MRR/ARR/churn seront calculés sur hotel_subscriptions et platform_invoices une fois la facturation Phase 2 en place.'},
-  support:{ic:'fa-regular fa-life-ring',desc:'La table support_tickets existe déjà (avec triage) et est accessible en lecture aux admins plateforme ; l\'interface dédiée arrive en Phase 2.'},
 };
 
 function renderShell(){
@@ -879,7 +878,7 @@ const VIEW_LOAD_ERROR_LABEL={
   dashboard:'le tableau de bord', hotels:'la liste des hôtels', groups:'la liste des groupes',
   users:'la liste des utilisateurs', subscriptions:'la liste des abonnements',
   billing:'la facturation', audit:"le journal d'audit", settings:'les paramètres',
-  supervision:'la supervision',
+  supervision:'la supervision', support:'le support',
 };
 async function renderView(){
   const el=$('view');
@@ -891,6 +890,7 @@ async function renderView(){
     else if(view==='users') await renderUsers(el);
     else if(view==='subscriptions') await renderSubscriptions(el);
     else if(view==='billing') await renderBilling(el);
+    else if(view==='support') await renderSupport(el);
     else if(view==='audit') await renderAudit(el);
     else if(view==='settings') await renderSettings(el);
     else if(view==='supervision') await renderSupervision(el);
@@ -2958,6 +2958,213 @@ async function renderBillingDashboard(el){
       <div class="note">Le modèle est déjà compatible (TVA/SIRET par facture, coordonnées figées à l'émission). L'intégration réelle (Chorus Pro, PDP, Stripe, GoCardless, SEPA) n'est pas encore connectée.</div>
     </div>
   `;
+}
+
+/* =====================================================================
+   Support (Lot 5, PR-06, ADR-012 §3.5) — back-office : liste/filtres/tri,
+   détail (fil de réponses append-only), triage (statut/priorité/assignation),
+   réponse publique ou note interne, masquage audité. Écriture exclusivement
+   via RPC (jamais d'accès table direct depuis ce module).
+   ===================================================================== */
+const SUPPORT_STATUS_LABEL={nouveau:'Nouveau',en_analyse:'En analyse',attente_utilisateur:"Attente utilisateur",en_correction:'En correction',resolu:'Résolu',ferme:'Fermé'};
+const SUPPORT_STATUS_TAG={nouveau:'blue',en_analyse:'amber',attente_utilisateur:'amber',en_correction:'amber',resolu:'green',ferme:'gray'};
+const SUPPORT_PRIORITY_LABEL={bloquant:'Bloquant',eleve:'Élevée',moyen:'Moyenne',faible:'Faible'};
+const SUPPORT_PRIORITY_TAG={bloquant:'red',eleve:'amber',moyen:'blue',faible:'gray'};
+const SUPPORT_RISK_LABEL={critique:'Critique',eleve:'Élevé',moyen:'Moyen',faible:'Faible'};
+
+let supportPage=0, supportSort={key:'created_at',dir:'desc'};
+let supportFilterStatus='', supportFilterPriority='', supportFilterModule='', supportFilterRisk='';
+
+async function renderSupport(el){
+  el.innerHTML='<div class="loading"><i class="fa-solid fa-circle-notch fa-spin"></i> Chargement…</div>';
+  const pageSize=20;
+  const {data:rows0,error}=await sb.rpc('admin_list_support_tickets',{
+    p_status:supportFilterStatus||null, p_priority:supportFilterPriority||null, p_assigned_to:null,
+    p_hotel_id:null, p_module:supportFilterModule||null, p_risk_score:supportFilterRisk||null,
+    p_search:searchQuery.trim()||null, p_limit:pageSize, p_offset:supportPage*pageSize,
+  });
+  if(error) throw error;
+  const rows=rows0||[];
+  const total=rows.length?rows[0].total_count:0;
+  const pageCount=Math.max(1,Math.ceil(total/pageSize));
+  const modules=[...new Set(rows.map(r=>r.module).filter(Boolean))];
+
+  el.innerHTML=`<div class="page">
+    <div class="phead"><div><h1>Support</h1><div class="sub">Tickets remontés par les hôtels — triage, réponses, notes internes</div></div></div>
+
+    <div class="filters">
+      <select id="fSStatus"><option value="">Tous les statuts</option>${Object.entries(SUPPORT_STATUS_LABEL).map(([k,l])=>`<option value="${k}" ${supportFilterStatus===k?'selected':''}>${l}</option>`).join('')}</select>
+      <select id="fSPriority"><option value="">Toutes priorités</option>${Object.entries(SUPPORT_PRIORITY_LABEL).map(([k,l])=>`<option value="${k}" ${supportFilterPriority===k?'selected':''}>${l}</option>`).join('')}</select>
+      <select id="fSRisk"><option value="">Tous risques</option>${Object.entries(SUPPORT_RISK_LABEL).map(([k,l])=>`<option value="${k}" ${supportFilterRisk===k?'selected':''}>${l}</option>`).join('')}</select>
+    </div>
+
+    ${!rows.length?`<div class="stub"><div class="ic"><i class="fa-regular fa-life-ring"></i></div><h2>Aucun ticket</h2>
+      <p>Aucun ticket support${supportFilterStatus||supportFilterPriority||supportFilterRisk||searchQuery.trim()?' pour ce filtre':''}.</p>
+    </div>`:`
+    <div class="tblwrap"><table class="tbl">
+      <thead><tr><th>Hôtel</th><th>Ticket</th><th>Module</th><th>Priorité</th><th>Statut</th><th>Risque</th><th>Assigné à</th><th>Réponses</th><th>Créé le</th></tr></thead>
+      <tbody>${rows.map(r=>`
+        <tr style="cursor:pointer" data-id="${r.id}">
+          <td><b>${esc(r.hotel_name)}</b></td>
+          <td>${esc(r.ticket_number||'—')}</td>
+          <td>${esc(r.module||'—')}</td>
+          <td><span class="tag ${SUPPORT_PRIORITY_TAG[r.priority]||'gray'}">${SUPPORT_PRIORITY_LABEL[r.priority]||esc(r.priority)}</span></td>
+          <td><span class="tag ${SUPPORT_STATUS_TAG[r.status]||'gray'}">${SUPPORT_STATUS_LABEL[r.status]||esc(r.status)}</span></td>
+          <td>${r.risk_score?esc(SUPPORT_RISK_LABEL[r.risk_score]||r.risk_score):'<span class="muted">—</span>'}</td>
+          <td>${r.assigned_to?esc(r.assigned_to):'<span class="muted">Non assigné</span>'}</td>
+          <td>${fmtNum(r.reply_count)}</td>
+          <td>${fmtDate(r.created_at)}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table></div>
+    <div class="pager">
+      <span>${total} ticket(s) — page ${supportPage+1}/${pageCount}</span>
+      <button id="sSupPrev" ${supportPage<=0?'disabled':''}>‹ Précédent</button>
+      <button id="sSupNext" ${supportPage>=pageCount-1?'disabled':''}>Suivant ›</button>
+    </div>`}
+  </div>`;
+
+  $('fSStatus').onchange=e=>{ supportFilterStatus=e.target.value; supportPage=0; renderSupport(el); };
+  $('fSPriority').onchange=e=>{ supportFilterPriority=e.target.value; supportPage=0; renderSupport(el); };
+  $('fSRisk').onchange=e=>{ supportFilterRisk=e.target.value; supportPage=0; renderSupport(el); };
+  if($('sSupPrev')) $('sSupPrev').onclick=()=>{ supportPage--; renderSupport(el); };
+  if($('sSupNext')) $('sSupNext').onclick=()=>{ supportPage++; renderSupport(el); };
+  el.querySelectorAll('tr[data-id]').forEach(tr=>tr.onclick=()=>openSupportTicketDrawer(tr.dataset.id, el));
+}
+
+async function openSupportTicketDrawer(ticketId, listEl){
+  openDrawer(`<div class="dh"><button class="close" id="dClose"><i class="fa-solid fa-xmark"></i></button><h2>Chargement…</h2></div>`);
+  $('dClose').onclick=closeDrawer;
+  const {data,error}=await sb.rpc('admin_get_support_ticket_detail',{p_ticket_id:ticketId});
+  if(error){ flash(errorLabel(error.message),'e'); closeDrawer(); return; }
+  const t=(data&&data[0]);
+  if(!t){ flash('Ticket introuvable.','e'); closeDrawer(); return; }
+  renderSupportTicketDrawerBody(t, listEl);
+}
+
+function renderSupportTicketDrawerBody(t, listEl){
+  const replies=t.replies||[];
+  openDrawer(`
+    <div class="dh"><button class="close" id="dClose"><i class="fa-solid fa-xmark"></i></button>
+      <h2>${esc(t.ticket_number||t.id)}</h2>
+      <div class="role">${esc(t.hotel_name)} · ${esc(t.module||'')} / ${esc(t.feature||'')}</div>
+    </div>
+    <div class="sec">
+      <h4>Description</h4>
+      <p style="font-size:13px;white-space:pre-wrap">${esc(t.description||'')}</p>
+      ${t.expected_result?`<div class="kv"><span>Résultat attendu</span><b>${esc(t.expected_result)}</b></div>`:''}
+      ${t.actual_result?`<div class="kv"><span>Résultat observé</span><b>${esc(t.actual_result)}</b></div>`:''}
+      <div class="kv"><span>Signalé par</span><b>${esc(t.user_email||'—')} (${esc(t.user_role||'—')})</b></div>
+      <div class="kv"><span>Risque</span><b>${t.risk_score?esc(SUPPORT_RISK_LABEL[t.risk_score]||t.risk_score):'—'}</b></div>
+    </div>
+    <div class="sec">
+      <h4>Triage</h4>
+      <div class="fld"><label>Statut</label><select id="tStatus">${Object.entries(SUPPORT_STATUS_LABEL).map(([k,l])=>`<option value="${k}" ${t.status===k?'selected':''}>${l}</option>`).join('')}</select></div>
+      <div class="fld"><label>Priorité</label><select id="tPriority">${Object.entries(SUPPORT_PRIORITY_LABEL).map(([k,l])=>`<option value="${k}" ${t.priority===k?'selected':''}>${l}</option>`).join('')}</select></div>
+      <div class="fld"><label>Assigné à (e-mail agent)</label><input id="tAssigned" value="${esc(t.assigned_to||'')}" placeholder="agent@flowtym.com"></div>
+      <div class="actrow"><button class="btn p" id="tSave"><i class="fa-solid fa-floppy-disk"></i> Enregistrer le triage</button></div>
+    </div>
+    <div class="sec">
+      <h4>Fil de réponses (${replies.length})</h4>
+      <div class="tlist">
+        ${replies.length?replies.map(r=>`
+          <div class="it" style="align-items:flex-start;flex-direction:column;gap:6px">
+            <div style="display:flex;justify-content:space-between;width:100%">
+              <div class="nm">
+                ${r.is_internal_note?'<span class="tag amber">Note interne</span>':'<span class="tag green">Publique</span>'}
+                ${r.hidden_at?'<span class="tag red">Masquée</span>':''}
+                ${r.corrects_reply_id?'<span class="tag gray">Correction</span>':''}
+                <b style="margin-left:6px">${esc(r.author_label)}</b>
+              </div>
+              <span class="muted" style="font-size:11px">${fmtDateTime(r.created_at)}</span>
+            </div>
+            <div style="font-size:13px;white-space:pre-wrap">${esc(r.body)}</div>
+            ${r.hidden_at?`<div class="muted" style="font-size:11px">Motif du masquage : ${esc(r.hidden_reason||'')}</div>`:''}
+            <div class="actrow">
+              ${r.hidden_at
+                ?`<button class="btn g sm" data-unhide="${r.id}">Démasquer</button>`
+                :`<button class="btn g sm" data-hide="${r.id}">Masquer</button>`}
+            </div>
+          </div>`).join(''):'<div class="empty" style="padding:14px">Aucune réponse pour l\'instant.</div>'}
+      </div>
+    </div>
+    <div class="sec">
+      <h4>Répondre</h4>
+      <div class="fld"><textarea id="rBody" rows="4" placeholder="Votre réponse…" style="width:100%;resize:vertical"></textarea></div>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin:6px 0">
+        <input type="checkbox" id="rInternal"> Note interne (jamais visible côté hôtel)
+      </label>
+      <div class="actrow"><button class="btn p" id="rSend"><i class="fa-solid fa-paper-plane"></i> Envoyer</button></div>
+    </div>
+  `);
+  $('dClose').onclick=closeDrawer;
+
+  $('tSave').onclick=async()=>{
+    $('tSave').disabled=true;
+    try{
+      const {error}=await sb.rpc('admin_update_support_ticket',{
+        p_ticket_id:t.id, p_status:$('tStatus').value, p_priority:$('tPriority').value,
+        p_assigned_to:$('tAssigned').value.trim()||null,
+      });
+      if(error) throw error;
+      flash('Triage enregistré.');
+      openSupportTicketDrawer(t.id, listEl);
+      if(listEl) renderSupport(listEl);
+    }catch(e){ flash(errorLabel(e.message),'e'); }
+    finally{ $('tSave').disabled=false; }
+  };
+
+  $('rSend').onclick=async()=>{
+    const body=$('rBody').value.trim();
+    if(!body){ flash('La réponse ne peut pas être vide.','e'); return; }
+    $('rSend').disabled=true;
+    try{
+      const {error}=await sb.rpc('admin_reply_support_ticket',{
+        p_ticket_id:t.id, p_body:body, p_is_internal_note:$('rInternal').checked, p_corrects_reply_id:null,
+      });
+      if(error) throw error;
+      flash('Réponse envoyée.');
+      openSupportTicketDrawer(t.id, listEl);
+      if(listEl) renderSupport(listEl);
+    }catch(e){ flash(errorLabel(e.message),'e'); $('rSend').disabled=false; }
+  };
+
+  bindSupportHideButtons(t, listEl);
+}
+
+function bindSupportHideButtons(t, listEl){
+  document.querySelectorAll('[data-hide]').forEach(btn=>btn.onclick=()=>openHideReplyModal(btn.dataset.hide, t, listEl));
+  document.querySelectorAll('[data-unhide]').forEach(btn=>btn.onclick=async()=>{
+    btn.disabled=true;
+    try{
+      const {error}=await sb.rpc('admin_unhide_support_ticket_reply',{p_reply_id:btn.dataset.unhide});
+      if(error) throw error;
+      flash('Réponse démasquée.');
+      openSupportTicketDrawer(t.id, listEl);
+    }catch(e){ flash(errorLabel(e.message),'e'); btn.disabled=false; }
+  });
+}
+
+function openHideReplyModal(replyId, t, listEl){
+  $('modal').className='modal';
+  $('modal').innerHTML=`<h3>Masquer cette réponse</h3>
+    <p class="muted" style="font-size:12.5px">La réponse reste visible côté admin (avec l'historique du masquage) mais disparaît de la vue hôtel. Aucune suppression physique.</p>
+    <div class="fld"><label>Motif (obligatoire)</label><textarea id="hReason" rows="3" style="width:100%"></textarea></div>
+    <div class="mact"><button class="btn g" id="mCancel">Annuler</button><button class="btn d" id="mOk">Masquer</button></div>`;
+  $('modalbg').classList.add('on');
+  $('mCancel').onclick=()=>{ $('modalbg').classList.remove('on'); $('modal').className='modal'; };
+  $('mOk').onclick=async()=>{
+    const reason=$('hReason').value.trim();
+    if(!reason){ flash('Le motif est obligatoire.','e'); return; }
+    $('mOk').disabled=true;
+    try{
+      const {error}=await sb.rpc('admin_hide_support_ticket_reply',{p_reply_id:replyId, p_reason:reason});
+      if(error) throw error;
+      flash('Réponse masquée.');
+      $('modalbg').classList.remove('on'); $('modal').className='modal';
+      openSupportTicketDrawer(t.id, listEl);
+    }catch(e){ flash(errorLabel(e.message),'e'); $('mOk').disabled=false; }
+  };
 }
 
 /* =====================================================================
