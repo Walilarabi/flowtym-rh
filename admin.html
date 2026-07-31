@@ -766,6 +766,7 @@ const MENU=[
   ['Plateforme',[
     ['audit','Audit','fa-solid fa-shield-halved',true],
     ['support','Support','fa-regular fa-life-ring',true],
+    ['rights_divergence','Divergence des droits','fa-solid fa-code-compare',true],
     ['settings','Paramètres plateforme','fa-solid fa-gear',true],
     ['supervision','Supervision','fa-solid fa-heart-pulse',true],
   ]],
@@ -878,7 +879,7 @@ const VIEW_LOAD_ERROR_LABEL={
   dashboard:'le tableau de bord', hotels:'la liste des hôtels', groups:'la liste des groupes',
   users:'la liste des utilisateurs', subscriptions:'la liste des abonnements',
   billing:'la facturation', audit:"le journal d'audit", settings:'les paramètres',
-  supervision:'la supervision', support:'le support',
+  supervision:'la supervision', support:'le support', rights_divergence:'la divergence des droits',
 };
 async function renderView(){
   const el=$('view');
@@ -894,6 +895,7 @@ async function renderView(){
     else if(view==='audit') await renderAudit(el);
     else if(view==='settings') await renderSettings(el);
     else if(view==='supervision') await renderSupervision(el);
+    else if(view==='rights_divergence') await renderRightsDivergence(el);
     else renderStub(el, view);
   }catch(e){
     console.error('[renderView]', view, e);
@@ -3293,6 +3295,111 @@ async function renderAudit(el){
       <details style="margin-top:12px"><summary style="cursor:pointer;font-size:12px;color:var(--muted)">Voir le JSON brut</summary>
         <pre style="background:#fafafe;border:1px solid var(--line);border-radius:10px;padding:14px;font-size:12px;white-space:pre-wrap;max-height:280px;overflow:auto;margin-top:8px">${esc(JSON.stringify(row.payload||{},null,2))}</pre>
       </details>
+      <div class="mact"><button class="btn g" id="mCancel">Fermer</button></div>`;
+    $('modalbg').classList.add('on');
+    $('mCancel').onclick=()=>$('modalbg').classList.remove('on');
+  });
+}
+
+/* =====================================================================
+   Divergence des droits — écran en lecture seule (ADR-012 §11).
+   Consomme admin_rights_divergence_report() (existant depuis Phase 2A,
+   sql/70), qui compare pour chaque triplet (hôtel, app, utilisateur) l'accès
+   théorique (recalculé depuis l'abonnement/plan/add-ons/statut utilisateur)
+   à l'accès réel (user_app_access). Le mode "enforce" de ce résolveur est
+   verrouillé en dur côté SQL (RAISE EXCEPTION) — aucune réparation
+   automatique n'est possible depuis cet écran, ni depuis aucun autre.
+   ===================================================================== */
+const RIGHTS_CAUSE_LABEL={
+  missing_main_subscription:"Aucun abonnement principal",
+  app_not_in_plan:"Application non incluse dans le plan",
+  missing_addon:"Add-on requis manquant",
+  addon_missing_app_mapping:"Add-on actif sans application associée",
+  expired_addon:"Add-on expiré",
+  expired_trial:"Période d'essai expirée",
+  trial_missing_end_date:"Date de fin d'essai manquante",
+  inactive_user:"Utilisateur désactivé",
+  suspended_hotel:"Hôtel non actif (suspendu/archivé/brouillon)",
+  incomplete_contract_snapshot:"Snapshot contractuel incomplet",
+  archived_plan:"Plan archivé",
+  inactive_plan:"Plan inactif",
+  missing_individual_access:"Aucun accès individuel accordé (user_app_access)",
+};
+let rightsShowOnlyDivergent=true;
+let rightsComputedAt=null;
+
+async function renderRightsDivergence(el){
+  el.innerHTML='<div class="loading"><i class="fa-solid fa-circle-notch fa-spin"></i> Chargement…</div>';
+  const {data:rows,error}=await sb.rpc('admin_rights_divergence_report');
+  if(error) throw error;
+  rightsComputedAt=new Date();
+  const all=(rows||[]).map(r=>({...r, resolution: r.resolution||{}}));
+  const total=all.length;
+  const divergent=all.filter(r=>r.resolution.diverges===true);
+  const q=searchQuery.trim().toLowerCase();
+  let list=rightsShowOnlyDivergent?divergent:all;
+  if(q) list=list.filter(r=>
+    (r.hotel_name||'').toLowerCase().includes(q) ||
+    (r.app_code||'').toLowerCase().includes(q) ||
+    (r.user_email||'').toLowerCase().includes(q));
+
+  el.innerHTML=`<div class="page">
+    <div class="phead"><div><h1>Divergence des droits</h1>
+      <div class="sub">Compare, pour chaque hôtel/application/utilisateur, l'accès théorique (abonnement, plan, add-ons, statut) à l'accès réellement accordé — lecture seule, aucune correction automatique.</div></div>
+      <div class="actions"><button class="btn g" id="exportRights"><i class="fa-solid fa-download"></i> Exporter CSV</button></div>
+    </div>
+    <div class="kpis">
+      <div class="kpi v"><div class="ic"><i class="fa-solid fa-code-compare"></i></div><div class="n">${fmtNum(total)}</div><div class="l">Combinaisons analysées</div></div>
+      <div class="kpi ${divergent.length?'a':'g'}"><div class="ic"><i class="fa-solid fa-triangle-exclamation"></i></div><div class="n">${fmtNum(divergent.length)}</div><div class="l">En divergence</div></div>
+      <div class="kpi b"><div class="ic"><i class="fa-solid fa-percent"></i></div><div class="n">${total?Math.round(divergent.length/total*100):0}%</div><div class="l">Taux de divergence</div></div>
+      <div class="kpi g"><div class="ic"><i class="fa-regular fa-clock"></i></div><div class="n" style="font-size:16px">${fmtDateTime(rightsComputedAt.toISOString())}</div><div class="l">Calculé</div></div>
+    </div>
+    <div class="note" style="margin-bottom:14px"><i class="fa-solid fa-circle-info"></i> Rapport calculé en temps réel à chaque ouverture (aucune valeur stockée/historisée) — ce n'est pas un journal, mais une photographie de l'instant présent. Le mode de correction automatique ("enforce") du résolveur est désactivé en dur côté base de données ; le durcir nécessite une décision CTO explicite et une régularisation complète (voir ADR-012).</div>
+    <div class="filters">
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ink2)">
+        <input type="checkbox" id="fOnlyDiverge" ${rightsShowOnlyDivergent?'checked':''}> Afficher uniquement les divergences
+      </label>
+    </div>
+    <div class="tblwrap"><table class="tbl">
+      <thead><tr><th>Hôtel</th><th>Application</th><th>Utilisateur</th><th>Attendu</th><th>Observé</th><th>Nature de la divergence</th><th></th></tr></thead>
+      <tbody>${list.length?list.map((r,i)=>{
+        const res=r.resolution; const causes=res.causes||[];
+        return `<tr>
+          <td><b>${esc(r.hotel_name||'—')}</b></td>
+          <td>${esc(r.app_code||'—')}</td>
+          <td>${esc(r.user_email||'—')}</td>
+          <td><span class="tag ${res.theoretical_access?'green':'gray'}">${res.theoretical_access?'Autorisé':'Non autorisé'}</span></td>
+          <td><span class="tag ${res.actual_access?'green':'gray'}">${res.actual_access?'Autorisé':'Non autorisé'}</span></td>
+          <td>${causes.length?causes.map(c=>`<span class="tag ${res.diverges?'red':'amber'}" style="margin:2px 4px 2px 0">${esc(RIGHTS_CAUSE_LABEL[c]||c)}</span>`).join(''):'<span class="muted">—</span>'}</td>
+          <td><button data-i="${i}" title="Voir le détail"><i class="fa-regular fa-eye"></i></button></td>
+        </tr>`;
+      }).join(''):'<tr><td colspan="7" class="empty">Aucune ligne à afficher pour ce filtre.</td></tr>'}</tbody>
+    </table></div>
+  </div>`;
+  $('fOnlyDiverge').onchange=e=>{ rightsShowOnlyDivergent=e.target.checked; renderRightsDivergence(el); };
+  $('exportRights').onclick=()=>downloadCSV('divergence_droits.csv', list, [
+    {label:'Hôtel',get:r=>r.hotel_name},{label:'Application',get:r=>r.app_code},{label:'Utilisateur',get:r=>r.user_email},
+    {label:'Attendu',get:r=>r.resolution.theoretical_access?'Autorisé':'Non autorisé'},
+    {label:'Observé',get:r=>r.resolution.actual_access?'Autorisé':'Non autorisé'},
+    {label:'Diverge',get:r=>r.resolution.diverges?'Oui':'Non'},
+    {label:'Causes',get:r=>(r.resolution.causes||[]).map(c=>RIGHTS_CAUSE_LABEL[c]||c).join(' ; ')},
+  ]);
+  el.querySelectorAll('[data-i]').forEach(b=>b.onclick=()=>{
+    const row=list[Number(b.dataset.i)]; const res=row.resolution; const cond=res.conditions||{};
+    const condLabel={
+      user_active:"Utilisateur actif", hotel_authorized:"Hôtel actif", subscription_valid:"Abonnement valide",
+      app_included_or_addon:"Application incluse (plan ou add-on)", trial_not_expired:"Essai non expiré",
+      individual_access_authorized:"Accès individuel accordé",
+    };
+    $('modal').innerHTML=`<h3>${esc(row.hotel_name)} · ${esc(row.app_code)} · ${esc(row.user_email||'—')}</h3>
+      <div class="kv"><span>Objet concerné</span><b>${esc(row.hotel_name)} / ${esc(row.app_code)} / ${esc(row.user_email||'—')}</b></div>
+      <div class="kv"><span>Valeur attendue</span><b>${res.theoretical_access?'Autorisé':'Non autorisé'}</b></div>
+      <div class="kv"><span>Valeur observée</span><b>${res.actual_access?'Autorisé':'Non autorisé'}</b></div>
+      <div class="kv"><span>Divergence</span><b style="color:${res.diverges?'var(--red)':'var(--green)'}">${res.diverges?'Oui':'Non'}</b></div>
+      <div class="kv"><span>Date de détection</span><b>${fmtDateTime(rightsComputedAt.toISOString())} (calcul en temps réel)</b></div>
+      <h4 style="margin:14px 0 8px;font-size:11px;text-transform:uppercase;color:var(--muted)">Conditions évaluées</h4>
+      ${Object.entries(condLabel).map(([k,lbl])=>`<div class="kv"><span>${esc(lbl)}</span><b style="color:${cond[k]?'var(--green)':'var(--red)'}">${cond[k]?'Oui':'Non'}</b></div>`).join('')}
+      ${(res.causes||[]).length?`<h4 style="margin:14px 0 8px;font-size:11px;text-transform:uppercase;color:var(--muted)">Impact potentiel / causes</h4>${(res.causes||[]).map(c=>`<div class="kv"><span>${esc(c)}</span><b>${esc(RIGHTS_CAUSE_LABEL[c]||c)}</b></div>`).join('')}`:''}
       <div class="mact"><button class="btn g" id="mCancel">Fermer</button></div>`;
     $('modalbg').classList.add('on');
     $('mCancel').onclick=()=>$('modalbg').classList.remove('on');
