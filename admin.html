@@ -757,7 +757,7 @@ const MENU=[
     ['users','Utilisateurs','fa-regular fa-user',true],
     ['subscriptions','Abonnements','fa-regular fa-calendar-check',true],
     ['trials','Périodes d\'essai','fa-regular fa-hourglass-half',false],
-    ['licenses','Licences','fa-solid fa-key',false],
+    ['licenses','Licences','fa-solid fa-key',true],
   ]],
   ['Finance',[
     ['billing','Facturation','fa-regular fa-file-lines',true],
@@ -774,7 +774,6 @@ const MENU=[
 const STUB_INFO={
   trials:{ic:'fa-regular fa-hourglass-half',desc:'Le suivi d\'essai (dates, alertes 30/15/7/3/1 jours) sera construit sur hotel_subscriptions.trial_ends_at en Phase 2.'},
   payments:{ic:'fa-solid fa-credit-card',desc:'Les paiements par facture se gèrent déjà depuis la fiche facture (module Facturation). Une vue transversale multi-factures (rapprochement bancaire, relances) arrive en Phase 2.'},
-  licenses:{ic:'fa-solid fa-key',desc:'platform_apps, hotel_app_subscriptions et user_app_access existent déjà. Vue de gestion consolidée prévue en Phase 2.'},
 };
 
 function renderShell(){
@@ -877,7 +876,7 @@ window.addEventListener('popstate',()=>{
 const VIEW_LOAD_ERROR_LABEL={
   dashboard:'le tableau de bord', hotels:'la liste des hôtels', groups:'la liste des groupes',
   users:'la liste des utilisateurs', subscriptions:'la liste des abonnements',
-  billing:'la facturation', audit:"le journal d'audit", settings:'les paramètres',
+  licenses:'les licences', billing:'la facturation', audit:"le journal d'audit", settings:'les paramètres',
   supervision:'la supervision', support:'le support', rights_divergence:'la divergence des droits',
   stats:'les statistiques',
 };
@@ -891,6 +890,7 @@ async function renderView(){
     else if(view==='groups') await renderGroups(el);
     else if(view==='users') await renderUsers(el);
     else if(view==='subscriptions') await renderSubscriptions(el);
+    else if(view==='licenses') await renderLicenses(el);
     else if(view==='billing') await renderBilling(el);
     else if(view==='support') await renderSupport(el);
     else if(view==='audit') await renderAudit(el);
@@ -2564,6 +2564,107 @@ async function openPlanModulesDrawer(plan){
     }catch(e){ flash(errorLabel(e.message),'e'); }
     finally{ $('dSave').disabled=false; }
   };
+}
+
+/* =====================================================================
+   Licences (Lot 3, ADR-012 §3.2) — observation seule : consommation réelle
+   (chambres, utilisateurs) vs quota souscrit (snapshot_limits), par abonnement
+   hôtel actif ou en essai. Aucune action, aucun blocage : lecture pure sur
+   admin_list_license_usage(). Seuil d'alerte 90% documenté, non définitif.
+   ===================================================================== */
+let licFilterStatus='', licSort={key:'hotel_name',dir:'asc'}, licPage=0;
+const LIC_STATUS_LABEL={ok:'OK',approaching:'Seuil approché',exceeded:'Dépassé',unavailable:'Donnée indisponible'};
+const LIC_STATUS_TAG={ok:'green',approaching:'amber',exceeded:'red',unavailable:'gray'};
+
+function licDimBadge(used, quota, status){
+  const lbl=LIC_STATUS_LABEL[status]||status;
+  const val=quota==null?`${fmtNum(used)} (quota inconnu)`:`${fmtNum(used)} / ${fmtNum(quota)}`;
+  return `<span class="tag ${LIC_STATUS_TAG[status]||'gray'}" title="${esc(lbl)}">${esc(val)}</span>`;
+}
+
+async function renderLicenses(el){
+  el.innerHTML='<div class="loading"><i class="fa-solid fa-circle-notch fa-spin"></i> Chargement…</div>';
+  const {data:rows0,error}=await sb.rpc('admin_list_license_usage');
+  if(error) throw error;
+  let rows=rows0||[];
+
+  const counts={ok:0,approaching:0,exceeded:0,unavailable:0};
+  rows.forEach(r=>{
+    [r.rooms_status,r.users_status].forEach(s=>{ if(counts[s]!=null) counts[s]++; });
+  });
+
+  if(searchQuery.trim()){
+    const q=searchQuery.trim().toLowerCase();
+    rows=rows.filter(r=>[r.hotel_name,r.group_name,r.plan_name].filter(Boolean).some(v=>String(v).toLowerCase().includes(q)));
+  }
+  if(licFilterStatus) rows=rows.filter(r=>r.rooms_status===licFilterStatus||r.users_status===licFilterStatus);
+  rows=sortRows(rows, licSort.key, licSort.dir);
+
+  const pageSize=20, pageCount=Math.max(1,Math.ceil(rows.length/pageSize));
+  licPage=Math.min(licPage,pageCount-1);
+  const pageRows=rows.slice(licPage*pageSize,(licPage+1)*pageSize);
+
+  el.innerHTML=`<div class="page">
+    <div class="phead"><div><h1>Licences</h1><div class="sub">Consommation réelle vs quota souscrit — observation seule, aucun blocage automatique</div></div></div>
+
+    <div class="kpis">
+      <div class="kpi v"><div class="ic"><i class="fa-solid fa-circle-check"></i></div><div class="n">${fmtNum(counts.ok)}</div><div class="l">Dimensions OK</div></div>
+      <div class="kpi a"><div class="ic"><i class="fa-solid fa-triangle-exclamation"></i></div><div class="n">${fmtNum(counts.approaching)}</div><div class="l">Seuil approché (≥90%)</div></div>
+      <div class="kpi b"><div class="ic"><i class="fa-solid fa-circle-exclamation"></i></div><div class="n">${fmtNum(counts.exceeded)}</div><div class="l">Dépassements</div></div>
+      <div class="kpi g"><div class="ic"><i class="fa-regular fa-circle-question"></i></div><div class="n">${fmtNum(counts.unavailable)}</div><div class="l">Donnée indisponible</div></div>
+    </div>
+
+    <div class="box" style="border-color:var(--blue);margin:16px 0">
+      <p class="muted" style="font-size:12.5px;margin:0">
+        <i class="fa-solid fa-circle-info"></i>
+        Mesure et alerte uniquement (ADR-012 §3.2) — aucune fonctionnalité hôtel n'est jamais désactivée automatiquement en cas de dépassement.
+        Quota figé au moment de la souscription (<code>snapshot_limits</code>), jamais recalculé rétroactivement. Seuil d'alerte à 90% : choix prudent, non définitif.
+        « Donnée indisponible » signifie qu'aucun quota n'est renseigné pour cet abonnement (ex. accès interne Legacy Pilot ou abonnement sans plan choisi).
+      </p>
+    </div>
+
+    <div class="filters">
+      <select id="fLicStatus">
+        <option value="">Tous les statuts</option>
+        ${Object.entries(LIC_STATUS_LABEL).map(([k,l])=>`<option value="${k}" ${licFilterStatus===k?'selected':''}>${l}</option>`).join('')}
+      </select>
+    </div>
+
+    ${!rows.length?`<div class="stub"><div class="ic"><i class="fa-solid fa-key"></i></div><h2>Aucun abonnement</h2>
+      <p>Aucun abonnement actif ou en essai à afficher${licFilterStatus||searchQuery.trim()?' pour ce filtre':''}.</p>
+    </div>`:`
+    <div class="tblwrap"><table class="tbl">
+      <thead><tr>
+        <th data-k="hotel_name">Hôtel</th><th>Groupe</th><th>Statut abonnement</th><th>Plan</th>
+        <th>Chambres</th><th>Utilisateurs</th><th data-k="snapshot_effective_at">Quota figé le</th>
+      </tr></thead>
+      <tbody>${pageRows.map(r=>`
+        <tr>
+          <td><b>${esc(r.hotel_name)}</b></td>
+          <td>${esc(groupNameOr(r.group_name||''))}</td>
+          <td><span class="tag ${r.subscription_status==='trial'?'amber':'green'}">${esc(r.subscription_status==='trial'?'Essai':'Actif')}</span></td>
+          <td>${esc(r.plan_name||'—')}</td>
+          <td>${licDimBadge(r.rooms_used,r.rooms_quota,r.rooms_status)}</td>
+          <td>${licDimBadge(r.users_used,r.users_quota,r.users_status)}</td>
+          <td>${fmtDate(r.snapshot_effective_at)}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table></div>
+    <div class="pager">
+      <span>${rows.length} abonnement(s) — page ${licPage+1}/${pageCount}</span>
+      <button id="licPrev" ${licPage<=0?'disabled':''}>‹ Précédent</button>
+      <button id="licNext" ${licPage>=pageCount-1?'disabled':''}>Suivant ›</button>
+    </div>`}
+  </div>`;
+
+  $('fLicStatus').onchange=e=>{ licFilterStatus=e.target.value; licPage=0; renderLicenses(el); };
+  if($('licPrev')) $('licPrev').onclick=()=>{ licPage--; renderLicenses(el); };
+  if($('licNext')) $('licNext').onclick=()=>{ licPage++; renderLicenses(el); };
+  el.querySelectorAll('th[data-k]').forEach(th=>th.onclick=()=>{
+    const k=th.dataset.k;
+    licSort=licSort.key===k?{key:k,dir:licSort.dir==='asc'?'desc':'asc'}:{key:k,dir:'asc'};
+    renderLicenses(el);
+  });
 }
 
 /* =====================================================================
