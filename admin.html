@@ -749,7 +749,7 @@ function renderAccessDenied(){
 const MENU=[
   ['Pilotage',[
     ['dashboard','Tableau de bord','fa-solid fa-table-columns',true],
-    ['stats','Statistiques','fa-solid fa-chart-line',false],
+    ['stats','Statistiques','fa-solid fa-chart-line',true],
   ]],
   ['Gestion globale',[
     ['hotels','Hôtels','fa-solid fa-hotel',true],
@@ -757,7 +757,7 @@ const MENU=[
     ['users','Utilisateurs','fa-regular fa-user',true],
     ['subscriptions','Abonnements','fa-regular fa-calendar-check',true],
     ['trials','Périodes d\'essai','fa-regular fa-hourglass-half',false],
-    ['licenses','Licences','fa-solid fa-key',false],
+    ['licenses','Licences','fa-solid fa-key',true],
   ]],
   ['Finance',[
     ['billing','Facturation','fa-regular fa-file-lines',true],
@@ -774,8 +774,6 @@ const MENU=[
 const STUB_INFO={
   trials:{ic:'fa-regular fa-hourglass-half',desc:'Le suivi d\'essai (dates, alertes 30/15/7/3/1 jours) sera construit sur hotel_subscriptions.trial_ends_at en Phase 2.'},
   payments:{ic:'fa-solid fa-credit-card',desc:'Les paiements par facture se gèrent déjà depuis la fiche facture (module Facturation). Une vue transversale multi-factures (rapprochement bancaire, relances) arrive en Phase 2.'},
-  licenses:{ic:'fa-solid fa-key',desc:'platform_apps, hotel_app_subscriptions et user_app_access existent déjà. Vue de gestion consolidée prévue en Phase 2.'},
-  stats:{ic:'fa-solid fa-chart-line',desc:'MRR/ARR/churn seront calculés sur hotel_subscriptions et platform_invoices une fois la facturation Phase 2 en place.'},
 };
 
 function renderShell(){
@@ -878,18 +876,21 @@ window.addEventListener('popstate',()=>{
 const VIEW_LOAD_ERROR_LABEL={
   dashboard:'le tableau de bord', hotels:'la liste des hôtels', groups:'la liste des groupes',
   users:'la liste des utilisateurs', subscriptions:'la liste des abonnements',
-  billing:'la facturation', audit:"le journal d'audit", settings:'les paramètres',
+  licenses:'les licences', billing:'la facturation', audit:"le journal d'audit", settings:'les paramètres',
   supervision:'la supervision', support:'le support', rights_divergence:'la divergence des droits',
+  stats:'les statistiques',
 };
 async function renderView(){
   const el=$('view');
   el.innerHTML='<div class="loading"><i class="fa-solid fa-circle-notch fa-spin"></i> Chargement…</div>';
   try{
-    if(view==='dashboard') await renderDashboard(el);
+    if(view==='stats') await renderStats(el);
+    else if(view==='dashboard') await renderDashboard(el);
     else if(view==='hotels') await renderHotels(el);
     else if(view==='groups') await renderGroups(el);
     else if(view==='users') await renderUsers(el);
     else if(view==='subscriptions') await renderSubscriptions(el);
+    else if(view==='licenses') await renderLicenses(el);
     else if(view==='billing') await renderBilling(el);
     else if(view==='support') await renderSupport(el);
     else if(view==='audit') await renderAudit(el);
@@ -2566,6 +2567,107 @@ async function openPlanModulesDrawer(plan){
 }
 
 /* =====================================================================
+   Licences (Lot 3, ADR-012 §3.2) — observation seule : consommation réelle
+   (chambres, utilisateurs) vs quota souscrit (snapshot_limits), par abonnement
+   hôtel actif ou en essai. Aucune action, aucun blocage : lecture pure sur
+   admin_list_license_usage(). Seuil d'alerte 90% documenté, non définitif.
+   ===================================================================== */
+let licFilterStatus='', licSort={key:'hotel_name',dir:'asc'}, licPage=0;
+const LIC_STATUS_LABEL={ok:'OK',approaching:'Seuil approché',exceeded:'Dépassé',unavailable:'Donnée indisponible'};
+const LIC_STATUS_TAG={ok:'green',approaching:'amber',exceeded:'red',unavailable:'gray'};
+
+function licDimBadge(used, quota, status){
+  const lbl=LIC_STATUS_LABEL[status]||status;
+  const val=quota==null?`${fmtNum(used)} (quota inconnu)`:`${fmtNum(used)} / ${fmtNum(quota)}`;
+  return `<span class="tag ${LIC_STATUS_TAG[status]||'gray'}" title="${esc(lbl)}">${esc(val)}</span>`;
+}
+
+async function renderLicenses(el){
+  el.innerHTML='<div class="loading"><i class="fa-solid fa-circle-notch fa-spin"></i> Chargement…</div>';
+  const {data:rows0,error}=await sb.rpc('admin_list_license_usage');
+  if(error) throw error;
+  let rows=rows0||[];
+
+  const counts={ok:0,approaching:0,exceeded:0,unavailable:0};
+  rows.forEach(r=>{
+    [r.rooms_status,r.users_status].forEach(s=>{ if(counts[s]!=null) counts[s]++; });
+  });
+
+  if(searchQuery.trim()){
+    const q=searchQuery.trim().toLowerCase();
+    rows=rows.filter(r=>[r.hotel_name,r.group_name,r.plan_name].filter(Boolean).some(v=>String(v).toLowerCase().includes(q)));
+  }
+  if(licFilterStatus) rows=rows.filter(r=>r.rooms_status===licFilterStatus||r.users_status===licFilterStatus);
+  rows=sortRows(rows, licSort.key, licSort.dir);
+
+  const pageSize=20, pageCount=Math.max(1,Math.ceil(rows.length/pageSize));
+  licPage=Math.min(licPage,pageCount-1);
+  const pageRows=rows.slice(licPage*pageSize,(licPage+1)*pageSize);
+
+  el.innerHTML=`<div class="page">
+    <div class="phead"><div><h1>Licences</h1><div class="sub">Consommation réelle vs quota souscrit — observation seule, aucun blocage automatique</div></div></div>
+
+    <div class="kpis">
+      <div class="kpi v"><div class="ic"><i class="fa-solid fa-circle-check"></i></div><div class="n">${fmtNum(counts.ok)}</div><div class="l">Dimensions OK</div></div>
+      <div class="kpi a"><div class="ic"><i class="fa-solid fa-triangle-exclamation"></i></div><div class="n">${fmtNum(counts.approaching)}</div><div class="l">Seuil approché (≥90%)</div></div>
+      <div class="kpi b"><div class="ic"><i class="fa-solid fa-circle-exclamation"></i></div><div class="n">${fmtNum(counts.exceeded)}</div><div class="l">Dépassements</div></div>
+      <div class="kpi g"><div class="ic"><i class="fa-regular fa-circle-question"></i></div><div class="n">${fmtNum(counts.unavailable)}</div><div class="l">Donnée indisponible</div></div>
+    </div>
+
+    <div class="box" style="border-color:var(--blue);margin:16px 0">
+      <p class="muted" style="font-size:12.5px;margin:0">
+        <i class="fa-solid fa-circle-info"></i>
+        Mesure et alerte uniquement (ADR-012 §3.2) — aucune fonctionnalité hôtel n'est jamais désactivée automatiquement en cas de dépassement.
+        Quota figé au moment de la souscription (<code>snapshot_limits</code>), jamais recalculé rétroactivement. Seuil d'alerte à 90% : choix prudent, non définitif.
+        « Donnée indisponible » signifie qu'aucun quota n'est renseigné pour cet abonnement (ex. accès interne Legacy Pilot ou abonnement sans plan choisi).
+      </p>
+    </div>
+
+    <div class="filters">
+      <select id="fLicStatus">
+        <option value="">Tous les statuts</option>
+        ${Object.entries(LIC_STATUS_LABEL).map(([k,l])=>`<option value="${k}" ${licFilterStatus===k?'selected':''}>${l}</option>`).join('')}
+      </select>
+    </div>
+
+    ${!rows.length?`<div class="stub"><div class="ic"><i class="fa-solid fa-key"></i></div><h2>Aucun abonnement</h2>
+      <p>Aucun abonnement actif ou en essai à afficher${licFilterStatus||searchQuery.trim()?' pour ce filtre':''}.</p>
+    </div>`:`
+    <div class="tblwrap"><table class="tbl">
+      <thead><tr>
+        <th data-k="hotel_name">Hôtel</th><th>Groupe</th><th>Statut abonnement</th><th>Plan</th>
+        <th>Chambres</th><th>Utilisateurs</th><th data-k="snapshot_effective_at">Quota figé le</th>
+      </tr></thead>
+      <tbody>${pageRows.map(r=>`
+        <tr>
+          <td><b>${esc(r.hotel_name)}</b></td>
+          <td>${esc(groupNameOr(r.group_name||''))}</td>
+          <td><span class="tag ${r.subscription_status==='trial'?'amber':'green'}">${esc(r.subscription_status==='trial'?'Essai':'Actif')}</span></td>
+          <td>${esc(r.plan_name||'—')}</td>
+          <td>${licDimBadge(r.rooms_used,r.rooms_quota,r.rooms_status)}</td>
+          <td>${licDimBadge(r.users_used,r.users_quota,r.users_status)}</td>
+          <td>${fmtDate(r.snapshot_effective_at)}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table></div>
+    <div class="pager">
+      <span>${rows.length} abonnement(s) — page ${licPage+1}/${pageCount}</span>
+      <button id="licPrev" ${licPage<=0?'disabled':''}>‹ Précédent</button>
+      <button id="licNext" ${licPage>=pageCount-1?'disabled':''}>Suivant ›</button>
+    </div>`}
+  </div>`;
+
+  $('fLicStatus').onchange=e=>{ licFilterStatus=e.target.value; licPage=0; renderLicenses(el); };
+  if($('licPrev')) $('licPrev').onclick=()=>{ licPage--; renderLicenses(el); };
+  if($('licNext')) $('licNext').onclick=()=>{ licPage++; renderLicenses(el); };
+  el.querySelectorAll('th[data-k]').forEach(th=>th.onclick=()=>{
+    const k=th.dataset.k;
+    licSort=licSort.key===k?{key:k,dir:licSort.dir==='asc'?'desc':'asc'}:{key:k,dir:'asc'};
+    renderLicenses(el);
+  });
+}
+
+/* =====================================================================
    Facturation (Lot 4) — facturation PLATEFORME (Flowtym -> hôtels), distincte de la
    facturation hôtel -> client final (module Checkout, hors périmètre ici).
    ===================================================================== */
@@ -3400,6 +3502,151 @@ async function renderRightsDivergence(el){
       <h4 style="margin:14px 0 8px;font-size:11px;text-transform:uppercase;color:var(--muted)">Conditions évaluées</h4>
       ${Object.entries(condLabel).map(([k,lbl])=>`<div class="kv"><span>${esc(lbl)}</span><b style="color:${cond[k]?'var(--green)':'var(--red)'}">${cond[k]?'Oui':'Non'}</b></div>`).join('')}
       ${(res.causes||[]).length?`<h4 style="margin:14px 0 8px;font-size:11px;text-transform:uppercase;color:var(--muted)">Impact potentiel / causes</h4>${(res.causes||[]).map(c=>`<div class="kv"><span>${esc(c)}</span><b>${esc(RIGHTS_CAUSE_LABEL[c]||c)}</b></div>`).join('')}`:''}
+      <div class="mact"><button class="btn g" id="mCancel">Fermer</button></div>`;
+    $('modalbg').classList.add('on');
+    $('mCancel').onclick=()=>$('modalbg').classList.remove('on');
+  });
+}
+
+/* =====================================================================
+   Statistiques (Lot 6, ADR-012 §6) — vue d'ensemble + score de santé
+   client/hôtel. Strictement séparé de la Supervision (santé TECHNIQUE de
+   la plateforme, sql/76) : ici uniquement des signaux métier/client.
+   ===================================================================== */
+let statsSubView='overview';
+const HEALTH_SUBSCORE_LABEL={
+  adoption:'Adoption', activity:'Activité', licenses:'Licences', support:'Support',
+  payment:'Paiement', retention:'Rétention',
+};
+function healthScoreColor(v){
+  if(v==null) return 'var(--muted)';
+  if(v>=75) return 'var(--green)'; if(v>=50) return 'var(--amber)'; return 'var(--red)';
+}
+
+async function renderStats(el){
+  el.innerHTML='<div class="loading"><i class="fa-solid fa-circle-notch fa-spin"></i> Chargement…</div>';
+  el.innerHTML=`<div class="page">
+    <div class="phead"><div><h1>Statistiques</h1>
+      <div class="sub">Chiffres réels de la plateforme — jamais une valeur fabriquée quand la donnée est absente ou insuffisante.</div></div>
+    </div>
+    <div class="tabs" style="margin-bottom:16px">
+      <button class="tab ${statsSubView==='overview'?'on':''}" data-sv="overview">Vue d'ensemble</button>
+      <button class="tab ${statsSubView==='health'?'on':''}" data-sv="health">Santé client/hôtel</button>
+    </div>
+    <div id="statsBody"></div>
+  </div>`;
+  el.querySelectorAll('[data-sv]').forEach(b=>b.onclick=()=>{ statsSubView=b.dataset.sv; renderStats(el); });
+  if(statsSubView==='overview') await renderStatsOverview($('statsBody'));
+  else await renderStatsHealth($('statsBody'));
+}
+
+async function renderStatsOverview(el){
+  el.innerHTML='<div class="loading"><i class="fa-solid fa-circle-notch fa-spin"></i> Chargement…</div>';
+  const {data:s,error}=await sb.rpc('admin_platform_statistics');
+  if(error) throw error;
+  const h=s.hotels, u=s.users, lic=s.licenses, sup=s.support, rev=s.revenue, tc=s.trial_conversion;
+  el.innerHTML=`
+    <div class="kpis">
+      <div class="kpi v"><div class="ic"><i class="fa-solid fa-hotel"></i></div><div class="n">${fmtNum(h.active)}</div><div class="l">Hôtels actifs</div><div class="sub">${fmtNum(h.total)} au total</div></div>
+      <div class="kpi a"><div class="ic"><i class="fa-regular fa-hourglass-half"></i></div><div class="n">${fmtNum(h.trial_subscriptions)}</div><div class="l">En essai</div></div>
+      <div class="kpi b"><div class="ic"><i class="fa-solid fa-ban"></i></div><div class="n">${fmtNum(h.suspended)} / ${fmtNum(h.archived)}</div><div class="l">Suspendus / archivés</div></div>
+      <div class="kpi g"><div class="ic"><i class="fa-regular fa-user"></i></div><div class="n">${fmtNum(u.active)}</div><div class="l">Utilisateurs actifs</div><div class="sub">${fmtNum(u.total)} au total</div></div>
+    </div>
+    <div class="cols2" style="margin-top:16px">
+      <div class="box"><h3><i class="fa-solid fa-euro-sign"></i> Revenu récurrent (MRR/ARR)</h3>
+        ${rev.available?`
+          <div class="tlist">
+            <div class="it"><div class="nm">MRR</div><div class="right"><b>${fmtNum(rev.mrr)} ${esc(rev.currency)}</b></div></div>
+            <div class="it"><div class="nm">ARR (MRR × 12)</div><div class="right"><b>${fmtNum(rev.arr)} ${esc(rev.currency)}</b></div></div>
+            <div class="it"><div class="nm">Abonnements actifs comptés</div><div class="right">${fmtNum(rev.active_subscriptions_counted)}</div></div>
+            ${rev.active_subscriptions_excluded_missing_price>0?`<div class="it"><div class="nm">Exclus (prix non figé)</div><div class="right"><span class="tag amber">${fmtNum(rev.active_subscriptions_excluded_missing_price)}</span></div></div>`:''}
+          </div>
+          <p class="muted" style="font-size:12px;margin-top:10px">${esc(rev.note)}</p>
+        `:`<p class="muted">Non disponible — données contractuelles insuffisantes.</p>`}
+      </div>
+      <div class="box"><h3><i class="fa-solid fa-arrow-right-arrow-left"></i> Conversion essai → abonnement</h3>
+        ${tc.available?`<div style="font-size:28px;font-weight:800">${tc.value}%</div>`:`
+          <div class="note" style="margin-bottom:0"><i class="fa-solid fa-circle-info"></i> Non disponible — ${esc(tc.reason)}</div>
+        `}
+      </div>
+    </div>
+    <div class="cols2" style="margin-top:16px">
+      <div class="box"><h3><i class="fa-solid fa-key"></i> Licences (quota vs consommation)</h3>
+        <div class="tlist">
+          <div class="it"><div class="nm">OK</div><div class="right"><span class="tag green">${fmtNum(lic.ok)}</span></div></div>
+          <div class="it"><div class="nm">Proche du seuil</div><div class="right"><span class="tag amber">${fmtNum(lic.approaching)}</span></div></div>
+          <div class="it"><div class="nm">Dépassé</div><div class="right"><span class="tag red">${fmtNum(lic.exceeded)}</span></div></div>
+          <div class="it"><div class="nm">Indisponible (quota non chiffré)</div><div class="right"><span class="tag gray">${fmtNum(lic.unavailable)}</span></div></div>
+        </div>
+      </div>
+      <div class="box"><h3><i class="fa-regular fa-life-ring"></i> Support</h3>
+        ${sup.total>0?`
+          <div class="tlist">
+            <div class="it"><div class="nm">Tickets ouverts</div><div class="right"><b>${fmtNum(sup.open)}</b> / ${fmtNum(sup.total)}</div></div>
+            <div class="it"><div class="nm">Par priorité</div><div class="right">${Object.entries(sup.by_priority||{}).map(([k,v])=>`<span class="tag amber" style="margin-left:4px">${esc(k)}: ${v}</span>`).join('')||'—'}</div></div>
+            <div class="it"><div class="nm">Délai moyen de résolution</div><div class="right">${sup.avg_resolution_hours!=null?Math.round(sup.avg_resolution_hours)+' h':'—'}</div></div>
+          </div>
+        `:`<p class="muted">Aucun ticket Support historisé à ce jour.</p>`}
+      </div>
+    </div>
+    <div class="box" style="margin-top:16px"><h3><i class="fa-regular fa-clock"></i> Activité récente</h3>
+      <div class="tlist">${(s.recent_activity||[]).length?s.recent_activity.map(a=>`
+        <div class="it"><div class="nm">${esc(historyActionLabel(a.action))}${a.hotel_name?' · '+esc(a.hotel_name):''}</div><div class="right muted">${esc(a.admin_email||'—')} · ${fmtDateTime(a.created_at)}</div></div>
+      `).join(''):'<div class="it"><div class="nm muted">Aucune activité récente.</div></div>'}</div>
+    </div>
+    <p class="muted" style="font-size:11.5px;margin-top:10px">Calculé en temps réel à l'instant présent (${fmtDateTime(s.computed_at)}) — aucune valeur historisée.</p>
+  `;
+}
+
+async function renderStatsHealth(el){
+  el.innerHTML='<div class="loading"><i class="fa-solid fa-circle-notch fa-spin"></i> Chargement…</div>';
+  const {data:rows,error}=await sb.rpc('admin_hotel_health_scores');
+  if(error) throw error;
+  const list=rows||[];
+  el.innerHTML=`
+    <div class="note" style="margin-bottom:14px"><i class="fa-solid fa-circle-info"></i> Score composite = moyenne pondérée des seuls sous-scores disponibles (pondération provisoire, non définitive — voir ADR-012). Un sous-score sans donnée suffisante est explicitement exclu, jamais neutralisé à une valeur par défaut. Le paiement n'est inclus que si des factures réelles existent pour l'hôtel.</div>
+    <div class="tblwrap"><table class="tbl">
+      <thead><tr><th>Hôtel</th><th>Composite</th><th>Adoption</th><th>Activité</th><th>Licences</th><th>Support</th><th>Paiement</th><th>Rétention</th><th></th></tr></thead>
+      <tbody>${list.length?list.map((r,i)=>{
+        const s=r.scores; const cell=(k)=>{
+          const sc=s[k];
+          if(!sc.available) return '<span class="muted" title="Non disponible">—</span>';
+          return `<b style="color:${healthScoreColor(sc.value)}">${sc.value}</b>`;
+        };
+        return `<tr>
+          <td><b>${esc(r.hotel_name)}</b></td>
+          <td><b style="font-size:15px;color:${healthScoreColor(s.composite.value)}">${s.composite.value!=null?s.composite.value:'—'}</b></td>
+          <td>${cell('adoption')}</td><td>${cell('activity')}</td><td>${cell('licenses')}</td>
+          <td>${cell('support')}</td><td>${cell('payment')}</td><td>${cell('retention')}</td>
+          <td><button data-i="${i}" title="Voir le détail"><i class="fa-regular fa-eye"></i></button></td>
+        </tr>`;
+      }).join(''):'<tr><td colspan="9" class="empty">Aucun hôtel à afficher.</td></tr>'}</tbody>
+    </table></div>
+  `;
+  el.querySelectorAll('[data-i]').forEach(b=>b.onclick=()=>{
+    const row=list[Number(b.dataset.i)]; const s=row.scores;
+    const subRows=Object.keys(HEALTH_SUBSCORE_LABEL).map(k=>{
+      const sc=s[k];
+      return `<div class="box" style="margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <b>${esc(HEALTH_SUBSCORE_LABEL[k])}</b>
+          ${sc.available?`<span style="font-size:18px;font-weight:800;color:${healthScoreColor(sc.value)}">${sc.value}</span>`:'<span class="tag gray">Non disponible</span>'}
+        </div>
+        ${sc.available?'':`<div class="muted" style="font-size:12.5px;margin-bottom:6px"><i class="fa-solid fa-circle-info"></i> ${esc(sc.reason||'')}</div>`}
+        <div style="font-size:11.5px;color:var(--muted)">
+          ${sc.definition?`<div><b>Définition :</b> ${esc(sc.definition)}</div>`:''}
+          ${sc.source?`<div><b>Source :</b> ${esc(sc.source)}</div>`:''}
+          ${sc.period?`<div><b>Période :</b> ${esc(sc.period)}</div>`:''}
+          <div><b>Pondération :</b> ${sc.weight}/100${(s.composite.excluded_subscores||[]).includes(k)?' (exclue du composite)':''}</div>
+        </div>
+      </div>`;
+    }).join('');
+    $('modal').innerHTML=`<h3>${esc(row.hotel_name)}</h3>
+      <div class="kv"><span>Score composite</span><b style="color:${healthScoreColor(s.composite.value)}">${s.composite.value!=null?s.composite.value:'Non calculable'}</b></div>
+      <div class="kv"><span>Calculé</span><b>${fmtDateTime(s.computed_at)} (temps réel)</b></div>
+      <div class="kv"><span>Sous-scores exclus</span><b>${(s.composite.excluded_subscores||[]).length?(s.composite.excluded_subscores||[]).map(k=>esc(HEALTH_SUBSCORE_LABEL[k]||k)).join(', '):'Aucun'}</b></div>
+      <h4 style="margin:14px 0 8px;font-size:11px;text-transform:uppercase;color:var(--muted)">Détail par sous-score</h4>
+      ${subRows}
       <div class="mact"><button class="btn g" id="mCancel">Fermer</button></div>`;
     $('modalbg').classList.add('on');
     $('mCancel').onclick=()=>$('modalbg').classList.remove('on');
