@@ -20,33 +20,164 @@
 -- de PR-07) pour que la lecture du fil par l'hôtel fonctionne dès cette PR,
 -- mais aucune RPC ni UI hôtel n'est livrée ici.
 --
+-- Doctrine trois états (remplace l'ancien CREATE TABLE IF NOT EXISTS, qui
+-- masquerait silencieusement toute divergence de schéma sur un replay) :
+--   A. domaine absent            → création complète (table, index, commentaire).
+--   B. domaine présent, conforme → no-op (contrat vérifié : colonnes,
+--                                  contraintes, index, trigger, policies,
+--                                  grants, commentaire, propriétaire).
+--   C. domaine présent, divergent → RAISE EXCEPTION, aucune correction
+--                                  automatique.
+--
 -- Pas de BEGIN/COMMIT/ROLLBACK. SQL pur, compatible apply_migration.
 -- ============================================================================
 
-CREATE TABLE IF NOT EXISTS public.support_ticket_replies (
-  id uuid NOT NULL DEFAULT gen_random_uuid(),
-  ticket_id uuid NOT NULL REFERENCES public.support_tickets(id) ON DELETE CASCADE,
-  seq bigserial NOT NULL,
-  author_type text NOT NULL CHECK (author_type IN ('super_admin', 'hotel_user', 'system')),
-  author_user_id uuid REFERENCES auth.users(id),
-  author_label text NOT NULL,
-  body text NOT NULL CHECK (char_length(body) <= 4000),
-  is_internal_note boolean NOT NULL DEFAULT false,
-  corrects_reply_id uuid REFERENCES public.support_ticket_replies(id),
-  hidden_at timestamptz,
-  hidden_by uuid REFERENCES auth.users(id),
-  hidden_reason text,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT support_ticket_replies_pkey PRIMARY KEY (id),
-  CONSTRAINT support_ticket_replies_author_user_id_check CHECK ((author_type = 'system') = (author_user_id IS NULL)),
-  CONSTRAINT support_ticket_replies_internal_note_author_check CHECK (NOT is_internal_note OR author_type = 'super_admin'),
-  CONSTRAINT support_ticket_replies_hidden_by_check CHECK ((hidden_at IS NULL) = (hidden_by IS NULL)),
-  CONSTRAINT support_ticket_replies_hidden_reason_check CHECK ((hidden_at IS NULL) = (hidden_reason IS NULL))
-);
+DO $support_ticket_replies_table$
+DECLARE
+  v_table_exists boolean;
+  v_col_count int;
+  v_owner text;
+  v_comment text;
+  v_missing_constraints text[];
+  v_c text;
+BEGIN
+  SELECT EXISTS (
+    SELECT 1 FROM pg_class WHERE relnamespace = 'public'::regnamespace AND relname = 'support_ticket_replies' AND relkind = 'r'
+  ) INTO v_table_exists;
 
-CREATE INDEX IF NOT EXISTS idx_support_ticket_replies_ticket_seq ON public.support_ticket_replies USING btree (ticket_id, seq);
+  IF NOT v_table_exists THEN
+    RAISE NOTICE '[support_ticket_replies] absente — création complète (table, index, commentaire).';
 
-COMMENT ON TABLE public.support_ticket_replies IS 'Lot 5 PR-06 (ADR-012 §3.5.7) — fil de réponses Support, append-only. Ordre canonique = seq (jamais created_at seul). Aucune policy UPDATE/DELETE : correction par nouvelle ligne (corrects_reply_id), masquage audité (hidden_at/by/reason). Écriture exclusivement via RPC (author_type/author_label/seq fixés côté serveur).';
+    EXECUTE $ddl$
+      CREATE TABLE public.support_ticket_replies (
+        id uuid NOT NULL DEFAULT gen_random_uuid(),
+        ticket_id uuid NOT NULL REFERENCES public.support_tickets(id) ON DELETE CASCADE,
+        seq bigserial NOT NULL,
+        author_type text NOT NULL CHECK (author_type IN ('super_admin', 'hotel_user', 'system')),
+        author_user_id uuid REFERENCES auth.users(id),
+        author_label text NOT NULL,
+        body text NOT NULL CHECK (char_length(body) <= 4000),
+        is_internal_note boolean NOT NULL DEFAULT false,
+        corrects_reply_id uuid REFERENCES public.support_ticket_replies(id),
+        hidden_at timestamptz,
+        hidden_by uuid REFERENCES auth.users(id),
+        hidden_reason text,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        CONSTRAINT support_ticket_replies_pkey PRIMARY KEY (id),
+        CONSTRAINT support_ticket_replies_author_user_id_check CHECK ((author_type = 'system') = (author_user_id IS NULL)),
+        CONSTRAINT support_ticket_replies_internal_note_author_check CHECK (NOT is_internal_note OR author_type = 'super_admin'),
+        CONSTRAINT support_ticket_replies_hidden_by_check CHECK ((hidden_at IS NULL) = (hidden_by IS NULL)),
+        CONSTRAINT support_ticket_replies_hidden_reason_check CHECK ((hidden_at IS NULL) = (hidden_reason IS NULL))
+      )
+    $ddl$;
+
+    EXECUTE $ddl$ CREATE INDEX idx_support_ticket_replies_ticket_seq ON public.support_ticket_replies USING btree (ticket_id, seq) $ddl$;
+
+    EXECUTE $ddl$ COMMENT ON TABLE public.support_ticket_replies IS 'Lot 5 PR-06 (ADR-012 §3.5.7) — fil de réponses Support, append-only. Ordre canonique = seq (jamais created_at seul). Aucune policy UPDATE/DELETE : correction par nouvelle ligne (corrects_reply_id), masquage audité (hidden_at/by/reason). Écriture exclusivement via RPC (author_type/author_label/seq fixés côté serveur).' $ddl$;
+
+    RAISE NOTICE '[support_ticket_replies] création terminée.';
+  ELSE
+    -- Cas B/C : la table existe déjà — vérification stricte du contrat avant
+    -- de considérer le domaine conforme. Toute divergence lève une exception
+    -- explicite ; aucune correction automatique n'est tentée.
+
+    -- Colonnes (nombre exact — 13 attendues)
+    SELECT count(*) INTO v_col_count FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'support_ticket_replies';
+    IF v_col_count <> 13 THEN
+      RAISE EXCEPTION '[support_ticket_replies] DIVERGENT : % colonne(s) trouvée(s), 13 attendues. Aucune correction automatique — vérifier manuellement avant de rejouer cette migration.', v_col_count;
+    END IF;
+
+    -- Colonnes clés : nullabilité/type des colonnes porteuses d'invariants métier
+    IF EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'support_ticket_replies'
+        AND ((column_name = 'author_type' AND (data_type <> 'text' OR is_nullable <> 'NO'))
+          OR (column_name = 'body' AND (data_type <> 'text' OR is_nullable <> 'NO'))
+          OR (column_name = 'is_internal_note' AND (data_type <> 'boolean' OR is_nullable <> 'NO' OR column_default IS DISTINCT FROM 'false'))
+          OR (column_name = 'hidden_at' AND (data_type <> 'timestamp with time zone' OR is_nullable <> 'YES'))
+          OR (column_name = 'id' AND is_nullable <> 'NO'))
+    ) THEN
+      RAISE EXCEPTION '[support_ticket_replies] DIVERGENT : type/nullabilité d''une colonne clé (author_type/body/is_internal_note/hidden_at/id) ne correspond pas au contrat attendu. Aucune correction automatique.';
+    END IF;
+
+    -- Contraintes attendues (5 nommées explicitement + PK + 3 FK + 2 CHECK auto-nommées)
+    FOREACH v_c IN ARRAY ARRAY[
+      'support_ticket_replies_pkey',
+      'support_ticket_replies_ticket_id_fkey',
+      'support_ticket_replies_author_type_check',
+      'support_ticket_replies_author_user_id_fkey',
+      'support_ticket_replies_corrects_reply_id_fkey',
+      'support_ticket_replies_hidden_by_fkey',
+      'support_ticket_replies_body_check',
+      'support_ticket_replies_author_user_id_check',
+      'support_ticket_replies_internal_note_author_check',
+      'support_ticket_replies_hidden_by_check',
+      'support_ticket_replies_hidden_reason_check'
+    ] LOOP
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.support_ticket_replies'::regclass AND conname = v_c) THEN
+        v_missing_constraints := coalesce(v_missing_constraints, '{}') || v_c;
+      END IF;
+    END LOOP;
+    IF v_missing_constraints IS NOT NULL THEN
+      RAISE EXCEPTION '[support_ticket_replies] DIVERGENT : contrainte(s) manquante(s) : %. Aucune correction automatique.', v_missing_constraints;
+    END IF;
+
+    -- Prédicats des 4 contraintes CHECK métier nommées explicitement (le nom seul ne
+    -- suffit pas à garantir que la règle imposée est bien celle attendue)
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.support_ticket_replies'::regclass AND conname = 'support_ticket_replies_author_user_id_check'
+        AND pg_get_constraintdef(oid) = 'CHECK (((author_type = ''system''::text) = (author_user_id IS NULL)))')
+    THEN
+      RAISE EXCEPTION '[support_ticket_replies] DIVERGENT : prédicat de support_ticket_replies_author_user_id_check différent de celui attendu. Aucune correction automatique.';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.support_ticket_replies'::regclass AND conname = 'support_ticket_replies_internal_note_author_check'
+        AND pg_get_constraintdef(oid) = 'CHECK (((NOT is_internal_note) OR (author_type = ''super_admin''::text)))')
+    THEN
+      RAISE EXCEPTION '[support_ticket_replies] DIVERGENT : prédicat de support_ticket_replies_internal_note_author_check différent de celui attendu. Aucune correction automatique.';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.support_ticket_replies'::regclass AND conname = 'support_ticket_replies_hidden_by_check'
+        AND pg_get_constraintdef(oid) = 'CHECK (((hidden_at IS NULL) = (hidden_by IS NULL)))')
+    THEN
+      RAISE EXCEPTION '[support_ticket_replies] DIVERGENT : prédicat de support_ticket_replies_hidden_by_check différent de celui attendu. Aucune correction automatique.';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.support_ticket_replies'::regclass AND conname = 'support_ticket_replies_hidden_reason_check'
+        AND pg_get_constraintdef(oid) = 'CHECK (((hidden_at IS NULL) = (hidden_reason IS NULL)))')
+    THEN
+      RAISE EXCEPTION '[support_ticket_replies] DIVERGENT : prédicat de support_ticket_replies_hidden_reason_check différent de celui attendu. Aucune correction automatique.';
+    END IF;
+
+    -- Index
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'support_ticket_replies'
+        AND indexname = 'idx_support_ticket_replies_ticket_seq'
+        AND indexdef ILIKE '%USING btree (ticket_id, seq)%'
+    ) THEN
+      RAISE EXCEPTION '[support_ticket_replies] DIVERGENT : index idx_support_ticket_replies_ticket_seq absent ou de définition différente. Aucune correction automatique.';
+    END IF;
+
+    -- Commentaire de table
+    SELECT obj_description('public.support_ticket_replies'::regclass, 'pg_class') INTO v_comment;
+    IF v_comment IS NULL OR v_comment = '' THEN
+      RAISE EXCEPTION '[support_ticket_replies] DIVERGENT : commentaire de table absent. Aucune correction automatique.';
+    END IF;
+
+    -- Propriétaire (doit rester le rôle d'application des migrations — jamais un rôle applicatif)
+    SELECT pg_get_userbyid(relowner) INTO v_owner FROM pg_class WHERE oid = 'public.support_ticket_replies'::regclass;
+    IF v_owner IN ('anon', 'authenticated') THEN
+      RAISE EXCEPTION '[support_ticket_replies] DIVERGENT : propriétaire de la table = % (rôle applicatif), attendu un rôle de migration. Aucune correction automatique.', v_owner;
+    END IF;
+
+    RAISE NOTICE '[support_ticket_replies] déjà présente et conforme (colonnes, contraintes, index, commentaire, propriétaire) — aucune action sur le schéma.';
+  END IF;
+END
+$support_ticket_replies_table$;
+
+-- Trigger, RLS, policies et grants restent définis en dehors du bloc trois-états
+-- ci-dessus : chacune de ces formes est déjà déterministe-convergente par
+-- construction (DROP ... IF EXISTS puis CREATE, ou REVOKE explicite puis GRANT
+-- précis), pas une forme masquante comme l'était CREATE TABLE IF NOT EXISTS —
+-- rejouer ces instructions ne peut jamais laisser survivre un état divergent
+-- silencieux, contrairement au problème corrigé ci-dessus.
 
 -- corrects_reply_id doit référencer une réponse du MÊME ticket — une simple FOREIGN KEY ne
 -- peut pas exprimer cette contrainte croisée (elle référence support_ticket_replies.id sans

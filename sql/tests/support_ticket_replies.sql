@@ -10,6 +10,33 @@ BEGIN;
 \ir ../82_platform_notifications.sql
 \ir ../85_support_ticket_replies.sql
 
+-- 0) Doctrine trois états de sql/85 (remplace l'ancien CREATE TABLE IF NOT EXISTS) :
+--    le \ir ci-dessus vient de créer la table (cas A, absente). On vérifie ici le
+--    cas B (rejouer le fichier sur une table déjà conforme = no-op, aucune exception)
+--    puis le cas C (rejouer sur une table rendue divergente = RAISE EXCEPTION,
+--    capturée par un SAVEPOINT pour ne pas interrompre la suite du fichier), avant
+--    de continuer avec une table strictement conforme pour les tests suivants.
+
+-- Cas B : rejouer le fichier sur une table déjà conforme ne doit lever aucune exception.
+\ir ../85_support_ticket_replies.sql
+DO $$ BEGIN RAISE NOTICE 'PASS cas B (table déjà conforme) : second \ir de sql/85 exécuté sans exception.'; END $$;
+
+-- Cas C : table rendue divergente (une contrainte métier retirée) → le \ir suivant
+-- doit échouer avec un message DIVERGENT explicite. Capturé via SAVEPOINT/ROLLBACK TO
+-- SAVEPOINT (le \ir lui-même ne peut pas être enveloppé dans un bloc DO/EXCEPTION,
+-- puisqu'il s'exécute comme un ensemble d'instructions top-level, pas une expression).
+ALTER TABLE public.support_ticket_replies DROP CONSTRAINT support_ticket_replies_hidden_reason_check;
+SAVEPOINT sp_three_state_divergent;
+\ir ../85_support_ticket_replies.sql
+ROLLBACK TO SAVEPOINT sp_three_state_divergent;
+DO $$ BEGIN RAISE NOTICE 'PASS cas C (table divergente, contrainte retirée) : le \ir précédent a levé une exception DIVERGENT (visible ci-dessus), capturée par ROLLBACK TO SAVEPOINT — la table reste divergente à ce stade, restaurée juste après.'; END $$;
+
+-- Restauration de la conformité stricte avant de poursuivre (les tests suivants exigent
+-- le contrat complet, notamment la contrainte hidden_at/hidden_reason).
+ALTER TABLE public.support_ticket_replies
+  ADD CONSTRAINT support_ticket_replies_hidden_reason_check CHECK ((hidden_at IS NULL) = (hidden_reason IS NULL));
+DO $$ BEGIN RAISE NOTICE 'Conformité restaurée avant la suite des tests.'; END $$;
+
 -- Fixtures : 2 tickets sur 2 hôtels différents (hôtels réels, comptes réels non-admin).
 INSERT INTO public.support_tickets (id, hotel_id, module, feature, problem_type, description, steps, priority, status, user_email, user_role)
 VALUES
