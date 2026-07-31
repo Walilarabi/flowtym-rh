@@ -11,7 +11,7 @@ function checkSyntax(code) {
     catch (e2) { return e.message; }
   }
 }
-for (const file of ['index.html', 'portal.html', 'admin.html']) {
+for (const file of ['index.html', 'portal.html', 'admin.html', 'support-portal.html']) {
   const html = readFileSync(file, 'utf8');
   const re = /<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi;
   let m, i = 0;

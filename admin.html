@@ -2971,6 +2971,7 @@ const SUPPORT_STATUS_TAG={nouveau:'blue',en_analyse:'amber',attente_utilisateur:
 const SUPPORT_PRIORITY_LABEL={bloquant:'Bloquant',eleve:'Élevée',moyen:'Moyenne',faible:'Faible'};
 const SUPPORT_PRIORITY_TAG={bloquant:'red',eleve:'amber',moyen:'blue',faible:'gray'};
 const SUPPORT_RISK_LABEL={critique:'Critique',eleve:'Élevé',moyen:'Moyen',faible:'Faible'};
+const ATTACH_STATUS_LABEL={pending_upload:'Envoi en attente',uploaded:'Envoyé, en attente d\'analyse',scan_pending:'Analyse antivirus en cours',clean:'Disponible',quarantined:'Rejeté (analyse antivirus)',rejected:'Rejeté'};
 
 let supportPage=0, supportSort={key:'created_at',dir:'desc'};
 let supportFilterStatus='', supportFilterPriority='', supportFilterModule='', supportFilterRisk='';
@@ -3035,14 +3036,18 @@ async function renderSupport(el){
 async function openSupportTicketDrawer(ticketId, listEl){
   openDrawer(`<div class="dh"><button class="close" id="dClose"><i class="fa-solid fa-xmark"></i></button><h2>Chargement…</h2></div>`);
   $('dClose').onclick=closeDrawer;
-  const {data,error}=await sb.rpc('admin_get_support_ticket_detail',{p_ticket_id:ticketId});
+  const [{data,error}, attachRes]=await Promise.all([
+    sb.rpc('admin_get_support_ticket_detail',{p_ticket_id:ticketId}),
+    sb.rpc('list_support_ticket_attachments',{p_ticket_id:ticketId}),
+  ]);
   if(error){ flash(errorLabel(error.message),'e'); closeDrawer(); return; }
   const t=(data&&data[0]);
   if(!t){ flash('Ticket introuvable.','e'); closeDrawer(); return; }
-  renderSupportTicketDrawerBody(t, listEl);
+  renderSupportTicketDrawerBody(t, listEl, attachRes.error?[]:(attachRes.data||[]));
 }
 
-function renderSupportTicketDrawerBody(t, listEl){
+function renderSupportTicketDrawerBody(t, listEl, attachments){
+  attachments=attachments||[];
   const replies=t.replies||[];
   openDrawer(`
     <div class="dh"><button class="close" id="dClose"><i class="fa-solid fa-xmark"></i></button>
@@ -3089,6 +3094,18 @@ function renderSupportTicketDrawerBody(t, listEl){
       </div>
     </div>
     <div class="sec">
+      <h4>Pièces jointes (${attachments.length})</h4>
+      <p class="muted" style="font-size:11.5px">Envoi côté hôtel temporairement désactivé (analyse antivirus non câblée, cf. ADR-012 §3.5.8). Fichiers déjà envoyés listés ci-dessous, en lecture seule ; suppression logique possible si un fichier est indésirable.</p>
+      <div class="tlist">
+        ${attachments.length?attachments.map(a=>`
+          <div class="it">
+            <div class="nm"><i class="fa-solid fa-paperclip" style="margin-right:6px"></i>${esc(a.original_filename)}</div>
+            <span class="tag ${a.status==='clean'?'green':(a.status==='quarantined'||a.status==='rejected'?'red':'amber')}">${esc(ATTACH_STATUS_LABEL[a.status]||a.status)}</span>
+            <button class="btn d sm" data-delattach="${a.id}">Supprimer</button>
+          </div>`).join(''):'<div class="empty" style="padding:14px">Aucune pièce jointe.</div>'}
+      </div>
+    </div>
+    <div class="sec">
       <h4>Répondre</h4>
       <div class="fld"><textarea id="rBody" rows="4" placeholder="Votre réponse…" style="width:100%;resize:vertical"></textarea></div>
       <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin:6px 0">
@@ -3098,6 +3115,7 @@ function renderSupportTicketDrawerBody(t, listEl){
     </div>
   `);
   $('dClose').onclick=closeDrawer;
+  document.querySelectorAll('[data-delattach]').forEach(btn=>btn.onclick=()=>openDeleteAttachmentModal(btn.dataset.delattach, t, listEl));
 
   $('tSave').onclick=async()=>{
     $('tSave').disabled=true;
@@ -3143,6 +3161,28 @@ function bindSupportHideButtons(t, listEl){
       openSupportTicketDrawer(t.id, listEl);
     }catch(e){ flash(errorLabel(e.message),'e'); btn.disabled=false; }
   });
+}
+
+function openDeleteAttachmentModal(attachmentId, t, listEl){
+  $('modal').className='modal';
+  $('modal').innerHTML=`<h3>Supprimer cette pièce jointe</h3>
+    <p class="muted" style="font-size:12.5px">Suppression logique uniquement (le fichier n'est jamais effacé du stockage, seule sa visibilité applicative disparaît). Action journalisée.</p>
+    <div class="fld"><label>Motif (obligatoire)</label><textarea id="daReason" rows="3" style="width:100%"></textarea></div>
+    <div class="mact"><button class="btn g" id="mCancel">Annuler</button><button class="btn d" id="mOk">Supprimer</button></div>`;
+  $('modalbg').classList.add('on');
+  $('mCancel').onclick=()=>{ $('modalbg').classList.remove('on'); $('modal').className='modal'; };
+  $('mOk').onclick=async()=>{
+    const reason=$('daReason').value.trim();
+    if(!reason){ flash('Le motif est obligatoire.','e'); return; }
+    $('mOk').disabled=true;
+    try{
+      const {error}=await sb.rpc('admin_delete_support_ticket_attachment',{p_attachment_id:attachmentId, p_reason:reason});
+      if(error) throw error;
+      flash('Pièce jointe supprimée.');
+      $('modalbg').classList.remove('on'); $('modal').className='modal';
+      openSupportTicketDrawer(t.id, listEl);
+    }catch(e){ flash(errorLabel(e.message),'e'); $('mOk').disabled=false; }
+  };
 }
 
 function openHideReplyModal(replyId, t, listEl){
