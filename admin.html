@@ -756,7 +756,7 @@ const MENU=[
     ['groups','Groupes hôteliers','fa-solid fa-sitemap',true],
     ['users','Utilisateurs','fa-regular fa-user',true],
     ['subscriptions','Abonnements','fa-regular fa-calendar-check',true],
-    ['trials','Périodes d\'essai','fa-regular fa-hourglass-half',false],
+    ['trials','Périodes d\'essai','fa-regular fa-hourglass-half',true],
     ['licenses','Licences','fa-solid fa-key',false],
   ]],
   ['Finance',[
@@ -771,7 +771,6 @@ const MENU=[
   ]],
 ];
 const STUB_INFO={
-  trials:{ic:'fa-regular fa-hourglass-half',desc:'Le suivi d\'essai (dates, alertes 30/15/7/3/1 jours) sera construit sur hotel_subscriptions.trial_ends_at en Phase 2.'},
   payments:{ic:'fa-solid fa-credit-card',desc:'Les paiements par facture se gèrent déjà depuis la fiche facture (module Facturation). Une vue transversale multi-factures (rapprochement bancaire, relances) arrive en Phase 2.'},
   licenses:{ic:'fa-solid fa-key',desc:'platform_apps, hotel_app_subscriptions et user_app_access existent déjà. Vue de gestion consolidée prévue en Phase 2.'},
   stats:{ic:'fa-solid fa-chart-line',desc:'MRR/ARR/churn seront calculés sur hotel_subscriptions et platform_invoices une fois la facturation Phase 2 en place.'},
@@ -878,8 +877,8 @@ window.addEventListener('popstate',()=>{
 const VIEW_LOAD_ERROR_LABEL={
   dashboard:'le tableau de bord', hotels:'la liste des hôtels', groups:'la liste des groupes',
   users:'la liste des utilisateurs', subscriptions:'la liste des abonnements',
-  billing:'la facturation', audit:"le journal d'audit", settings:'les paramètres',
-  supervision:'la supervision',
+  trials:"les périodes d'essai", billing:'la facturation', audit:"le journal d'audit",
+  settings:'les paramètres', supervision:'la supervision',
 };
 async function renderView(){
   const el=$('view');
@@ -890,6 +889,7 @@ async function renderView(){
     else if(view==='groups') await renderGroups(el);
     else if(view==='users') await renderUsers(el);
     else if(view==='subscriptions') await renderSubscriptions(el);
+    else if(view==='trials') await renderTrials(el);
     else if(view==='billing') await renderBilling(el);
     else if(view==='audit') await renderAudit(el);
     else if(view==='settings') await renderSettings(el);
@@ -2560,6 +2560,99 @@ async function openPlanModulesDrawer(plan){
       flash('Applications mises à jour.'); closeDrawer(); renderView();
     }catch(e){ flash(errorLabel(e.message),'e'); }
     finally{ $('dSave').disabled=false; }
+  };
+}
+
+/* =====================================================================
+   Périodes d'essai (Lot 4, ADR-012 §3.3) — notifications de fin d'essai
+   J-7/J-3/J-1, prédicat de preview et de run strictement identique (les deux RPC
+   itèrent sur le même helper serveur). Déclenchement manuel uniquement, aucun cron.
+   ===================================================================== */
+async function renderTrials(el){
+  el.innerHTML='<div class="loading"><i class="fa-solid fa-circle-notch fa-spin"></i> Chargement…</div>';
+  const {data:rows0,error}=await sb.rpc('admin_preview_trial_ending_notifications');
+  if(error) throw error;
+  const rows=(rows0||[]).sort((a,b)=>a.days_remaining-b.days_remaining || (a.hotel_name||'').localeCompare(b.hotel_name||''));
+  const toSend=rows.filter(r=>r.would_send);
+  const alreadySent=rows.filter(r=>r.already_sent);
+  const noEmail=rows.filter(r=>!r.already_sent && !r.would_send);
+
+  el.innerHTML=`<div class="page">
+    <div class="phead"><div><h1>Périodes d'essai</h1><div class="sub">Notifications de fin d'essai — paliers J-7 / J-3 / J-1, déclenchement manuel</div></div>
+      <div class="actions"><button class="btn g" id="runTrialNotifs"><i class="fa-solid fa-paper-plane"></i> Envoyer les notifications dues</button></div>
+    </div>
+
+    <div class="kpis">
+      <div class="kpi v"><div class="ic"><i class="fa-solid fa-paper-plane"></i></div><div class="n">${fmtNum(toSend.length)}</div><div class="l">À envoyer maintenant</div></div>
+      <div class="kpi g"><div class="ic"><i class="fa-solid fa-circle-check"></i></div><div class="n">${fmtNum(alreadySent.length)}</div><div class="l">Déjà envoyées</div></div>
+      <div class="kpi a"><div class="ic"><i class="fa-solid fa-triangle-exclamation"></i></div><div class="n">${fmtNum(noEmail.length)}</div><div class="l">Sans e-mail de contact</div></div>
+    </div>
+
+    <div class="box" style="border-color:var(--blue);margin:16px 0">
+      <p class="muted" style="font-size:12.5px;margin:0">
+        <i class="fa-solid fa-circle-info"></i>
+        Aucun cron : ce traitement doit être déclenché manuellement. Le prédicat de cette liste
+        (aperçu) est strictement identique à celui utilisé lors de l'envoi — un palier une fois
+        notifié avec succès n'est jamais renvoyé (idempotence par abonnement + palier).
+      </p>
+    </div>
+
+    ${!rows.length?`<div class="stub"><div class="ic"><i class="fa-regular fa-hourglass-half"></i></div><h2>Aucun essai concerné</h2>
+      <p>Aucun abonnement en essai n'approche d'un palier J-7/J-3/J-1 pour l'instant.</p>
+    </div>`:`
+    <div class="tblwrap"><table class="tbl">
+      <thead><tr><th>Hôtel</th><th>Échéance</th><th>Jours restants</th><th>Palier</th><th>Destinataire</th><th>État</th></tr></thead>
+      <tbody>${rows.map(r=>`
+        <tr>
+          <td><b>${esc(r.hotel_name)}</b></td>
+          <td>${fmtDate(r.trial_ends_at)}</td>
+          <td>${r.days_remaining}</td>
+          <td><span class="tag ${r.threshold_days===1?'red':r.threshold_days===3?'amber':'blue'}">J-${r.threshold_days}</span></td>
+          <td>${r.recipient_email?esc(r.recipient_email):'<span class="muted">—</span>'}</td>
+          <td>${r.already_sent?'<span class="tag green">Déjà envoyée</span>':r.would_send?'<span class="tag amber">À envoyer</span>':`<span class="tag gray" title="${esc(r.skip_reason||'')}">Bloquée</span>`}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table></div>`}
+  </div>`;
+
+  $('runTrialNotifs').onclick=()=>openTrialEndingNotificationsModal(el, toSend);
+}
+
+// Le bouton "Envoyer" ouvre une confirmation avant tout envoi réel — même doctrine que
+// openExpiredTrialsPreviewModal (jamais d'action destructive/irréversible en un clic direct).
+// Chaque ligne est recalculée côté serveur au moment de l'exécution (le tableau passé ici
+// n'est qu'un résumé, jamais une garantie transactionnelle).
+function openTrialEndingNotificationsModal(el, toSend){
+  $('modal').className='modal wide';
+  const summary=toSend.length
+    ? `<div class="msummary">Cette action va envoyer :<br>• ${toSend.length} notification${toSend.length>1?'s':''} de fin d'essai</div>`
+    : `<div class="msummary ok"><i class="fa-solid fa-circle-check"></i> Aucune notification à envoyer — tous les paliers dus sont déjà notifiés.</div>`;
+  const detail=toSend.length?`<div class="mscroll">${toSend.map(r=>`
+    <div class="it" style="align-items:flex-start">
+      <div><div class="nm">${esc(r.hotel_name)} — J-${r.threshold_days}</div>
+        <div class="sub">Échéance ${fmtDate(r.trial_ends_at)} · ${esc(r.recipient_email||'')}</div></div>
+      <div class="right"><span class="tag amber">À envoyer</span></div>
+    </div>`).join('')}</div>`:'';
+  $('modal').innerHTML=`<h3>Envoyer les notifications de fin d'essai</h3>
+    ${summary}
+    <p>Déclenchement manuel, consigné dans les journaux plateforme. Idempotent : un palier déjà notifié avec succès n'est jamais renvoyé.</p>
+    ${detail}
+    <div class="mact"><button class="btn g" id="mCancel">Annuler</button><button class="btn p" id="mOk" ${toSend.length?'':'disabled'}>Envoyer maintenant</button></div>`;
+  $('modalbg').classList.add('on');
+  $('mCancel').onclick=()=>{ $('modalbg').classList.remove('on'); $('modal').className='modal'; };
+  $('mOk').onclick=async()=>{
+    $('mOk').disabled=true; $('mCancel').disabled=true;
+    try{
+      const {data,error}=await sb.rpc('admin_run_trial_ending_notifications');
+      if(error) throw error;
+      const r=(data&&data[0])||{sent_count:0,skipped_already_sent:0,skipped_no_email:0};
+      flash(`Envoi effectué : ${r.sent_count} notification(s) créée(s)${r.skipped_already_sent?`, ${r.skipped_already_sent} déjà envoyée(s)`:''}${r.skipped_no_email?`, ${r.skipped_no_email} sans e-mail de contact`:''}.`);
+      $('modalbg').classList.remove('on'); $('modal').className='modal';
+      renderView();
+    }catch(e){
+      flash(errorLabel(e.message),'e');
+      $('mOk').disabled=false; $('mCancel').disabled=false;
+    }
   };
 }
 
