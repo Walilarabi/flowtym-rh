@@ -134,6 +134,12 @@ BEGIN
 END;
 $function$;
 
+-- Supabase accorde EXECUTE à anon/authenticated/service_role par défaut à la création d'une
+-- fonction (default privileges du rôle postgres sur le schéma public) — révoqué explicitement
+-- ici, exactement comme le fait sql/76 pour chaque RPC admin_* existante. Sans cette ligne,
+-- anon aurait un accès EXECUTE au niveau grant (bloqué en pratique par le contrôle
+-- is_platform_admin() interne à la fonction, mais sans la défense en profondeur attendue).
+REVOKE ALL ON FUNCTION public.admin_list_license_usage() FROM PUBLIC, anon, service_role;
 GRANT EXECUTE ON FUNCTION public.admin_list_license_usage() TO authenticated;
 
 -- ----------------------------------------------------------------------------
