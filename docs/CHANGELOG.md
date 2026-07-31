@@ -1,5 +1,67 @@
 # Flowtym RH — Changelog
 
+## v1.6.0 — Portail Super Admin, Phase 2 (Lots 1-6 + divergence des droits)
+
+9 PR ouvertes et empilées (#21-#29, voir ADR-012 pour le détail complet et l'ordre de
+merge), aucune mergée, aucune migration appliquée en production, aucun cron activé.
+
+### Contenu
+- **Lot 1** (PR #21, #22) : rétro-versionnement Support à l'identique + durcissement
+  ACL/RLS. Deux failles réelles corrigées : `TRUNCATE` non filtré par RLS (`anon`
+  pouvait vider `support_tickets`), et les policies `support_select/insert/update`
+  qui ne matchaient jamais aucun utilisateur hôtel réel (`user_hotels.user_id`
+  comparé directement à `auth.uid()` au lieu de passer par `public.users.auth_id`).
+  Le même motif existe sur 7 autres tables RH/RMS/Salon/Lighthouse, volontairement
+  non corrigé ici (hors périmètre, cf. ADR-012 §2).
+- **Lot 2** (PR #23) : fondation `platform_notifications` (idempotence stricte,
+  retries bornés, aucun cron).
+- **Lot 3** (PR #24) : licences en observation seule (quota vs consommation réelle,
+  seuil d'alerte 90 % non définitif, aucun blocage fonctionnel).
+- **Lot 4** (PR #25) : notifications d'essai J-7/J-3/J-1, prédicat d'éligibilité
+  strictement partagé entre prévisualisation et exécution.
+- **Lot 5A** (PR #26) : back-office Support (`support_ticket_replies` append-only,
+  masquage audité, moindre privilège `super_admin`/`support_agent`).
+- **Lot 5B** (PR #27) : portail hôtel Support + pièces jointes. Nouveau fichier
+  indépendant `support-portal.html` (ni `portal.html`, ni `index.html` — cf. ADR-012
+  §7 pour la justification par les données réelles), 3 Edge Functions, statuts
+  antivirus honnêtes (`clean` jamais atteint automatiquement, aucun scanner câblé).
+- **Divergence des droits** (PR #28) : écran en lecture seule, aucune nouvelle
+  migration (réutilise `admin_rights_divergence_report()`, en production depuis
+  Phase 2A).
+- **Lot 6** (PR #29) : statistiques Super Admin + score de santé client/hôtel.
+  MRR/ARR affiché (0 € réel, abonnements actifs au tarif Legacy Pilot) ; conversion
+  essai→payant explicitement non affichée (aucune conversion organique réelle) ;
+  score paiement exclu du composite tant qu'aucune facture réelle n'existe.
+
+### Défauts trouvés et corrigés pendant l'implémentation (jamais masqués)
+- Default privileges Supabase (`ALTER DEFAULT PRIVILEGES`) accordant EXECUTE/DML à
+  `anon`/`authenticated`/`service_role` sur toute nouvelle fonction/table — trouvé et
+  corrigé indépendamment 4 fois (sql/83, 84, 85, 86) avant merge.
+  `support_ticket_replies` avait spécifiquement conservé INSERT/UPDATE pour
+  `authenticated`, violant sa propre doctrine append-only.
+- Bucket Storage `support-ticket-attachments` : l'upsert de la migration ne forçait
+  pas `public = false` dans son `ON CONFLICT DO UPDATE`, laissant une dérive
+  manuelle antérieure (`public = true`) survivre à un rejeu — corrigé, testé.
+- Écran Divergence des droits : cartes KPI avec des classes CSS inventées
+  (`.lbl`/`.val`, absentes de la feuille de style) — corrigé avant que le lot
+  suivant ne s'appuie dessus.
+
+### Tests
+Jest 522/522 (stable sur toutes les branches). Script de vérification syntaxique
+frontend étendu à `support-portal.html`. Suites SQL dédiées par lot
+(`sql/tests/support_acl_hardening.sql`, `trial_ending_notifications.sql`,
+`support_ticket_replies.sql`, `support_ticket_attachments.sql`,
+`lot6_statistics_health_score.sql`), toutes exécutées en `BEGIN...ROLLBACK` contre
+la production réelle avec des comptes/hôtels réels — aucune donnée modifiée.
+Playwright mocké (client Supabase intercepté au niveau réseau — CDN et API réelles
+inaccessibles depuis ce sandbox) sur chaque nouvel écran frontend.
+
+### Hors périmètre (documenté, non développé)
+Paiements (aucun fournisseur choisi, `platform_invoices` vide en production, cf.
+ADR-012 §11). Dette de reconstruction du socle Super Admin (`db/reconstruct/` ne
+couvre que le périmètre pilote, pas `sql/68`-`87` — impact et plan documentés en
+ADR-012 §12, non traité dans cette Phase 2).
+
 ## v1.5.2 — Portail Super Admin : contrat prévisualisation = exécution (essais expirés)
 
 ### Cause

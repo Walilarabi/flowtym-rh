@@ -15,6 +15,8 @@ développeur / PO / QA / CTO comprenne les choix sans l'historique des échanges
 | [ADR-008](ADR-008-concurrency-tests-mandatory.md) | Tests de concurrence obligatoires | Accepté |
 | [ADR-009](ADR-009-super-admin-portal-architecture.md) | Architecture et modèle de sécurité du portail Super Admin | Accepté |
 | [ADR-010](ADR-010-phase2a-rights-resolution-architecture.md) | Résolution des droits applicatifs et cycle de vie des abonnements (Phase 2A) | Accepté |
+| [ADR-011](ADR-011-plan-deprecation-hotel-app-subscriptions.md) | Plan de dépréciation `hotel_app_subscriptions` | Accepté |
+| [ADR-012](ADR-012-super-admin-phase2-plateforme-saas.md) | Phase 2 Super Admin — plateforme SaaS : Lots 1-6, portail hôtel Support, divergence des droits, rapport d'implémentation réel (§9) | En cours (round 6, aucune PR mergée) |
 
 Format : Contexte · Problème · Décision · Alternatives · Avantages · Inconvénients · Impacts futurs.
 (ADR-009 couvre 14 décisions liées — voir le document pour son propre sommaire.)
