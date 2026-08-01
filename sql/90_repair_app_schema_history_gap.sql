@@ -1311,6 +1311,20 @@ CREATE TABLE IF NOT EXISTS public.competitor_rates (
 );
 
 -- ----------------------------------------------------------------------------
+-- 5w. Table _odms_cron_config — cause racine révélée par
+--     20260617145841_security_sprint2_hardening (`DROP POLICY IF EXISTS
+--     "service_role_only_odms_cron_config" ON public._odms_cron_config`
+--     échoue avec "does not exist"). Zéro CREATE TABLE trackée (regex
+--     stricte : 0 correspondance). Config clé/valeur interne du worker
+--     ODMS (On-Demand Market Scan).
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public._odms_cron_config (
+  key text PRIMARY KEY,
+  value text NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- ----------------------------------------------------------------------------
 -- 6. Les 13 vues attendues par 0013_security_views_refactor
 --    (créées directement avec security_invoker=on, état final réel de
 --    production — rend le ALTER VIEW de 0013 idempotent)
