@@ -470,6 +470,28 @@ CREATE TABLE IF NOT EXISTS public.payments (
   status text DEFAULT 'completed'
 );
 
+-- 5d(bis). Colonnes payments manquantes — même cause racine, révélée
+--          seulement à la compilation de la 13e et dernière vue
+--          (v_fec_entries, CTE `pay`, réfère p.reference/p.transaction_id/
+--          p.payment_date, aucune des trois absente de la définition
+--          minimale ci-dessus). Portée alignée sur l'état réel de
+--          production (introspection information_schema.columns).
+ALTER TABLE public.payments
+  ADD COLUMN IF NOT EXISTS reservation_id uuid,
+  ADD COLUMN IF NOT EXISTS payment_date timestamptz DEFAULT now(),
+  ADD COLUMN IF NOT EXISTS reference text,
+  ADD COLUMN IF NOT EXISTS transaction_id text,
+  ADD COLUMN IF NOT EXISTS payment_type text DEFAULT 'settlement',
+  ADD COLUMN IF NOT EXISTS notes text,
+  ADD COLUMN IF NOT EXISTS created_by uuid,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now(),
+  ADD COLUMN IF NOT EXISTS invoice_id uuid,
+  ADD COLUMN IF NOT EXISTS currency text NOT NULL DEFAULT 'EUR',
+  ADD COLUMN IF NOT EXISTS method text NOT NULL DEFAULT 'other',
+  ADD COLUMN IF NOT EXISTS reversal_of uuid,
+  ADD COLUMN IF NOT EXISTS reversal_reason text,
+  ADD COLUMN IF NOT EXISTS collected_at timestamptz NOT NULL DEFAULT now();
+
 -- ----------------------------------------------------------------------------
 -- 5e. Table prestations (minimale) — même cause racine.
 -- ----------------------------------------------------------------------------
