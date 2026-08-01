@@ -471,6 +471,18 @@ CREATE TABLE IF NOT EXISTS public.payments (
 );
 
 -- ----------------------------------------------------------------------------
+-- 5e. Table prestations (minimale) — même cause racine.
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.prestations (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  prestation_date date DEFAULT CURRENT_DATE,
+  tva_rate numeric DEFAULT 10.0,
+  total_amount numeric,
+  tva_amount numeric,
+  status text DEFAULT 'active'
+);
+
+-- ----------------------------------------------------------------------------
 -- 6. Les 13 vues attendues par 0013_security_views_refactor
 --    (créées directement avec security_invoker=on, état final réel de
 --    production — rend le ALTER VIEW de 0013 idempotent)
