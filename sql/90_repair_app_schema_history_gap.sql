@@ -1195,6 +1195,35 @@ CREATE TABLE IF NOT EXISTS public.competitor_sync_failures (
 ALTER TABLE public.hotels ADD COLUMN IF NOT EXISTS active boolean DEFAULT true;
 
 -- ----------------------------------------------------------------------------
+-- 5r. hotels.status : conversion enum hotel_status -> text — cause racine
+--     de nature différente des sections précédentes (ni objet manquant, ni
+--     migration non déterministe : ici, le TYPE capturé par 00001_initial_
+--     schema pour hotels.status est lui-même erroné). 00001 définit
+--     `status hotel_status NOT NULL DEFAULT 'trial'` (enum à 3 valeurs :
+--     trial/active/suspended). En production aujourd'hui, hotels.status
+--     est du type `text` (défaut 'active') — le type enum a été converti
+--     hors bande à un moment non tracké ; le type `hotel_status` existe
+--     encore en production mais n'est utilisé par AUCUNE colonne (preuve :
+--     0 lignes dans pg_attribute référençant ce type). Révélé par
+--     20260605184017_saas_11_hotels_company_status, dont le backfill
+--     `UPDATE hotels SET status = CASE WHEN active THEN 'active' ELSE
+--     'suspended' END` échoue avec "column \"status\" is of type
+--     hotel_status but expression is of type text" sur un rejeu vierge
+--     (où status est resté l'enum d'origine faute de conversion trackée).
+--     Correction : conversion guardée (no-op si déjà text — vérifié
+--     directement en production, où ce bloc ne change rien).
+-- ----------------------------------------------------------------------------
+DO $repair$
+BEGIN
+  IF (SELECT atttypid::regtype::text FROM pg_attribute
+      WHERE attrelid = 'public.hotels'::regclass AND attname = 'status' AND NOT attisdropped) = 'hotel_status' THEN
+    ALTER TABLE public.hotels ALTER COLUMN status DROP DEFAULT;
+    ALTER TABLE public.hotels ALTER COLUMN status TYPE text USING status::text;
+    ALTER TABLE public.hotels ALTER COLUMN status SET DEFAULT 'active';
+  END IF;
+END $repair$;
+
+-- ----------------------------------------------------------------------------
 -- 6. Les 13 vues attendues par 0013_security_views_refactor
 --    (créées directement avec security_invoker=on, état final réel de
 --    production — rend le ALTER VIEW de 0013 idempotent)
