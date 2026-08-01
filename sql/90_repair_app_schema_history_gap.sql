@@ -1224,6 +1224,27 @@ BEGIN
 END $repair$;
 
 -- ----------------------------------------------------------------------------
+-- 5s. Table user_invitations — cause racine révélée par
+--     20260607111411_role_permissions_system (`DROP POLICY IF EXISTS
+--     user_invitations_platform_admin ON public.user_invitations` échoue
+--     avec "relation \"public.user_invitations\" does not exist"). Zéro
+--     CREATE TABLE trackée (regex stricte : 0 correspondance). Invitations
+--     utilisateur en attente d'acceptation, par hôtel.
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.user_invitations (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  hotel_id uuid NOT NULL REFERENCES public.hotels(id) ON DELETE CASCADE,
+  email text NOT NULL,
+  full_name text,
+  role admin_user_role NOT NULL DEFAULT 'reception',
+  status text NOT NULL DEFAULT 'PENDING' CHECK (status = ANY (ARRAY['PENDING','ACCEPTED','REVOKED'])),
+  invited_by uuid REFERENCES public.users(id),
+  invited_at timestamptz NOT NULL DEFAULT now(),
+  accepted_at timestamptz,
+  token uuid NOT NULL DEFAULT gen_random_uuid()
+);
+
+-- ----------------------------------------------------------------------------
 -- 6. Les 13 vues attendues par 0013_security_views_refactor
 --    (créées directement avec security_invoker=on, état final réel de
 --    production — rend le ALTER VIEW de 0013 idempotent)
