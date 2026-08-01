@@ -18,6 +18,13 @@
 -- (public.update_updated_at(), la 3e fonction du bloc, est elle bien créée par
 -- 00001 — pas de gap sur celle-là.)
 --
+-- Même constat, un cran plus loin dans l'historique, pour la migration
+-- suivante 20260511142334_0013_security_views_refactor : sa sanity-check
+-- exige 13 vues déjà existantes (v_cli01_debtors, v_cli05_clv, ... ) avant de
+-- les basculer en SECURITY INVOKER — vues elles aussi absentes de 00001.
+-- Créées ici directement avec security_invoker=on (état final réel de
+-- production), ce qui rend le ALTER VIEW de 0013 idempotent.
+--
 -- Ces objets existent réellement en production aujourd'hui (créés hors bande,
 -- jamais capturés par une migration trackée). Cette migration ne change RIEN
 -- fonctionnellement en production : chaque statement est idempotent
@@ -378,5 +385,468 @@ begin
   return v_user_id;
 end;
 $function$;
+
+-- ----------------------------------------------------------------------------
+-- 5. Les 13 vues attendues par 0013_security_views_refactor
+--    (créées directement avec security_invoker=on, état final réel de
+--    production — rend le ALTER VIEW de 0013 idempotent)
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE VIEW public.v_cli01_debtors WITH (security_invoker=on) AS
+ SELECT id,
+    reference,
+    guest_name,
+    guest_email,
+    check_in,
+    check_out,
+    source AS canal,
+    total_amount,
+    paid_amount,
+    solde AS amount_due,
+    payment_mode
+   FROM reservations r
+  WHERE solde > 0::numeric AND (status <> ALL (ARRAY['cancelled'::text, 'no_show'::text]))
+  ORDER BY solde DESC;
+
+CREATE OR REPLACE VIEW public.v_cli05_clv WITH (security_invoker=on) AS
+ SELECT id,
+    (first_name || ' '::text) || last_name AS full_name,
+    email,
+    country,
+    loyalty_level,
+    total_stays,
+    total_spent,
+        CASE
+            WHEN total_stays > 0 THEN round(total_spent / total_stays::numeric, 2)
+            ELSE 0::numeric
+        END AS clv
+   FROM guests g
+  ORDER BY total_spent DESC;
+
+CREATE OR REPLACE VIEW public.v_dir01_direction WITH (security_invoker=on) AS
+ SELECT ( SELECT sum(reservations.total_amount) AS sum
+           FROM reservations
+          WHERE EXTRACT(month FROM reservations.check_in) = EXTRACT(month FROM CURRENT_DATE)) AS ca_month,
+    ( SELECT round(avg(reservations.total_amount / NULLIF(reservations.nights, 0)::numeric), 2) AS round
+           FROM reservations
+          WHERE reservations.status <> ALL (ARRAY['cancelled'::text, 'no_show'::text])) AS adr,
+    ( SELECT count(*) AS count
+           FROM reservations
+          WHERE reservations.status = 'no_show'::text) AS total_noshow,
+    ( SELECT count(*) AS count
+           FROM reservations
+          WHERE reservations.status = 'cancelled'::text) AS total_cancellations,
+    ( SELECT sum(reservations.solde) AS sum
+           FROM reservations
+          WHERE reservations.solde > 0::numeric AND (reservations.status <> ALL (ARRAY['cancelled'::text, 'no_show'::text]))) AS total_impaye;
+
+CREATE OR REPLACE VIEW public.v_exp01_occupation WITH (security_invoker=on) AS
+ SELECT count(DISTINCT id) AS occupied_rooms,
+    ( SELECT count(*) AS count
+           FROM rooms
+          WHERE rooms.active = true) AS total_rooms,
+    round(count(DISTINCT id)::numeric * 100.0 / NULLIF(( SELECT count(*) AS count
+           FROM rooms
+          WHERE rooms.active = true), 0)::numeric, 1) AS to_pct,
+    count(
+        CASE
+            WHEN check_in = CURRENT_DATE THEN 1
+            ELSE NULL::integer
+        END) AS arrivals_today,
+    count(
+        CASE
+            WHEN check_out = CURRENT_DATE THEN 1
+            ELSE NULL::integer
+        END) AS departures_today
+   FROM reservations r
+  WHERE check_in <= CURRENT_DATE AND check_out > CURRENT_DATE AND (status = ANY (ARRAY['confirmed'::text, 'checked_in'::text]));
+
+CREATE OR REPLACE VIEW public.v_exp09_noshow WITH (security_invoker=on) AS
+ SELECT id,
+    reference,
+    guest_name,
+    check_in,
+    check_out,
+    source AS canal,
+    total_amount AS montant_perdu,
+    status
+   FROM reservations r
+  WHERE status = 'no_show'::text OR check_in < CURRENT_DATE AND checkin_status = 'pending'::text AND status = 'confirmed'::text
+  ORDER BY check_in DESC;
+
+CREATE OR REPLACE VIEW public.v_exp10_departures WITH (security_invoker=on) AS
+ SELECT id,
+    reference,
+    room_number,
+    guest_name,
+    check_in,
+    check_out,
+    status,
+    solde
+   FROM reservations r
+  WHERE check_out = CURRENT_DATE AND (status <> ALL (ARRAY['cancelled'::text, 'no_show'::text]))
+  ORDER BY room_number;
+
+CREATE OR REPLACE VIEW public.v_fec_entries WITH (security_invoker=on) AS
+ WITH payment_account_map AS (
+         SELECT 'CB'::text AS method,
+            '512100'::text AS compte_num,
+            'Banque - CB'::text AS compte_lib
+        UNION ALL
+         SELECT 'CARD'::text,
+            '512100'::text,
+            'Banque - CB'::text
+        UNION ALL
+         SELECT 'CARTE BANCAIRE'::text,
+            '512100'::text,
+            'Banque - CB'::text
+        UNION ALL
+         SELECT 'CARTE'::text,
+            '512100'::text,
+            'Banque - CB'::text
+        UNION ALL
+         SELECT 'VIREMENT'::text,
+            '512000'::text,
+            'Banque - Virement'::text
+        UNION ALL
+         SELECT 'TRANSFER'::text,
+            '512000'::text,
+            'Banque - Virement'::text
+        UNION ALL
+         SELECT 'WIRE'::text,
+            '512000'::text,
+            'Banque - Virement'::text
+        UNION ALL
+         SELECT 'CHEQUE'::text,
+            '512110'::text,
+            'Banque - Chèque'::text
+        UNION ALL
+         SELECT 'CHÈQUE'::text,
+            '512110'::text,
+            'Banque - Chèque'::text
+        UNION ALL
+         SELECT 'CHECK'::text,
+            '512110'::text,
+            'Banque - Chèque'::text
+        UNION ALL
+         SELECT 'ESPECES'::text,
+            '530000'::text,
+            'Caisse - Espèces'::text
+        UNION ALL
+         SELECT 'ESPÈCES'::text,
+            '530000'::text,
+            'Caisse - Espèces'::text
+        UNION ALL
+         SELECT 'CASH'::text,
+            '530000'::text,
+            'Caisse - Espèces'::text
+        UNION ALL
+         SELECT 'OTA'::text,
+            '512200'::text,
+            'Banque - Payout OTA'::text
+        UNION ALL
+         SELECT 'PAYPAL'::text,
+            '512300'::text,
+            'Banque - PayPal'::text
+        UNION ALL
+         SELECT 'STRIPE'::text,
+            '512300'::text,
+            'Banque - Stripe'::text
+        UNION ALL
+         SELECT 'PMS'::text,
+            '512300'::text,
+            'Banque - PMS'::text
+        ), inv AS (
+         SELECT i.id AS src_id,
+            i.hotel_id,
+            'VE'::text AS journal_code,
+            'Journal des Ventes'::text AS journal_lib,
+            i.invoice_number AS piece_ref,
+            COALESCE(i.issue_date, i.created_at::date) AS ecr_date,
+            COALESCE(i.issue_date, i.created_at::date) AS piece_date,
+            COALESCE(NULLIF(i.guest_name, ''::text), 'Client divers'::text) AS guest_name,
+            COALESCE(i.total_ht, 0::numeric) AS ht,
+            COALESCE(i.total_tva, 0::numeric) AS tva,
+            COALESCE(i.total_ttc, 0::numeric) AS ttc,
+            (('Facture '::text || i.invoice_number) || ' - '::text) || COALESCE(i.guest_name, 'Client'::text) AS ecr_lib,
+            i.reservation_id,
+            COALESCE(i.created_at, now()) AS valid_date
+           FROM invoices i
+          WHERE COALESCE(i.status, 'draft'::text) <> 'cancelled'::text
+        ), inv_lines AS (
+         SELECT inv.hotel_id,
+            inv.src_id,
+            inv.journal_code,
+            inv.journal_lib,
+            inv.piece_ref,
+            inv.ecr_date,
+            inv.piece_date,
+            inv.valid_date,
+            '411000'::text AS compte_num,
+            'Clients'::text AS compte_lib,
+            NULL::text AS compaux_num,
+            NULL::text AS compaux_lib,
+            inv.ttc AS debit,
+            0::numeric AS credit,
+            inv.ecr_lib,
+            1 AS sub_order
+           FROM inv
+        UNION ALL
+         SELECT inv.hotel_id,
+            inv.src_id,
+            inv.journal_code,
+            inv.journal_lib,
+            inv.piece_ref,
+            inv.ecr_date,
+            inv.piece_date,
+            inv.valid_date,
+            '707000'::text AS compte_num,
+            'Ventes - Hébergement'::text AS compte_lib,
+            NULL::text AS compaux_num,
+            NULL::text AS compaux_lib,
+            0::numeric AS debit,
+            inv.ht AS credit,
+            inv.ecr_lib,
+            2
+           FROM inv
+          WHERE inv.ht > 0::numeric
+        UNION ALL
+         SELECT inv.hotel_id,
+            inv.src_id,
+            inv.journal_code,
+            inv.journal_lib,
+            inv.piece_ref,
+            inv.ecr_date,
+            inv.piece_date,
+            inv.valid_date,
+            '445710'::text AS compte_num,
+            'TVA collectée'::text AS compte_lib,
+            NULL::text AS compaux_num,
+            NULL::text AS compaux_lib,
+            0::numeric AS debit,
+            inv.tva AS credit,
+            inv.ecr_lib,
+            3
+           FROM inv
+          WHERE inv.tva > 0::numeric
+        ), pay AS (
+         SELECT p.id AS src_id,
+            p.hotel_id,
+            'BQ'::text AS journal_code,
+            'Journal de Banque'::text AS journal_lib,
+            COALESCE(p.reference, p.transaction_id, p.id::text) AS piece_ref,
+            COALESCE(p.payment_date::date, p.created_at::date) AS ecr_date,
+            COALESCE(p.payment_date::date, p.created_at::date) AS piece_date,
+            COALESCE(p.amount, 0::numeric) AS ttc,
+            upper(COALESCE(p.payment_method, 'CB'::text)) AS method,
+            (('Encaissement '::text || COALESCE(p.payment_method, 'CB'::text)) || ' - '::text) || COALESCE(p.reference, p.id::text) AS ecr_lib,
+            COALESCE(p.created_at, now()) AS valid_date
+           FROM payments p
+          WHERE COALESCE(p.status, 'completed'::text) <> 'cancelled'::text
+        ), pay_lines AS (
+         SELECT py.hotel_id,
+            py.src_id,
+            py.journal_code,
+            py.journal_lib,
+            py.piece_ref,
+            py.ecr_date,
+            py.piece_date,
+            py.valid_date,
+            COALESCE(m.compte_num, '512000'::text) AS compte_num,
+            COALESCE(m.compte_lib, 'Banque - Autre'::text) AS compte_lib,
+            NULL::text AS compaux_num,
+            NULL::text AS compaux_lib,
+            py.ttc AS debit,
+            0::numeric AS credit,
+            py.ecr_lib,
+            1 AS sub_order
+           FROM pay py
+             LEFT JOIN payment_account_map m ON m.method = py.method
+        UNION ALL
+         SELECT py.hotel_id,
+            py.src_id,
+            py.journal_code,
+            py.journal_lib,
+            py.piece_ref,
+            py.ecr_date,
+            py.piece_date,
+            py.valid_date,
+            '411000'::text AS compte_num,
+            'Clients'::text AS compte_lib,
+            NULL::text AS compaux_num,
+            NULL::text AS compaux_lib,
+            0::numeric AS debit,
+            py.ttc AS credit,
+            py.ecr_lib,
+            2
+           FROM pay py
+        ), all_lines AS (
+         SELECT inv_lines.hotel_id,
+            inv_lines.src_id,
+            inv_lines.journal_code,
+            inv_lines.journal_lib,
+            inv_lines.piece_ref,
+            inv_lines.ecr_date,
+            inv_lines.piece_date,
+            inv_lines.valid_date,
+            inv_lines.compte_num,
+            inv_lines.compte_lib,
+            inv_lines.compaux_num,
+            inv_lines.compaux_lib,
+            inv_lines.debit,
+            inv_lines.credit,
+            inv_lines.ecr_lib,
+            inv_lines.sub_order
+           FROM inv_lines
+        UNION ALL
+         SELECT pay_lines.hotel_id,
+            pay_lines.src_id,
+            pay_lines.journal_code,
+            pay_lines.journal_lib,
+            pay_lines.piece_ref,
+            pay_lines.ecr_date,
+            pay_lines.piece_date,
+            pay_lines.valid_date,
+            pay_lines.compte_num,
+            pay_lines.compte_lib,
+            pay_lines.compaux_num,
+            pay_lines.compaux_lib,
+            pay_lines.debit,
+            pay_lines.credit,
+            pay_lines.ecr_lib,
+            pay_lines.sub_order
+           FROM pay_lines
+        ), numbered AS (
+         SELECT all_lines.hotel_id,
+            all_lines.journal_code,
+            all_lines.journal_lib,
+            dense_rank() OVER (PARTITION BY all_lines.hotel_id, all_lines.journal_code, (date_part('year'::text, all_lines.ecr_date)) ORDER BY all_lines.ecr_date, all_lines.src_id) AS ecr_num,
+            all_lines.ecr_date,
+            all_lines.compte_num,
+            all_lines.compte_lib,
+            all_lines.compaux_num,
+            all_lines.compaux_lib,
+            all_lines.piece_ref,
+            all_lines.piece_date,
+            all_lines.ecr_lib,
+            all_lines.debit,
+            all_lines.credit,
+            all_lines.valid_date,
+            all_lines.src_id,
+            all_lines.sub_order
+           FROM all_lines
+        )
+ SELECT hotel_id,
+    journal_code AS "JournalCode",
+    journal_lib AS "JournalLib",
+    (journal_code || to_char(ecr_date::timestamp with time zone, 'YYYY'::text)) || lpad(ecr_num::text, 6, '0'::text) AS "EcritureNum",
+    to_char(ecr_date::timestamp with time zone, 'YYYYMMDD'::text) AS "EcritureDate",
+    compte_num AS "CompteNum",
+    compte_lib AS "CompteLib",
+    COALESCE(compaux_num, ''::text) AS "CompAuxNum",
+    COALESCE(compaux_lib, ''::text) AS "CompAuxLib",
+    piece_ref AS "PieceRef",
+    to_char(piece_date::timestamp with time zone, 'YYYYMMDD'::text) AS "PieceDate",
+    ecr_lib AS "EcritureLib",
+    to_char(debit, 'FM999999990D00'::text) AS "Debit",
+    to_char(credit, 'FM999999990D00'::text) AS "Credit",
+    ''::text AS "EcritureLet",
+    ''::text AS "DateLet",
+    to_char(valid_date, 'YYYYMMDD'::text) AS "ValidDate",
+    ''::text AS "Montantdevise",
+    ''::text AS "Idevise",
+    src_id,
+    sub_order,
+    ecr_num
+   FROM numbered;
+
+CREATE OR REPLACE VIEW public.v_fin02_payments WITH (security_invoker=on) AS
+ SELECT payment_method,
+    count(*) AS nb_transactions,
+    sum(amount) AS total_amount,
+    round(sum(amount) * 100.0 / NULLIF(sum(sum(amount)) OVER (), 0::numeric), 1) AS share_pct
+   FROM payments
+  WHERE status = 'completed'::text
+  GROUP BY payment_method
+  ORDER BY (sum(amount)) DESC;
+
+CREATE OR REPLACE VIEW public.v_fin09_tva WITH (security_invoker=on) AS
+ SELECT date_trunc('month'::text, prestation_date::timestamp with time zone) AS month,
+    tva_rate,
+    sum(total_amount) AS total_ttc,
+    sum(tva_amount) AS tva_collected,
+    count(*) AS nb_lines
+   FROM prestations
+  WHERE status <> 'cancelled'::text
+  GROUP BY (date_trunc('month'::text, prestation_date::timestamp with time zone)), tva_rate
+  ORDER BY (date_trunc('month'::text, prestation_date::timestamp with time zone)) DESC;
+
+CREATE OR REPLACE VIEW public.v_sta01_dashboard WITH (security_invoker=on) AS
+ SELECT count(*) AS total_reservations,
+    sum(total_amount) AS ca_total,
+    sum(paid_amount) AS ca_encaisse,
+    sum(COALESCE(solde, 0::numeric)) AS ca_impaye,
+    round(avg(total_amount / NULLIF(nights, 0)::numeric), 2) AS adr,
+    sum(nights) AS total_nights,
+    count(
+        CASE
+            WHEN status = 'cancelled'::text THEN 1
+            ELSE NULL::integer
+        END) AS cancellations,
+    count(
+        CASE
+            WHEN status = 'no_show'::text THEN 1
+            ELSE NULL::integer
+        END) AS no_shows
+   FROM reservations;
+
+CREATE OR REPLACE VIEW public.v_sta05_channels WITH (security_invoker=on) AS
+ SELECT COALESCE(source, 'Direct'::text) AS canal,
+    count(*) AS bookings,
+    sum(total_amount) AS revenue,
+    round(sum(total_amount) * 100.0 / NULLIF(sum(sum(total_amount)) OVER (), 0::numeric), 1) AS share_pct
+   FROM reservations
+  GROUP BY (COALESCE(source, 'Direct'::text))
+  ORDER BY (sum(total_amount)) DESC;
+
+CREATE OR REPLACE VIEW public.v_sta06_nationalities WITH (security_invoker=on) AS
+ SELECT COALESCE(g.country, 'FR'::text) AS country,
+    count(DISTINCT r.id) AS reservations,
+    sum(r.nights) AS total_nights,
+    sum(r.total_amount) AS revenue
+   FROM reservations r
+     LEFT JOIN guests g ON r.guest_id = g.id
+  GROUP BY g.country
+  ORDER BY (sum(r.total_amount)) DESC;
+
+CREATE OR REPLACE VIEW public.partner_reliability_view WITH (security_invoker=on) AS
+ SELECT hotel_id,
+    partner_id,
+    count(*)::integer AS runs,
+    round(avg(score), 1) AS avg_score_30d,
+    sum(
+        CASE
+            WHEN decision = 'AUTO_INTEGRATE'::rie_decision THEN 1
+            ELSE 0
+        END)::integer AS auto_count,
+    sum(
+        CASE
+            WHEN decision = 'WARNING'::rie_decision THEN 1
+            ELSE 0
+        END)::integer AS warning_count,
+    sum(
+        CASE
+            WHEN decision = 'MANUAL_REVIEW'::rie_decision THEN 1
+            ELSE 0
+        END)::integer AS manual_count,
+    sum(
+        CASE
+            WHEN decision = 'QUARANTINE'::rie_decision THEN 1
+            ELSE 0
+        END)::integer AS quarantine_count,
+    sum(abs(COALESCE(delta_amount, 0::numeric)))::numeric(14,2) AS cumulative_delta_30d,
+    max(created_at) AS last_run_at
+   FROM reservation_validations v
+  WHERE created_at >= (now() - '30 days'::interval)
+  GROUP BY hotel_id, partner_id;
 
 COMMIT;
