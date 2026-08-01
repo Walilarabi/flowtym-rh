@@ -1070,6 +1070,29 @@ CREATE TABLE IF NOT EXISTS public.staff_members (
 );
 
 -- ----------------------------------------------------------------------------
+-- 5n. Table pricing_rules — cause racine révélée par
+--     20260602190039_r4c_update_rls (`DROP POLICY IF EXISTS
+--     pricing_rules_write ON public.pricing_rules` échoue avec
+--     "relation \"public.pricing_rules\" does not exist" — DROP POLICY exige
+--     que la table cible existe, contrairement à DROP TABLE/DROP POLICY sur
+--     une policy elle-même). Zéro CREATE TABLE trackée (regex stricte sur
+--     les 247 migrations : 0 correspondance). Table de configuration mono-
+--     ligne par hôtel (PK = hotel_id), FK vers hotels et rate_plans (cette
+--     dernière comblée en 5l, donc positionnée avant ici dans le même
+--     tableau statements).
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.pricing_rules (
+  hotel_id uuid PRIMARY KEY REFERENCES public.hotels(id) ON DELETE CASCADE,
+  reference_room_type_code text NOT NULL,
+  reference_plan_id uuid REFERENCES public.rate_plans(id) ON DELETE SET NULL,
+  room_rules jsonb NOT NULL DEFAULT '[]'::jsonb,
+  plan_rules jsonb NOT NULL DEFAULT '[]'::jsonb,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_by uuid REFERENCES public.users(id) ON DELETE SET NULL,
+  version integer NOT NULL DEFAULT 1
+);
+
+-- ----------------------------------------------------------------------------
 -- 6. Les 13 vues attendues par 0013_security_views_refactor
 --    (créées directement avec security_invoker=on, état final réel de
 --    production — rend le ALTER VIEW de 0013 idempotent)
