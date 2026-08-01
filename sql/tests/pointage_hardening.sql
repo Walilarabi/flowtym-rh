@@ -32,9 +32,9 @@ VALUES
   ('22222222-2222-2222-2222-222222222222', 'Hotel Nice',    'Europe/Paris',   43.7102, 7.2620, 150, true),
   ('33333333-3333-3333-3333-333333333333', 'Hotel Cayenne', 'America/Cayenne',  4.9224, -52.3135, 150, true);
 
-INSERT INTO public.users(id, auth_id, email, full_name) VALUES
-  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','00000000-0000-0000-0000-00000000aaaa','admin.paris@x.fr','Admin Paris'),
-  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','00000000-0000-0000-0000-00000000bbbb','admin.nice@x.fr','Admin Nice');
+INSERT INTO public.users(id, auth_id, email, full_name, first_name, last_name) VALUES
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','00000000-0000-0000-0000-00000000aaaa','admin.paris@x.fr','Admin Paris','Admin','Paris'),
+  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','00000000-0000-0000-0000-00000000bbbb','admin.nice@x.fr','Admin Nice','Admin','Nice');
 INSERT INTO public.user_hotels(user_id, hotel_id) VALUES
   ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','11111111-1111-1111-1111-111111111111'),
   ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','22222222-2222-2222-2222-222222222222');

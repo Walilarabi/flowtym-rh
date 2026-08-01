@@ -293,8 +293,8 @@ BEGIN
   v_admin := pg_temp.zz7_mk_admin(); v_hotel := pg_temp.zz7_mk_hotel();
   DELETE FROM public.user_hotels WHERE hotel_id = v_hotel;
   INSERT INTO auth.users(id) VALUES (gen_random_uuid()) RETURNING id INTO v_auth;
-  INSERT INTO public.users (auth_id, hotel_id, email, full_name, role, is_active)
-  VALUES (v_auth, v_hotel, 'zz7-noaccess-'||v_auth::text||'@example.invalid', 'ZZ7 NoAccess', 'reception', true);
+  INSERT INTO public.users (auth_id, hotel_id, email, full_name, first_name, last_name, role, is_active)
+  VALUES (v_auth, v_hotel, 'zz7-noaccess-'||v_auth::text||'@example.invalid', 'ZZ7 NoAccess', 'ZZ7', 'NoAccess', 'reception', true);
   PERFORM pg_temp.zz7_as(v_admin);
   v_kpis := public.admin_platform_overview_kpis('this_month', NULL, NULL);
   IF (v_kpis->'users_detail'->>'without_access')::int >= 1 AND (v_kpis->'users_detail'->>'hotels_without_admin')::int >= 1 THEN

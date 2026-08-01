@@ -39,8 +39,8 @@ CREATE OR REPLACE FUNCTION pg_temp.zz5_mk_user(p_hotel uuid) RETURNS uuid AS $$
 DECLARE v_auth uuid; v_id uuid;
 BEGIN
   INSERT INTO auth.users(id) VALUES (gen_random_uuid()) RETURNING id INTO v_auth;
-  INSERT INTO public.users (auth_id, hotel_id, email, full_name, role, is_active)
-  VALUES (v_auth, p_hotel, 'zz5user-'||v_auth::text||'@example.invalid', 'ZZ5 User', 'reception', true)
+  INSERT INTO public.users (auth_id, hotel_id, email, full_name, first_name, last_name, role, is_active)
+  VALUES (v_auth, p_hotel, 'zz5user-'||v_auth::text||'@example.invalid', 'ZZ5 User', 'ZZ5', 'User', 'reception', true)
   RETURNING id INTO v_id;
   INSERT INTO public.user_hotels (user_id, hotel_id, role, is_default) VALUES (v_id, p_hotel, 'reception', true);
   RETURN v_id;
