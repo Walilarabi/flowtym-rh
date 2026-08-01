@@ -1245,6 +1245,25 @@ CREATE TABLE IF NOT EXISTS public.user_invitations (
 );
 
 -- ----------------------------------------------------------------------------
+-- 5t. users.full_name / users.is_active — cause racine révélée par
+--     20260607111411_role_permissions_system (fonction admin_list_user_
+--     access() référence u.full_name : "column u.full_name does not
+--     exist"). 00001_initial_schema définit users avec first_name/
+--     last_name/active — jamais renommées/complétées par une migration
+--     trackée (regex stricte sur ALTER TABLE users ... full_name|is_active
+--     : 0 correspondance). En production, users a full_name/is_active
+--     (et n'a plus first_name/last_name/active — renommage hors bande).
+--     Aucune migration trackée n'insère dans users (vérifié : 0 INSERT
+--     INTO users dans les 247 migrations — la table n'est peuplée que par
+--     l'application runtime), donc ajouter full_name en NOT NULL sans
+--     défaut (comme en production) est sans risque pour le reste du
+--     rejeu.
+-- ----------------------------------------------------------------------------
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS full_name text NOT NULL DEFAULT '';
+ALTER TABLE public.users ALTER COLUMN full_name DROP DEFAULT;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true;
+
+-- ----------------------------------------------------------------------------
 -- 6. Les 13 vues attendues par 0013_security_views_refactor
 --    (créées directement avec security_invoker=on, état final réel de
 --    production — rend le ALTER VIEW de 0013 idempotent)
