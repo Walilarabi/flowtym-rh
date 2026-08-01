@@ -546,6 +546,15 @@ ALTER TABLE public.guests
 -- ----------------------------------------------------------------------------
 ALTER TABLE public.rooms ADD COLUMN IF NOT EXISTS active boolean DEFAULT true;
 
+-- 5c(bis). rooms.room_type_code / rooms.type — cause racine révélée par
+-- 20260529091802_room_types_table_and_seed, dont le seed
+-- `INSERT INTO room_types ... SELECT r.hotel_id, r.room_type_code, ...
+-- FROM rooms r` suppose ces colonnes déjà présentes. Zéro ADD COLUMN
+-- trackée pour l'une ou l'autre sur les 247 migrations.
+ALTER TABLE public.rooms
+  ADD COLUMN IF NOT EXISTS room_type_code text,
+  ADD COLUMN IF NOT EXISTS type text;
+
 -- ----------------------------------------------------------------------------
 -- 5d. Table payments (minimale) — même cause racine que guests : aucune
 --     migration trackée ne crée jamais public.payments.
