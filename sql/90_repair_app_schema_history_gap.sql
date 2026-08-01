@@ -347,6 +347,21 @@ begin
 end;
 $function$;
 
+-- 3b. public.update_updated_at_column — même cause racine, révélée
+--     seulement par settings_config_blobs (migration ultérieure), un
+--     `CREATE TRIGGER ... EXECUTE FUNCTION update_updated_at_column()`
+--     assumant son existence préalable, sans jamais la créer.
+CREATE OR REPLACE FUNCTION public.update_updated_at_column()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path TO 'pg_catalog', 'public'
+AS $function$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$function$;
+
 -- ----------------------------------------------------------------------------
 -- 4. public.provision_user_for_hotel
 --    Note : les GRANT/REVOKE d'exécution définitifs sur cette fonction sont
