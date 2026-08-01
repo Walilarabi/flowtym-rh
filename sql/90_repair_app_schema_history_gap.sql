@@ -455,6 +455,16 @@ CREATE TABLE IF NOT EXISTS public.guests (
   total_spent numeric DEFAULT 0
 );
 
+-- 5b(bis). guests.updated_at — cause racine 20260522130241_crm_c1_sync_orphans
+-- (même backfill que no_show_at ci-dessus, UPDATE guests SET ... updated_at
+-- = now() en DML directe). Un ADD COLUMN updated_at existe bien ailleurs
+-- dans l'historique (20260531193337) mais sur `invoices`, pas `guests` —
+-- faux positif du premier balayage (texte "guests" présent dans une AUTRE
+-- clause du même statement, une FK non liée). Zéro création réelle pour
+-- guests.updated_at.
+ALTER TABLE public.guests
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
+
 -- ----------------------------------------------------------------------------
 -- 5c. rooms.active — cause racine légèrement différente : une migration
 --     trackée ajoute bien cette colonne (ALTER TABLE rooms ADD COLUMN
