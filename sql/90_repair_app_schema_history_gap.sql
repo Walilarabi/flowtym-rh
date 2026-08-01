@@ -387,7 +387,50 @@ end;
 $function$;
 
 -- ----------------------------------------------------------------------------
--- 5. Les 13 vues attendues par 0013_security_views_refactor
+-- 5. Colonnes public.reservations absentes de 00001, requises pour que les
+--    13 vues de la section 6 puissent compiler.
+--
+--    Preuve de cause racine : balayage complet des 247 migrations trackées,
+--    zéro occurrence de `ALTER TABLE reservations ADD COLUMN` — aucune
+--    migration, à aucun moment de l'historique, ne fait jamais évoluer cette
+--    table depuis sa définition 00001 (16 colonnes) vers sa forme réelle en
+--    production (49 colonnes). Tout l'écart a été appliqué hors bande.
+--    Portée limitée ici aux colonnes effectivement référencées par les 13
+--    vues (pas les 33 colonnes manquantes au total — celles-ci ne bloquent
+--    aucun rejeu tant qu'aucune migration trackée ne les utilise).
+-- ----------------------------------------------------------------------------
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='reservations' AND column_name='check_in_date')
+     AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='reservations' AND column_name='check_in') THEN
+    ALTER TABLE public.reservations RENAME COLUMN check_in_date TO check_in;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='reservations' AND column_name='check_out_date')
+     AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='reservations' AND column_name='check_out') THEN
+    ALTER TABLE public.reservations RENAME COLUMN check_out_date TO check_out;
+  END IF;
+
+  IF (SELECT data_type FROM information_schema.columns WHERE table_schema='public' AND table_name='reservations' AND column_name='status') <> 'text' THEN
+    ALTER TABLE public.reservations ALTER COLUMN status TYPE text USING status::text;
+    ALTER TABLE public.reservations ALTER COLUMN status SET DEFAULT 'confirmed'::text;
+  END IF;
+END$$;
+
+ALTER TABLE public.reservations
+  ADD COLUMN IF NOT EXISTS reference text,
+  ADD COLUMN IF NOT EXISTS room_number text,
+  ADD COLUMN IF NOT EXISTS guest_id uuid,
+  ADD COLUMN IF NOT EXISTS guest_email text,
+  ADD COLUMN IF NOT EXISTS nights integer,
+  ADD COLUMN IF NOT EXISTS checkin_status text DEFAULT 'pending',
+  ADD COLUMN IF NOT EXISTS total_amount numeric(12,2) DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS paid_amount numeric(12,2) DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS solde numeric(12,2),
+  ADD COLUMN IF NOT EXISTS source text DEFAULT 'Direct',
+  ADD COLUMN IF NOT EXISTS payment_mode text DEFAULT 'Carte bancaire';
+
+-- ----------------------------------------------------------------------------
+-- 6. Les 13 vues attendues par 0013_security_views_refactor
 --    (créées directement avec security_invoker=on, état final réel de
 --    production — rend le ALTER VIEW de 0013 idempotent)
 -- ----------------------------------------------------------------------------
