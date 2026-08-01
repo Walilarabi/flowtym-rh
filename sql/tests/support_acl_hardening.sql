@@ -41,9 +41,9 @@ INSERT INTO auth.users (id) VALUES
 -- users.id volontairement DIFFÉRENT de auth_id (comme en production réelle) —
 -- c'est précisément la distinction que la première version de ce test ne
 -- vérifiait pas et qui masquait le bug corrigé dans sql/81.
-INSERT INTO public.users (id, auth_id, hotel_id, email, full_name, role, is_active) VALUES
-  ('00000000-1111-aaaa-bbbb-000000000002','00000000-aaaa-bbbb-cccc-000000000002','b833efe8-c71e-4822-87a1-b9b6bf06f1e8','zz-acl-test-a@example.invalid','ACL Test Hotel A','reception', true),
-  ('00000000-1111-aaaa-bbbb-000000000003','00000000-aaaa-bbbb-cccc-000000000003','f8de287f-e5db-497f-be0b-c0fcdb035822','zz-acl-test-b@example.invalid','ACL Test Hotel B','reception', true);
+INSERT INTO public.users (id, auth_id, hotel_id, email, full_name, first_name, last_name, role, is_active) VALUES
+  ('00000000-1111-aaaa-bbbb-000000000002','00000000-aaaa-bbbb-cccc-000000000002','b833efe8-c71e-4822-87a1-b9b6bf06f1e8','zz-acl-test-a@example.invalid','ACL Test Hotel A','ACL','Test Hotel A','reception', true),
+  ('00000000-1111-aaaa-bbbb-000000000003','00000000-aaaa-bbbb-cccc-000000000003','f8de287f-e5db-497f-be0b-c0fcdb035822','zz-acl-test-b@example.invalid','ACL Test Hotel B','ACL','Test Hotel B','reception', true);
 
 INSERT INTO public.user_hotels (hotel_id, user_id) VALUES
   ('b833efe8-c71e-4822-87a1-b9b6bf06f1e8','00000000-1111-aaaa-bbbb-000000000002'),
