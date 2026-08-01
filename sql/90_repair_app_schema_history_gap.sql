@@ -1355,6 +1355,15 @@ ALTER TABLE public.reservations ADD COLUMN IF NOT EXISTS room_type text;
 ALTER TABLE public.hotels ADD COLUMN IF NOT EXISTS city text;
 
 -- ----------------------------------------------------------------------------
+-- 5aa. hotels.timezone — cause racine révélée par
+--     20260724074710_staff_planning_rebuild (fonction _pcr_today() :
+--     "column \"timezone\" does not exist"). Même cause racine que 5q/5z
+--     (colonne hotels ajoutée hors bande, absente de 00001). Zéro ALTER
+--     TABLE hotels ... timezone trackée (regex stricte : 0 correspondance).
+-- ----------------------------------------------------------------------------
+ALTER TABLE public.hotels ADD COLUMN IF NOT EXISTS "timezone" text DEFAULT 'Europe/Paris';
+
+-- ----------------------------------------------------------------------------
 -- 6. Les 13 vues attendues par 0013_security_views_refactor
 --    (créées directement avec security_invoker=on, état final réel de
 --    production — rend le ALTER VIEW de 0013 idempotent)
