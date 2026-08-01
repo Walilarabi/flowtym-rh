@@ -449,6 +449,16 @@ CREATE TABLE IF NOT EXISTS public.guests (
 );
 
 -- ----------------------------------------------------------------------------
+-- 5c. rooms.active — cause racine légèrement différente : une migration
+--     trackée ajoute bien cette colonne (ALTER TABLE rooms ADD COLUMN
+--     active...), mais elle est positionnée bien plus tard dans l'historique
+--     que cette réparation (qui doit s'exécuter avant 0011/0013). Ajout ici
+--     en IF NOT EXISTS : sans effet sur production, et sans conflit avec la
+--     migration tardive qui refera le même ADD COLUMN IF NOT EXISTS plus loin.
+-- ----------------------------------------------------------------------------
+ALTER TABLE public.rooms ADD COLUMN IF NOT EXISTS active boolean DEFAULT true;
+
+-- ----------------------------------------------------------------------------
 -- 6. Les 13 vues attendues par 0013_security_views_refactor
 --    (créées directement avec security_invoker=on, état final réel de
 --    production — rend le ALTER VIEW de 0013 idempotent)
