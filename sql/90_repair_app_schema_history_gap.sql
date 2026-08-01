@@ -544,6 +544,108 @@ CREATE TABLE IF NOT EXISTS public.invoices (
 );
 
 -- ----------------------------------------------------------------------------
+-- 5h. Tables sas_* (Service Après-Séjour / gestion des litiges partenaires) —
+--     même cause racine, révélée seulement à la migration
+--     20260514130954_fix_sas_rls_policies, qui recrée des policies RLS sur
+--     ces 5 tables en tenant pour acquis qu'elles existent déjà. Preuve :
+--     balayage complet des 247 migrations trackées, zéro occurrence de
+--     `CREATE TABLE ... sas_*` — seule cette migration de policies les
+--     référence, jamais une création. Colonnes/types/defaults alignés sur
+--     l'état réel de production (introspection information_schema.columns) ;
+--     aucune contrainte (PK/FK/UNIQUE) déclarée en production sur ces 5
+--     tables, donc aucune ajoutée ici pour rester fidèle à la réalité.
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.sas_partners (
+  id uuid DEFAULT gen_random_uuid() NOT NULL,
+  hotel_id uuid NOT NULL,
+  code text NOT NULL,
+  name text NOT NULL,
+  status text DEFAULT 'active' NOT NULL,
+  timezone text DEFAULT 'Europe/Paris' NOT NULL,
+  currency character(3) DEFAULT 'EUR' NOT NULL,
+  country character(2),
+  api_provider text,
+  metadata jsonb DEFAULT '{}'::jsonb,
+  account_manager_name text,
+  account_manager_email text,
+  support_email text,
+  dispute_email text,
+  phone text,
+  contract_reference text,
+  commission_rate numeric(5,2),
+  auto_send_disputes boolean DEFAULT false NOT NULL,
+  dispute_sla_days integer DEFAULT 7 NOT NULL,
+  followup_days integer[] DEFAULT '{2,5,10}'::integer[] NOT NULL,
+  created_at timestamptz DEFAULT now() NOT NULL,
+  updated_at timestamptz DEFAULT now() NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS public.sas_disputes (
+  id uuid DEFAULT gen_random_uuid() NOT NULL,
+  hotel_id uuid NOT NULL,
+  reference text NOT NULL,
+  incoming_id uuid,
+  validation_id uuid,
+  partner_id uuid,
+  expected_amount numeric(12,2),
+  received_amount numeric(12,2),
+  claimed_amount numeric(12,2),
+  recovered_amount numeric(12,2) DEFAULT 0,
+  subject text,
+  explanation text,
+  email_subject text,
+  email_body text,
+  recipients jsonb DEFAULT '[]'::jsonb,
+  status text DEFAULT 'DRAFT' NOT NULL,
+  sent_at timestamptz,
+  acknowledged_at timestamptz,
+  resolved_at timestamptz,
+  next_followup_at timestamptz,
+  followup_count integer DEFAULT 0 NOT NULL,
+  created_by uuid,
+  created_at timestamptz DEFAULT now() NOT NULL,
+  updated_at timestamptz DEFAULT now() NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS public.sas_dispute_messages (
+  id uuid DEFAULT gen_random_uuid() NOT NULL,
+  hotel_id uuid NOT NULL,
+  dispute_id uuid NOT NULL,
+  direction text DEFAULT 'INTERNAL' NOT NULL,
+  content text NOT NULL,
+  attachments jsonb DEFAULT '[]'::jsonb,
+  sent_at timestamptz,
+  created_by uuid,
+  created_at timestamptz DEFAULT now() NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS public.sas_dispute_status_history (
+  id uuid DEFAULT gen_random_uuid() NOT NULL,
+  hotel_id uuid NOT NULL,
+  dispute_id uuid NOT NULL,
+  old_status text,
+  new_status text NOT NULL,
+  reason text,
+  changed_by uuid,
+  changed_at timestamptz DEFAULT now() NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS public.sas_email_logs (
+  id uuid DEFAULT gen_random_uuid() NOT NULL,
+  hotel_id uuid NOT NULL,
+  dispute_id uuid,
+  followup_id uuid,
+  resend_id text,
+  from_email text NOT NULL,
+  to_emails jsonb DEFAULT '[]'::jsonb NOT NULL,
+  subject text NOT NULL,
+  status text DEFAULT 'queued' NOT NULL,
+  sent_at timestamptz,
+  error_msg text,
+  created_at timestamptz DEFAULT now() NOT NULL
+);
+
+-- ----------------------------------------------------------------------------
 -- 6. Les 13 vues attendues par 0013_security_views_refactor
 --    (créées directement avec security_invoker=on, état final réel de
 --    production — rend le ALTER VIEW de 0013 idempotent)
