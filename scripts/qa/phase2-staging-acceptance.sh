@@ -33,7 +33,7 @@ set -uo pipefail
 : "${GITHUB_ENVIRONMENT_NAME:?GITHUB_ENVIRONMENT_NAME manquant}"
 
 # Project ref UNIQUE autorisé pour cette recette. Toute autre valeur est un refus immédiat.
-readonly ALLOWED_STAGING_REF="kjsriewplpqztmypoars"
+readonly ALLOWED_STAGING_REF="ezjnkjvdojjvdonftzmc"
 # Liste explicite des refs interdits — le vrai projet de production en tête. Étendre cette
 # liste si d'autres environnements sensibles existent un jour.
 readonly FORBIDDEN_REFS=("hzrzkvdebaadditvbqis")
@@ -578,11 +578,33 @@ else
   log_fail "idempotence essais — skipped_already_sent=${SKIPPED2} (attendu >=1)" "$ST2"
 fi
 
-R=$(rest_call GET "/rest/v1/platform_notifications?category=eq.trial_ending_soon&select=id" "$JWT_SUPERADMIN")
+# Déduplication : prouvée par les valeurs de retour du RPC ci-dessus (SENT1=1 au 1er run,
+# SKIPPED2>=1 au 2e run immédiat) — jamais par une lecture directe de platform_notifications
+# avec un JWT utilisateur. Cette table est volontairement accessible uniquement à service_role
+# (RLS activée, zéro policy, tous les grants révoqués pour authenticated — y compris pour un
+# Platform Admin, défense en profondeur, sql/82). Un super_admin reste, au niveau rôle
+# PostgreSQL, `authenticated` : une lecture directe doit donc être refusée, jamais autorisée.
+if [[ "$ST1" == "200" && "$SENT1" -ge 1 && "$ST2" == "200" && "${SKIPPED2:-0}" -ge 1 ]]; then
+  log_pass "Déduplication confirmée via les valeurs de retour du RPC (sent_count=${SENT1}, skipped_already_sent=${SKIPPED2}) — jamais par lecture directe avec un JWT utilisateur" ""
+else
+  log_fail "Déduplication non confirmée par les valeurs de retour du RPC (sent_count=${SENT1}, skipped_already_sent=${SKIPPED2})" ""
+fi
+
+# Récupération de l'ID de la notification pour la section NOTIFICATIONS (Edge Function)
+# ci-dessous : service_role strictement limité à ce rôle de setup/assertion QA interne — jamais
+# utilisé pour démontrer qu'un utilisateur (super_admin ou autre) est autorisé à lire cette table.
+R=$(service_call GET "/rest/v1/platform_notifications?category=eq.trial_ending_soon&select=id")
 N=$(echo "$R"|tail -n +2|jq 'length' 2>/dev/null||echo -1)
 NOTIF_ID=$(echo "$R"|tail -n +2|jq -r '.[0].id // empty')
 [[ -n "$NOTIF_ID" ]] && CREATED_ROWS+=("platform_notifications|${NOTIF_ID}")
-[[ "$N" == "1" ]] && log_pass "1 seule notification trial_ending_soon en base (déduplication OK, pas de doublon)" "" || log_fail "${N} notification(s) trial_ending_soon en base (attendu 1)" ""
+[[ "$N" == "1" ]] && log_pass "1 seule notification trial_ending_soon en base (vérifié via service_role, setup QA uniquement)" "" || log_fail "${N} notification(s) trial_ending_soon en base (attendu 1)" ""
+
+# Garde-fou : un super_admin (rôle PostgreSQL authenticated) ne doit JAMAIS pouvoir lire
+# platform_notifications directement — seul service_role y a accès (sql/82, défense en
+# profondeur). Un 200 ici serait une régression de sécurité réelle.
+R=$(rest_call GET "/rest/v1/platform_notifications?select=id" "$JWT_SUPERADMIN")
+ST=$(echo "$R"|head -n1)
+[[ "$ST" == "401" || "$ST" == "403" ]] && log_pass "super_admin : lecture directe de platform_notifications refusée comme attendu (service_role uniquement)" "$ST" || log_fail "super_admin a pu lire platform_notifications directement — régression de sécurité" "$ST"
 
 # ============================================================================
 # SECTION STATISTIQUES + Divergence des droits

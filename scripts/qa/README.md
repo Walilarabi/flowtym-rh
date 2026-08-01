@@ -9,7 +9,7 @@ Supabase dédiée à la Phase 2, puis nettoie systématiquement ce qu'il a cré�
 - Aucun code métier dans cette PR : uniquement `.github/workflows/phase2-staging-acceptance.yml`,
   `scripts/qa/phase2-staging-acceptance.sh`, les fixtures de référence
   `scripts/qa/fixtures/production_*.json`, et ce document.
-- La cible est **exclusivement** la branche de staging (project ref `kjsriewplpqztmypoars`). Le
+- La cible est **exclusivement** la branche de staging (project ref `ezjnkjvdojjvdonftzmc`). Le
   script refuse de s'exécuter si l'URL contient le project ref de production ou tout autre ref
   de la liste interdite, si `CONFIRM_STAGING` ≠ `YES`, ou si l'environnement GitHub n'est pas
   nommé `phase2-staging`.
@@ -22,7 +22,7 @@ référence explicitement), ajoute exactement ces quatre secrets :
 
 | Nom exact | Contenu |
 |---|---|
-| `PHASE2_STAGING_URL` | URL de l'API du projet de staging (`https://kjsriewplpqztmypoars.supabase.co`) |
+| `PHASE2_STAGING_URL` | URL de l'API du projet de staging (`https://ezjnkjvdojjvdonftzmc.supabase.co`) |
 | `PHASE2_STAGING_ANON_KEY` | Clé anon/publishable du projet de staging |
 | `PHASE2_STAGING_SERVICE_ROLE_KEY` | Clé service_role du projet de staging (setup/cleanup uniquement) |
 | `PHASE2_NOTIFICATION_INTERNAL_KEY` | Valeur exacte du secret `PLATFORM_NOTIFICATION_INTERNAL_KEY` déjà configuré sur l'Edge Function `platform-send-notification` du projet de staging |
@@ -65,16 +65,32 @@ Deux catégories de tables :
   encore ouvertes (sql/80-89), pas encore en production. Contrôle d'existence + RLS activée
   uniquement, jamais comparées à un snapshot de production puisqu'elle ne les a pas encore.
 
-**État connu au moment de la création de cette PR :** la comparaison structurelle **échouera**
-sur le staging actuel. 34 des 42 tables de référence divergent réellement de la production
-(colonnes manquantes, contraintes/index/triggers absents — dont le trigger de chaînage de hash
-`trg_audit_chain_link` sur `audit_logs`). Cause : ce staging a été reconstruit manuellement après
-l'échec du rejeu automatique des migrations par Supabase (`MIGRATIONS_FAILED`, lacune réelle et
-préexistante dans l'historique de migrations tracké de la production), en recréant les tables à
-la main plutôt qu'en rejouant l'historique réel. **C'est un blocage de déploiement documenté, pas
-un bug de cette PR QA** : la comparaison fonctionne comme prévu en détectant cette dérive. La
-correction (reconstruction fidèle du staging, par ex. via `pg_dump --schema-only` de la
-production plutôt qu'un rejeu Supabase) est un travail séparé, hors périmètre de cette PR.
+**État connu (rejeu natif Supabase pur, vérifié à deux reprises, zéro intervention manuelle) :**
+le rejeu des 262 migrations réelles de production sur une branche vierge est déterministe et
+reproductible (deux rejeux indépendants strictement identiques). La comparaison structurelle,
+elle, **échouera néanmoins** sur 16 des 42 tables de référence — et c'est le comportement attendu
+du contrôle : il détecte une dérive réelle et préexistante de la production elle-même, jamais un
+défaut du rejeu. Vérifié en lecture seule directement sur la production (`hzrzkvdebaadditvbqis`),
+exemples confirmés :
+- `audit_logs` : RLS activée en production avec 4 policies (`audit_hotel_read`,
+  `audit_logs_admin_read`, `audit_logs_modify`, `audit_logs_select`) — absentes de tout fichier
+  `sql/*.sql` tracké, donc absentes après un rejeu pur.
+- `users.hotel_id` / `users.auth_id` : `NOT NULL` en production réelle, `NULL`-able après rejeu
+  pur — un `ALTER COLUMN ... SET NOT NULL` a été appliqué directement en production sans jamais
+  passer par une migration trackée.
+- Plusieurs tables (`hotels`, `rooms`, `invoices`, `payments`, `rms_decisions`, `rms_settings`,
+  `lighthouse_days`, `employees`, `help_articles`, `staff_departments`, `user_invitations`)
+  portent en production des colonnes/contraintes/index/triggers absents de l'historique tracké.
+
+**Cause racine confirmée : dérive non trackée de la production elle-même** (modifications
+appliquées directement — Dashboard/SQL manuel — jamais capturées par une migration versionnée),
+**pas** une reconstruction manuelle défaillante du staging (l'ancienne branche de staging
+reconstruite à la main, et le diagnostic qui l'accompagnait, ont été remplacés par ce rejeu natif
+pur — voir le rapport de qualification SQL du 1er août 2026). La comparaison structurelle
+continue donc, à raison, de signaler ces 16 tables comme divergentes. **Ce n'est pas un bug de
+cette PR QA ni du rejeu** : combler cette dérive documentée exigerait de nouvelles migrations de
+rattrapage, un travail de réparation des migrations explicitement fermé et hors périmètre de
+cette PR.
 
 ## 5. Nettoyage de secours
 
