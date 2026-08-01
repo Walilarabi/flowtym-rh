@@ -1141,6 +1141,43 @@ CREATE TABLE IF NOT EXISTS public.rate_restrictions (
 );
 
 -- ----------------------------------------------------------------------------
+-- 5p. Tables worker_runs / competitor_sync_failures — cause racine révélée
+--     par 20260602190039_r4c_update_rls (`DROP POLICY IF EXISTS
+--     worker_runs_select ON public.worker_runs` puis `sync_failures_select
+--     ON public.competitor_sync_failures` échouent avec "does not exist").
+--     Zéro CREATE TABLE trackée pour l'une comme pour l'autre (regex
+--     stricte : 0 correspondance chacune). Tables de supervision technique
+--     (runs du worker RMS/lighthouse, échecs de synchronisation OTA).
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.worker_runs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  worker_name text NOT NULL,
+  trigger_source text NOT NULL DEFAULT 'cron',
+  started_at timestamptz NOT NULL DEFAULT now(),
+  finished_at timestamptz,
+  status text NOT NULL DEFAULT 'running' CHECK (status = ANY (ARRAY['running','succeeded','failed','partial'])),
+  batch_index integer NOT NULL DEFAULT 0,
+  batch_count integer NOT NULL DEFAULT 1,
+  hotels_processed integer NOT NULL DEFAULT 0,
+  hotels_succeeded integer NOT NULL DEFAULT 0,
+  hotels_failed integer NOT NULL DEFAULT 0,
+  rows_ingested integer NOT NULL DEFAULT 0,
+  api_failures integer NOT NULL DEFAULT 0,
+  duration_seconds numeric,
+  summary text
+);
+
+CREATE TABLE IF NOT EXISTS public.competitor_sync_failures (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  hotel_id uuid NOT NULL REFERENCES public.hotels(id) ON DELETE CASCADE,
+  ota text,
+  status_code integer,
+  error_message text,
+  request_url text,
+  occurred_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- ----------------------------------------------------------------------------
 -- 6. Les 13 vues attendues par 0013_security_views_refactor
 --    (créées directement avec security_invoker=on, état final réel de
 --    production — rend le ALTER VIEW de 0013 idempotent)
