@@ -1279,6 +1279,38 @@ CREATE TABLE IF NOT EXISTS public.user_active_hotel (
 );
 
 -- ----------------------------------------------------------------------------
+-- 5v. Table competitor_rates — cause racine révélée par
+--     20260617141820_security_sprint1_v1_views_invoker (la vue
+--     public.competitor_rates_latest référence FROM public.competitor_
+--     rates, table inexistante sur rejeu vierge). Zéro CREATE TABLE
+--     trackée (regex stricte : 0 correspondance). Tarifs concurrents
+--     collectés via Lighthouse (API sync ou import Excel).
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.competitor_rates (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  hotel_id uuid NOT NULL REFERENCES public.hotels(id) ON DELETE CASCADE,
+  competitor_id bigint NOT NULL,
+  competitor_name text NOT NULL,
+  ota text NOT NULL,
+  stay_date date NOT NULL,
+  los integer NOT NULL DEFAULT 1,
+  price numeric,
+  currency text NOT NULL DEFAULT 'EUR',
+  available boolean NOT NULL DEFAULT true,
+  meal_type text,
+  room_type_label text,
+  is_refundable boolean,
+  "position" integer,
+  shopped_at timestamptz NOT NULL,
+  fetched_at timestamptz NOT NULL DEFAULT now(),
+  raw_payload jsonb,
+  import_id uuid REFERENCES public.lighthouse_imports(id) ON DELETE SET NULL,
+  source text NOT NULL DEFAULT 'api_sync' CHECK (source = ANY (ARRAY['api_sync','excel_import'])),
+  status_text text,
+  UNIQUE (hotel_id, competitor_id, ota, stay_date, los, shopped_at)
+);
+
+-- ----------------------------------------------------------------------------
 -- 6. Les 13 vues attendues par 0013_security_views_refactor
 --    (créées directement avec security_invoker=on, état final réel de
 --    production — rend le ALTER VIEW de 0013 idempotent)
