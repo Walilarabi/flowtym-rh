@@ -832,6 +832,192 @@ CREATE TRIGGER trg_audit_logs_no_delete
   FOR EACH ROW EXECUTE FUNCTION app.audit_logs_immutable();
 
 -- ----------------------------------------------------------------------------
+-- 5l. 11 tables référencées uniquement par des CREATE POLICY dans
+--     20260528161639_security_phase1 (RMS pricing/events, rate_plans,
+--     guest_history, exchange_rates, PDP e-facturation) — même cause
+--     racine : zéro CREATE TABLE trackée sur les 247 migrations pour
+--     chacune (motif strict `CREATE TABLE (IF NOT EXISTS )?nom\(` vérifié
+--     individuellement). Schéma exact aligné sur production
+--     (information_schema.columns + pg_constraint).
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.rms_competitors (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name text NOT NULL,
+  stars integer CHECK (stars BETWEEN 1 AND 5),
+  segment text NOT NULL CHECK (segment IN ('budget','midscale','upscale','luxury')),
+  distance_km numeric(5,2),
+  address text,
+  city text NOT NULL,
+  country_code text NOT NULL DEFAULT 'FR',
+  capacity integer,
+  base_price numeric(10,2),
+  quality_score numeric(3,2) CHECK (quality_score BETWEEN 0 AND 10),
+  review_count integer DEFAULT 0,
+  booking_id text,
+  is_active boolean NOT NULL DEFAULT true,
+  is_primary_compset boolean NOT NULL DEFAULT false,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.rms_competitor_pricing (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  competitor_id uuid NOT NULL REFERENCES public.rms_competitors(id) ON DELETE CASCADE,
+  date date NOT NULL,
+  price numeric(10,2) NOT NULL,
+  availability text CHECK (availability IN ('high','medium','low','sold-out')),
+  variation_vs_yesterday numeric(5,2),
+  variation_vs_3days numeric(5,2),
+  variation_vs_7days numeric(5,2),
+  scraped_at timestamptz NOT NULL DEFAULT now(),
+  source text NOT NULL DEFAULT 'booking.com',
+  is_reliable boolean NOT NULL DEFAULT true,
+  UNIQUE (competitor_id, date)
+);
+
+CREATE TABLE IF NOT EXISTS public.rms_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name text NOT NULL,
+  start_date date NOT NULL,
+  end_date date NOT NULL,
+  venue text,
+  category text NOT NULL CHECK (category IN ('salon','sport','national','cultural')),
+  impact text NOT NULL CHECK (impact IN ('low','medium','high')),
+  impact_score integer NOT NULL CHECK (impact_score BETWEEN 0 AND 100),
+  city text NOT NULL DEFAULT 'Paris',
+  country_code text NOT NULL DEFAULT 'FR',
+  source text,
+  external_id text,
+  is_active boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT valid_date_range CHECK (end_date >= start_date)
+);
+
+CREATE TABLE IF NOT EXISTS public.rms_pricing_recommendations (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  date date NOT NULL,
+  room_type_id uuid,
+  rate_plan_id uuid,
+  current_price numeric(10,2) NOT NULL,
+  recommended_price numeric(10,2) NOT NULL,
+  delta_amount numeric(10,2) NOT NULL,
+  delta_percent numeric(5,2) NOT NULL,
+  confidence_score integer NOT NULL CHECK (confidence_score BETWEEN 0 AND 100),
+  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','applied','rejected','expired')),
+  triggered_rules text[],
+  warnings text[],
+  opportunities text[],
+  applied_at timestamptz,
+  applied_by uuid,
+  rejection_reason text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  expires_at timestamptz NOT NULL DEFAULT (now() + interval '7 days')
+);
+
+CREATE TABLE IF NOT EXISTS public.rms_pricing_factors (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  recommendation_id uuid NOT NULL REFERENCES public.rms_pricing_recommendations(id) ON DELETE CASCADE,
+  factor_id text NOT NULL,
+  factor_name text NOT NULL,
+  weight numeric(3,2) NOT NULL CHECK (weight BETWEEN 0 AND 1),
+  value numeric(10,2) NOT NULL,
+  impact numeric(4,2) NOT NULL CHECK (impact BETWEEN -1 AND 1),
+  confidence numeric(3,2) NOT NULL CHECK (confidence BETWEEN 0 AND 1),
+  explanation text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.rms_pricing_applications (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  recommendation_id uuid NOT NULL REFERENCES public.rms_pricing_recommendations(id),
+  applied_at timestamptz NOT NULL DEFAULT now(),
+  applied_by uuid,
+  date_range_start date NOT NULL,
+  date_range_end date NOT NULL,
+  room_type_id uuid,
+  rate_plan_id uuid,
+  old_price numeric(10,2) NOT NULL,
+  new_price numeric(10,2) NOT NULL,
+  actual_occupancy numeric(5,2),
+  actual_revenue numeric(10,2),
+  performance_vs_forecast numeric(5,2),
+  notes text,
+  is_test boolean NOT NULL DEFAULT false
+);
+
+CREATE TABLE IF NOT EXISTS public.rate_plans (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  hotel_id uuid NOT NULL REFERENCES public.hotels(id) ON DELETE CASCADE,
+  plan_code text NOT NULL,
+  plan_name text NOT NULL,
+  pension_type text NOT NULL CHECK (pension_type IN ('RO','BB','HB','FB','AI','Package')),
+  channel_type text NOT NULL DEFAULT 'OTA' CHECK (channel_type IN ('OTA','Mobile','Corporate','Direct')),
+  calc_mode text NOT NULL DEFAULT 'derived' CHECK (calc_mode IN ('fixed','derived')),
+  calc_value numeric NOT NULL DEFAULT 0,
+  reference_plan_id uuid REFERENCES public.rate_plans(id) ON DELETE SET NULL,
+  is_reference boolean NOT NULL DEFAULT false,
+  is_active boolean NOT NULL DEFAULT true,
+  connectivity_type text NOT NULL DEFAULT 'Aucun' CHECK (connectivity_type IN ('D-EDGE','ChannelManager','Aucun')),
+  is_connectivity_locked boolean NOT NULL DEFAULT false,
+  distribution_channels jsonb NOT NULL DEFAULT '[]'::jsonb,
+  min_stay integer,
+  max_stay integer,
+  cancellation_policy text,
+  meal_plan text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  deleted_at timestamptz,
+  version integer NOT NULL DEFAULT 1,
+  cancellation_type text,
+  occupancy text,
+  UNIQUE (hotel_id, plan_code)
+);
+
+CREATE TABLE IF NOT EXISTS public.guest_history (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  guest_id uuid REFERENCES public.guests(id) ON DELETE CASCADE,
+  reservation_id uuid REFERENCES public.reservations(id) ON DELETE SET NULL,
+  stay_start date,
+  stay_end date,
+  room_number text,
+  amount numeric(10,2),
+  rating integer CHECK (rating BETWEEN 1 AND 5),
+  comment text,
+  created_at timestamptz DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.exchange_rates (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  currency_from text NOT NULL DEFAULT 'EUR',
+  currency_to text NOT NULL,
+  rate numeric(12,6) NOT NULL,
+  rate_date date NOT NULL DEFAULT CURRENT_DATE,
+  source text DEFAULT 'ECB',
+  created_at timestamptz DEFAULT now(),
+  UNIQUE (currency_from, currency_to, rate_date)
+);
+
+CREATE TABLE IF NOT EXISTS public.invoice_pdp_status (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  invoice_id uuid REFERENCES public.invoices(id) ON DELETE CASCADE,
+  status text CHECK (status IN ('sent','accepted','rejected','pending')),
+  response_payload jsonb,
+  error_message text,
+  created_at timestamptz DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.pdp_exchange_logs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  invoice_id uuid REFERENCES public.invoices(id) ON DELETE SET NULL,
+  request_payload jsonb NOT NULL,
+  response_payload jsonb,
+  http_status integer,
+  duration_ms integer,
+  created_at timestamptz DEFAULT now()
+);
+
+-- ----------------------------------------------------------------------------
 -- 6. Les 13 vues attendues par 0013_security_views_refactor
 --    (créées directement avec security_invoker=on, état final réel de
 --    production — rend le ALTER VIEW de 0013 idempotent)
