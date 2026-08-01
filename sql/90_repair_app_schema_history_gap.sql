@@ -465,6 +465,18 @@ CREATE TABLE IF NOT EXISTS public.guests (
 ALTER TABLE public.guests
   ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
 
+-- 5b(ter). guests.hotel_id — omission de la définition minimale initiale
+-- (section 5b ne l'avait jamais incluse). Révélée seulement à
+-- 20260522152506_crm_c4_loyalty_segments, dont une fonction LANGUAGE SQL
+-- (donc validée à la création, contrairement aux corps plpgsql) référence
+-- `guests g WHERE g.hotel_id = ...`. N'a jamais causé d'échec avant car les
+-- seules références précédentes à guests.hotel_id étaient dans des boucles
+-- plpgsql (crm_c1_sync_orphans) dont le corps ne s'exécute jamais sur une
+-- base vierge sans données (FOR v_hotel_id IN SELECT DISTINCT hotel_id FROM
+-- reservations ... : zéro ligne, boucle jamais entrée).
+ALTER TABLE public.guests
+  ADD COLUMN IF NOT EXISTS hotel_id uuid;
+
 -- ----------------------------------------------------------------------------
 -- 5c. rooms.active — cause racine légèrement différente : une migration
 --     trackée ajoute bien cette colonne (ALTER TABLE rooms ADD COLUMN
