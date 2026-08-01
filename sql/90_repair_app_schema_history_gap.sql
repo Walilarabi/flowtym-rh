@@ -1264,6 +1264,21 @@ ALTER TABLE public.users ALTER COLUMN full_name DROP DEFAULT;
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true;
 
 -- ----------------------------------------------------------------------------
+-- 5u. Table user_active_hotel — cause racine révélée par
+--     20260611065213_create_mi_imported_events (la policy RLS
+--     mi_imported_events_hotel_isolation référence `SELECT hotel_id FROM
+--     public.user_active_hotel WHERE user_id = auth.uid()` — la table
+--     n'existe pas, la CREATE POLICY échoue). Zéro CREATE TABLE trackée
+--     (regex stricte : 0 correspondance). Mémorise l'hôtel actif d'un
+--     utilisateur multi-hôtel entre deux connexions.
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.user_active_hotel (
+  user_id uuid PRIMARY KEY REFERENCES public.users(id) ON DELETE CASCADE,
+  hotel_id uuid NOT NULL REFERENCES public.hotels(id) ON DELETE CASCADE,
+  switched_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- ----------------------------------------------------------------------------
 -- 6. Les 13 vues attendues par 0013_security_views_refactor
 --    (créées directement avec security_invoker=on, état final réel de
 --    production — rend le ALTER VIEW de 0013 idempotent)
