@@ -1093,6 +1093,54 @@ CREATE TABLE IF NOT EXISTS public.pricing_rules (
 );
 
 -- ----------------------------------------------------------------------------
+-- 5o. Tables rate_prices / rate_restrictions — cause racine révélée par
+--     20260602190039_r4c_update_rls (`DROP POLICY IF EXISTS rate_prices_write
+--     ON public.rate_prices` puis `rate_restrictions_write ON public.
+--     rate_restrictions` échouent avec "does not exist"). Zéro CREATE TABLE
+--     trackée pour l'une comme pour l'autre (regex stricte sur les 247
+--     migrations : 0 correspondance chacune). Calendrier tarifaire jour par
+--     jour (rate_prices, unique sur hotel/room_type/plan/date) et
+--     restrictions associées (rate_restrictions, unique sur hotel/room_type/
+--     date) — FK vers hotels, rate_plans (comblée en 5l) et users.
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.rate_prices (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  hotel_id uuid NOT NULL REFERENCES public.hotels(id) ON DELETE CASCADE,
+  room_type_code text NOT NULL,
+  plan_id uuid NOT NULL REFERENCES public.rate_plans(id) ON DELETE CASCADE,
+  stay_date date NOT NULL,
+  price numeric NOT NULL CHECK (price >= 0),
+  currency text NOT NULL DEFAULT 'EUR',
+  status text NOT NULL DEFAULT 'open' CHECK (status = ANY (ARRAY['open','closed','restricted','readonly'])),
+  plan_closed boolean NOT NULL DEFAULT false,
+  block_reason text,
+  source text NOT NULL DEFAULT 'manual' CHECK (source = ANY (ARRAY['manual','cascade','rms_recommendation','import','lighthouse'])),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_by uuid REFERENCES public.users(id) ON DELETE SET NULL,
+  version integer NOT NULL DEFAULT 1,
+  UNIQUE (hotel_id, room_type_code, plan_id, stay_date)
+);
+
+CREATE TABLE IF NOT EXISTS public.rate_restrictions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  hotel_id uuid NOT NULL REFERENCES public.hotels(id) ON DELETE CASCADE,
+  room_type_code text NOT NULL,
+  stay_date date NOT NULL,
+  cta boolean NOT NULL DEFAULT false,
+  ctd boolean NOT NULL DEFAULT false,
+  min_stay integer CHECK (min_stay IS NULL OR min_stay >= 1),
+  max_stay integer CHECK (max_stay IS NULL OR max_stay >= 1),
+  inventory integer NOT NULL DEFAULT 0,
+  capacity integer,
+  sold integer NOT NULL DEFAULT 0,
+  inventory_override text CHECK (inventory_override IS NULL OR inventory_override = ANY (ARRAY['manual_closed','force_open'])),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_by uuid REFERENCES public.users(id) ON DELETE SET NULL,
+  version integer NOT NULL DEFAULT 1,
+  UNIQUE (hotel_id, room_type_code, stay_date)
+);
+
+-- ----------------------------------------------------------------------------
 -- 6. Les 13 vues attendues par 0013_security_views_refactor
 --    (créées directement avec security_invoker=on, état final réel de
 --    production — rend le ALTER VIEW de 0013 idempotent)
