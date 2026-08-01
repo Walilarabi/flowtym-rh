@@ -430,6 +430,25 @@ ALTER TABLE public.reservations
   ADD COLUMN IF NOT EXISTS payment_mode text DEFAULT 'Carte bancaire';
 
 -- ----------------------------------------------------------------------------
+-- 5b. Table guests (minimale) — même cause racine : aucune migration trackée
+--     ne crée jamais public.guests (une seule, crm_c1_schema, l'ALTER pour y
+--     ajouter des colonnes CRM — elle suppose son existence préalable, elle
+--     ne la crée pas). Créée ici avec les seules colonnes requises par les
+--     vues de la section 6 ; crm_c1_schema complètera le reste plus tard
+--     dans l'historique sans conflit (ADD COLUMN IF NOT EXISTS).
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.guests (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  first_name text,
+  last_name text NOT NULL,
+  email text,
+  country text DEFAULT 'FR',
+  loyalty_level text DEFAULT 'Standard',
+  total_stays integer DEFAULT 0,
+  total_spent numeric DEFAULT 0
+);
+
+-- ----------------------------------------------------------------------------
 -- 6. Les 13 vues attendues par 0013_security_views_refactor
 --    (créées directement avec security_invoker=on, état final réel de
 --    production — rend le ALTER VIEW de 0013 idempotent)
