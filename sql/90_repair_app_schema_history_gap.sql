@@ -1325,6 +1325,16 @@ CREATE TABLE IF NOT EXISTS public._odms_cron_config (
 );
 
 -- ----------------------------------------------------------------------------
+-- 5x. reservations.segment — cause racine révélée par
+--     20260629184100_analytics_reports_batch1_recreate (fonction
+--     analytics_51010 référence r.segment : "column r.segment does not
+--     exist"). Zéro ALTER TABLE reservations ... segment trackée (regex
+--     stricte : 0 correspondance). Segmentation commerciale de la
+--     réservation (Leisure/Corporate/Groupe/...).
+-- ----------------------------------------------------------------------------
+ALTER TABLE public.reservations ADD COLUMN IF NOT EXISTS segment text DEFAULT 'Leisure';
+
+-- ----------------------------------------------------------------------------
 -- 6. Les 13 vues attendues par 0013_security_views_refactor
 --    (créées directement avec security_invoker=on, état final réel de
 --    production — rend le ALTER VIEW de 0013 idempotent)
