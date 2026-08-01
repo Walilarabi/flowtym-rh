@@ -477,6 +477,50 @@ ALTER TABLE public.guests
 ALTER TABLE public.guests
   ADD COLUMN IF NOT EXISTS hotel_id uuid;
 
+-- 5b(quater). Reste des colonnes guests — même cause racine (définition
+-- minimale initiale trop étroite), révélée colonne par colonne par
+-- 20260522155703_crm_c7_automation (encore une fonction LANGUAGE SQL,
+-- `g.blacklisted`) : plutôt que d'itérer une colonne à la fois, alignement
+-- complet ici sur le schéma réel de production (introspection
+-- information_schema.columns) pour éviter les cycles répétés sur la même
+-- table. legacy_id volontairement omise : colonne d'import historique
+-- (nextval sur une séquence dédiée), non référencée par aucune migration
+-- trackée — inutile de reproduire la séquence tant qu'aucun rejeu ne
+-- l'exige réellement.
+ALTER TABLE public.guests
+  ADD COLUMN IF NOT EXISTS phone text,
+  ADD COLUMN IF NOT EXISTS nationality text,
+  ADD COLUMN IF NOT EXISTS passport text,
+  ADD COLUMN IF NOT EXISTS date_of_birth date,
+  ADD COLUMN IF NOT EXISTS address text,
+  ADD COLUMN IF NOT EXISTS city text,
+  ADD COLUMN IF NOT EXISTS zip text,
+  ADD COLUMN IF NOT EXISTS language text DEFAULT 'fr',
+  ADD COLUMN IF NOT EXISTS segment text DEFAULT 'Leisure',
+  ADD COLUMN IF NOT EXISTS id_verified boolean DEFAULT false,
+  ADD COLUMN IF NOT EXISTS gdpr_consent boolean DEFAULT false,
+  ADD COLUMN IF NOT EXISTS gdpr_date timestamptz,
+  ADD COLUMN IF NOT EXISTS blacklisted boolean DEFAULT false,
+  ADD COLUMN IF NOT EXISTS notes text,
+  ADD COLUMN IF NOT EXISTS tags text[],
+  ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now(),
+  ADD COLUMN IF NOT EXISTS gender text,
+  ADD COLUMN IF NOT EXISTS whatsapp text,
+  ADD COLUMN IF NOT EXISTS social_links jsonb DEFAULT '{}'::jsonb,
+  ADD COLUMN IF NOT EXISTS photo_url text,
+  ADD COLUMN IF NOT EXISTS profession text,
+  ADD COLUMN IF NOT EXISTS employer text,
+  ADD COLUMN IF NOT EXISTS job_title text,
+  ADD COLUMN IF NOT EXISTS visa text,
+  ADD COLUMN IF NOT EXISTS doc_expiry_date date,
+  ADD COLUMN IF NOT EXISTS languages text[] DEFAULT '{}'::text[],
+  ADD COLUMN IF NOT EXISTS acquisition_source text,
+  ADD COLUMN IF NOT EXISTS vip boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS risk_level text NOT NULL DEFAULT 'low',
+  ADD COLUMN IF NOT EXISTS satisfaction_score numeric(4,2),
+  ADD COLUMN IF NOT EXISTS ai_scores jsonb DEFAULT '{}'::jsonb,
+  ADD COLUMN IF NOT EXISTS badges text[] NOT NULL DEFAULT '{}'::text[];
+
 -- ----------------------------------------------------------------------------
 -- 5c. rooms.active — cause racine légèrement différente : une migration
 --     trackée ajoute bien cette colonne (ALTER TABLE rooms ADD COLUMN
