@@ -426,6 +426,15 @@ log_pass "5 logins réussis via GoTrue (5 JWT réels obtenus, masqués)"
 # ============================================================================
 log_info "=== RLS-MATRIX ==="
 
+# Garde-fou : _qa_introspect_tables est un outil QA interne réservé à service_role (REVOKE ALL
+# FROM PUBLIC, anon, authenticated dans qa_introspect_tables.sql) — jamais accessible via PostgREST
+# à un rôle anon ou authenticated, quelle que soit l'identité du JWT.
+R=$(rest_call POST "/rest/v1/rpc/_qa_introspect_tables" "" '{"p_tables":["hotels"]}'); ST=$(echo "$R"|head -n1)
+[[ "$ST" == "401" || "$ST" == "403" || "$ST" == "404" ]] && log_pass "anon : _qa_introspect_tables() refusé (outil QA interne service_role-only)" "$ST" || log_fail "anon a pu appeler _qa_introspect_tables() — fuite de l'outillage QA interne" "$ST"
+
+R=$(rest_call POST "/rest/v1/rpc/_qa_introspect_tables" "$JWT_NOATTACH" '{"p_tables":["hotels"]}'); ST=$(echo "$R"|head -n1)
+[[ "$ST" == "401" || "$ST" == "403" || "$ST" == "404" ]] && log_pass "authenticated : _qa_introspect_tables() refusé (outil QA interne service_role-only)" "$ST" || log_fail "authenticated a pu appeler _qa_introspect_tables() — fuite de l'outillage QA interne" "$ST"
+
 R=$(rest_call GET "/rest/v1/hotels?select=id" ""); ST=$(echo "$R"|head -n1); BODY=$(echo "$R"|tail -n +2)
 N=$(echo "$BODY" | jq 'length' 2>/dev/null || echo -1)
 if [[ "$ST" == "200" && "$N" == "0" ]]; then
