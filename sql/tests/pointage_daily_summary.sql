@@ -32,8 +32,8 @@ INSERT INTO public.hotels(id, name, timezone, qr_clocking_enabled) VALUES
   ('d1000000-0000-0000-0000-000000000001', 'Hotel Paris', 'Europe/Paris', true),
   ('d2000000-0000-0000-0000-000000000002', 'Hotel Nice',  'Europe/Paris', true);
 
-INSERT INTO public.users(id, auth_id, email, full_name, first_name, last_name) VALUES
-  ('d0a00001-0000-0000-0000-000000000001','00000000-0000-0000-0000-0000000d0a01','manager.paris@x.fr','Manager Paris','Manager','Paris');
+INSERT INTO public.users(id, auth_id, email, full_name) VALUES
+  ('d0a00001-0000-0000-0000-000000000001','00000000-0000-0000-0000-0000000d0a01','manager.paris@x.fr','Manager Paris');
 INSERT INTO public.user_hotels(user_id, hotel_id) VALUES
   ('d0a00001-0000-0000-0000-000000000001','d1000000-0000-0000-0000-000000000001');
 
