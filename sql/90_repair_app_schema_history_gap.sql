@@ -719,6 +719,46 @@ CREATE TABLE IF NOT EXISTS public.lighthouse_imports (
 );
 
 -- ----------------------------------------------------------------------------
+-- 5k. Table audit_logs + ses 2 triggers d'immuabilité — cause racine
+--     démontrée sur la migration 20260522113519_finance_audit_chain_f7_setup,
+--     qui contient un `ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS seq`
+--     en DDL DIRECTE (pas dans un corps de fonction plpgsql non validé
+--     statiquement, contrairement aux occurrences vues dans les migrations
+--     précédentes qui ne faisaient que RÉFÉRENCER audit_logs à l'intérieur
+--     de CREATE FUNCTION). Preuve : `create table ... audit_logs` strict
+--     remonte zéro occurrence sur les 247 migrations trackées. La même
+--     migration fait aussi `ALTER TABLE audit_logs DISABLE TRIGGER
+--     trg_audit_logs_no_update` — ce trigger (et son jumeau
+--     trg_audit_logs_no_delete), bien que liés à app.audit_logs_immutable()
+--     déjà réparée en section 2, n'étaient eux-mêmes jamais créés par une
+--     migration trackée. Colonnes seq/prev_hash/entry_hash volontairement
+--     omises ici : elles sont ajoutées par 20260522113519 lui-même via
+--     ALTER ... ADD COLUMN IF NOT EXISTS, donc déjà idempotentes.
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.audit_logs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  hotel_id uuid NOT NULL REFERENCES public.hotels(id) ON DELETE CASCADE,
+  actor_user_id uuid REFERENCES public.users(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED,
+  entity text NOT NULL,
+  entity_id uuid NOT NULL,
+  action text NOT NULL,
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  correlation_id uuid,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  actor_label text
+);
+
+DROP TRIGGER IF EXISTS trg_audit_logs_no_update ON public.audit_logs;
+CREATE TRIGGER trg_audit_logs_no_update
+  BEFORE UPDATE ON public.audit_logs
+  FOR EACH ROW EXECUTE FUNCTION app.audit_logs_immutable();
+
+DROP TRIGGER IF EXISTS trg_audit_logs_no_delete ON public.audit_logs;
+CREATE TRIGGER trg_audit_logs_no_delete
+  BEFORE DELETE ON public.audit_logs
+  FOR EACH ROW EXECUTE FUNCTION app.audit_logs_immutable();
+
+-- ----------------------------------------------------------------------------
 -- 6. Les 13 vues attendues par 0013_security_views_refactor
 --    (créées directement avec security_invoker=on, état final réel de
 --    production — rend le ALTER VIEW de 0013 idempotent)
