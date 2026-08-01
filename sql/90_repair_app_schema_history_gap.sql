@@ -13,6 +13,11 @@
 -- rejoue le texte stocké des migrations sur une base vierge — pas un dump de
 -- la production) échoue toujours et déterministiquement à 0011.
 --
+-- Même constat pour deux autres fonctions référencées par le même bloc P1-1
+-- de 0011 : public.set_updated_at() et public.audit_jsonb_diff(jsonb, jsonb).
+-- (public.update_updated_at(), la 3e fonction du bloc, est elle bien créée par
+-- 00001 — pas de gap sur celle-là.)
+--
 -- Ces objets existent réellement en production aujourd'hui (créés hors bande,
 -- jamais capturés par une migration trackée). Cette migration ne change RIEN
 -- fonctionnellement en production : chaque statement est idempotent
@@ -302,7 +307,41 @@ GRANT EXECUTE ON FUNCTION app.ensure_user_profile(uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION app.resolve_actor_user_id() TO authenticated, service_role;
 
 -- ----------------------------------------------------------------------------
--- 3. public.provision_user_for_hotel
+-- 3. Fonctions public.* également absentes de 00001 mais requises par le
+--    bloc P1-1 de 0011 (ALTER FUNCTION ... SET search_path)
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.set_updated_at()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+BEGIN NEW.updated_at = now(); RETURN NEW; END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.audit_jsonb_diff(before_row jsonb, after_row jsonb)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ IMMUTABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+declare
+  k text;
+  acc jsonb := '{}'::jsonb;
+  ignored text[] := array['updated_at', 'created_at', 'version', 'dispatch_locked_at'];
+begin
+  if before_row is null or after_row is null then return null; end if;
+  for k in select jsonb_object_keys(after_row) loop
+    if k = any(ignored) then continue; end if;
+    if (before_row->k) is distinct from (after_row->k) then
+      acc := acc || jsonb_build_object(k, jsonb_build_array(before_row->k, after_row->k));
+    end if;
+  end loop;
+  return acc;
+end;
+$function$;
+
+-- ----------------------------------------------------------------------------
+-- 4. public.provision_user_for_hotel
 --    Note : les GRANT/REVOKE d'exécution définitifs sur cette fonction sont
 --    déjà gérés par 0011_security_hardening (REVOKE anon/authenticated/public)
 --    qui s'exécute juste après dans l'historique — pas dupliqué ici.
