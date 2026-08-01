@@ -427,7 +427,14 @@ ALTER TABLE public.reservations
   ADD COLUMN IF NOT EXISTS paid_amount numeric(12,2) DEFAULT 0,
   ADD COLUMN IF NOT EXISTS solde numeric(12,2),
   ADD COLUMN IF NOT EXISTS source text DEFAULT 'Direct',
-  ADD COLUMN IF NOT EXISTS payment_mode text DEFAULT 'Carte bancaire';
+  ADD COLUMN IF NOT EXISTS payment_mode text DEFAULT 'Carte bancaire',
+  ADD COLUMN IF NOT EXISTS no_show_at timestamptz;
+-- no_show_at : cause racine révélée par 20260522130241_crm_c1_sync_orphans,
+-- qui fait un UPDATE ... FROM (SELECT ... no_show_at ... FROM reservations)
+-- en DML DIRECTE au niveau migration (pas dans un corps plpgsql non
+-- validé statiquement comme les occurrences précédentes) — c'est ce qui l'a
+-- révélée avant les autres colonnes déjà manquantes référencées seulement
+-- à l'intérieur de fonctions.
 
 -- ----------------------------------------------------------------------------
 -- 5b. Table guests (minimale) — même cause racine : aucune migration trackée
