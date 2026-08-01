@@ -1178,6 +1178,23 @@ CREATE TABLE IF NOT EXISTS public.competitor_sync_failures (
 );
 
 -- ----------------------------------------------------------------------------
+-- 5q. hotels.active — cause racine révélée par 20260605184017_
+--     saas_11_hotels_company_status (`UPDATE public.hotels SET status =
+--     CASE WHEN active THEN ... END` échoue avec "column \"active\" does
+--     not exist"). 00001_initial_schema définit hotels avec seulement 10
+--     colonnes (id/name/email/phone/address/status/room_count/user_count/
+--     created_at/updated_at) ; `active` (comme des dizaines d'autres
+--     colonnes hotels réelles en production : city, siret, timezone,
+--     lighthouse_*, geofence_*, group_id, ...) a été ajoutée hors bande.
+--     Zéro `ALTER TABLE ... ADD COLUMN ... active` trackée dans les 247
+--     migrations (regex stricte : 0 correspondance). Seule `active` est
+--     comblée ici — c'est la seule colonne hotels dont l'absence bloque
+--     le rejeu à ce stade ; les autres colonnes hors bande, si elles
+--     bloquent un rejeu ultérieur, seront traitées au cycle suivant.
+-- ----------------------------------------------------------------------------
+ALTER TABLE public.hotels ADD COLUMN IF NOT EXISTS active boolean DEFAULT true;
+
+-- ----------------------------------------------------------------------------
 -- 6. Les 13 vues attendues par 0013_security_views_refactor
 --    (créées directement avec security_invoker=on, état final réel de
 --    production — rend le ALTER VIEW de 0013 idempotent)
