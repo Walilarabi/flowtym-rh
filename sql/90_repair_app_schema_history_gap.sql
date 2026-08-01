@@ -1048,6 +1048,28 @@ CREATE TABLE IF NOT EXISTS public.pdp_exchange_logs (
 );
 
 -- ----------------------------------------------------------------------------
+-- 5m. Table staff_members — cause racine révélée par
+--     20260602170110_planning_module_multitenant (`ALTER TABLE
+--     public.staff_members ADD COLUMN IF NOT EXISTS department text`,
+--     suppose la table déjà existante). Zéro CREATE TABLE trackée. Colonne
+--     `department` volontairement omise ici : ajoutée par cette même
+--     migration, déjà idempotente (ADD COLUMN IF NOT EXISTS).
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.staff_members (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  hotel_id uuid,
+  first_name text NOT NULL,
+  last_name text NOT NULL,
+  email text,
+  phone text,
+  role text NOT NULL,
+  shift text,
+  active boolean DEFAULT true,
+  hired_at date,
+  created_at timestamptz DEFAULT now()
+);
+
+-- ----------------------------------------------------------------------------
 -- 6. Les 13 vues attendues par 0013_security_views_refactor
 --    (créées directement avec security_invoker=on, état final réel de
 --    production — rend le ALTER VIEW de 0013 idempotent)
