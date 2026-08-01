@@ -504,6 +504,24 @@ CREATE TABLE IF NOT EXISTS public.reservation_validations (
 );
 
 -- ----------------------------------------------------------------------------
+-- 5g. Table invoices (minimale) — même cause racine, dernière table
+--     manquante pour la 13e et dernière vue (v_fec_entries).
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.invoices (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  reservation_id uuid,
+  hotel_id uuid,
+  invoice_number text NOT NULL,
+  guest_name text,
+  issue_date date DEFAULT CURRENT_DATE,
+  total_ht numeric,
+  total_tva numeric,
+  total_ttc numeric,
+  status text DEFAULT 'draft',
+  created_at timestamptz DEFAULT now()
+);
+
+-- ----------------------------------------------------------------------------
 -- 6. Les 13 vues attendues par 0013_security_views_refactor
 --    (créées directement avec security_invoker=on, état final réel de
 --    production — rend le ALTER VIEW de 0013 idempotent)
