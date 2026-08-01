@@ -640,6 +640,12 @@ CREATE TABLE IF NOT EXISTS public.invoices (
   created_at timestamptz DEFAULT now()
 );
 
+-- 5g(bis). invoices.notes — cause racine révélée par
+-- 20260531193440_20260616_billing_financial_timeline (CREATE VIEW
+-- financial_timeline, SELECT notes FROM invoices). Zéro ADD COLUMN trackée.
+ALTER TABLE public.invoices
+  ADD COLUMN IF NOT EXISTS notes text;
+
 -- ----------------------------------------------------------------------------
 -- 5h. Tables sas_* (Service Après-Séjour / gestion des litiges partenaires) —
 --     même cause racine, révélée seulement à la migration
