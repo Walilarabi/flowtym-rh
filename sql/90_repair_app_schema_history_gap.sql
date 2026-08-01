@@ -646,6 +646,28 @@ CREATE TABLE IF NOT EXISTS public.sas_email_logs (
 );
 
 -- ----------------------------------------------------------------------------
+-- 5i. Table user_hotels (association utilisateur ↔ hôtel + rôle) — même
+--     cause racine, révélée seulement à 20260518102844_rms_decisions_
+--     append_only_audit, la première d'au moins 14 migrations qui
+--     référencent user_hotels en la tenant pour acquise. Preuve : le motif
+--     naïf `create table ... user_hotels` remonte 14 faux positifs (FK vers
+--     user_hotels dans un CREATE TABLE d'une AUTRE table) ; le motif strict
+--     `CREATE TABLE (IF NOT EXISTS )?public\.user_hotels\(` ne remonte
+--     aucune occurrence sur les 247 migrations trackées — zéro création
+--     réelle. Le type public.admin_user_role qu'utilise sa colonne `role`
+--     est, lui, bien créé par 00001 (pas de gap sur le type).
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.user_hotels (
+  user_id uuid NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  hotel_id uuid NOT NULL REFERENCES public.hotels(id) ON DELETE CASCADE,
+  role public.admin_user_role NOT NULL DEFAULT 'reception',
+  is_default boolean NOT NULL DEFAULT false,
+  granted_at timestamptz NOT NULL DEFAULT now(),
+  granted_by uuid REFERENCES public.users(id) ON DELETE SET NULL,
+  PRIMARY KEY (user_id, hotel_id)
+);
+
+-- ----------------------------------------------------------------------------
 -- 6. Les 13 vues attendues par 0013_security_views_refactor
 --    (créées directement avec security_invoker=on, état final réel de
 --    production — rend le ALTER VIEW de 0013 idempotent)
