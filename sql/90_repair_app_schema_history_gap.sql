@@ -1345,6 +1345,16 @@ ALTER TABLE public.reservations ADD COLUMN IF NOT EXISTS segment text DEFAULT 'L
 ALTER TABLE public.reservations ADD COLUMN IF NOT EXISTS room_type text;
 
 -- ----------------------------------------------------------------------------
+-- 5z. hotels.city — cause racine révélée par 20260721153307_
+--     pl_portal_hotels_function (fonction pl_portal_hotels() : "column
+--     h.city does not exist"). Même cause racine que 5q (hotels.active) :
+--     00001_initial_schema ne capture pas cette colonne, ajoutée hors
+--     bande. Zéro ALTER TABLE hotels ... city trackée (regex stricte : 0
+--     correspondance).
+-- ----------------------------------------------------------------------------
+ALTER TABLE public.hotels ADD COLUMN IF NOT EXISTS city text;
+
+-- ----------------------------------------------------------------------------
 -- 6. Les 13 vues attendues par 0013_security_views_refactor
 --    (créées directement avec security_invoker=on, état final réel de
 --    production — rend le ALTER VIEW de 0013 idempotent)
