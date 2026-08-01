@@ -668,6 +668,57 @@ CREATE TABLE IF NOT EXISTS public.user_hotels (
 );
 
 -- ----------------------------------------------------------------------------
+-- 5j. Table lighthouse_imports (import RMS de benchmark concurrentiel) —
+--     cause racine différente des précédentes : ce n'est pas une simple
+--     absence de création trackée, c'est une INCOHÉRENCE entre deux
+--     migrations trackées. La migration 20260518112224_lighthouse_imports_
+--     extend_for_persistence contient elle-même un `CREATE TABLE IF NOT
+--     EXISTS lighthouse_imports (...)` de bootstrap — mais avec un schéma
+--     réduit (12 colonnes : id, hotel_id, file_name, our_hotel_name,
+--     competitor_names, sheets_found, warnings, is_active, days_count,
+--     imported_at, imported_by, archived_at) — suivi d'un `CREATE INDEX
+--     ... (uploaded_at DESC)` qui suppose une colonne `uploaded_at`
+--     absente de ce schéma réduit. Sur production, le bootstrap était un
+--     no-op (la vraie table, créée hors bande, existait déjà avec 26
+--     colonnes incluant uploaded_at) donc l'incohérence ne s'est jamais
+--     révélée. Sur un rejeu vierge, le bootstrap CRÉE réellement la table
+--     avec le schéma réduit, et l'index sur uploaded_at échoue :
+--     ERROR: column "uploaded_at" does not exist.
+--     Correction : créer ici le schéma RÉEL et complet de production, pour
+--     que le bootstrap de 20260518112224 soit un no-op au rejeu aussi,
+--     exactement comme il l'est en production.
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.lighthouse_imports (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  hotel_id uuid NOT NULL REFERENCES public.hotels(id) ON DELETE CASCADE,
+  filename text NOT NULL,
+  file_size_bytes bigint,
+  storage_path text,
+  ota text,
+  rate_type text,
+  los integer,
+  guests integer,
+  client_hotel_name text,
+  competitor_count integer,
+  status text NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending','processing','completed','failed','cancelled')),
+  rows_ingested integer NOT NULL DEFAULT 0,
+  rows_skipped integer NOT NULL DEFAULT 0,
+  error_message text,
+  warnings jsonb NOT NULL DEFAULT '[]'::jsonb,
+  uploaded_by uuid REFERENCES public.users(id) ON DELETE SET NULL,
+  uploaded_at timestamptz NOT NULL DEFAULT now(),
+  processed_at timestamptz,
+  duration_seconds numeric,
+  is_active boolean NOT NULL DEFAULT false,
+  our_hotel_name text,
+  competitor_names jsonb NOT NULL DEFAULT '[]'::jsonb,
+  sheets_found jsonb,
+  archived_at timestamptz,
+  days_count integer NOT NULL DEFAULT 0
+);
+
+-- ----------------------------------------------------------------------------
 -- 6. Les 13 vues attendues par 0013_security_views_refactor
 --    (créées directement avec security_invoker=on, état final réel de
 --    production — rend le ALTER VIEW de 0013 idempotent)
