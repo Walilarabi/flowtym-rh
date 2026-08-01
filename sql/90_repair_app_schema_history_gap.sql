@@ -483,6 +483,27 @@ CREATE TABLE IF NOT EXISTS public.prestations (
 );
 
 -- ----------------------------------------------------------------------------
+-- 5f. Type rie_decision + table reservation_validations (minimale) — même
+--     cause racine, dernier objet manquant pour les 13 vues.
+-- ----------------------------------------------------------------------------
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'rie_decision') THEN
+    CREATE TYPE public.rie_decision AS ENUM ('AUTO_INTEGRATE', 'WARNING', 'MANUAL_REVIEW', 'QUARANTINE');
+  END IF;
+END$$;
+
+CREATE TABLE IF NOT EXISTS public.reservation_validations (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  hotel_id uuid NOT NULL,
+  partner_id uuid,
+  score integer NOT NULL DEFAULT 0,
+  decision public.rie_decision NOT NULL DEFAULT 'MANUAL_REVIEW',
+  delta_amount numeric,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- ----------------------------------------------------------------------------
 -- 6. Les 13 vues attendues par 0013_security_views_refactor
 --    (créées directement avec security_invoker=on, état final réel de
 --    production — rend le ALTER VIEW de 0013 idempotent)
