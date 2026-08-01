@@ -1335,6 +1335,16 @@ CREATE TABLE IF NOT EXISTS public._odms_cron_config (
 ALTER TABLE public.reservations ADD COLUMN IF NOT EXISTS segment text DEFAULT 'Leisure';
 
 -- ----------------------------------------------------------------------------
+-- 5y. reservations.room_type — cause racine révélée par la même migration
+--     20260629184100_analytics_reports_batch1_recreate, un cran plus loin
+--     (fonction analytics_54002 : "column r.room_type does not exist").
+--     Zéro ALTER TABLE reservations ... room_type trackée (regex stricte :
+--     0 correspondance). Libellé de type de chambre en texte libre,
+--     indépendant de rooms.room_type_code (fallback si pas de room_id).
+-- ----------------------------------------------------------------------------
+ALTER TABLE public.reservations ADD COLUMN IF NOT EXISTS room_type text;
+
+-- ----------------------------------------------------------------------------
 -- 6. Les 13 vues attendues par 0013_security_views_refactor
 --    (créées directement avec security_invoker=on, état final réel de
 --    production — rend le ALTER VIEW de 0013 idempotent)
