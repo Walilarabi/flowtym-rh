@@ -459,6 +459,18 @@ CREATE TABLE IF NOT EXISTS public.guests (
 ALTER TABLE public.rooms ADD COLUMN IF NOT EXISTS active boolean DEFAULT true;
 
 -- ----------------------------------------------------------------------------
+-- 5d. Table payments (minimale) — même cause racine que guests : aucune
+--     migration trackée ne crée jamais public.payments.
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.payments (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  hotel_id uuid,
+  amount numeric NOT NULL,
+  payment_method text NOT NULL DEFAULT 'Carte bancaire',
+  status text DEFAULT 'completed'
+);
+
+-- ----------------------------------------------------------------------------
 -- 6. Les 13 vues attendues par 0013_security_views_refactor
 --    (créées directement avec security_invoker=on, état final réel de
 --    production — rend le ALTER VIEW de 0013 idempotent)
