@@ -61,6 +61,18 @@ command -v jq >/dev/null 2>&1 || { echo "::error::jq est requis"; exit 2; }
 command -v curl >/dev/null 2>&1 || { echo "::error::curl est requis"; exit 2; }
 
 # ============================================================================
+# 0bis. GARDE-FOU CIBLE RENFORCÉ — validation multi-source, avant toute action
+# ============================================================================
+# Aucune migration, aucun setup, aucun test, aucun appel Edge Function n'a lieu avant ce point.
+# Voir scripts/qa/lib/target-guard.sh pour le détail des 3 sources indépendantes vérifiées
+# (URL, ref encodé dans la clé anon, ref encodé dans la clé service_role) et le test de
+# non-régression dédié scripts/qa/tests/test-target-guard.sh.
+export FORBIDDEN_TARGET_REFS="${FORBIDDEN_REFS[*]}"
+# shellcheck source=lib/target-guard.sh
+source "$(dirname "$0")/lib/target-guard.sh"
+validate_staging_target || exit 2
+
+# ============================================================================
 # Masquage — GitHub Actions (::add-mask::) + masquage défensif de toute sortie affichée
 # ============================================================================
 mask_secret() {

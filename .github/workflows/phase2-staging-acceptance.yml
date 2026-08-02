@@ -43,6 +43,16 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq jq
 
+      - name: Valider la cible (garde-fou obligatoire, avant toute action)
+        id: target-guard
+        env:
+          PHASE2_STAGING_URL: ${{ secrets.PHASE2_STAGING_URL }}
+          PHASE2_STAGING_ANON_KEY: ${{ secrets.PHASE2_STAGING_ANON_KEY }}
+          PHASE2_STAGING_SERVICE_ROLE_KEY: ${{ secrets.PHASE2_STAGING_SERVICE_ROLE_KEY }}
+          ALLOWED_STAGING_REF: jutigvpcwiwvxkabbolg
+          FORBIDDEN_TARGET_REFS: hzrzkvdebaadditvbqis
+        run: bash scripts/qa/lib/target-guard.sh
+
       - name: Exécuter la recette d'acceptation
         id: acceptance
         env:

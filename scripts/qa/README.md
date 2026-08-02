@@ -58,6 +58,17 @@ par GitHub Actions ni transmise au workflow.
 2. Cliquer **Run workflow**.
 3. Dans le champ `confirm_staging`, taper exactement `YES`, puis **Run workflow**.
 
+Avant toute autre action (migration, setup, test, appel Edge Function), le workflow exécute une
+étape dédiée **"Valider la cible (garde-fou obligatoire, avant toute action)"** qui vérifie, à
+partir de 3 sources indépendantes (`PHASE2_STAGING_URL`, le ref encodé dans le JWT de la clé
+anon, le ref encodé dans le JWT de la clé service_role), que la cible est exactement et
+uniquement la branche `phase2-staging` (ref `jutigvpcwiwvxkabbolg`) — jamais la production. La
+même validation est répétée en tout premier dans `scripts/qa/phase2-staging-acceptance.sh`
+lui-même (`scripts/qa/lib/target-guard.sh`). Un test de non-régression dédié
+(`scripts/qa/tests/test-target-guard.sh`) tourne automatiquement sur chaque push/PR (CI
+`ci.yml`, job "QA — garde-fou cible phase2-staging (non-régression)") pour garantir que ce
+garde-fou ne peut pas être supprimé ou affaibli accidentellement.
+
 ## 4. Résultat
 
 - Le résumé du run (onglet Summary du job) affiche PASS/FAIL/verdict.
