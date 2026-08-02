@@ -31,6 +31,13 @@ jobs:
       - uses: actions/checkout@v4
       - run: bash scripts/qa/tests/test-fixture-and-response-encoding.sh
 
+  qa-insert-response-validation-test:
+    name: QA — validation stricte des réponses HTTP d'insertion (non-régression)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/qa/tests/test-insert-response-validation.sh
+
   db-tests:
     name: DB — reconstruction dépôt + tests (P0 24/24 ; concurrence A-G)
     runs-on: ubuntu-latest
