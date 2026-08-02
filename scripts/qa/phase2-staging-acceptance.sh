@@ -33,7 +33,7 @@ set -uo pipefail
 : "${GITHUB_ENVIRONMENT_NAME:?GITHUB_ENVIRONMENT_NAME manquant}"
 
 # Project ref UNIQUE autorisé pour cette recette. Toute autre valeur est un refus immédiat.
-readonly ALLOWED_STAGING_REF="ezjnkjvdojjvdonftzmc"
+readonly ALLOWED_STAGING_REF="jutigvpcwiwvxkabbolg"
 # Liste explicite des refs interdits — le vrai projet de production en tête. Étendre cette
 # liste si d'autres environnements sensibles existent un jour.
 readonly FORBIDDEN_REFS=("hzrzkvdebaadditvbqis")
