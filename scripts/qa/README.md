@@ -69,6 +69,12 @@ lui-même (`scripts/qa/lib/target-guard.sh`). Un test de non-régression dédié
 `ci.yml`, job "QA — garde-fou cible phase2-staging (non-régression)") pour garantir que ce
 garde-fou ne peut pas être supprimé ou affaibli accidentellement.
 
+Un second test de non-régression (`scripts/qa/tests/test-fixture-and-response-encoding.sh`, job
+CI "QA — fixtures/réponses HTTP volumineuses") couvre deux corrections issues d'une exécution
+réelle du workflow (run PASS:1/FAIL:6) : la longueur du `hotel_code` fictif (contrainte
+`varchar(5)` de `public.hotels`) et le découpage sûr des réponses HTTP volumineuses de la section
+STRUCTURE (`scripts/qa/lib/http-response.sh`, sans pipe externe ni `--argjson` sur un gros JSON).
+
 ## 4. Résultat
 
 - Le résumé du run (onglet Summary du job) affiche PASS/FAIL/verdict.

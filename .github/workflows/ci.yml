@@ -24,6 +24,13 @@ jobs:
       - uses: actions/checkout@v4
       - run: bash scripts/qa/tests/test-target-guard.sh
 
+  qa-fixture-response-encoding-test:
+    name: QA — fixtures/réponses HTTP volumineuses (non-régression FAIL#1/FAIL#6)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/qa/tests/test-fixture-and-response-encoding.sh
+
   db-tests:
     name: DB — reconstruction dépôt + tests (P0 24/24 ; concurrence A-G)
     runs-on: ubuntu-latest
