@@ -17,6 +17,13 @@ jobs:
         with: { node-version: '20' }
       - run: node scripts/ci/check-frontend-syntax.mjs
 
+  qa-target-guard-test:
+    name: QA — garde-fou cible phase2-staging (non-régression)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/qa/tests/test-target-guard.sh
+
   db-tests:
     name: DB — reconstruction dépôt + tests (P0 24/24 ; concurrence A-G)
     runs-on: ubuntu-latest
