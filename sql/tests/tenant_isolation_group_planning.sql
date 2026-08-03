@@ -34,6 +34,13 @@ CREATE OR REPLACE FUNCTION pg_temp.ti_log(p_no int, p_name text, p_status text, 
   ON CONFLICT (test_no) DO UPDATE SET status = excluded.status, detail = excluded.detail;
 $$ LANGUAGE sql SECURITY DEFINER;
 
+-- Introspection de test (contourne volontairement RLS/GRANT de `hotels`, non exposée en direct
+-- à `authenticated` côté PostgREST) : sert uniquement à vérifier l'état réel après un appel RPC,
+-- jamais utilisée pour simuler un accès applicatif.
+CREATE OR REPLACE FUNCTION pg_temp.ti_peek_hotel_group(p_hotel uuid) RETURNS uuid AS $$
+  SELECT group_id FROM hotels WHERE id = p_hotel;
+$$ LANGUAGE sql SECURITY DEFINER;
+
 -- Positionne les DEUX conventions de GUC JWT utilisées dans ce dépôt : la forme JSON
 -- `request.jwt.claims` (auth.uid() réel de Supabase, production/branches — cf. zz3_as dans
 -- sql/tests/phase2c_lot2_hotels_groups.sql) ET la forme aplatie `request.jwt.claim.sub` (shim
@@ -54,8 +61,8 @@ $$ LANGUAGE sql;
 -- ---------------------------------------------------------------------------
 DO $$
 DECLARE
-  v_gid_b uuid; v_gid_r uuid;
-  v_hb1 uuid; v_hb2 uuid; v_hr1 uuid; v_hr2 uuid;
+  v_gid_b uuid; v_gid_r uuid; v_gid_iso_a uuid; v_gid_iso_b uuid;
+  v_hb1 uuid; v_hb2 uuid; v_hr1 uuid; v_hr2 uuid; v_hr3 uuid; v_h_iso_a uuid; v_h_iso_b uuid;
   v_svc_b uuid; v_svc_r uuid;
   v_emp_b uuid; v_emp_r uuid; v_extra_b uuid; v_extra_r uuid;
   v_auth_bdir uuid; v_auth_bcol uuid; v_auth_rdir uuid; v_auth_rcol uuid;
@@ -69,6 +76,10 @@ BEGIN
   INSERT INTO hotels(name, group_id, hotel_code) VALUES ('ZZTI Boudaa H2', v_gid_b, 'ZTB2') RETURNING id INTO v_hb2;
   INSERT INTO hotels(name, group_id, hotel_code) VALUES ('ZZTI Redouane H1', v_gid_r, 'ZTR1') RETURNING id INTO v_hr1;
   INSERT INTO hotels(name, group_id, hotel_code) VALUES ('ZZTI Redouane H2', v_gid_r, 'ZTR2') RETURNING id INTO v_hr2;
+  -- Hôtel Redouane SANS hotel_code (fiche legacy incomplète) : exerce précisément la branche
+  -- historiquement vulnérable d'org_provision() (écrasement inconditionnel du group_id quand
+  -- hotel_code est NULL). Sans ce fixture, ce chemin ne serait jamais exécuté par les tests.
+  INSERT INTO hotels(name, group_id, hotel_code) VALUES ('ZZTI Redouane H3 (legacy)', v_gid_r, NULL) RETURNING id INTO v_hr3;
 
   INSERT INTO staff_departments(hotel_id, name) VALUES (v_hb2, 'ZZTI Reception') RETURNING id INTO v_svc_b;
   INSERT INTO staff_departments(hotel_id, name) VALUES (v_hr2, 'ZZTI Reception') RETURNING id INTO v_svc_r;
@@ -117,6 +128,20 @@ BEGIN
   INSERT INTO user_hotels(user_id, hotel_id, role, is_default) VALUES (v_u_multi, v_hb2, 'direction', false);
   INSERT INTO user_hotels(user_id, hotel_id, role, is_default) VALUES (v_u_multi, v_hr1, 'direction', false);
   INSERT INTO user_hotels(user_id, hotel_id, role, is_default) VALUES (v_u_multi, v_hr2, 'direction', false);
+  INSERT INTO user_hotels(user_id, hotel_id, role, is_default) VALUES (v_u_multi, v_hr3, 'direction', false);
+
+  -- Micro-fixture ISOLÉE (2 groupes/2 hôtels dédiés, seuls accessibles au multi-groupe en plus
+  -- des 4 ci-dessus) pour le test org_provision() ci-dessous : avec plusieurs hôtels déjà
+  -- groupés dans le fixture partagé, l'ancien SELECT ... LIMIT 1 SANS ORDER BY de org_provision()
+  -- peut, selon l'ordre physique de scan (non garanti par Postgres), retomber par hasard sur le
+  -- même groupe que celui déjà en place — faux négatif confirmé expérimentalement. Avec
+  -- exactement un hôtel candidat, le résultat de l'ancien LIMIT 1 est sans ambiguïté.
+  INSERT INTO hotel_groups(name) VALUES ('ZZTI ISO A') RETURNING id INTO v_gid_iso_a;
+  INSERT INTO hotel_groups(name) VALUES ('ZZTI ISO B') RETURNING id INTO v_gid_iso_b;
+  INSERT INTO hotels(name, group_id, hotel_code) VALUES ('ZZTI Iso Hotel A', v_gid_iso_a, 'ZTIA') RETURNING id INTO v_h_iso_a;
+  INSERT INTO hotels(name, group_id, hotel_code) VALUES ('ZZTI Iso Hotel B (legacy)', v_gid_iso_b, NULL) RETURNING id INTO v_h_iso_b;
+  INSERT INTO user_hotels(user_id, hotel_id, role, is_default) VALUES (v_u_multi, v_h_iso_a, 'direction', false);
+  INSERT INTO user_hotels(user_id, hotel_id, role, is_default) VALUES (v_u_multi, v_h_iso_b, 'direction', false);
 
   INSERT INTO group_move_proposals(id, group_id, employee_id, from_hotel_id, to_hotel_id, from_service, to_service,
     period_from, period_to, slots, reason, status, decision)
@@ -132,7 +157,8 @@ BEGIN
     VALUES (v_hb2, v_emp_b, '2099-06-01', 0, 1440, 'destination', 'PE', v_prop_b, v_hb1);
 
   CREATE TEMP TABLE ti_ids AS SELECT
-    v_gid_b gid_b, v_gid_r gid_r, v_hb1, v_hb2, v_hr1, v_hr2, v_emp_b, v_emp_r, v_extra_b, v_extra_r,
+    v_gid_b gid_b, v_gid_r gid_r, v_gid_iso_a, v_gid_iso_b, v_hb1, v_hb2, v_hr1, v_hr2, v_hr3,
+    v_h_iso_a, v_h_iso_b, v_emp_b, v_emp_r, v_extra_b, v_extra_r,
     v_auth_bdir, v_auth_bcol, v_auth_rdir, v_auth_rcol, v_auth_extra_b, v_auth_extra_r, v_auth_admin,
     v_auth_multi, v_u_multi, v_prop_b;
 END $$;
@@ -330,6 +356,102 @@ BEGIN
   END;
   RESET ROLE;
 END $$;
+
+-- 7b. group_move_visibility_audit()/backfill() portaient encore le GRANT PUBLIC par défaut :
+--     anon devait pouvoir les exécuter avant correctif (contrairement à toute la famille
+--     group_move_*). Vérifie que anon n'a plus le droit d'exécution du tout.
+DO $$
+DECLARE v_caught boolean := false;
+BEGIN
+  SET LOCAL ROLE anon;
+  BEGIN
+    PERFORM public.group_move_visibility_audit();
+  EXCEPTION WHEN insufficient_privilege THEN v_caught := true;
+  END;
+  IF v_caught THEN
+    PERFORM pg_temp.ti_log(28,'visibility_audit: anon (non authentifie) n''a plus le droit d''execution','PASS','insufficient_privilege (attendu)');
+  ELSE
+    PERFORM pg_temp.ti_log(28,'visibility_audit: anon (non authentifie) n''a plus le droit d''execution','FAIL','anon a pu executer la fonction');
+  END IF;
+  RESET ROLE;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 8. Ré-audit complet (sql/99) : 3 défauts distincts trouvés ailleurs dans les RPC de
+--    Planning Groupe, aucun n'expliquant le symptôme initial (déjà fermé par sql/98) mais
+--    tous de vraies fuites/écritures inter-groupes possibles.
+-- ---------------------------------------------------------------------------
+SET LOCAL ROLE authenticated;
+DO $$
+DECLARE
+  r ti_ids%rowtype;
+  v_audit_hit boolean;
+  v_wf jsonb;
+  v_caught boolean;
+  v_gid_after uuid;
+BEGIN
+  SELECT * INTO r FROM ti_ids;
+
+  -- 8a. group_move_visibility_audit() ne filtrait par AUCUN critère de groupe/hôtel et était
+  --     exécutable par anon : le directeur Redouane (aucun accès Boudaa) ne doit jamais voir la
+  --     proposition appliquée Boudaa (v_prop_b) dans le résultat.
+  PERFORM pg_temp.ti_as(r.v_auth_rdir);
+  SELECT EXISTS (SELECT 1 FROM public.group_move_visibility_audit() WHERE proposal_id = r.v_prop_b) INTO v_audit_hit;
+  IF NOT v_audit_hit THEN
+    PERFORM pg_temp.ti_log(24,'visibility_audit: Redouane dir NE VOIT PAS la proposition Boudaa','PASS','absente (attendu)');
+  ELSE
+    PERFORM pg_temp.ti_log(24,'visibility_audit: Redouane dir NE VOIT PAS la proposition Boudaa','FAIL','FUITE: proposition Boudaa visible');
+  END IF;
+
+  -- 8b. group_move_workflow_get(p_group) acceptait un group_id arbitraire sans vérifier
+  --     l'appartenance : le directeur Redouane ne doit pas pouvoir lire le workflow du groupe Boudaa.
+  v_caught := false;
+  BEGIN
+    v_wf := public.group_move_workflow_get(r.gid_b);
+  EXCEPTION WHEN OTHERS THEN v_caught := true;
+  END;
+  IF v_caught THEN
+    PERFORM pg_temp.ti_log(25,'workflow_get: Redouane dir ne peut pas lire le workflow Boudaa','PASS','acces refuse (attendu)');
+  ELSE
+    PERFORM pg_temp.ti_log(25,'workflow_get: Redouane dir ne peut pas lire le workflow Boudaa','FAIL', 'FUITE: '||coalesce(v_wf::text,'null'));
+  END IF;
+
+  -- 8c. org_update_hotel/org_detach_hotel/org_set_hotel_status résolvaient le "groupe courant"
+  --     via un scan non déterministe de pl_my_hotels() : un utilisateur multi-groupe positionné
+  --     sur Boudaa (get_user_hotel_id() = hôtel Boudaa) ne doit jamais pouvoir modifier un hôtel
+  --     Redouane, même s'il y a légitimement accès (ACL) sous un autre hôtel actif.
+  PERFORM pg_temp.ti_as(r.v_auth_multi);
+  PERFORM public.set_active_hotel(r.v_hb1);
+  v_caught := false;
+  BEGIN
+    PERFORM public.org_update_hotel(r.v_hr1, jsonb_build_object('name','ZZTI Hack Redouane'));
+  EXCEPTION WHEN OTHERS THEN v_caught := true;
+  END;
+  IF v_caught THEN
+    PERFORM pg_temp.ti_log(26,'org_update_hotel: actif=Boudaa -> ecriture sur hotel Redouane refusee','PASS','acces refuse (attendu)');
+  ELSE
+    PERFORM pg_temp.ti_log(26,'org_update_hotel: actif=Boudaa -> ecriture sur hotel Redouane refusee','FAIL','FUITE: ecriture cross-groupe acceptee');
+  END IF;
+
+  -- 8d. org_provision() écrasait sans condition le group_id d'un hôtel accessible DÉPOURVU de
+  --     hotel_code, même s'il appartenait déjà à un AUTRE groupe réel. Utilise la micro-fixture
+  --     ISOLÉE (r.v_h_iso_a/r.v_h_iso_b, 2 groupes dédiés) plutôt que le fixture partagé
+  --     v_hr1/v_hr2/v_hr3 : avec plusieurs hôtels déjà groupés dans le fixture partagé, l'ancien
+  --     SELECT ... LIMIT 1 SANS ORDER BY de org_provision() peut, selon l'ordre physique de scan
+  --     (non garanti par Postgres), retomber par hasard sur le même groupe que celui déjà en
+  --     place — faux négatif confirmé expérimentalement lors de la mise au point de ce test. Avec
+  --     un seul hôtel candidat (r.v_h_iso_a), le résultat de l'ancien LIMIT 1 est sans ambiguïté.
+  PERFORM public.set_active_hotel(r.v_h_iso_a);
+  PERFORM public.org_provision();
+  v_gid_after := pg_temp.ti_peek_hotel_group(r.v_h_iso_b);
+  IF v_gid_after = r.v_gid_iso_b THEN
+    PERFORM pg_temp.ti_log(27,'org_provision: hotel sans hotel_code conserve son groupe (pas de fusion inter-groupes)','PASS', v_gid_after::text);
+  ELSE
+    PERFORM pg_temp.ti_log(27,'org_provision: hotel sans hotel_code conserve son groupe (pas de fusion inter-groupes)','FAIL','FUITE: group_id ecrase -> '||coalesce(v_gid_after::text,'null'));
+  END IF;
+END $$;
+
+RESET ROLE;
 
 -- ---------------------------------------------------------------------------
 -- Rapport final : échoue explicitement (RAISE EXCEPTION) si un seul test a échoué —

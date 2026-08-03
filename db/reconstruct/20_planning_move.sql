@@ -52,6 +52,15 @@ CREATE TABLE employee_extra_activations (
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (employee_id, hotel_id, year, month, host_service_id));
 
+CREATE TABLE employee_hotel_assignments (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  employee_id uuid NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  source_hotel_id uuid NOT NULL REFERENCES hotels(id) ON DELETE CASCADE,
+  target_hotel_id uuid NOT NULL REFERENCES hotels(id) ON DELETE CASCADE,
+  active boolean DEFAULT true, notes text, authorized_by text,
+  created_at timestamptz DEFAULT now());
+GRANT SELECT ON employee_hotel_assignments TO authenticated, anon;
+
 -- ── Propositions & cycle de vie ──────────────────────────────────────────────
 CREATE TABLE group_move_proposals (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
