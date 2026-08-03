@@ -10,7 +10,7 @@ Supabase dédiée à la Phase 2, puis nettoie systématiquement ce qu'il a cré�
   `scripts/qa/phase2-staging-acceptance.sh`, les fixtures de référence
   `scripts/qa/fixtures/production_*.json`, et ce document.
 - La cible est **exclusivement** la branche de staging (nom `phase2-staging`, project ref
-  `jutigvpcwiwvxkabbolg`). Le script refuse de s'exécuter si l'URL contient le project ref de
+  `rhftbfgvenxdpqudokcw`). Le script refuse de s'exécuter si l'URL contient le project ref de
   production ou tout autre ref de la liste interdite, si `CONFIRM_STAGING` ≠ `YES`, ou si
   l'environnement GitHub n'est pas nommé `phase2-staging`.
 - **Cette branche n'est pas un projet Supabase séparé** : c'est une branche (Supabase Branching
@@ -26,7 +26,7 @@ Branching 2.0) du projet `flowtym-housekeeping` (ref `hzrzkvdebaadditvbqis`), or
 
 1. Dashboard Supabase → ouvrir le projet **flowtym-housekeeping**.
 2. Menu de gauche (ou sélecteur en haut de l'écran) → **Branches**.
-3. Cliquer sur la branche **`phase2-staging`** (project ref `jutigvpcwiwvxkabbolg`) → cela ouvre
+3. Cliquer sur la branche **`phase2-staging`** (project ref `rhftbfgvenxdpqudokcw`) → cela ouvre
    sa propre console, distincte de celle de production.
 4. Dans cette console de branche → **Project Settings → API** : c'est là que se trouvent son URL,
    sa clé anon/publishable et sa clé service_role — **jamais celles de production**.
@@ -43,7 +43,7 @@ l'étape précédente :
 
 | Nom exact | Contenu |
 |---|---|
-| `PHASE2_STAGING_URL` | URL de l'API de la branche `phase2-staging` (`https://jutigvpcwiwvxkabbolg.supabase.co`) |
+| `PHASE2_STAGING_URL` | URL de l'API de la branche `phase2-staging` (`https://rhftbfgvenxdpqudokcw.supabase.co`) |
 | `PHASE2_STAGING_ANON_KEY` | Clé anon/publishable de la branche `phase2-staging` |
 | `PHASE2_STAGING_SERVICE_ROLE_KEY` | Clé service_role de la branche `phase2-staging` (setup/cleanup uniquement) |
 | `PHASE2_NOTIFICATION_INTERNAL_KEY` | Même valeur que `PLATFORM_NOTIFICATION_INTERNAL_KEY` configuré sur l'Edge Function `platform-send-notification` de la branche `phase2-staging` |
@@ -62,7 +62,7 @@ Avant toute autre action (migration, setup, test, appel Edge Function), le workf
 étape dédiée **"Valider la cible (garde-fou obligatoire, avant toute action)"** qui vérifie, à
 partir de 3 sources indépendantes (`PHASE2_STAGING_URL`, le ref encodé dans le JWT de la clé
 anon, le ref encodé dans le JWT de la clé service_role), que la cible est exactement et
-uniquement la branche `phase2-staging` (ref `jutigvpcwiwvxkabbolg`) — jamais la production. La
+uniquement la branche `phase2-staging` (ref `rhftbfgvenxdpqudokcw`) — jamais la production. La
 même validation est répétée en tout premier dans `scripts/qa/phase2-staging-acceptance.sh`
 lui-même (`scripts/qa/lib/target-guard.sh`). Un test de non-régression dédié
 (`scripts/qa/tests/test-target-guard.sh`) tourne automatiquement sur chaque push/PR (CI

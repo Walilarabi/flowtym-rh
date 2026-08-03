@@ -49,7 +49,7 @@ jobs:
           PHASE2_STAGING_URL: ${{ secrets.PHASE2_STAGING_URL }}
           PHASE2_STAGING_ANON_KEY: ${{ secrets.PHASE2_STAGING_ANON_KEY }}
           PHASE2_STAGING_SERVICE_ROLE_KEY: ${{ secrets.PHASE2_STAGING_SERVICE_ROLE_KEY }}
-          ALLOWED_STAGING_REF: jutigvpcwiwvxkabbolg
+          ALLOWED_STAGING_REF: rhftbfgvenxdpqudokcw
           FORBIDDEN_TARGET_REFS: hzrzkvdebaadditvbqis
         run: bash scripts/qa/lib/target-guard.sh
 

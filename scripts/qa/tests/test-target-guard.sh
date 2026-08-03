@@ -35,7 +35,7 @@ mk_fake_jwt() {
   echo "${header}.${payload}.fakesignature"
 }
 
-REAL_REF="jutigvpcwiwvxkabbolg"
+REAL_REF="rhftbfgvenxdpqudokcw"
 OTHER_REF="zzzz00000000000000zz"
 PROD_REF="hzrzkvdebaadditvbqis"
 
