@@ -40,6 +40,11 @@ CREATE TABLE public.user_hotels (
   granted_at timestamptz NOT NULL DEFAULT now(), granted_by uuid,
   PRIMARY KEY (user_id, hotel_id));
 
+CREATE TABLE public.user_active_hotel (
+  user_id uuid PRIMARY KEY REFERENCES public.users(id) ON DELETE CASCADE,
+  hotel_id uuid NOT NULL REFERENCES public.hotels(id) ON DELETE CASCADE,
+  switched_at timestamptz NOT NULL DEFAULT now());
+
 CREATE TABLE public.staff_departments (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   hotel_id uuid NOT NULL REFERENCES public.hotels(id) ON DELETE CASCADE,

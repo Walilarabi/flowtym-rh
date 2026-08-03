@@ -9,6 +9,47 @@ AS $function$
   JOIN public.users u ON u.id = uh.user_id WHERE u.auth_id = auth.uid();
 $function$;
 
+-- get_user_hotel_id()/set_active_hotel() (verbatim schéma live) — l'hôtel réellement ACTIF de
+-- l'appelant, source de vérité déjà utilisée par la RLS de `hotels` (hotels_select : id =
+-- get_user_hotel_id()) ; sql/98 en fait aussi la source de vérité pour le groupe courant.
+CREATE OR REPLACE FUNCTION public.get_user_hotel_id()
+ RETURNS uuid LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path TO 'public','pg_catalog'
+AS $function$
+DECLARE
+  v_auth_uid uuid := auth.uid(); v_user_id uuid; v_hotel_id uuid;
+BEGIN
+  IF v_auth_uid IS NULL THEN RETURN NULL; END IF;
+  SELECT id INTO v_user_id FROM public.users WHERE auth_id = v_auth_uid LIMIT 1;
+  IF v_user_id IS NULL THEN RETURN NULL; END IF;
+
+  SELECT uah.hotel_id INTO v_hotel_id FROM public.user_active_hotel uah
+    WHERE uah.user_id = v_user_id
+      AND EXISTS (SELECT 1 FROM public.user_hotels uh WHERE uh.user_id = v_user_id AND uh.hotel_id = uah.hotel_id)
+    LIMIT 1;
+  IF v_hotel_id IS NOT NULL THEN RETURN v_hotel_id; END IF;
+
+  SELECT uh.hotel_id INTO v_hotel_id FROM public.user_hotels uh
+    WHERE uh.user_id = v_user_id AND uh.is_default = true LIMIT 1;
+  RETURN v_hotel_id;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.set_active_hotel(p_hotel_id uuid)
+ RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public','pg_catalog'
+AS $function$
+DECLARE v_user_id uuid; v_has_access boolean;
+BEGIN
+  SELECT id INTO v_user_id FROM public.users WHERE auth_id = auth.uid() LIMIT 1;
+  IF v_user_id IS NULL THEN RAISE EXCEPTION 'User not authenticated' USING ERRCODE = '42501'; END IF;
+  SELECT EXISTS (SELECT 1 FROM public.user_hotels WHERE user_id = v_user_id AND hotel_id = p_hotel_id) INTO v_has_access;
+  IF NOT v_has_access THEN RAISE EXCEPTION 'User does not have access to hotel %', p_hotel_id USING ERRCODE = '42501'; END IF;
+  INSERT INTO public.user_active_hotel (user_id, hotel_id, switched_at)
+  VALUES (v_user_id, p_hotel_id, now())
+  ON CONFLICT (user_id) DO UPDATE SET hotel_id = EXCLUDED.hotel_id, switched_at = EXCLUDED.switched_at;
+  RETURN true;
+END;
+$function$;
+
 -- RLS employees (verbatim schéma live) — nécessaire pour que
 -- sql/tests/tenant_isolation_group_planning.sql exerce une isolation réelle sous le rôle
 -- `authenticated`, pas seulement la logique interne des RPC SECURITY DEFINER. Dépend de
@@ -473,7 +514,10 @@ AS $function$
   SELECT EXISTS (SELECT 1 FROM public.platform_admins WHERE auth_id = auth.uid() AND is_active = true);
 $function$;
 
--- ── Groupes hôteliers : lecture scopée par groupe (verbatim schéma live) ─────
+-- ── Groupes hôteliers : lecture scopée par le GROUPE DE L'HÔTEL ACTIF (sql/98, verbatim
+-- schéma live post-correctif — voir sql/98_security_group_scope_active_hotel.sql pour la
+-- version pré-correctif et la cause racine : un scan sans ORDER BY sur tous les hôtels
+-- accessibles à l'appelant, jamais lié à get_user_hotel_id()) ────────────────────────────
 CREATE OR REPLACE FUNCTION public.group_staff_directory()
  RETURNS TABLE(employee_id uuid, first_name text, last_name text, role text, department text, hotel_id uuid, hotel_name text, phone text, email text, active boolean, status text)
  LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public'
@@ -483,12 +527,7 @@ AS $function$
   FROM public.employees e
   JOIN public.hotels h ON h.id = e.hotel_id
   WHERE public.is_platform_admin()
-     OR h.group_id IN (
-          SELECT hz.group_id
-          FROM public.hotels hz
-          WHERE hz.id IN (SELECT public.pl_my_hotels())
-            AND hz.group_id IS NOT NULL
-        )
+     OR h.group_id = (SELECT group_id FROM public.hotels WHERE id = public.get_user_hotel_id())
   ORDER BY h.name, e.last_name, e.first_name;
 $function$;
 
@@ -511,7 +550,7 @@ CREATE OR REPLACE FUNCTION public.org_get()
 AS $function$
 DECLARE v_gid uuid; g record;
 BEGIN
-  SELECT group_id INTO v_gid FROM hotels WHERE id IN (SELECT public.pl_my_hotels()) AND group_id IS NOT NULL LIMIT 1;
+  SELECT group_id INTO v_gid FROM hotels WHERE id = public.get_user_hotel_id();
   IF v_gid IS NULL THEN RETURN jsonb_build_object('group_id',null); END IF;
   SELECT * INTO g FROM hotel_groups WHERE id=v_gid;
   RETURN jsonb_build_object(
@@ -527,3 +566,67 @@ BEGIN
       'users',(SELECT count(DISTINCT user_id) FROM user_hotels WHERE hotel_id IN (SELECT id FROM hotels WHERE group_id=v_gid))
     ));
 END $function$;
+
+CREATE OR REPLACE FUNCTION public.group_planning(p_service text, p_from date, p_to date)
+ RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path TO 'public'
+AS $function$
+DECLARE v_gid uuid;
+BEGIN
+  SELECT group_id INTO v_gid FROM hotels WHERE id = public.get_user_hotel_id();
+  IF v_gid IS NULL THEN RETURN jsonb_build_object('group_id',null,'hotels','[]'::jsonb,'services','[]'::jsonb,'cells','[]'::jsonb,'requirements','[]'::jsonb); END IF;
+  RETURN jsonb_build_object(
+    'group_id', v_gid,
+    'hotels', (SELECT coalesce(jsonb_agg(jsonb_build_object('id',id,'name',name,'hotel_code',hotel_code) ORDER BY name),'[]'::jsonb)
+               FROM hotels WHERE group_id=v_gid AND active AND id IN (SELECT public.pl_my_hotels())),
+    'services', (SELECT coalesce(jsonb_agg(DISTINCT name),'[]'::jsonb) FROM staff_departments
+                 WHERE hotel_id IN (SELECT id FROM hotels WHERE group_id=v_gid AND id IN (SELECT public.pl_my_hotels()))),
+    'cells', (SELECT coalesce(jsonb_agg(c),'[]'::jsonb) FROM (
+        SELECT jsonb_build_object('hotel_id',e.hotel_id,'employee_id',e.id,'name',e.first_name||' '||e.last_name,
+               'role',e.role,'is_extra',false,'origin_hotel_id',e.hotel_id,'day',gd.day::date,
+               'status',coalesce(sp.status,''),
+               'emp_status',coalesce(e.status, CASE WHEN e.active THEN 'actif' ELSE 'parti' END),
+               'service',p_service,'shift_label',sp.shift_label) AS c
+        FROM employees e
+        CROSS JOIN generate_series(p_from, p_to, interval '1 day') AS gd(day)
+        LEFT JOIN staff_planning sp ON sp.employee_id=e.id AND sp.hotel_id=e.hotel_id AND sp.day=gd.day::date
+        WHERE e.hotel_id IN (SELECT id FROM hotels WHERE group_id=v_gid AND active AND id IN (SELECT public.pl_my_hotels()))
+          AND e.department=p_service
+          AND coalesce(e.status, CASE WHEN e.active THEN 'actif' ELSE 'parti' END) <> 'parti'
+        UNION ALL
+        SELECT jsonb_build_object('hotel_id',sp.hotel_id,'employee_id',e.id,'name',e.first_name||' '||e.last_name,
+               'role',coalesce(act.host_role,e.role),'is_extra',true,'origin_hotel_id',e.hotel_id,'day',sp.day,'status',sp.status,
+               'emp_status',e.status,'service',p_service,'shift_label',sp.shift_label)
+        FROM employee_extra_activations act
+        JOIN staff_departments d ON d.id=act.host_service_id AND d.name=p_service
+        JOIN employees e ON e.id=act.employee_id
+        JOIN staff_planning sp ON sp.employee_id=act.employee_id AND sp.hotel_id=act.hotel_id
+          AND sp.day BETWEEN p_from AND p_to
+          AND extract(year FROM sp.day)::int=act.year AND extract(month FROM sp.day)::int=act.month
+        WHERE act.active AND act.hotel_id IN (SELECT id FROM hotels WHERE group_id=v_gid AND active AND id IN (SELECT public.pl_my_hotels()))
+      ) sub),
+    'requirements', (SELECT coalesce(jsonb_agg(jsonb_build_object('hotel_id',hotel_id,'weekday',weekday,'shift',shift,'required',required_count)),'[]'::jsonb)
+                     FROM group_staffing_requirements
+                     WHERE service_name=p_service AND hotel_id IN (SELECT id FROM hotels WHERE group_id=v_gid AND id IN (SELECT public.pl_my_hotels())))
+  );
+END $function$;
+
+CREATE OR REPLACE FUNCTION public.group_requirements_list()
+ RETURNS TABLE(hotel_id uuid, service_name text, weekday integer, required_count integer)
+ LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public'
+AS $function$
+  SELECT hotel_id, service_name, weekday, required_count
+  FROM group_staffing_requirements
+  WHERE hotel_id IN (SELECT public.pl_my_hotels())
+    AND hotel_id IN (SELECT id FROM hotels WHERE group_id = (SELECT group_id FROM hotels WHERE id = public.get_user_hotel_id()));
+$function$;
+
+CREATE OR REPLACE FUNCTION public.group_travel_times()
+ RETURNS TABLE(from_hotel_id uuid, to_hotel_id uuid, duration_min integer, safety_margin_min integer, transport_type text, valid_from date, valid_to date)
+ LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public'
+AS $function$
+  SELECT from_hotel_id, to_hotel_id, duration_min, safety_margin_min, transport_type, valid_from, valid_to
+  FROM hotel_travel_times
+  WHERE from_hotel_id IN (SELECT public.pl_my_hotels()) AND to_hotel_id IN (SELECT public.pl_my_hotels())
+    AND from_hotel_id IN (SELECT id FROM hotels WHERE group_id = (SELECT group_id FROM hotels WHERE id = public.get_user_hotel_id()))
+    AND to_hotel_id IN (SELECT id FROM hotels WHERE group_id = (SELECT group_id FROM hotels WHERE id = public.get_user_hotel_id()));
+$function$;

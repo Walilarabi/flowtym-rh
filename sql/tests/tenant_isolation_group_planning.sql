@@ -59,8 +59,8 @@ DECLARE
   v_svc_b uuid; v_svc_r uuid;
   v_emp_b uuid; v_emp_r uuid; v_extra_b uuid; v_extra_r uuid;
   v_auth_bdir uuid; v_auth_bcol uuid; v_auth_rdir uuid; v_auth_rcol uuid;
-  v_auth_extra_b uuid; v_auth_extra_r uuid; v_auth_admin uuid;
-  v_u_bdir uuid; v_u_bcol uuid; v_u_rdir uuid; v_u_rcol uuid;
+  v_auth_extra_b uuid; v_auth_extra_r uuid; v_auth_admin uuid; v_auth_multi uuid;
+  v_u_bdir uuid; v_u_bcol uuid; v_u_rdir uuid; v_u_rcol uuid; v_u_multi uuid;
   v_prop_b uuid := gen_random_uuid();
 BEGIN
   INSERT INTO hotel_groups(name) VALUES ('ZZTI BOUDAA HOTELS') RETURNING id INTO v_gid_b;
@@ -107,6 +107,17 @@ BEGIN
 
   INSERT INTO platform_admins(auth_id, email, role, is_active) VALUES (v_auth_admin, 'zzti-admin@example.invalid', 'super_admin', true);
 
+  -- Utilisateur MULTI-GROUPE (reproduit exactement l'incident réel : direction accès direct
+  -- aux 2 hôtels de Boudaa ET aux 2 hôtels de Redouane). Avant sql/98, org_get()/group_planning()
+  -- resolvaient le groupe via un SELECT ... LIMIT 1 sans ORDER BY sur l'ensemble de ces 4 hôtels
+  -- — non déterministe, jamais lié à l'hôtel réellement actif.
+  v_auth_multi := gen_random_uuid(); INSERT INTO auth.users(id) VALUES (v_auth_multi);
+  INSERT INTO users(auth_id, hotel_id, email, full_name, role) VALUES (v_auth_multi, v_hb1, 'zzti-multi@example.invalid', 'ZZTI Multi Groupe', 'direction') RETURNING id INTO v_u_multi;
+  INSERT INTO user_hotels(user_id, hotel_id, role, is_default) VALUES (v_u_multi, v_hb1, 'direction', true);
+  INSERT INTO user_hotels(user_id, hotel_id, role, is_default) VALUES (v_u_multi, v_hb2, 'direction', false);
+  INSERT INTO user_hotels(user_id, hotel_id, role, is_default) VALUES (v_u_multi, v_hr1, 'direction', false);
+  INSERT INTO user_hotels(user_id, hotel_id, role, is_default) VALUES (v_u_multi, v_hr2, 'direction', false);
+
   INSERT INTO group_move_proposals(id, group_id, employee_id, from_hotel_id, to_hotel_id, from_service, to_service,
     period_from, period_to, slots, reason, status, decision)
   VALUES (v_prop_b, v_gid_b, v_emp_b, v_hb1, v_hb2, 'ZZTI Reception', 'ZZTI Reception',
@@ -122,7 +133,8 @@ BEGIN
 
   CREATE TEMP TABLE ti_ids AS SELECT
     v_gid_b gid_b, v_gid_r gid_r, v_hb1, v_hb2, v_hr1, v_hr2, v_emp_b, v_emp_r, v_extra_b, v_extra_r,
-    v_auth_bdir, v_auth_bcol, v_auth_rdir, v_auth_rcol, v_auth_extra_b, v_auth_extra_r, v_auth_admin, v_prop_b;
+    v_auth_bdir, v_auth_bcol, v_auth_rdir, v_auth_rcol, v_auth_extra_b, v_auth_extra_r, v_auth_admin,
+    v_auth_multi, v_u_multi, v_prop_b;
 END $$;
 
 GRANT SELECT ON ti_ids TO authenticated, anon;
@@ -240,16 +252,72 @@ BEGIN
   ELSE PERFORM pg_temp.ti_log(17,'portail extra: extra Redouane ne voit que sa propre fiche (jamais Boudaa)','FAIL', v_cnt::text); END IF;
 END $$;
 
+-- ---------------------------------------------------------------------------
+-- 6. Utilisateur MULTI-GROUPE — reproduction exacte de l'incident réel (sql/98).
+-- Avant sql/98 : org_get()/group_planning()/group_staff_directory()/group_requirements_list()/
+-- group_travel_times() résolvaient le groupe via un scan sans ORDER BY de TOUS les hôtels
+-- accessibles à l'appelant (pl_my_hotels()) — jamais lié à l'hôtel réellement actif
+-- (get_user_hotel_id()). Un utilisateur avec accès légitime aux 2 groupes pouvait donc voir,
+-- en étant positionné sur un hôtel Boudaa, les hôtels du groupe Redouane (et vice-versa).
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE
+  r ti_ids%rowtype;
+  v_org jsonb; v_dir jsonb; v_gp jsonb;
+BEGIN
+  SELECT * INTO r FROM ti_ids;
+
+  -- Actif = hôtel Boudaa -> tout doit être Boudaa, jamais Redouane.
+  PERFORM pg_temp.ti_as(r.v_auth_multi);
+  PERFORM public.set_active_hotel(r.v_hb1);
+  v_org := public.org_get();
+  IF v_org->>'group_id' = r.gid_b::text
+     AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_org->'members') m WHERE (m->>'id')::uuid IN (r.v_hr1, r.v_hr2)) THEN
+    PERFORM pg_temp.ti_log(18,'multi-groupe: actif=Boudaa -> org_get() = Boudaa uniquement','PASS', v_org::text);
+  ELSE PERFORM pg_temp.ti_log(18,'multi-groupe: actif=Boudaa -> org_get() = Boudaa uniquement','FAIL', 'FUITE eventuelle: '||v_org::text); END IF;
+
+  v_dir := (SELECT coalesce(jsonb_agg(hotel_id),'[]'::jsonb) FROM public.group_staff_directory() WHERE hotel_id IN (r.v_hb1, r.v_hb2, r.v_hr1, r.v_hr2));
+  IF v_dir @> to_jsonb(r.v_hb1) AND NOT (v_dir @> to_jsonb(r.v_hr1)) AND NOT (v_dir @> to_jsonb(r.v_hr2)) THEN
+    PERFORM pg_temp.ti_log(19,'multi-groupe: actif=Boudaa -> group_staff_directory() = Boudaa uniquement','PASS', v_dir::text);
+  ELSE PERFORM pg_temp.ti_log(19,'multi-groupe: actif=Boudaa -> group_staff_directory() = Boudaa uniquement','FAIL', v_dir::text); END IF;
+
+  v_gp := public.group_planning('ZZTI Reception'::text, '2099-06-01'::date, '2099-06-01'::date);
+  IF v_gp->>'group_id' = r.gid_b::text
+     AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_gp->'hotels') m WHERE (m->>'id')::uuid IN (r.v_hr1, r.v_hr2)) THEN
+    PERFORM pg_temp.ti_log(22,'multi-groupe: actif=Boudaa -> group_planning().hotels = Boudaa uniquement (symptome rapporte)','PASS', v_gp::text);
+  ELSE PERFORM pg_temp.ti_log(22,'multi-groupe: actif=Boudaa -> group_planning().hotels = Boudaa uniquement (symptome rapporte)','FAIL', 'FUITE: '||v_gp::text); END IF;
+
+  -- Bascule l'hôtel actif vers Redouane (exactement le RPC utilisé par le vrai frontend,
+  -- BE.setActiveHotel, appelé dans loadHotel() à chaque navigation vers un établissement).
+  PERFORM public.set_active_hotel(r.v_hr1);
+  v_org := public.org_get();
+  IF v_org->>'group_id' = r.gid_r::text
+     AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_org->'members') m WHERE (m->>'id')::uuid IN (r.v_hb1, r.v_hb2)) THEN
+    PERFORM pg_temp.ti_log(20,'multi-groupe: actif=Redouane -> org_get() = Redouane uniquement','PASS', v_org::text);
+  ELSE PERFORM pg_temp.ti_log(20,'multi-groupe: actif=Redouane -> org_get() = Redouane uniquement','FAIL', 'FUITE eventuelle: '||v_org::text); END IF;
+
+  v_gp := public.group_planning('ZZTI Reception'::text, '2099-06-01'::date, '2099-06-01'::date);
+  IF v_gp->>'group_id' = r.gid_r::text
+     AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_gp->'hotels') m WHERE (m->>'id')::uuid IN (r.v_hb1, r.v_hb2)) THEN
+    PERFORM pg_temp.ti_log(23,'multi-groupe: actif=Redouane -> group_planning().hotels = Redouane uniquement (symptome rapporte)','PASS', v_gp::text);
+  ELSE PERFORM pg_temp.ti_log(23,'multi-groupe: actif=Redouane -> group_planning().hotels = Redouane uniquement (symptome rapporte)','FAIL', 'FUITE: '||v_gp::text); END IF;
+
+  v_dir := (SELECT coalesce(jsonb_agg(hotel_id),'[]'::jsonb) FROM public.group_staff_directory() WHERE hotel_id IN (r.v_hb1, r.v_hb2, r.v_hr1, r.v_hr2));
+  IF v_dir @> to_jsonb(r.v_hr1) AND NOT (v_dir @> to_jsonb(r.v_hb1)) AND NOT (v_dir @> to_jsonb(r.v_hb2)) THEN
+    PERFORM pg_temp.ti_log(21,'multi-groupe: actif=Redouane -> group_staff_directory() = Redouane uniquement','PASS', v_dir::text);
+  ELSE PERFORM pg_temp.ti_log(21,'multi-groupe: actif=Redouane -> group_staff_directory() = Redouane uniquement','FAIL', v_dir::text); END IF;
+END $$;
+
 RESET ROLE;
 
--- 6. group_move_cancellations sous role anon (non authentifié du tout) : ne doit jamais
+-- 7. group_move_cancellations sous role anon (non authentifié du tout) : ne doit jamais
 --    renvoyer de ligne exploitable, que ce soit par RLS (0 ligne) ou par absence de droit
 --    (insufficient_privilege) — les deux issues sont une correction acceptable.
 DO $$
 DECLARE v_cnt int;
 BEGIN
   SET LOCAL ROLE anon;
-  PERFORM set_config('request.jwt.claims', '', true);
+  PERFORM set_config('request.jwt.claims', '', true), set_config('request.jwt.claim.sub', '', true);
   BEGIN
     SELECT count(*) INTO v_cnt FROM group_move_cancellations;
     IF v_cnt = 0 THEN

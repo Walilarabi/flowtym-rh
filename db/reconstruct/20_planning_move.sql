@@ -38,8 +38,19 @@ CREATE TABLE hotel_travel_times (
   from_hotel_id uuid NOT NULL REFERENCES hotels(id) ON DELETE CASCADE,
   to_hotel_id uuid NOT NULL REFERENCES hotels(id) ON DELETE CASCADE,
   duration_min int NOT NULL, safety_margin_min int NOT NULL DEFAULT 10,
+  transport_type text, valid_from date, valid_to date,
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
   CHECK (from_hotel_id <> to_hotel_id), CHECK (duration_min >= 0), CHECK (safety_margin_min >= 0));
+
+CREATE TABLE employee_extra_activations (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  employee_id uuid NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  hotel_id uuid NOT NULL REFERENCES hotels(id) ON DELETE CASCADE,
+  year int NOT NULL, month int NOT NULL,
+  host_service_id uuid, host_role text, active boolean NOT NULL DEFAULT true,
+  comment text, created_by uuid,
+  created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (employee_id, hotel_id, year, month, host_service_id));
 
 -- ── Propositions & cycle de vie ──────────────────────────────────────────────
 CREATE TABLE group_move_proposals (
