@@ -181,6 +181,20 @@ UNION ALL
    FROM deposits
   WHERE ((deposits.hotel_id = get_user_hotel_id()) OR is_platform_admin());
 
+-- GRANT explicites — un DROP VIEW/CREATE VIEW produit un nouvel objet qui ne
+-- porte que les privilèges par défaut du propriétaire. Sans ce ré-octroi,
+-- l'accès anon/authenticated/service_role à ces 3 vues serait silencieusement
+-- révoqué, cassant notamment l'export FEC réglementaire (v_fec_entries).
+-- Grants exacts recopiés depuis information_schema.table_privileges de
+-- production le 2026-08-03 (financial_timeline : authenticated/postgres/
+-- service_role uniquement, pas anon ; les deux autres vues : + anon).
+-- Le REVOKE explicite est nécessaire : une règle ALTER DEFAULT PRIVILEGES
+-- sur le schéma public accorde automatiquement anon à tout nouvel objet créé
+-- (confirmé à l'exécution — testé sur branche, anon apparaissait sur
+-- financial_timeline malgré l'absence de anon dans le GRANT ci-dessus).
+GRANT ALL ON TABLE public.financial_timeline TO authenticated, postgres, service_role;
+REVOKE ALL ON TABLE public.financial_timeline FROM anon;
+
 CREATE VIEW public.v_fec_entries AS
  WITH payment_account_map AS (
          SELECT 'CB'::text AS method,
@@ -454,6 +468,8 @@ CREATE VIEW public.v_fec_entries AS
     ecr_num
    FROM numbered;
 
+GRANT ALL ON TABLE public.v_fec_entries TO anon, authenticated, postgres, service_role;
+
 CREATE VIEW public.v_fin02_payments AS
  SELECT payment_method,
     count(*) AS nb_transactions,
@@ -463,6 +479,8 @@ CREATE VIEW public.v_fin02_payments AS
   WHERE (status = 'completed'::text)
   GROUP BY payment_method
   ORDER BY (sum(amount)) DESC;
+
+GRANT ALL ON TABLE public.v_fin02_payments TO anon, authenticated, postgres, service_role;
 
 -- ----------------------------------------------------------------------------
 -- D) lighthouse_imports — duration_seconds est une colonne GÉNÉRÉE STOCKÉE en
