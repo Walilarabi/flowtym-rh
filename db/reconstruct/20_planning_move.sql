@@ -60,6 +60,8 @@ CREATE TABLE group_move_proposals (
   CHECK (decision = ANY (ARRAY['allowed','allowed_with_warnings','blocked'])),
   CHECK (staleness = ANY (ARRAY['valid','to_refresh','conflict','expired'])),
   CHECK (status = ANY (ARRAY['draft','pending_review','approved','scheduled','rejected','cancelled','expired','applied'])));
+-- RLS + GRANT sur group_move_proposals : voir 30_functions.sql (dépend de pl_my_hotels(),
+-- défini plus tard dans l'ordre de reconstruction — cf. rebuild.sh).
 
 CREATE TABLE group_move_applications (
   idempotency_key text PRIMARY KEY,
@@ -99,6 +101,39 @@ CREATE TABLE group_move_approvals (
   comment text, created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (proposal_id, step_index),
   CHECK (status = ANY (ARRAY['pending','approved','rejected','skipped'])));
+
+-- group_move_cancellations / group_move_replacements : ajoutées par sql/97 (P0 sécurité
+-- 2026-08-03, cf. incident isolation inter-groupes) — RLS activée dès la création ici (le
+-- schéma live avait dérivé sans RLS ; cf. sql/97 pour le correctif appliqué en production).
+CREATE TABLE group_move_cancellations (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  idempotency_key text NOT NULL UNIQUE,
+  proposal_id uuid NOT NULL REFERENCES group_move_proposals(id) ON DELETE CASCADE,
+  scope text NOT NULL, scope_day date, cancelled_by uuid,
+  status text NOT NULL DEFAULT 'processing', result jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CHECK (scope = ANY (ARRAY['full','day'])),
+  CHECK (status = ANY (ARRAY['processing','completed'])));
+ALTER TABLE group_move_cancellations ENABLE ROW LEVEL SECURITY;
+CREATE POLICY gmc_access ON group_move_cancellations
+  FOR SELECT USING (proposal_id IN (SELECT id FROM group_move_proposals));
+GRANT SELECT ON group_move_cancellations TO authenticated, anon;
+
+CREATE TABLE group_move_replacements (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  idempotency_key text NOT NULL UNIQUE,
+  old_proposal_id uuid NOT NULL REFERENCES group_move_proposals(id),
+  new_proposal_id uuid REFERENCES group_move_proposals(id),
+  replaced_by uuid, status text NOT NULL DEFAULT 'processing', result jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CHECK (status = ANY (ARRAY['processing','completed'])));
+ALTER TABLE group_move_replacements ENABLE ROW LEVEL SECURITY;
+CREATE POLICY gmr_access ON group_move_replacements
+  FOR SELECT USING (
+    old_proposal_id IN (SELECT id FROM group_move_proposals)
+    OR new_proposal_id IN (SELECT id FROM group_move_proposals)
+  );
+GRANT SELECT ON group_move_replacements TO authenticated, anon;
 
 -- ── Grille (résumé/cache) et Segments (source de vérité) ─────────────────────
 CREATE TABLE staff_planning (
