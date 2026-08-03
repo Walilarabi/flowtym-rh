@@ -1,8 +1,9 @@
 -- ============================================================================
 -- sql/94_repair_users_generation_convergence.sql
--- Régularisation — convergence de génération de public.users vers la forme
--- réellement servie par production (ADR-012 §9, audit de dérive du
--- 2026-08-02)
+-- Régularisation ADDITIVE de public.users vers la forme réellement servie
+-- par production (ADR-012 §9, audit de dérive du 2026-08-02 ; révisé le
+-- 2026-08-02 suite à l'arbitrage explicite du mandat : aucun DROP COLUMN
+-- sans audit du dépôt PMS, inaccessible depuis ce dépôt).
 --
 -- Contexte : `00001_initial_schema` (baseline squashée, trackée) définit
 -- `users` avec first_name/last_name/email/role/hotel_id (nullable, ON DELETE
@@ -10,31 +11,31 @@
 -- created_at/updated_at — vérifié par lecture directe du texte de 00001. La
 -- table réellement servie par production a été redéfinie hors bande :
 -- first_name/last_name fusionnées en full_name, active→is_active,
--- invited_by/invitation_accepted_at retirées, hotel_id passé NOT NULL avec
--- ON DELETE RESTRICT (au lieu de nullable/SET NULL), auth_id passé NOT NULL
--- avec sa propre FK+UNIQUE vers auth.users, ajout de users_hotel_id_email_key.
+-- hotel_id passé NOT NULL avec ON DELETE RESTRICT (au lieu de nullable/SET
+-- NULL), auth_id passé NOT NULL avec sa propre FK+UNIQUE vers auth.users,
+-- ajout de users_hotel_id_email_key.
 --
--- Cible retenue : la forme de PRODUCTION — confirmée le 2026-08-02 comme
--- étant celle réellement utilisée par des dizaines de fonctions live
--- (admin_list_user_access, admin_get_user_detail, admin_set_user_status,
--- _resolve_app_access_core, current_user_has_app, platform_dashboard_kpis,
--- admin_platform_overview_kpis, admin_platform_alerts, etc.) et par les 14
--- lignes réelles de production (full_name/is_active/auth_id/hotel_id tous
--- peuplés, aucune trace de first_name/last_name).
+-- Cible retenue pour les colonnes ADDITIVES : la forme de PRODUCTION —
+-- confirmée le 2026-08-02 comme étant celle réellement utilisée par des
+-- dizaines de fonctions live (admin_list_user_access, admin_get_user_detail,
+-- admin_set_user_status, _resolve_app_access_core, current_user_has_app,
+-- platform_dashboard_kpis, admin_platform_overview_kpis,
+-- admin_platform_alerts, etc.) et par les 14 lignes réelles de production
+-- (full_name/is_active/auth_id/hotel_id tous peuplés).
 --
--- Preuve « zéro référence » pour chaque colonne retirée ci-dessous : les
--- seules occurrences de first_name/last_name trouvées dans le dépôt et dans
--- le corps des fonctions live de production appartiennent à d'AUTRES tables
--- (employees, candidates, guests, hk_staff, staff_members — confirmé via
--- pg_attribute, aucune n'appartient à public.users) ; invited_by et
--- invitation_accepted_at : 0 occurrence nulle part (colonne ni référencée en
--- lecture ni en écriture) ; la colonne booléenne legacy `active` (distincte
--- de `is_active`) : 0 référence identifiée comme colonne de users.
+-- RÉVISION 2026-08-02 — colonnes first_name, last_name, active, invited_by,
+-- invitation_accepted_at : la version précédente de ce fichier les DROPpait
+-- sur preuve de « zéro référence dans ce dépôt + corps des fonctions de
+-- production ». Cette preuve est jugée insuffisante par le mandat : le PMS
+-- vit dans un dépôt séparé non accessible depuis cette session. Aucun DROP
+-- COLUMN n'est donc exécuté ici. Les 5 colonnes legacy sont CONSERVÉES
+-- intégralement, uniquement marquées comme dépréciées via COMMENT ON
+-- COLUMN — le retrait effectif est différé à une migration ultérieure,
+-- après audit complet du dépôt PMS.
 --
--- Ce fichier n'est PAS idempotent au sens Postgres natif pour les DROP
--- COLUMN (`DROP COLUMN IF EXISTS` l'est) mais suit le même patron trois-états
--- que sql/93 : détecte l'état pristine (colonnes legacy présentes) vs déjà
--- convergé (absentes) vs partiel inattendu.
+-- Ce fichier suit le même patron trois-états que sql/93 : détecte l'état
+-- pristine (colonnes legacy présentes) vs déjà convergé (full_name présent)
+-- vs un état partiel inattendu.
 --
 -- Pas de BEGIN/COMMIT/ROLLBACK. SQL pur, compatible apply_migration. À
 -- appliquer sur une branche fraîchement rejouée AVANT toute insertion de
@@ -63,10 +64,10 @@ BEGIN
     RAISE EXCEPTION '[users] état inattendu : ni first_name (génération pristine) ni full_name (génération cible) présents. Aucune correction automatique — vérifier manuellement.';
   END IF;
 
-  -- A) full_name/is_active : sur un rejeu pristine pur, ces colonnes cible
-  -- n'existent pas encore (00001 ne les crée pas) — les ajouter si besoin,
-  -- avec backfill depuis first_name/last_name/active pour toute ligne déjà
-  -- présente (table normalement vide sur un rejeu frais).
+  -- A) full_name/is_active : ajout additif + backfill depuis
+  -- first_name/last_name/active pour toute ligne déjà présente (table
+  -- normalement vide sur un rejeu frais). Ne touche jamais first_name/
+  -- last_name/active elles-mêmes, qui restent intactes (cf. section F).
   IF NOT v_has_target THEN
     EXECUTE 'ALTER TABLE public.users ADD COLUMN full_name text';
     EXECUTE 'ALTER TABLE public.users ADD COLUMN is_active boolean NOT NULL DEFAULT true';
@@ -78,7 +79,9 @@ BEGIN
   -- B) auth_id / hotel_id : NOT NULL + FK cible. Échec explicite (jamais
   -- silencieux) si une ligne existante a l'un des deux à NULL — signe que la
   -- table contient déjà des données incompatibles avec la cible, à traiter
-  -- manuellement avant de rejouer cette migration.
+  -- manuellement avant de rejouer cette migration. Poser NOT NULL ne
+  -- supprime aucune donnée (contrairement à un DROP COLUMN) : il bloque
+  -- seulement l'insertion future de NULL.
   IF EXISTS (SELECT 1 FROM public.users WHERE auth_id IS NULL) THEN
     RAISE EXCEPTION '[users] au moins une ligne a auth_id NULL — impossible de poser NOT NULL sans perte de données implicite. Aucune correction automatique.';
   END IF;
@@ -98,9 +101,7 @@ BEGIN
 
   -- hotel_id FK : cible ON DELETE RESTRICT (production bloque la suppression
   -- d'un hôtel ayant encore des utilisateurs) au lieu de ON DELETE SET NULL
-  -- (baseline pristine — désormais impossible de toute façon puisque
-  -- hotel_id est NOT NULL ci-dessus, SET NULL y échouerait silencieusement
-  -- en pratique). Divergence sémantique réelle, pas cosmétique.
+  -- (baseline pristine). Divergence sémantique réelle, pas cosmétique.
   IF EXISTS (
     SELECT 1 FROM pg_constraint WHERE conrelid='public.users'::regclass AND conname='users_hotel_id_fkey'
       AND pg_get_constraintdef(oid) LIKE '%ON DELETE SET NULL%'
@@ -123,7 +124,7 @@ BEGIN
   -- hotel_id() (production) remplace la version baseline qui ajoutait
   -- `OR auth_id = auth.uid()`. users_delete/insert/update (baseline) sont
   -- retirées au profit de users_hotel_select/users_hotel_update
-  -- (production).
+  -- (production). Le retrait d'une policy ne touche jamais aux données.
   IF EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='public' AND tablename='users' AND policyname='users_select'
       AND qual LIKE '%auth_id = auth.uid()%') THEN
     EXECUTE 'DROP POLICY users_select ON public.users';
@@ -149,17 +150,17 @@ BEGIN
   EXECUTE 'CREATE INDEX IF NOT EXISTS idx_users_auth ON public.users USING btree (auth_id)';
   EXECUTE 'CREATE INDEX IF NOT EXISTS idx_users_hotel ON public.users USING btree (hotel_id)';
 
-  -- F) Retrait des colonnes de l'ancienne génération — preuve de zéro
-  -- référence documentée en en-tête de fichier. CASCADE retire
-  -- automatiquement users_invited_by_fkey (rattachée à invited_by).
+  -- F) RÉVISÉ — aucun DROP COLUMN. Les 5 colonnes de l'ancienne génération
+  -- sont marquées legacy/dépréciées via commentaire, jamais retirées tant
+  -- que l'audit du dépôt PMS n'a pas prouvé l'absence de toute lecture.
   IF v_has_legacy THEN
-    EXECUTE 'ALTER TABLE public.users DROP COLUMN IF EXISTS first_name CASCADE';
-    EXECUTE 'ALTER TABLE public.users DROP COLUMN IF EXISTS last_name CASCADE';
-    EXECUTE 'ALTER TABLE public.users DROP COLUMN IF EXISTS active CASCADE';
-    EXECUTE 'ALTER TABLE public.users DROP COLUMN IF EXISTS invited_by CASCADE';
-    EXECUTE 'ALTER TABLE public.users DROP COLUMN IF EXISTS invitation_accepted_at CASCADE';
+    EXECUTE $c$COMMENT ON COLUMN public.users.first_name IS 'LEGACY (ancienne génération, fusionnée dans "full_name") — conservée sans retrait : aucune preuve d''absence de lecture côté dépôt PMS (hors périmètre de cet audit). Ne pas utiliser pour du nouveau code. Retrait différé à une migration ultérieure après audit PMS complet.'$c$;
+    EXECUTE $c$COMMENT ON COLUMN public.users.last_name IS 'LEGACY (ancienne génération, fusionnée dans "full_name") — conservée sans retrait, audit PMS requis avant suppression. Ne pas utiliser pour du nouveau code.'$c$;
+    EXECUTE $c$COMMENT ON COLUMN public.users.active IS 'LEGACY (ancienne génération, remplacée par "is_active") — conservée sans retrait, audit PMS requis avant suppression. Ne pas utiliser pour du nouveau code.'$c$;
+    EXECUTE $c$COMMENT ON COLUMN public.users.invited_by IS 'LEGACY (ancienne génération) — conservée sans retrait, audit PMS requis avant suppression. Ne pas utiliser pour du nouveau code.'$c$;
+    EXECUTE $c$COMMENT ON COLUMN public.users.invitation_accepted_at IS 'LEGACY (ancienne génération) — conservée sans retrait, audit PMS requis avant suppression. Ne pas utiliser pour du nouveau code.'$c$;
   END IF;
 
-  RAISE NOTICE '[users] convergence de génération terminée (colonnes, contraintes NOT NULL/FK, trigger, policies, index, retraits justifiés).';
+  RAISE NOTICE '[users] convergence additive terminée (colonnes, contraintes NOT NULL/FK, trigger, policies, index) ; colonnes legacy conservées et marquées dépréciées, aucun DROP COLUMN.';
 END
 $converge_users$;

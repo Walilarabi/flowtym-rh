@@ -10,6 +10,15 @@
 -- aveugle : texte exact extrait via pg_get_triggerdef/pg_get_functiondef/
 -- pg_views.definition/col_description/pg_get_expr, jamais reformulé.
 --
+-- RÉVISION 2026-08-02 : la section B (hotels) ne DROP plus aucune colonne.
+-- room_count/user_count/updated_at sont conservées et marquées legacy —
+-- le mandat exige un audit du dépôt PMS (inaccessible depuis ce dépôt)
+-- avant tout retrait de colonne, "l'absence de référence dans flowtym-rh
+-- ne suffit pas". Conséquence assumée et documentée : la branche
+-- régularisée diverge désormais de production sur ces 3 colonnes
+-- spécifiques (divergence expliquée, pas silencieuse) tant que ce retrait
+-- n'est pas fait dans une migration ultérieure dédiée.
+--
 -- Pas de BEGIN/COMMIT/ROLLBACK. SQL pur, compatible apply_migration.
 -- ============================================================================
 
@@ -20,14 +29,17 @@
 COMMENT ON COLUMN public.audit_logs.actor_label IS 'Étiquette humainement lisible de l''acteur quand actor_user_id est NULL (ex: "Cron", "Service Role", "Anonymous").';
 
 -- ----------------------------------------------------------------------------
--- B) hotels — retrait des 3 colonnes legacy jamais retirées du rejeu pur
---    (preuve de zéro référence déjà établie dans sql/92 ; ce fichier exécute
---    enfin le retrait que sql/92 avait annoncé sans le faire), correction de
---    la nullabilité de status, ajout du trigger manquant, retrait des 3
---    policies legacy remplacées en production par les policies _admin/_own,
---    correction du rôle de hotels_select, et correction des 7 commentaires
---    Lighthouse (recopiés mot pour mot depuis production, y compris celui de
---    lighthouse_subscription_id totalement absent du rejeu).
+-- B) hotels — RÉVISÉ 2026-08-02 : aucun DROP COLUMN (mandat : le PMS vit
+--    dans un dépôt séparé inaccessible, "l'absence de référence dans
+--    flowtym-rh ne suffit pas"). room_count/user_count/updated_at sont
+--    conservées et marquées legacy/dépréciées au lieu d'être retirées.
+--    Le reste : correction de la nullabilité de status, ajout du trigger
+--    manquant, retrait des 3 policies legacy remplacées en production par
+--    les policies _admin/_own (un retrait de policy ne touche aucune
+--    donnée), correction du rôle de hotels_select, et correction des 7
+--    commentaires Lighthouse (recopiés mot pour mot depuis production, y
+--    compris celui de lighthouse_subscription_id totalement absent du
+--    rejeu).
 -- ----------------------------------------------------------------------------
 DO $repair_hotels$
 BEGIN
@@ -36,13 +48,13 @@ BEGIN
   END IF;
 
   IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='hotels' AND column_name='room_count') THEN
-    EXECUTE 'ALTER TABLE public.hotels DROP COLUMN room_count CASCADE';
+    EXECUTE $c$COMMENT ON COLUMN public.hotels.room_count IS 'LEGACY (colonne du baseline pristine, absente de production) — conservée sans retrait : aucune preuve d''absence de lecture côté dépôt PMS (hors périmètre de cet audit). Ne pas utiliser pour du nouveau code. Retrait différé à une migration ultérieure après audit PMS complet.'$c$;
   END IF;
   IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='hotels' AND column_name='user_count') THEN
-    EXECUTE 'ALTER TABLE public.hotels DROP COLUMN user_count CASCADE';
+    EXECUTE $c$COMMENT ON COLUMN public.hotels.user_count IS 'LEGACY (colonne du baseline pristine, absente de production) — conservée sans retrait, audit PMS requis avant suppression. Ne pas utiliser pour du nouveau code.'$c$;
   END IF;
   IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='hotels' AND column_name='updated_at') THEN
-    EXECUTE 'ALTER TABLE public.hotels DROP COLUMN updated_at CASCADE';
+    EXECUTE $c$COMMENT ON COLUMN public.hotels.updated_at IS 'LEGACY (colonne du baseline pristine, absente de production ; trigger de rafraîchissement automatique retiré) — conservée sans retrait, valeur figée à sa dernière mise à jour. Audit PMS requis avant suppression.'$c$;
   END IF;
 
   IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='hotels' AND column_name='status' AND is_nullable='NO') THEN
