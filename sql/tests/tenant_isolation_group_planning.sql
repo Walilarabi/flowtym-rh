@@ -66,8 +66,8 @@ DECLARE
   v_svc_b uuid; v_svc_r uuid;
   v_emp_b uuid; v_emp_r uuid; v_extra_b uuid; v_extra_r uuid;
   v_auth_bdir uuid; v_auth_bcol uuid; v_auth_rdir uuid; v_auth_rcol uuid;
-  v_auth_extra_b uuid; v_auth_extra_r uuid; v_auth_admin uuid; v_auth_multi uuid;
-  v_u_bdir uuid; v_u_bcol uuid; v_u_rdir uuid; v_u_rcol uuid; v_u_multi uuid;
+  v_auth_extra_b uuid; v_auth_extra_r uuid; v_auth_admin uuid; v_auth_multi uuid; v_auth_bnoacl uuid;
+  v_u_bdir uuid; v_u_bcol uuid; v_u_rdir uuid; v_u_rcol uuid; v_u_multi uuid; v_u_bnoacl uuid;
   v_prop_b uuid := gen_random_uuid();
 BEGIN
   INSERT INTO hotel_groups(name) VALUES ('ZZTI BOUDAA HOTELS') RETURNING id INTO v_gid_b;
@@ -118,6 +118,20 @@ BEGIN
 
   INSERT INTO platform_admins(auth_id, email, role, is_active) VALUES (v_auth_admin, 'zzti-admin@example.invalid', 'super_admin', true);
 
+  -- Utilisateur SANS AUCUNE ligne user_hotels (reproduit exactement le profil réel majoritaire :
+  -- accès à son unique hôtel via la seule colonne historique users.hotel_id, jamais via user_hotels
+  -- — cf. régression sql/100). pl_my_hotels() est TOUJOURS vide pour ce compte. get_user_hotel_id()
+  -- le résout correctement via son fallback (c) legacy users.hotel_id.
+  v_auth_bnoacl := gen_random_uuid(); INSERT INTO auth.users(id) VALUES (v_auth_bnoacl);
+  INSERT INTO users(auth_id, hotel_id, email, full_name, role) VALUES (v_auth_bnoacl, v_hb1, 'zzti-bnoacl@example.invalid', 'ZZTI Boudaa SansACL', 'reception') RETURNING id INTO v_u_bnoacl;
+
+  -- Fixture pour group_requirements_list()/group_travel_times() : une ligne par groupe, pour
+  -- vérifier que le principal sans ACL du groupe Boudaa ne voit jamais la ligne Redouane.
+  INSERT INTO group_staffing_requirements(hotel_id, service_name, weekday, required_count)
+    VALUES (v_hb1, 'ZZTI Reception', 1, 2), (v_hr1, 'ZZTI Reception', 1, 3);
+  INSERT INTO hotel_travel_times(from_hotel_id, to_hotel_id, duration_min)
+    VALUES (v_hb1, v_hb2, 15), (v_hr1, v_hr2, 20);
+
   -- Utilisateur MULTI-GROUPE (reproduit exactement l'incident réel : direction accès direct
   -- aux 2 hôtels de Boudaa ET aux 2 hôtels de Redouane). Avant sql/98, org_get()/group_planning()
   -- resolvaient le groupe via un SELECT ... LIMIT 1 sans ORDER BY sur l'ensemble de ces 4 hôtels
@@ -160,7 +174,7 @@ BEGIN
     v_gid_b gid_b, v_gid_r gid_r, v_gid_iso_a, v_gid_iso_b, v_hb1, v_hb2, v_hr1, v_hr2, v_hr3,
     v_h_iso_a, v_h_iso_b, v_emp_b, v_emp_r, v_extra_b, v_extra_r,
     v_auth_bdir, v_auth_bcol, v_auth_rdir, v_auth_rcol, v_auth_extra_b, v_auth_extra_r, v_auth_admin,
-    v_auth_multi, v_u_multi, v_prop_b;
+    v_auth_multi, v_u_multi, v_prop_b, v_auth_bnoacl, v_u_bnoacl;
 END $$;
 
 GRANT SELECT ON ti_ids TO authenticated, anon;
@@ -448,6 +462,53 @@ BEGIN
     PERFORM pg_temp.ti_log(27,'org_provision: hotel sans hotel_code conserve son groupe (pas de fusion inter-groupes)','PASS', v_gid_after::text);
   ELSE
     PERFORM pg_temp.ti_log(27,'org_provision: hotel sans hotel_code conserve son groupe (pas de fusion inter-groupes)','FAIL','FUITE: group_id ecrase -> '||coalesce(v_gid_after::text,'null'));
+  END IF;
+END $$;
+
+RESET ROLE;
+
+-- ---------------------------------------------------------------------------
+-- 9. Régression sql/100 : group_planning()/group_requirements_list()/group_travel_times()
+--    combinaient group_id=(groupe actif) ET id IN (SELECT pl_my_hotels()) — cette seconde
+--    condition, pour tout compte SANS ligne user_hotels (le profil réel majoritaire), renvoyait
+--    une liste d'hôtels VIDE, group_id pourtant correct : l'onglet Groupe disparaissait pour des
+--    comptes 100% légitimes de leur propre groupe. Reproduit ici avec v_auth_bnoacl (0 ligne
+--    user_hotels, accès via users.hotel_id uniquement) : preuve que les 3 RPC renvoient
+--    désormais le périmètre complet du groupe actif (pas juste l'hôtel de l'appelant, pas vide)
+--    ET jamais le groupe Redouane.
+-- ---------------------------------------------------------------------------
+SET LOCAL ROLE authenticated;
+DO $$
+DECLARE
+  r ti_ids%rowtype;
+  v_gp jsonb; v_reqs jsonb; v_tt jsonb;
+BEGIN
+  SELECT * INTO r FROM ti_ids;
+  PERFORM pg_temp.ti_as(r.v_auth_bnoacl);
+
+  v_gp := public.group_planning('ZZTI Reception'::text, '2099-06-01'::date, '2099-06-01'::date);
+  IF v_gp->>'group_id' = r.gid_b::text
+     AND (SELECT count(*) FROM jsonb_array_elements(v_gp->'hotels') m WHERE (m->>'id')::uuid IN (r.v_hb1, r.v_hb2)) = 2
+     AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_gp->'hotels') m WHERE (m->>'id')::uuid IN (r.v_hr1, r.v_hr2, r.v_hr3)) THEN
+    PERFORM pg_temp.ti_log(29,'regression sql/100: compte sans user_hotels voit TOUT son groupe Boudaa (pas vide, pas Redouane)','PASS', v_gp::text);
+  ELSE
+    PERFORM pg_temp.ti_log(29,'regression sql/100: compte sans user_hotels voit TOUT son groupe Boudaa (pas vide, pas Redouane)','FAIL', coalesce(v_gp::text,'null'));
+  END IF;
+
+  v_reqs := (SELECT coalesce(jsonb_agg(t),'[]'::jsonb) FROM public.group_requirements_list() t);
+  IF (SELECT count(*) FROM jsonb_array_elements(v_reqs) x WHERE (x->>'hotel_id')::uuid = r.v_hb1) = 1
+     AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_reqs) x WHERE (x->>'hotel_id')::uuid = r.v_hr1) THEN
+    PERFORM pg_temp.ti_log(30,'regression sql/100: group_requirements_list() sans user_hotels = Boudaa uniquement','PASS', v_reqs::text);
+  ELSE
+    PERFORM pg_temp.ti_log(30,'regression sql/100: group_requirements_list() sans user_hotels = Boudaa uniquement','FAIL', coalesce(v_reqs::text,'null'));
+  END IF;
+
+  v_tt := (SELECT coalesce(jsonb_agg(t),'[]'::jsonb) FROM public.group_travel_times() t);
+  IF (SELECT count(*) FROM jsonb_array_elements(v_tt) x WHERE (x->>'from_hotel_id')::uuid = r.v_hb1) = 1
+     AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_tt) x WHERE (x->>'from_hotel_id')::uuid = r.v_hr1) THEN
+    PERFORM pg_temp.ti_log(31,'regression sql/100: group_travel_times() sans user_hotels = Boudaa uniquement','PASS', v_tt::text);
+  ELSE
+    PERFORM pg_temp.ti_log(31,'regression sql/100: group_travel_times() sans user_hotels = Boudaa uniquement','FAIL', coalesce(v_tt::text,'null'));
   END IF;
 END $$;
 

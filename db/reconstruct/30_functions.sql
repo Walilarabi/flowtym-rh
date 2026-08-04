@@ -30,6 +30,9 @@ BEGIN
 
   SELECT uh.hotel_id INTO v_hotel_id FROM public.user_hotels uh
     WHERE uh.user_id = v_user_id AND uh.is_default = true LIMIT 1;
+  IF v_hotel_id IS NOT NULL THEN RETURN v_hotel_id; END IF;
+
+  SELECT u.hotel_id INTO v_hotel_id FROM public.users u WHERE u.id = v_user_id LIMIT 1;
   RETURN v_hotel_id;
 END;
 $function$;
@@ -720,9 +723,9 @@ BEGIN
   RETURN jsonb_build_object(
     'group_id', v_gid,
     'hotels', (SELECT coalesce(jsonb_agg(jsonb_build_object('id',id,'name',name,'hotel_code',hotel_code) ORDER BY name),'[]'::jsonb)
-               FROM hotels WHERE group_id=v_gid AND active AND id IN (SELECT public.pl_my_hotels())),
+               FROM hotels WHERE group_id=v_gid AND active),
     'services', (SELECT coalesce(jsonb_agg(DISTINCT name),'[]'::jsonb) FROM staff_departments
-                 WHERE hotel_id IN (SELECT id FROM hotels WHERE group_id=v_gid AND id IN (SELECT public.pl_my_hotels()))),
+                 WHERE hotel_id IN (SELECT id FROM hotels WHERE group_id=v_gid)),
     'cells', (SELECT coalesce(jsonb_agg(c),'[]'::jsonb) FROM (
         SELECT jsonb_build_object('hotel_id',e.hotel_id,'employee_id',e.id,'name',e.first_name||' '||e.last_name,
                'role',e.role,'is_extra',false,'origin_hotel_id',e.hotel_id,'day',gd.day::date,
@@ -732,7 +735,7 @@ BEGIN
         FROM employees e
         CROSS JOIN generate_series(p_from, p_to, interval '1 day') AS gd(day)
         LEFT JOIN staff_planning sp ON sp.employee_id=e.id AND sp.hotel_id=e.hotel_id AND sp.day=gd.day::date
-        WHERE e.hotel_id IN (SELECT id FROM hotels WHERE group_id=v_gid AND active AND id IN (SELECT public.pl_my_hotels()))
+        WHERE e.hotel_id IN (SELECT id FROM hotels WHERE group_id=v_gid AND active)
           AND e.department=p_service
           AND coalesce(e.status, CASE WHEN e.active THEN 'actif' ELSE 'parti' END) <> 'parti'
         UNION ALL
@@ -745,11 +748,11 @@ BEGIN
         JOIN staff_planning sp ON sp.employee_id=act.employee_id AND sp.hotel_id=act.hotel_id
           AND sp.day BETWEEN p_from AND p_to
           AND extract(year FROM sp.day)::int=act.year AND extract(month FROM sp.day)::int=act.month
-        WHERE act.active AND act.hotel_id IN (SELECT id FROM hotels WHERE group_id=v_gid AND active AND id IN (SELECT public.pl_my_hotels()))
+        WHERE act.active AND act.hotel_id IN (SELECT id FROM hotels WHERE group_id=v_gid AND active)
       ) sub),
     'requirements', (SELECT coalesce(jsonb_agg(jsonb_build_object('hotel_id',hotel_id,'weekday',weekday,'shift',shift,'required',required_count)),'[]'::jsonb)
                      FROM group_staffing_requirements
-                     WHERE service_name=p_service AND hotel_id IN (SELECT id FROM hotels WHERE group_id=v_gid AND id IN (SELECT public.pl_my_hotels())))
+                     WHERE service_name=p_service AND hotel_id IN (SELECT id FROM hotels WHERE group_id=v_gid))
   );
 END $function$;
 
@@ -759,8 +762,7 @@ CREATE OR REPLACE FUNCTION public.group_requirements_list()
 AS $function$
   SELECT hotel_id, service_name, weekday, required_count
   FROM group_staffing_requirements
-  WHERE hotel_id IN (SELECT public.pl_my_hotels())
-    AND hotel_id IN (SELECT id FROM hotels WHERE group_id = (SELECT group_id FROM hotels WHERE id = public.get_user_hotel_id()));
+  WHERE hotel_id IN (SELECT id FROM hotels WHERE group_id = (SELECT group_id FROM hotels WHERE id = public.get_user_hotel_id()));
 $function$;
 
 CREATE OR REPLACE FUNCTION public.group_travel_times()
@@ -769,7 +771,6 @@ CREATE OR REPLACE FUNCTION public.group_travel_times()
 AS $function$
   SELECT from_hotel_id, to_hotel_id, duration_min, safety_margin_min, transport_type, valid_from, valid_to
   FROM hotel_travel_times
-  WHERE from_hotel_id IN (SELECT public.pl_my_hotels()) AND to_hotel_id IN (SELECT public.pl_my_hotels())
-    AND from_hotel_id IN (SELECT id FROM hotels WHERE group_id = (SELECT group_id FROM hotels WHERE id = public.get_user_hotel_id()))
+  WHERE from_hotel_id IN (SELECT id FROM hotels WHERE group_id = (SELECT group_id FROM hotels WHERE id = public.get_user_hotel_id()))
     AND to_hotel_id IN (SELECT id FROM hotels WHERE group_id = (SELECT group_id FROM hotels WHERE id = public.get_user_hotel_id()));
 $function$;
