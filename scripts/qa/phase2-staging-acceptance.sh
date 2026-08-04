@@ -71,6 +71,8 @@ export FORBIDDEN_TARGET_REFS="${FORBIDDEN_REFS[*]}"
 # shellcheck source=lib/target-guard.sh
 source "$(dirname "$0")/lib/target-guard.sh"
 validate_staging_target || exit 2
+# shellcheck source=lib/http-response.sh
+source "$(dirname "$0")/lib/http-response.sh"
 
 # ============================================================================
 # Masquage — GitHub Actions (::add-mask::) + masquage défensif de toute sortie affichée
@@ -165,6 +167,79 @@ service_call() {
   echo "$body_out"
 }
 
+# assert_insert_response LABEL STATUS BODY
+#
+# Cœur commun de validation d'une réponse PostgREST censée représenter une ligne insérée
+# (Prefer: return=representation) — jamais d'accès `.[0]` sans être passé, dans cet ordre
+# strict, par ces contrôles :
+#   1. le code HTTP (doit être 200/201) ;
+#   2. que le corps est du JSON syntaxiquement valide (jamais parsé sinon) ;
+#   3. que le corps n'est pas un objet d'erreur PostgREST ({message,code,details,hint} ou
+#      {error:...}) — un objet reconnu comme erreur produit un message explicite avec le détail
+#      renvoyé par PostgREST, jamais un `jq: Cannot index object with number` opaque ;
+#   4. que le corps est bien un tableau (forme attendue de `Prefer: return=representation`) ;
+#   5. que ce tableau contient au moins une ligne avec un `id`.
+# Écrit l'id sur stdout et retourne 0 en cas de succès ; sinon émet un [FAIL] explicite (HTTP +
+# détail éventuel) via log_fail et retourne 1 — jamais un die_critical direct ici, pour laisser
+# l'appelant décider (certains inserts sont critiques, d'autres non).
+assert_insert_response() {
+  local label="$1" status="$2" body="$3"
+
+  if [[ "$status" != "200" && "$status" != "201" ]]; then
+    log_fail "${label} — code HTTP inattendu (${status}, attendu 200/201)" "$status"
+    echo "  corps reçu : ${body}" | mask
+    return 1
+  fi
+
+  if ! echo "$body" | jq -e . >/dev/null 2>&1; then
+    log_fail "${label} — réponse non-JSON reçue malgré un HTTP ${status}" "$status"
+    echo "  corps reçu (tronqué) : $(echo "$body" | head -c 300)" | mask
+    return 1
+  fi
+
+  if echo "$body" | jq -e 'type == "object" and (has("message") or has("code") or has("error") or has("hint"))' >/dev/null 2>&1; then
+    local errmsg
+    errmsg=$(echo "$body" | jq -r '.message // .error // .hint // .code // "erreur PostgREST non détaillée"' 2>/dev/null)
+    log_fail "${label} — PostgREST a renvoyé un objet d'erreur (HTTP ${status})" "$status"
+    echo "  détail : ${errmsg}" | mask
+    return 1
+  fi
+
+  if ! echo "$body" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    log_fail "${label} — forme JSON inattendue (ni tableau, ni objet d'erreur reconnu)" "$status"
+    return 1
+  fi
+
+  local id
+  id=$(echo "$body" | jq -r '.[0].id // empty' 2>/dev/null)
+  if [[ -z "$id" ]]; then
+    log_fail "${label} — tableau vide ou sans champ id (0 ligne insérée)" "$status"
+    return 1
+  fi
+
+  echo "$id"
+  return 0
+}
+
+# insert_and_get_id LABEL PATH PAYLOAD — variante service_role (fixtures QA internes).
+insert_and_get_id() {
+  local label="$1" path="$2" payload="$3"
+  local resp
+  resp=$(service_call POST "$path" "$payload")
+  split_http_response "$resp"
+  assert_insert_response "$label" "$HTTP_STATUS" "$HTTP_BODY"
+}
+
+# insert_and_get_id_rest LABEL PATH JWT PAYLOAD — variante rest_call (INSERT réel via
+# PostgREST sous l'identité d'un persona JWT, ex. hôtel A créant son propre ticket support).
+insert_and_get_id_rest() {
+  local label="$1" path="$2" jwt="$3" payload="$4"
+  local resp
+  resp=$(rest_call POST "$path" "$jwt" "$payload")
+  split_http_response "$resp"
+  assert_insert_response "$label" "$HTTP_STATUS" "$HTTP_BODY"
+}
+
 expect_status() {
   local label="$1" got="$2" want="$3"
   if [[ "$got" == "$want" ]]; then log_pass "$label" "$got"; else log_fail "$label — attendu $want" "$got"; fi
@@ -241,7 +316,14 @@ log_info "=== STRUCTURE (comparaison staging vs snapshot production committé) =
 BASELINE_TABLES='["add_ons","audit_logs","employees","help_articles","hotel_addon_subscriptions","hotel_app_subscriptions","hotel_groups","hotel_subscription_events","hotel_subscriptions","hotels","hr_document_audit_logs","invoice_sequences","invoices","lighthouse_days","lighthouse_imports","mi_imported_events","onboarding_tasks","payments","plan_modules","platform_admins","platform_apps","platform_contracts","platform_credit_note_sequences","platform_credit_notes","platform_invoice_sequences","platform_invoices","platform_logs","platform_payments","platform_schema_markers","platform_settings","rms_decisions","rms_settings","rooms","salon_events","staff_departments","subscription_plans","support_tickets","user_active_hotel","user_app_access","user_hotels","user_invitations","users"]'
 
 R=$(service_call POST "/rest/v1/rpc/_qa_introspect_tables" "$(jq -nc --argjson t "$BASELINE_TABLES" '{p_tables:$t}')")
-ST=$(echo "$R" | head -n1); STAGING_SNAPSHOT=$(echo "$R" | tail -n +2)
+# NB : l'introspection complète de 42 tables (colonnes/contraintes/index/triggers/policies/
+# grants) peut produire un JSON volumineux. On évite ici deux pièges observés en exécution
+# réelle : (1) `echo "$R" | head -n1` peut recevoir SIGPIPE ("Broken pipe") quand $R est gros et
+# que head ferme son entrée tôt — remplacé par split_http_response (lib/http-response.sh,
+# expansion de paramètre bash pure, sans pipe externe) ; (2) passer ce JSON volumineux à jq via
+# l'option "argjson" (comme argument de ligne de commande) peut dépasser ARG_MAX du système
+# ("Argument list too long") — remplacé par un fichier temporaire lu via `--slurpfile`.
+split_http_response "$R"; ST="$HTTP_STATUS"; STAGING_SNAPSHOT="$HTTP_BODY"
 if [[ "$ST" != "200" ]]; then
   die_critical "Impossible d'introspecter le schéma de staging (_qa_introspect_tables) — HTTP ${ST}"
 fi
@@ -251,11 +333,14 @@ if [[ ! -f "$SNAPSHOT_FIXTURE" ]]; then
   die_critical "Fixture manquante : ${SNAPSHOT_FIXTURE}"
 fi
 
+STAGING_SNAPSHOT_FILE=$(mktemp)
+printf '%s' "$STAGING_SNAPSHOT" > "$STAGING_SNAPSHOT_FILE"
+
 # Comparaison stricte : colonnes (nom/type/nullable), contraintes, index, triggers, policies,
 # grants, RLS enabled/forced. Tolère les différences de texte de 'default' (peut contenir des
 # OID/séquences non comparables tel quel) — tout le reste doit matcher exactement.
-STRUCT_DIFF=$(jq -n --slurpfile prod "$SNAPSHOT_FIXTURE" --argjson staging "$STAGING_SNAPSHOT" '
-  ($prod[0]) as $p | $staging as $s |
+STRUCT_DIFF=$(jq -n --slurpfile prod "$SNAPSHOT_FIXTURE" --slurpfile staging "$STAGING_SNAPSHOT_FILE" '
+  ($prod[0]) as $p | ($staging[0]) as $s |
   [ ($p|keys[]) as $t | select($s[$t] != null) |
     ($p[$t]) as $pt | ($s[$t]) as $st |
     {
@@ -280,13 +365,14 @@ else
   done
 fi
 echo "$STRUCT_DIFF" > "${RESULTS_DIR}/structural_diff.json"
+rm -f "$STAGING_SNAPSHOT_FILE"
 
 # Tables Phase 2 réellement nouvelles (introduites par sql/80-89, pas encore en production —
 # ces PR sont encore ouvertes) : existence + RLS activée uniquement, pas de comparaison à la
 # production puisqu'elle ne les a pas encore.
 NEW_TABLES='["platform_notifications","support_ticket_replies","support_ticket_attachments","support_ticket_attachment_access_log"]'
 R=$(service_call POST "/rest/v1/rpc/_qa_introspect_tables" "$(jq -nc --argjson t "$NEW_TABLES" '{p_tables:$t}')")
-ST=$(echo "$R" | head -n1); NEW_SNAPSHOT=$(echo "$R" | tail -n +2)
+split_http_response "$R"; ST="$HTTP_STATUS"; NEW_SNAPSHOT="$HTTP_BODY"
 if [[ "$ST" == "200" ]]; then
   for t in $(echo "$NEW_TABLES" | jq -r '.[]'); do
     exists=$(echo "$NEW_SNAPSHOT" | jq --arg t "$t" 'has($t)')
@@ -314,13 +400,32 @@ EMAIL_HOTEL_B="${RUN_TAG}-hotelb@flowtym-staging-test.invalid"
 EMAIL_NOATTACH="${RUN_TAG}-noattach@flowtym-staging-test.invalid"
 
 create_confirmed_user() {
+  # GoTrue renvoie un OBJET (jamais un tableau) : mêmes contrôles stricts que
+  # insert_and_get_id (HTTP, JSON valide, objet d'erreur) mais adaptés à cette forme.
   local email="$1"
-  local resp body id
+  local resp status body
   resp=$(service_call POST "/auth/v1/admin/users" \
     "$(jq -n --arg e "$email" --arg p "$PASSWORD" '{email:$e, password:$p, email_confirm:true}')")
-  body=$(echo "$resp" | tail -n +2)
-  id=$(echo "$body" | jq -r '.id // empty')
-  echo "$id"
+  split_http_response "$resp"
+  status="$HTTP_STATUS"
+  body="$HTTP_BODY"
+
+  if [[ "$status" != "200" && "$status" != "201" ]]; then
+    log_info "create_confirmed_user(${email}) — code HTTP inattendu (${status})"
+    return 0
+  fi
+  if ! echo "$body" | jq -e . >/dev/null 2>&1; then
+    log_info "create_confirmed_user(${email}) — réponse non-JSON malgré HTTP ${status}"
+    return 0
+  fi
+  if echo "$body" | jq -e '(has("message") or has("error_description") or has("msg")) and (has("id") | not)' >/dev/null 2>&1; then
+    local errmsg
+    errmsg=$(echo "$body" | jq -r '.message // .error_description // .msg // "erreur GoTrue non détaillée"' 2>/dev/null)
+    log_info "create_confirmed_user(${email}) — GoTrue a renvoyé une erreur : ${errmsg}"
+    return 0
+  fi
+
+  echo "$body" | jq -r '.id // empty' 2>/dev/null
 }
 
 AUTH_ID_SUPERADMIN=$(create_confirmed_user "$EMAIL_SUPERADMIN")
@@ -336,23 +441,27 @@ done
 log_pass "5 comptes Auth de fixture créés et confirmés"
 
 RUN_SUFFIX="${RUN_TAG: -8}"
-HOTEL_A_ID=$(service_call POST "/rest/v1/hotels" \
-  "$(jq -n --arg n "${RUN_TAG} Hotel A" --arg c "${RUN_SUFFIX}A" '{name:$n, city:"Paris", hotel_code:$c, status:"active", active:true}')" \
-  | tail -n +2 | jq -r '.[0].id // empty')
-HOTEL_B_ID=$(service_call POST "/rest/v1/hotels" \
-  "$(jq -n --arg n "${RUN_TAG} Hotel B" --arg c "${RUN_SUFFIX}B" '{name:$n, city:"Lyon", hotel_code:$c, status:"active", active:true}')" \
-  | tail -n +2 | jq -r '.[0].id // empty')
-[[ -z "$HOTEL_A_ID" || -z "$HOTEL_B_ID" ]] && die_critical "Échec création des 2 hôtels fictifs."
+# public.hotels.hotel_code est un varchar(5) — RUN_SUFFIX (8 caractères) dépasserait la limite
+# et ferait échouer l'INSERT (PostgREST renvoie alors un objet d'erreur, pas un tableau, d'où
+# l'échec `jq: Cannot index object with number` sur `.[0].id`). Code dédié, borné à 5 caractères
+# (4 issus de RUN_SUFFIX + 1 lettre A/B), tandis que RUN_SUFFIX (non contraint en longueur ici)
+# reste utilisé tel quel pour platform_apps.code ci-dessous.
+HOTEL_CODE_SUFFIX="${RUN_SUFFIX: -4}"
+HOTEL_A_ID=$(insert_and_get_id "Création hôtel fictif A" "/rest/v1/hotels" \
+  "$(jq -n --arg n "${RUN_TAG} Hotel A" --arg c "${HOTEL_CODE_SUFFIX}A" '{name:$n, city:"Paris", hotel_code:$c, status:"active", active:true}')") \
+  || die_critical "Échec création des 2 hôtels fictifs."
+HOTEL_B_ID=$(insert_and_get_id "Création hôtel fictif B" "/rest/v1/hotels" \
+  "$(jq -n --arg n "${RUN_TAG} Hotel B" --arg c "${HOTEL_CODE_SUFFIX}B" '{name:$n, city:"Lyon", hotel_code:$c, status:"active", active:true}')") \
+  || die_critical "Échec création des 2 hôtels fictifs."
 CREATED_ROWS+=("hotels|${HOTEL_A_ID}" "hotels|${HOTEL_B_ID}")
 log_pass "2 hôtels fictifs créés"
 
-USER_A_ID=$(service_call POST "/rest/v1/users" \
-  "$(jq -n --arg aid "$AUTH_ID_HOTEL_A" --arg h "$HOTEL_A_ID" --arg e "$EMAIL_HOTEL_A" '{auth_id:$aid, hotel_id:$h, email:$e, full_name:"QA Hotel A", role:"admin_hotel", is_active:true}')" \
-  | tail -n +2 | jq -r '.[0].id // empty')
-USER_B_ID=$(service_call POST "/rest/v1/users" \
-  "$(jq -n --arg aid "$AUTH_ID_HOTEL_B" --arg h "$HOTEL_B_ID" --arg e "$EMAIL_HOTEL_B" '{auth_id:$aid, hotel_id:$h, email:$e, full_name:"QA Hotel B", role:"admin_hotel", is_active:true}')" \
-  | tail -n +2 | jq -r '.[0].id // empty')
-[[ -z "$USER_A_ID" || -z "$USER_B_ID" ]] && die_critical "Échec création des lignes public.users."
+USER_A_ID=$(insert_and_get_id "Création ligne public.users hôtel A" "/rest/v1/users" \
+  "$(jq -n --arg aid "$AUTH_ID_HOTEL_A" --arg h "$HOTEL_A_ID" --arg e "$EMAIL_HOTEL_A" '{auth_id:$aid, hotel_id:$h, email:$e, full_name:"QA Hotel A", role:"admin_hotel", is_active:true}')") \
+  || die_critical "Échec création des lignes public.users."
+USER_B_ID=$(insert_and_get_id "Création ligne public.users hôtel B" "/rest/v1/users" \
+  "$(jq -n --arg aid "$AUTH_ID_HOTEL_B" --arg h "$HOTEL_B_ID" --arg e "$EMAIL_HOTEL_B" '{auth_id:$aid, hotel_id:$h, email:$e, full_name:"QA Hotel B", role:"admin_hotel", is_active:true}')") \
+  || die_critical "Échec création des lignes public.users."
 CREATED_ROWS+=("users|${USER_A_ID}" "users|${USER_B_ID}")
 
 service_call POST "/rest/v1/user_hotels" \
@@ -361,36 +470,32 @@ service_call POST "/rest/v1/user_hotels" \
   "$(jq -n --arg u "$USER_B_ID" --arg h "$HOTEL_B_ID" '{user_id:$u, hotel_id:$h, role:"admin_hotel", is_default:true}')" >/dev/null
 log_pass "2 utilisateurs hôtel (A, B) créés et rattachés"
 
-PA_SUPERADMIN_ID=$(service_call POST "/rest/v1/platform_admins" \
-  "$(jq -n --arg aid "$AUTH_ID_SUPERADMIN" --arg e "$EMAIL_SUPERADMIN" '{auth_id:$aid, email:$e, full_name:"QA Super Admin", role:"super_admin", is_active:true}')" \
-  | tail -n +2 | jq -r '.[0].id // empty')
-PA_SUPPORT_ID=$(service_call POST "/rest/v1/platform_admins" \
-  "$(jq -n --arg aid "$AUTH_ID_SUPPORT" --arg e "$EMAIL_SUPPORT" '{auth_id:$aid, email:$e, full_name:"QA Support Agent", role:"support_agent", is_active:true}')" \
-  | tail -n +2 | jq -r '.[0].id // empty')
-[[ -z "$PA_SUPERADMIN_ID" || -z "$PA_SUPPORT_ID" ]] && die_critical "Échec création des platform_admins."
+PA_SUPERADMIN_ID=$(insert_and_get_id "Création platform_admin super_admin" "/rest/v1/platform_admins" \
+  "$(jq -n --arg aid "$AUTH_ID_SUPERADMIN" --arg e "$EMAIL_SUPERADMIN" '{auth_id:$aid, email:$e, full_name:"QA Super Admin", role:"super_admin", is_active:true}')") \
+  || die_critical "Échec création des platform_admins."
+PA_SUPPORT_ID=$(insert_and_get_id "Création platform_admin support_agent" "/rest/v1/platform_admins" \
+  "$(jq -n --arg aid "$AUTH_ID_SUPPORT" --arg e "$EMAIL_SUPPORT" '{auth_id:$aid, email:$e, full_name:"QA Support Agent", role:"support_agent", is_active:true}')") \
+  || die_critical "Échec création des platform_admins."
 CREATED_ROWS+=("platform_admins|${PA_SUPERADMIN_ID}" "platform_admins|${PA_SUPPORT_ID}")
 log_pass "platform_admins créés (1 super_admin, 1 support_agent)"
 
-PLAN_ID=$(service_call POST "/rest/v1/subscription_plans" \
-  "$(jq -n --arg n "${RUN_TAG} Plan" --arg s "${RUN_TAG}-plan" '{name:$n, slug:$s, plan_scope:"public", is_active:true, is_commercializable:true, price_monthly:99, max_rooms:20, max_users:10, trial_days:14}')" \
-  | tail -n +2 | jq -r '.[0].id // empty')
-[[ -z "$PLAN_ID" ]] && die_critical "Échec création du plan fictif."
+PLAN_ID=$(insert_and_get_id "Création plan fictif" "/rest/v1/subscription_plans" \
+  "$(jq -n --arg n "${RUN_TAG} Plan" --arg s "${RUN_TAG}-plan" '{name:$n, slug:$s, plan_scope:"public", is_active:true, is_commercializable:true, price_monthly:99, max_rooms:20, max_users:10, trial_days:14}')") \
+  || die_critical "Échec création du plan fictif."
 CREATED_ROWS+=("subscription_plans|${PLAN_ID}")
 
-APP_ID=$(service_call POST "/rest/v1/platform_apps" \
-  "$(jq -n --arg c "APP${RUN_SUFFIX}" --arg n "${RUN_TAG} App" '{code:$c, name:$n, is_active:true}')" \
-  | tail -n +2 | jq -r '.[0].id // empty')
-[[ -z "$APP_ID" ]] && die_critical "Échec création de l'app fictive."
+APP_ID=$(insert_and_get_id "Création app fictive" "/rest/v1/platform_apps" \
+  "$(jq -n --arg c "APP${RUN_SUFFIX}" --arg n "${RUN_TAG} App" '{code:$c, name:$n, is_active:true}')") \
+  || die_critical "Échec création de l'app fictive."
 CREATED_ROWS+=("platform_apps|${APP_ID}")
 
-SUB_A_ID=$(service_call POST "/rest/v1/hotel_subscriptions" \
-  "$(jq -n --arg h "$HOTEL_A_ID" --arg p "$PLAN_ID" '{hotel_id:$h, plan_id:$p, status:"active", snapshot_price_net_ht:99, snapshot_effective_at:"now()"}')" \
-  | tail -n +2 | jq -r '.[0].id // empty')
+SUB_A_ID=$(insert_and_get_id "Création abonnement fictif A (active)" "/rest/v1/hotel_subscriptions" \
+  "$(jq -n --arg h "$HOTEL_A_ID" --arg p "$PLAN_ID" '{hotel_id:$h, plan_id:$p, status:"active", snapshot_price_net_ht:99, snapshot_effective_at:"now()"}')") \
+  || die_critical "Échec création des abonnements fictifs."
 TRIAL_END_J7=$(date -u -d "+7 days" +"%Y-%m-%dT12:00:00Z" 2>/dev/null || date -u -v+7d +"%Y-%m-%dT12:00:00Z")
-SUB_B_ID=$(service_call POST "/rest/v1/hotel_subscriptions" \
-  "$(jq -n --arg h "$HOTEL_B_ID" --arg p "$PLAN_ID" --arg t "$TRIAL_END_J7" '{hotel_id:$h, plan_id:$p, status:"trial", trial_ends_at:$t, snapshot_price_net_ht:99, snapshot_effective_at:"now()"}')" \
-  | tail -n +2 | jq -r '.[0].id // empty')
-[[ -z "$SUB_A_ID" || -z "$SUB_B_ID" ]] && die_critical "Échec création des abonnements fictifs."
+SUB_B_ID=$(insert_and_get_id "Création abonnement fictif B (trial J+7)" "/rest/v1/hotel_subscriptions" \
+  "$(jq -n --arg h "$HOTEL_B_ID" --arg p "$PLAN_ID" --arg t "$TRIAL_END_J7" '{hotel_id:$h, plan_id:$p, status:"trial", trial_ends_at:$t, snapshot_price_net_ht:99, snapshot_effective_at:"now()"}')") \
+  || die_critical "Échec création des abonnements fictifs."
 CREATED_ROWS+=("hotel_subscriptions|${SUB_A_ID}" "hotel_subscriptions|${SUB_B_ID}")
 log_pass "1 plan + 1 app + 2 abonnements (A=active, B=trial J+7) créés"
 
@@ -502,10 +607,9 @@ ST=$(echo "$R"|head -n1)
 # ============================================================================
 log_info "=== SUPPORT ==="
 
-R=$(rest_call POST "/rest/v1/support_tickets" "$JWT_HOTEL_A" \
-  "$(jq -n --arg h "$HOTEL_A_ID" --arg u "$USER_A_ID" --arg e "$EMAIL_HOTEL_A" '{hotel_id:$h, module:"planning", feature:"qa", description:"Ticket hotel A", user_id:$u, user_email:$e}')")
-TICKET_A_ID=$(echo "$R" | tail -n +2 | jq -r '.[0].id // empty')
-[[ -z "$TICKET_A_ID" ]] && die_critical "Échec création du ticket support hôtel A."
+TICKET_A_ID=$(insert_and_get_id_rest "Création ticket support hôtel A" "/rest/v1/support_tickets" "$JWT_HOTEL_A" \
+  "$(jq -n --arg h "$HOTEL_A_ID" --arg u "$USER_A_ID" --arg e "$EMAIL_HOTEL_A" '{hotel_id:$h, module:"planning", feature:"qa", description:"Ticket hotel A", user_id:$u, user_email:$e}')") \
+  || die_critical "Échec création du ticket support hôtel A."
 CREATED_ROWS+=("support_tickets|${TICKET_A_ID}")
 log_pass "Ticket support créé par hôtel A (INSERT réel via PostgREST)"
 
@@ -514,9 +618,16 @@ R=$(rest_call GET "/rest/v1/support_tickets?select=id" "$JWT_HOTEL_B"); N=$(echo
 
 R=$(rest_call POST "/rest/v1/rpc/admin_reply_support_ticket" "$JWT_SUPPORT" \
   "$(jq -n --arg t "$TICKET_A_ID" '{p_ticket_id:$t, p_body:"Réponse publique QA", p_is_internal_note:false, p_corrects_reply_id:null}')")
-REPLY_PUBLIC_ID=$(echo "$R" | tail -n +2 | jq -r 'if type=="array" then .[0] else . end' 2>/dev/null)
-ST=$(echo "$R"|head -n1)
+split_http_response "$R"; ST="$HTTP_STATUS"
 expect_status "support_agent : réponse publique au ticket" "$ST" "200"
+# admin_reply_support_ticket() peut renvoyer un scalaire brut ou un tableau à un élément selon
+# le typage SETOF/TABLE — jamais indexé sans avoir d'abord validé que le corps est du JSON
+# syntaxiquement correct (ne parse jamais une réponse invalide).
+if [[ "$ST" == "200" ]] && echo "$HTTP_BODY" | jq -e . >/dev/null 2>&1; then
+  REPLY_PUBLIC_ID=$(echo "$HTTP_BODY" | jq -r 'if type=="array" then (.[0] // empty) else . end' 2>/dev/null)
+else
+  REPLY_PUBLIC_ID=""
+fi
 
 R=$(rest_call POST "/rest/v1/rpc/admin_reply_support_ticket" "$JWT_SUPPORT" \
   "$(jq -n --arg t "$TICKET_A_ID" '{p_ticket_id:$t, p_body:"Note interne QA", p_is_internal_note:true, p_corrects_reply_id:null}')")
@@ -524,8 +635,8 @@ ST=$(echo "$R"|head -n1)
 expect_status "support_agent : note interne créée" "$ST" "200"
 
 # Correction cross-ticket : refusée par le trigger dédié
-TICKET_B_TMP=$(rest_call POST "/rest/v1/support_tickets" "$JWT_HOTEL_B" \
-  "$(jq -n --arg h "$HOTEL_B_ID" --arg u "$USER_B_ID" --arg e "$EMAIL_HOTEL_B" '{hotel_id:$h, module:"planning", feature:"qa", description:"Ticket hotel B", user_id:$u, user_email:$e}')" | tail -n +2 | jq -r '.[0].id // empty')
+TICKET_B_TMP=$(insert_and_get_id_rest "Création ticket support hôtel B (test cross-ticket)" "/rest/v1/support_tickets" "$JWT_HOTEL_B" \
+  "$(jq -n --arg h "$HOTEL_B_ID" --arg u "$USER_B_ID" --arg e "$EMAIL_HOTEL_B" '{hotel_id:$h, module:"planning", feature:"qa", description:"Ticket hotel B", user_id:$u, user_email:$e}')")
 if [[ -n "$TICKET_B_TMP" ]]; then
   CREATED_ROWS+=("support_tickets|${TICKET_B_TMP}")
   if [[ "$REPLY_PUBLIC_ID" != "null" && -n "$REPLY_PUBLIC_ID" ]]; then
