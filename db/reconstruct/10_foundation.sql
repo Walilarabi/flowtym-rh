@@ -40,6 +40,11 @@ CREATE TABLE public.user_hotels (
   granted_at timestamptz NOT NULL DEFAULT now(), granted_by uuid,
   PRIMARY KEY (user_id, hotel_id));
 
+CREATE TABLE public.user_active_hotel (
+  user_id uuid PRIMARY KEY REFERENCES public.users(id) ON DELETE CASCADE,
+  hotel_id uuid NOT NULL REFERENCES public.hotels(id) ON DELETE CASCADE,
+  switched_at timestamptz NOT NULL DEFAULT now());
+
 CREATE TABLE public.staff_departments (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   hotel_id uuid NOT NULL REFERENCES public.hotels(id) ON DELETE CASCADE,
@@ -57,9 +62,13 @@ CREATE TABLE public.employees (
   active boolean NOT NULL DEFAULT true,
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
   departure_date date, planning_sort_order integer NOT NULL DEFAULT 0,
-  portal_auth_id uuid, schedule_id uuid, email text, manager_id uuid,
+  portal_auth_id uuid, schedule_id uuid, email text, phone text, manager_id uuid,
+  portal_enabled boolean NOT NULL DEFAULT false,
   status text NOT NULL DEFAULT 'actif', departure_reason text, last_worked_date date);
 
 -- Admins transverses (RH Groupe / Super Admin) — mécanisme existant, réutilisé.
 CREATE TABLE IF NOT EXISTS public.platform_admins (
-  auth_id uuid PRIMARY KEY, is_active boolean NOT NULL DEFAULT true, created_at timestamptz NOT NULL DEFAULT now());
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  auth_id uuid NOT NULL UNIQUE, email text NOT NULL, full_name text, role text NOT NULL,
+  is_active boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());

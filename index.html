@@ -1959,6 +1959,13 @@ const DEFAULT_PERMISSIONS={
     absences:_0,  pointage:_vc,  tracking:_0, payroll:_0,
     recruitment:_0, training:_0, reviews:_0,  medical:_0,
     equipment:_0, orgchart:_v,   portal_inbox:_0, config:_0, ai_assistant:_0,
+    // Lecture seule du Planning Groupe (comparaison multi-établissements du même groupe) :
+    // demande produit explicite — la Réception d'un hôtel membre d'un groupe doit pouvoir
+    // consulter (pas créer/approuver de renfort) le planning des autres hôtels de SON groupe.
+    // Le périmètre de sécurité réel (jamais l'hôtel d'un AUTRE groupe) est garanti côté backend
+    // (group_planning()/group_staff_directory()/etc., scopées par l'hôtel actif — sql/98-100),
+    // pas par ce simple gate d'affichage.
+    group_planning:_v,
   },
   gouvernante:{
     dashboard:_v, planning:_p(1,1,1,0,0,0,0), reporting:_0,

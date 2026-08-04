@@ -9,6 +9,80 @@ AS $function$
   JOIN public.users u ON u.id = uh.user_id WHERE u.auth_id = auth.uid();
 $function$;
 
+-- get_user_hotel_id()/set_active_hotel() (verbatim schéma live) — l'hôtel réellement ACTIF de
+-- l'appelant, source de vérité déjà utilisée par la RLS de `hotels` (hotels_select : id =
+-- get_user_hotel_id()) ; sql/98 en fait aussi la source de vérité pour le groupe courant.
+CREATE OR REPLACE FUNCTION public.get_user_hotel_id()
+ RETURNS uuid LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path TO 'public','pg_catalog'
+AS $function$
+DECLARE
+  v_auth_uid uuid := auth.uid(); v_user_id uuid; v_hotel_id uuid;
+BEGIN
+  IF v_auth_uid IS NULL THEN RETURN NULL; END IF;
+  SELECT id INTO v_user_id FROM public.users WHERE auth_id = v_auth_uid LIMIT 1;
+  IF v_user_id IS NULL THEN RETURN NULL; END IF;
+
+  SELECT uah.hotel_id INTO v_hotel_id FROM public.user_active_hotel uah
+    WHERE uah.user_id = v_user_id
+      AND EXISTS (SELECT 1 FROM public.user_hotels uh WHERE uh.user_id = v_user_id AND uh.hotel_id = uah.hotel_id)
+    LIMIT 1;
+  IF v_hotel_id IS NOT NULL THEN RETURN v_hotel_id; END IF;
+
+  SELECT uh.hotel_id INTO v_hotel_id FROM public.user_hotels uh
+    WHERE uh.user_id = v_user_id AND uh.is_default = true LIMIT 1;
+  IF v_hotel_id IS NOT NULL THEN RETURN v_hotel_id; END IF;
+
+  SELECT u.hotel_id INTO v_hotel_id FROM public.users u WHERE u.id = v_user_id LIMIT 1;
+  RETURN v_hotel_id;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.set_active_hotel(p_hotel_id uuid)
+ RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public','pg_catalog'
+AS $function$
+DECLARE v_user_id uuid; v_has_access boolean;
+BEGIN
+  SELECT id INTO v_user_id FROM public.users WHERE auth_id = auth.uid() LIMIT 1;
+  IF v_user_id IS NULL THEN RAISE EXCEPTION 'User not authenticated' USING ERRCODE = '42501'; END IF;
+  SELECT EXISTS (SELECT 1 FROM public.user_hotels WHERE user_id = v_user_id AND hotel_id = p_hotel_id) INTO v_has_access;
+  IF NOT v_has_access THEN RAISE EXCEPTION 'User does not have access to hotel %', p_hotel_id USING ERRCODE = '42501'; END IF;
+  INSERT INTO public.user_active_hotel (user_id, hotel_id, switched_at)
+  VALUES (v_user_id, p_hotel_id, now())
+  ON CONFLICT (user_id) DO UPDATE SET hotel_id = EXCLUDED.hotel_id, switched_at = EXCLUDED.switched_at;
+  RETURN true;
+END;
+$function$;
+
+-- RLS employees (verbatim schéma live) — nécessaire pour que
+-- sql/tests/tenant_isolation_group_planning.sql exerce une isolation réelle sous le rôle
+-- `authenticated`, pas seulement la logique interne des RPC SECURITY DEFINER. Dépend de
+-- pl_my_hotels() ci-dessus, d'où son placement ici plutôt que dans 10_foundation.sql.
+CREATE OR REPLACE FUNCTION public.pl_portal_employee_id()
+ RETURNS uuid LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public'
+AS $function$
+  SELECT id FROM public.employees WHERE portal_auth_id = auth.uid() AND portal_enabled = true LIMIT 1
+$function$;
+ALTER TABLE public.employees ENABLE ROW LEVEL SECURITY;
+CREATE POLICY employees_rls ON public.employees
+  FOR ALL USING (hotel_id IN (SELECT pl_my_hotels()))
+  WITH CHECK (hotel_id IN (SELECT pl_my_hotels()));
+CREATE POLICY employees_portal_self ON public.employees
+  FOR SELECT USING (id = pl_portal_employee_id());
+GRANT SELECT ON public.employees TO authenticated, anon;
+
+ALTER TABLE public.group_move_proposals ENABLE ROW LEVEL SECURITY;
+CREATE POLICY gmp_access ON public.group_move_proposals
+  FOR ALL
+  USING (from_hotel_id IN (SELECT pl_my_hotels()) AND to_hotel_id IN (SELECT pl_my_hotels()))
+  WITH CHECK (from_hotel_id IN (SELECT pl_my_hotels()) AND to_hotel_id IN (SELECT pl_my_hotels()));
+GRANT SELECT ON public.group_move_proposals TO authenticated, anon;
+
+ALTER TABLE public.staff_planning_segments ENABLE ROW LEVEL SECURITY;
+CREATE POLICY sps_manager ON public.staff_planning_segments
+  FOR SELECT USING (hotel_id IN (SELECT pl_my_hotels()) OR origin_hotel_id IN (SELECT pl_my_hotels()));
+GRANT SELECT ON public.staff_planning_segments TO authenticated, anon;
+GRANT SELECT ON public.v_staff_day_flags TO authenticated, anon;
+
 CREATE OR REPLACE FUNCTION public._gmp_can_access(p_from uuid, p_to uuid)
  RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public'
 AS $function$
@@ -68,6 +142,27 @@ BEGIN
   RETURN r;
 END $function$;
 
+-- group_move_timeline : version corrigée (sql/97, P0 sécurité 2026-08-03) — filtre désormais
+-- from_hotel_id/to_hotel_id dans pl_my_hotels() comme toutes les fonctions sœurs ci-dessous ;
+-- la version live avant correctif ne vérifiait que l'existence de l'id, tous groupes confondus.
+CREATE OR REPLACE FUNCTION public.group_move_timeline(p_id uuid)
+ RETURNS jsonb LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public'
+AS $function$
+  SELECT jsonb_build_object(
+    'events', (SELECT coalesce(jsonb_agg(jsonb_build_object('action',action,'old_status',old_status,'new_status',new_status,'comment',comment,'metadata',metadata,'at',created_at) ORDER BY created_at),'[]'::jsonb)
+               FROM group_move_proposal_events WHERE proposal_id=p_id),
+    'approvals', (SELECT coalesce(jsonb_agg(jsonb_build_object('step',step_index,'key',step_key,'approver_type',approver_type,'status',status,'decided_at',decided_at,'comment',comment) ORDER BY step_index),'[]'::jsonb)
+                 FROM group_move_approvals WHERE proposal_id=p_id),
+    'notifications', (SELECT coalesce(jsonb_agg(jsonb_build_object('event',event,'recipient',recipient_type,'sent_at',sent_at,'at',created_at) ORDER BY created_at),'[]'::jsonb)
+                     FROM group_move_notifications WHERE proposal_id=p_id)
+  )
+  WHERE p_id IN (
+    SELECT id FROM group_move_proposals
+    WHERE from_hotel_id IN (SELECT public.pl_my_hotels())
+      AND to_hotel_id IN (SELECT public.pl_my_hotels())
+  );
+$function$;
+
 CREATE OR REPLACE FUNCTION public.group_move_open_for_employee(p_emp uuid, p_exclude uuid DEFAULT NULL::uuid)
  RETURNS TABLE(id uuid, employee_id uuid, status text, slots jsonb, created_at timestamp with time zone, score integer, scheduled_at timestamp with time zone)
  LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public'
@@ -84,6 +179,9 @@ CREATE OR REPLACE FUNCTION public.group_move_workflow_get(p_group uuid)
 AS $function$
 DECLARE v jsonb;
 BEGIN
+  IF p_group NOT IN (SELECT group_id FROM hotels WHERE id IN (SELECT public.pl_my_hotels())) THEN
+    RAISE EXCEPTION 'Accès refusé à ce groupe';
+  END IF;
   SELECT steps INTO v FROM group_move_workflows WHERE group_id=p_group;
   IF v IS NULL THEN
     v := jsonb_build_array(jsonb_build_object('key','dest_director','label','Directeur hôtel destination','approver_type','dest_director','hotel_scope','dest'));
@@ -420,4 +518,259 @@ CREATE OR REPLACE FUNCTION public.is_platform_admin()
  RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public','pg_temp'
 AS $function$
   SELECT EXISTS (SELECT 1 FROM public.platform_admins WHERE auth_id = auth.uid() AND is_active = true);
+$function$;
+
+-- ── Groupes hôteliers : lecture scopée par le GROUPE DE L'HÔTEL ACTIF (sql/98, verbatim
+-- schéma live post-correctif — voir sql/98_security_group_scope_active_hotel.sql pour la
+-- version pré-correctif et la cause racine : un scan sans ORDER BY sur tous les hôtels
+-- accessibles à l'appelant, jamais lié à get_user_hotel_id()) ────────────────────────────
+CREATE OR REPLACE FUNCTION public.group_staff_directory()
+ RETURNS TABLE(employee_id uuid, first_name text, last_name text, role text, department text, hotel_id uuid, hotel_name text, phone text, email text, active boolean, status text)
+ LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public'
+AS $function$
+  SELECT e.id, e.first_name, e.last_name, e.role, e.department,
+         e.hotel_id, h.name, e.phone, e.email, e.active, e.status
+  FROM public.employees e
+  JOIN public.hotels h ON h.id = e.hotel_id
+  WHERE public.is_platform_admin()
+     OR h.group_id = (SELECT group_id FROM public.hotels WHERE id = public.get_user_hotel_id())
+  ORDER BY h.name, e.last_name, e.first_name;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.hotel_group_get(p_hotel uuid)
+ RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path TO 'public'
+AS $function$
+DECLARE v_gid uuid; v_name text;
+BEGIN
+  IF p_hotel NOT IN (SELECT public.pl_my_hotels()) THEN RAISE EXCEPTION 'NON_AUTORISE'; END IF;
+  SELECT group_id INTO v_gid FROM hotels WHERE id=p_hotel;
+  IF v_gid IS NULL THEN RETURN jsonb_build_object('group_id',null,'group_name',null,'members','[]'::jsonb); END IF;
+  SELECT name INTO v_name FROM hotel_groups WHERE id=v_gid;
+  RETURN jsonb_build_object('group_id',v_gid,'group_name',v_name,'members',
+    (SELECT coalesce(jsonb_agg(jsonb_build_object('id',id,'name',name,'hotel_code',hotel_code,'is_self',(id=p_hotel)) ORDER BY name),'[]'::jsonb)
+     FROM hotels WHERE group_id=v_gid));
+END; $function$;
+
+CREATE OR REPLACE FUNCTION public.org_get()
+ RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path TO 'public'
+AS $function$
+DECLARE v_gid uuid; g record;
+BEGIN
+  SELECT group_id INTO v_gid FROM hotels WHERE id = public.get_user_hotel_id();
+  IF v_gid IS NULL THEN RETURN jsonb_build_object('group_id',null); END IF;
+  SELECT * INTO g FROM hotel_groups WHERE id=v_gid;
+  RETURN jsonb_build_object(
+    'group_id',v_gid,'name',g.name,'status',g.status,'logo_url',g.logo_url,
+    'features',coalesce(g.features,'{}'::jsonb),'created_at',g.created_at,
+    'members',(SELECT coalesce(jsonb_agg(jsonb_build_object(
+        'id',id,'name',name,'hotel_code',hotel_code,'city',city,'address',address,'country',country,
+        'phone',phone,'email',email,'currency',currency,'timezone',timezone,
+        'active',active,'status',coalesce(status,'active')) ORDER BY name),'[]'::jsonb) FROM hotels WHERE group_id=v_gid),
+    'counts',jsonb_build_object(
+      'hotels',(SELECT count(*) FROM hotels WHERE group_id=v_gid),
+      'employees',(SELECT count(*) FROM employees WHERE hotel_id IN (SELECT id FROM hotels WHERE group_id=v_gid)),
+      'users',(SELECT count(DISTINCT user_id) FROM user_hotels WHERE hotel_id IN (SELECT id FROM hotels WHERE group_id=v_gid))
+    ));
+END $function$;
+
+CREATE OR REPLACE FUNCTION public.org_provision()
+ RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public'
+AS $function$
+DECLARE v_gid uuid; r record; v_base text; v_code text; v_n int;
+BEGIN
+  SELECT group_id INTO v_gid FROM hotels WHERE id = public.get_user_hotel_id();
+  IF v_gid IS NULL THEN INSERT INTO hotel_groups(name) VALUES (NULL) RETURNING id INTO v_gid; END IF;
+  FOR r IN SELECT id, name, hotel_code FROM hotels
+           WHERE id IN (SELECT public.pl_my_hotels()) AND group_id IS NULL LOOP
+    IF r.hotel_code IS NULL THEN
+      v_base := coalesce((SELECT upper(string_agg(left(w,1),'')) FROM (
+                  SELECT w FROM unnest(regexp_split_to_array(regexp_replace(coalesce(r.name,''),'[^A-Za-z ]','','g'),'\s+')) AS w
+                  WHERE w<>'' LIMIT 2) t),'');
+      IF length(v_base)<2 THEN v_base := upper(left(regexp_replace(coalesce(r.name,'HT'),'[^A-Za-z]','','g')||'HT',2)); END IF;
+      v_n := 1;
+      LOOP
+        v_code := v_base || lpad(v_n::text,3,'0');
+        EXIT WHEN NOT EXISTS(SELECT 1 FROM hotels WHERE upper(hotel_code)=v_code);
+        v_n := v_n + 1;
+      END LOOP;
+      UPDATE hotels SET hotel_code=v_code, group_id=COALESCE(group_id, v_gid) WHERE id=r.id;
+    ELSE
+      UPDATE hotels SET group_id=COALESCE(group_id,v_gid) WHERE id=r.id;
+    END IF;
+  END LOOP;
+  RETURN v_gid;
+END $function$;
+
+CREATE OR REPLACE FUNCTION public.org_create_hotel(p jsonb)
+ RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public'
+AS $function$
+DECLARE v_gid uuid; v_new uuid; v_code text; v_pubuser uuid;
+BEGIN
+  SELECT group_id INTO v_gid FROM hotels WHERE id = public.get_user_hotel_id();
+  IF v_gid IS NULL THEN v_gid := public.org_provision(); END IF;
+  v_code := upper(trim(coalesce(p->>'hotel_code','')));
+  IF v_code='' THEN RAISE EXCEPTION 'CODE_VIDE'; END IF;
+  IF EXISTS(SELECT 1 FROM hotels WHERE upper(hotel_code)=v_code) THEN RAISE EXCEPTION 'CODE_EXISTANT'; END IF;
+  IF coalesce(trim(p->>'name'),'')='' THEN RAISE EXCEPTION 'NOM_VIDE'; END IF;
+  INSERT INTO hotels(name,address,city,country,phone,email,currency,timezone,hotel_code,group_id,active,status)
+    VALUES(trim(p->>'name'),nullif(p->>'address',''),nullif(p->>'city',''),nullif(p->>'country',''),nullif(p->>'phone',''),nullif(p->>'email',''),
+           coalesce(nullif(p->>'currency',''),'EUR'),coalesce(nullif(p->>'timezone',''),'Europe/Paris'),v_code,v_gid,true,'active')
+    RETURNING id INTO v_new;
+  SELECT id INTO v_pubuser FROM users WHERE auth_id=auth.uid() LIMIT 1;
+  IF v_pubuser IS NOT NULL THEN
+    INSERT INTO user_hotels(user_id,hotel_id,is_default) VALUES(v_pubuser,v_new,false) ON CONFLICT (user_id,hotel_id) DO NOTHING;
+  END IF;
+  RETURN public.org_get();
+END $function$;
+
+CREATE OR REPLACE FUNCTION public.org_detach_hotel(p_hotel uuid)
+ RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public'
+AS $function$
+DECLARE v_gid uuid;
+BEGIN
+  SELECT group_id INTO v_gid FROM hotels WHERE id = public.get_user_hotel_id();
+  IF v_gid IS NULL OR NOT EXISTS(SELECT 1 FROM hotels WHERE id=p_hotel AND group_id=v_gid) THEN RAISE EXCEPTION 'NON_AUTORISE'; END IF;
+  UPDATE hotels SET group_id=NULL WHERE id=p_hotel;
+  RETURN public.org_get();
+END $function$;
+
+CREATE OR REPLACE FUNCTION public.org_set_hotel_status(p_hotel uuid, p_status text)
+ RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public'
+AS $function$
+DECLARE v_gid uuid;
+BEGIN
+  SELECT group_id INTO v_gid FROM hotels WHERE id = public.get_user_hotel_id();
+  IF v_gid IS NULL OR NOT EXISTS(SELECT 1 FROM hotels WHERE id=p_hotel AND group_id=v_gid) THEN RAISE EXCEPTION 'NON_AUTORISE'; END IF;
+  IF p_status NOT IN ('active','suspended') THEN RAISE EXCEPTION 'STATUT_INVALIDE'; END IF;
+  UPDATE hotels SET status=p_status, active=(p_status='active') WHERE id=p_hotel;
+  RETURN public.org_get();
+END $function$;
+
+CREATE OR REPLACE FUNCTION public.org_update_hotel(p_hotel uuid, p jsonb)
+ RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public'
+AS $function$
+DECLARE v_gid uuid;
+BEGIN
+  SELECT group_id INTO v_gid FROM hotels WHERE id = public.get_user_hotel_id();
+  IF v_gid IS NULL OR NOT EXISTS(SELECT 1 FROM hotels WHERE id=p_hotel AND group_id=v_gid) THEN RAISE EXCEPTION 'NON_AUTORISE'; END IF;
+  UPDATE hotels SET
+    name=coalesce(nullif(trim(p->>'name'),''),name),
+    address=coalesce(p->>'address',address), city=coalesce(p->>'city',city), country=coalesce(p->>'country',country),
+    phone=coalesce(p->>'phone',phone), email=coalesce(p->>'email',email),
+    currency=coalesce(nullif(p->>'currency',''),currency), timezone=coalesce(nullif(p->>'timezone',''),timezone)
+  WHERE id=p_hotel;
+  RETURN public.org_get();
+END $function$;
+
+CREATE OR REPLACE FUNCTION public.group_move_visibility_audit()
+ RETURNS TABLE(proposal_id uuid, employee_id uuid, from_hotel_id uuid, to_hotel_id uuid, to_service text, period_from date, period_to date, applied_at timestamp with time zone, missing_assignment boolean, missing_activations text[])
+ LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public'
+AS $function$
+  WITH applied AS (
+    SELECT p.id, p.employee_id, p.from_hotel_id, p.to_hotel_id, p.to_service,
+           p.period_from, p.period_to, p.applied_at, p.slots
+    FROM group_move_proposals p
+    WHERE p.status = 'applied'
+      AND p.from_hotel_id IN (SELECT public.pl_my_hotels())
+      AND p.to_hotel_id IN (SELECT public.pl_my_hotels())
+  ),
+  slots_months AS (
+    SELECT a.id AS proposal_id, a.employee_id, a.from_hotel_id, a.to_hotel_id, a.to_service,
+           a.period_from, a.period_to, a.applied_at,
+           extract(year FROM (s->>'date')::date)::int AS y,
+           extract(month FROM (s->>'date')::date)::int AS m
+    FROM applied a
+    LEFT JOIN jsonb_array_elements(a.slots) s ON true
+  ),
+  agg AS (
+    SELECT sm.proposal_id, sm.employee_id, sm.from_hotel_id, sm.to_hotel_id, sm.to_service,
+           sm.period_from, sm.period_to, sm.applied_at,
+           NOT EXISTS (
+             SELECT 1 FROM employee_hotel_assignments h
+             WHERE h.employee_id = sm.employee_id AND h.target_hotel_id = sm.to_hotel_id AND h.active = true
+           ) AS missing_assignment,
+           array_agg(DISTINCT sm.y::text || '-' || lpad(sm.m::text, 2, '0'))
+             FILTER (
+               WHERE sm.y IS NOT NULL AND NOT EXISTS (
+                 SELECT 1 FROM employee_extra_activations ea
+                 WHERE ea.employee_id = sm.employee_id AND ea.hotel_id = sm.to_hotel_id
+                   AND ea.year = sm.y AND ea.month = sm.m AND ea.active = true
+               )
+             ) AS missing_activations
+    FROM slots_months sm
+    GROUP BY sm.proposal_id, sm.employee_id, sm.from_hotel_id, sm.to_hotel_id, sm.to_service,
+             sm.period_from, sm.period_to, sm.applied_at
+  )
+  SELECT proposal_id, employee_id, from_hotel_id, to_hotel_id, to_service,
+         period_from, period_to, applied_at,
+         missing_assignment,
+         coalesce(missing_activations, ARRAY[]::text[]) AS missing_activations
+  FROM agg
+  WHERE missing_assignment OR coalesce(array_length(missing_activations, 1), 0) > 0
+  ORDER BY applied_at DESC NULLS LAST;
+$function$;
+
+REVOKE EXECUTE ON FUNCTION public.group_move_visibility_audit() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.group_move_visibility_audit() TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.group_planning(p_service text, p_from date, p_to date)
+ RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path TO 'public'
+AS $function$
+DECLARE v_gid uuid;
+BEGIN
+  SELECT group_id INTO v_gid FROM hotels WHERE id = public.get_user_hotel_id();
+  IF v_gid IS NULL THEN RETURN jsonb_build_object('group_id',null,'hotels','[]'::jsonb,'services','[]'::jsonb,'cells','[]'::jsonb,'requirements','[]'::jsonb); END IF;
+  RETURN jsonb_build_object(
+    'group_id', v_gid,
+    'hotels', (SELECT coalesce(jsonb_agg(jsonb_build_object('id',id,'name',name,'hotel_code',hotel_code) ORDER BY name),'[]'::jsonb)
+               FROM hotels WHERE group_id=v_gid AND active),
+    'services', (SELECT coalesce(jsonb_agg(DISTINCT name),'[]'::jsonb) FROM staff_departments
+                 WHERE hotel_id IN (SELECT id FROM hotels WHERE group_id=v_gid)),
+    'cells', (SELECT coalesce(jsonb_agg(c),'[]'::jsonb) FROM (
+        SELECT jsonb_build_object('hotel_id',e.hotel_id,'employee_id',e.id,'name',e.first_name||' '||e.last_name,
+               'role',e.role,'is_extra',false,'origin_hotel_id',e.hotel_id,'day',gd.day::date,
+               'status',coalesce(sp.status,''),
+               'emp_status',coalesce(e.status, CASE WHEN e.active THEN 'actif' ELSE 'parti' END),
+               'service',p_service,'shift_label',sp.shift_label) AS c
+        FROM employees e
+        CROSS JOIN generate_series(p_from, p_to, interval '1 day') AS gd(day)
+        LEFT JOIN staff_planning sp ON sp.employee_id=e.id AND sp.hotel_id=e.hotel_id AND sp.day=gd.day::date
+        WHERE e.hotel_id IN (SELECT id FROM hotels WHERE group_id=v_gid AND active)
+          AND e.department=p_service
+          AND coalesce(e.status, CASE WHEN e.active THEN 'actif' ELSE 'parti' END) <> 'parti'
+        UNION ALL
+        SELECT jsonb_build_object('hotel_id',sp.hotel_id,'employee_id',e.id,'name',e.first_name||' '||e.last_name,
+               'role',coalesce(act.host_role,e.role),'is_extra',true,'origin_hotel_id',e.hotel_id,'day',sp.day,'status',sp.status,
+               'emp_status',e.status,'service',p_service,'shift_label',sp.shift_label)
+        FROM employee_extra_activations act
+        JOIN staff_departments d ON d.id=act.host_service_id AND d.name=p_service
+        JOIN employees e ON e.id=act.employee_id
+        JOIN staff_planning sp ON sp.employee_id=act.employee_id AND sp.hotel_id=act.hotel_id
+          AND sp.day BETWEEN p_from AND p_to
+          AND extract(year FROM sp.day)::int=act.year AND extract(month FROM sp.day)::int=act.month
+        WHERE act.active AND act.hotel_id IN (SELECT id FROM hotels WHERE group_id=v_gid AND active)
+      ) sub),
+    'requirements', (SELECT coalesce(jsonb_agg(jsonb_build_object('hotel_id',hotel_id,'weekday',weekday,'shift',shift,'required',required_count)),'[]'::jsonb)
+                     FROM group_staffing_requirements
+                     WHERE service_name=p_service AND hotel_id IN (SELECT id FROM hotels WHERE group_id=v_gid))
+  );
+END $function$;
+
+CREATE OR REPLACE FUNCTION public.group_requirements_list()
+ RETURNS TABLE(hotel_id uuid, service_name text, weekday integer, required_count integer)
+ LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public'
+AS $function$
+  SELECT hotel_id, service_name, weekday, required_count
+  FROM group_staffing_requirements
+  WHERE hotel_id IN (SELECT id FROM hotels WHERE group_id = (SELECT group_id FROM hotels WHERE id = public.get_user_hotel_id()));
+$function$;
+
+CREATE OR REPLACE FUNCTION public.group_travel_times()
+ RETURNS TABLE(from_hotel_id uuid, to_hotel_id uuid, duration_min integer, safety_margin_min integer, transport_type text, valid_from date, valid_to date)
+ LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public'
+AS $function$
+  SELECT from_hotel_id, to_hotel_id, duration_min, safety_margin_min, transport_type, valid_from, valid_to
+  FROM hotel_travel_times
+  WHERE from_hotel_id IN (SELECT id FROM hotels WHERE group_id = (SELECT group_id FROM hotels WHERE id = public.get_user_hotel_id()))
+    AND to_hotel_id IN (SELECT id FROM hotels WHERE group_id = (SELECT group_id FROM hotels WHERE id = public.get_user_hotel_id()));
 $function$;

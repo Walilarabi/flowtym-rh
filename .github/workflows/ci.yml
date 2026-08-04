@@ -48,6 +48,33 @@ jobs:
       - name: Reconstruction depuis le dépôt + suites de tests
         run: bash scripts/ci/run-db-tests.sh
 
+  db-tenant-isolation-tests:
+    # P0 sécurité 2026-08-03 — cf. sql/97_security_group_planning_isolation.sql. Reconstruit la
+    # base pilote et rejoue sql/tests/tenant_isolation_group_planning.sql : échoue si une seule
+    # requête renvoie une donnée d'un groupe hôtelier à un principal d'un autre groupe.
+    name: DB — isolation inter-groupes (Planning Groupe)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      PGHOST: localhost
+      PGPORT: '5432'
+      PGUSER: postgres
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - name: Installer le client psql
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Reconstruction depuis le dépôt + suite d'isolation inter-groupes
+        run: bash scripts/ci/run-tenant-isolation-tests.sh
+
   db-pointage-tests:
     # Applique réellement les migrations 62 + 63 sur une base propre, vérifie
     # leur idempotence, puis exécute les suites de tests SQL du module

@@ -38,8 +38,28 @@ CREATE TABLE hotel_travel_times (
   from_hotel_id uuid NOT NULL REFERENCES hotels(id) ON DELETE CASCADE,
   to_hotel_id uuid NOT NULL REFERENCES hotels(id) ON DELETE CASCADE,
   duration_min int NOT NULL, safety_margin_min int NOT NULL DEFAULT 10,
+  transport_type text, valid_from date, valid_to date,
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
   CHECK (from_hotel_id <> to_hotel_id), CHECK (duration_min >= 0), CHECK (safety_margin_min >= 0));
+
+CREATE TABLE employee_extra_activations (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  employee_id uuid NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  hotel_id uuid NOT NULL REFERENCES hotels(id) ON DELETE CASCADE,
+  year int NOT NULL, month int NOT NULL,
+  host_service_id uuid, host_role text, active boolean NOT NULL DEFAULT true,
+  comment text, created_by uuid,
+  created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (employee_id, hotel_id, year, month, host_service_id));
+
+CREATE TABLE employee_hotel_assignments (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  employee_id uuid NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  source_hotel_id uuid NOT NULL REFERENCES hotels(id) ON DELETE CASCADE,
+  target_hotel_id uuid NOT NULL REFERENCES hotels(id) ON DELETE CASCADE,
+  active boolean DEFAULT true, notes text, authorized_by text,
+  created_at timestamptz DEFAULT now());
+GRANT SELECT ON employee_hotel_assignments TO authenticated, anon;
 
 -- ── Propositions & cycle de vie ──────────────────────────────────────────────
 CREATE TABLE group_move_proposals (
@@ -60,6 +80,8 @@ CREATE TABLE group_move_proposals (
   CHECK (decision = ANY (ARRAY['allowed','allowed_with_warnings','blocked'])),
   CHECK (staleness = ANY (ARRAY['valid','to_refresh','conflict','expired'])),
   CHECK (status = ANY (ARRAY['draft','pending_review','approved','scheduled','rejected','cancelled','expired','applied'])));
+-- RLS + GRANT sur group_move_proposals : voir 30_functions.sql (dépend de pl_my_hotels(),
+-- défini plus tard dans l'ordre de reconstruction — cf. rebuild.sh).
 
 CREATE TABLE group_move_applications (
   idempotency_key text PRIMARY KEY,
@@ -99,6 +121,39 @@ CREATE TABLE group_move_approvals (
   comment text, created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (proposal_id, step_index),
   CHECK (status = ANY (ARRAY['pending','approved','rejected','skipped'])));
+
+-- group_move_cancellations / group_move_replacements : ajoutées par sql/97 (P0 sécurité
+-- 2026-08-03, cf. incident isolation inter-groupes) — RLS activée dès la création ici (le
+-- schéma live avait dérivé sans RLS ; cf. sql/97 pour le correctif appliqué en production).
+CREATE TABLE group_move_cancellations (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  idempotency_key text NOT NULL UNIQUE,
+  proposal_id uuid NOT NULL REFERENCES group_move_proposals(id) ON DELETE CASCADE,
+  scope text NOT NULL, scope_day date, cancelled_by uuid,
+  status text NOT NULL DEFAULT 'processing', result jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CHECK (scope = ANY (ARRAY['full','day'])),
+  CHECK (status = ANY (ARRAY['processing','completed'])));
+ALTER TABLE group_move_cancellations ENABLE ROW LEVEL SECURITY;
+CREATE POLICY gmc_access ON group_move_cancellations
+  FOR SELECT USING (proposal_id IN (SELECT id FROM group_move_proposals));
+GRANT SELECT ON group_move_cancellations TO authenticated, anon;
+
+CREATE TABLE group_move_replacements (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  idempotency_key text NOT NULL UNIQUE,
+  old_proposal_id uuid NOT NULL REFERENCES group_move_proposals(id),
+  new_proposal_id uuid REFERENCES group_move_proposals(id),
+  replaced_by uuid, status text NOT NULL DEFAULT 'processing', result jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CHECK (status = ANY (ARRAY['processing','completed'])));
+ALTER TABLE group_move_replacements ENABLE ROW LEVEL SECURITY;
+CREATE POLICY gmr_access ON group_move_replacements
+  FOR SELECT USING (
+    old_proposal_id IN (SELECT id FROM group_move_proposals)
+    OR new_proposal_id IN (SELECT id FROM group_move_proposals)
+  );
+GRANT SELECT ON group_move_replacements TO authenticated, anon;
 
 -- ── Grille (résumé/cache) et Segments (source de vérité) ─────────────────────
 CREATE TABLE staff_planning (
