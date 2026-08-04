@@ -59,8 +59,8 @@ CREATE OR REPLACE FUNCTION pg_temp.zz_mk_user(p_hotel_id uuid, p_active boolean 
 DECLARE v_auth uuid; v_id uuid;
 BEGIN
   INSERT INTO auth.users(id) VALUES (gen_random_uuid()) RETURNING id INTO v_auth;
-  INSERT INTO public.users(auth_id, hotel_id, email, full_name, role, is_active)
-    VALUES (v_auth, p_hotel_id, 'zztest-user-' || v_auth::text || '@example.invalid', 'ZZTEST User', 'direction', p_active)
+  INSERT INTO public.users(auth_id, hotel_id, email, full_name, first_name, last_name, role, is_active)
+    VALUES (v_auth, p_hotel_id, 'zztest-user-' || v_auth::text || '@example.invalid', 'ZZTEST User', 'ZZTEST', 'User', 'direction', p_active)
   RETURNING id INTO v_id;
   RETURN v_id;
 END; $$ LANGUAGE plpgsql;
