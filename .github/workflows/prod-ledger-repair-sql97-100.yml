@@ -1,0 +1,76 @@
+name: Repair production migration ledger (sql/97-100)
+run-name: Ledger repair sql/97-100 (migration repair, zero SQL execution)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type EXECUTE to proceed against production'
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  PROD_PROJECT_REF: hzrzkvdebaadditvbqis
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.confirm == 'EXECUTE' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Fail closed if required secrets are missing
+        run: |
+          if [ -z "${{ secrets.SUPABASE_ACCESS_TOKEN }}" ]; then
+            echo "::error::SUPABASE_ACCESS_TOKEN secret missing"; exit 1
+          fi
+          if [ -z "${{ secrets.SUPABASE_DB_PASSWORD }}" ]; then
+            echo "::error::SUPABASE_DB_PASSWORD secret missing"; exit 1
+          fi
+
+      - name: Link to production (hardcoded ref, reviewable in this file's diff)
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: supabase link --project-ref "$PROD_PROJECT_REF"
+
+      - name: Migration status BEFORE repair
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: supabase migration list
+
+      - name: Repair sql/97_security_group_planning_isolation (mark applied)
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: supabase migration repair 20260803145520 --status applied
+
+      - name: Repair sql/98_security_group_scope_active_hotel (mark applied)
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: supabase migration repair 20260803155015 --status applied
+
+      - name: Repair sql/99_security_group_scope_writes_and_visibility_audit (mark applied)
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: supabase migration repair 20260803160737 --status applied
+
+      - name: Repair sql/100_fix_group_planning_acl_over_restriction_regression (mark applied)
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: supabase migration repair 20260804073913 --status applied
+
+      - name: Migration status AFTER repair
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: supabase migration list
