@@ -515,6 +515,98 @@ END $$;
 RESET ROLE;
 
 -- ---------------------------------------------------------------------------
+-- 10. Cas limites exigés en régularisation post-incident : hôtel sans groupe, groupe à un seul
+-- hôtel, hôtel actif désactivé, et absence totale de résolution (aucune ligne public.users) —
+-- dans tous les cas : aucune erreur, aucune fuite, forme de réponse explicite (jamais un
+-- plantage silencieux).
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE
+  v_h_nogroup uuid; v_auth_nogroup uuid; v_u_nogroup uuid;
+  v_gid_solo uuid; v_h_solo uuid; v_auth_solo uuid; v_u_solo uuid;
+  v_gid_inactive uuid; v_h_inactive uuid; v_auth_inactive uuid; v_u_inactive uuid;
+  v_auth_orphan uuid;
+  v_org jsonb; v_gp jsonb;
+BEGIN
+  -- 10a. Hôtel SANS groupe (group_id IS NULL) : org_get()/group_planning() doivent renvoyer
+  --      un group_id NULL explicite et des tableaux vides, jamais une erreur ni les hôtels
+  --      d'un groupe réel.
+  INSERT INTO hotels(name, group_id, hotel_code) VALUES ('ZZTI Hotel Solo Sans Groupe', NULL, 'ZTNG') RETURNING id INTO v_h_nogroup;
+  v_auth_nogroup := gen_random_uuid(); INSERT INTO auth.users(id) VALUES (v_auth_nogroup);
+  INSERT INTO users(auth_id, hotel_id, email, full_name, role) VALUES (v_auth_nogroup, v_h_nogroup, 'zzti-nogroup@example.invalid', 'ZZTI NoGroup', 'reception') RETURNING id INTO v_u_nogroup;
+  INSERT INTO user_hotels(user_id, hotel_id, role, is_default) VALUES (v_u_nogroup, v_h_nogroup, 'reception', true);
+
+  -- 10b. Groupe à un SEUL hôtel (le sien) : ni vide ni fusionné — exactement 1 membre.
+  INSERT INTO hotel_groups(name) VALUES ('ZZTI GROUPE SOLO') RETURNING id INTO v_gid_solo;
+  INSERT INTO hotels(name, group_id, hotel_code) VALUES ('ZZTI Hotel Groupe Solo', v_gid_solo, 'ZTGS') RETURNING id INTO v_h_solo;
+  v_auth_solo := gen_random_uuid(); INSERT INTO auth.users(id) VALUES (v_auth_solo);
+  INSERT INTO users(auth_id, hotel_id, email, full_name, role) VALUES (v_auth_solo, v_h_solo, 'zzti-solo@example.invalid', 'ZZTI Solo', 'reception') RETURNING id INTO v_u_solo;
+  INSERT INTO user_hotels(user_id, hotel_id, role, is_default) VALUES (v_u_solo, v_h_solo, 'reception', true);
+
+  -- 10c. Hôtel actif DÉSACTIVÉ (active=false — équivalent applicatif d'une suppression : la
+  --      ligne n'est jamais physiquement supprimée, cf. FK ON DELETE CASCADE users->hotels qui
+  --      ferait disparaître le compte lui-même, pas seulement l'hôtel). get_user_hotel_id() ne
+  --      filtre pas sur `active` : le groupe doit rester résolu sans erreur.
+  INSERT INTO hotel_groups(name) VALUES ('ZZTI GROUPE INACTIF') RETURNING id INTO v_gid_inactive;
+  INSERT INTO hotels(name, group_id, hotel_code, active) VALUES ('ZZTI Hotel Inactif', v_gid_inactive, 'ZTIN', false) RETURNING id INTO v_h_inactive;
+  v_auth_inactive := gen_random_uuid(); INSERT INTO auth.users(id) VALUES (v_auth_inactive);
+  INSERT INTO users(auth_id, hotel_id, email, full_name, role) VALUES (v_auth_inactive, v_h_inactive, 'zzti-inactive@example.invalid', 'ZZTI Inactif', 'reception') RETURNING id INTO v_u_inactive;
+  INSERT INTO user_hotels(user_id, hotel_id, role, is_default) VALUES (v_u_inactive, v_h_inactive, 'reception', true);
+
+  -- 10d. Aucune ligne public.users du tout pour cet auth.uid() (ex. provisioning incomplet) :
+  --      get_user_hotel_id() doit renvoyer NULL sans erreur, org_get()/group_planning() la forme
+  --      NULL explicite.
+  v_auth_orphan := gen_random_uuid(); INSERT INTO auth.users(id) VALUES (v_auth_orphan);
+
+  SET LOCAL ROLE authenticated;
+
+  -- 10a
+  PERFORM pg_temp.ti_as(v_auth_nogroup);
+  v_org := public.org_get();
+  IF v_org->>'group_id' IS NULL THEN
+    PERFORM pg_temp.ti_log(32,'hotel sans groupe: org_get().group_id = NULL explicite','PASS', v_org::text);
+  ELSE
+    PERFORM pg_temp.ti_log(32,'hotel sans groupe: org_get().group_id = NULL explicite','FAIL', v_org::text);
+  END IF;
+  v_gp := public.group_planning('ZZTI Reception'::text,'2099-06-01'::date,'2099-06-01'::date);
+  IF v_gp->>'group_id' IS NULL AND jsonb_array_length(v_gp->'hotels')=0 THEN
+    PERFORM pg_temp.ti_log(33,'hotel sans groupe: group_planning() = forme vide explicite (pas d''erreur, pas de fuite)','PASS', v_gp::text);
+  ELSE
+    PERFORM pg_temp.ti_log(33,'hotel sans groupe: group_planning() = forme vide explicite (pas d''erreur, pas de fuite)','FAIL', v_gp::text);
+  END IF;
+
+  -- 10b
+  PERFORM pg_temp.ti_as(v_auth_solo);
+  v_org := public.org_get();
+  IF v_org->>'group_id' = v_gid_solo::text AND jsonb_array_length(v_org->'members')=1 THEN
+    PERFORM pg_temp.ti_log(34,'groupe a un seul hotel: org_get() = exactement 1 membre (ni vide ni fusionne)','PASS', v_org::text);
+  ELSE
+    PERFORM pg_temp.ti_log(34,'groupe a un seul hotel: org_get() = exactement 1 membre (ni vide ni fusionne)','FAIL', v_org::text);
+  END IF;
+
+  -- 10c
+  PERFORM pg_temp.ti_as(v_auth_inactive);
+  v_org := public.org_get();
+  IF v_org->>'group_id' = v_gid_inactive::text THEN
+    PERFORM pg_temp.ti_log(35,'hotel actif desactive (active=false): groupe reste resolu sans erreur','PASS', v_org::text);
+  ELSE
+    PERFORM pg_temp.ti_log(35,'hotel actif desactive (active=false): groupe reste resolu sans erreur','FAIL', coalesce(v_org::text,'null'));
+  END IF;
+
+  -- 10d
+  PERFORM pg_temp.ti_as(v_auth_orphan);
+  v_org := public.org_get();
+  v_gp := public.group_planning('ZZTI Reception'::text,'2099-06-01'::date,'2099-06-01'::date);
+  IF v_org->>'group_id' IS NULL AND v_gp->>'group_id' IS NULL AND jsonb_array_length(v_gp->'hotels')=0 THEN
+    PERFORM pg_temp.ti_log(36,'aucune ligne public.users: org_get()/group_planning() = forme NULL explicite, pas d''erreur','PASS', (v_org::text || ' | ' || v_gp::text));
+  ELSE
+    PERFORM pg_temp.ti_log(36,'aucune ligne public.users: org_get()/group_planning() = forme NULL explicite, pas d''erreur','FAIL', coalesce(v_org::text,'null') || ' | ' || coalesce(v_gp::text,'null'));
+  END IF;
+END $$;
+
+RESET ROLE;
+
+-- ---------------------------------------------------------------------------
 -- Rapport final : échoue explicitement (RAISE EXCEPTION) si un seul test a échoué —
 -- garantit que ce fichier fait réellement échouer le job CI en cas de régression.
 -- ---------------------------------------------------------------------------
