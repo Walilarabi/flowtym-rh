@@ -17,6 +17,20 @@ jobs:
         with: { node-version: '20' }
       - run: node scripts/ci/check-frontend-syntax.mjs
 
+  db-rls-coverage:
+    # Audit Security Advisor 2026-08-05 (rls_disabled_in_public / policy_exists_rls_disabled) :
+    # 29 tables production avaient RLS activée uniquement hors migration versionnée (SQL éditeur/
+    # dashboard), jamais capturée dans sql/*.sql — invisible à toute reconstruction depuis le dépôt.
+    # Échoue si une NOUVELLE table public créée dans sql/*.sql n'a pas son propre
+    # ENABLE ROW LEVEL SECURITY dans sql/*.sql (dette pré-existante en baseline, non bloquante).
+    name: DB — garde-fou RLS (table public sans RLS)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - run: node scripts/ci/check-rls-coverage.mjs
+
   qa-target-guard-test:
     name: QA — garde-fou cible phase2-staging (non-régression)
     runs-on: ubuntu-latest
