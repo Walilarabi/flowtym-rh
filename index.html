@@ -3576,7 +3576,7 @@ function renderCurrentPlanView(){
     // Recalcule visibleRows avec les mêmes filtres que render()
     visibleRows=staff.filter(s=>{
       const st=s.status||(s.active?'actif':'parti');
-      if(fStatus==='actif'){if(st==='parti'){if(!s.departure_date)return false;const dd=new Date(s.departure_date);if(cur>=new Date(dd.getFullYear(),dd.getMonth()+1,1))return false;}if(st==='pause'){const hasSh=planningRows.some(r=>r.employee_id===s.id);if(!hasSh)return false;}}
+      if(fStatus==='actif'){if(st==='parti'||st==='pause'){const hasSh=planningRows.some(r=>r.employee_id===s.id);if(!hasSh)return false;}}
       if(fStatus==='pause'&&st!=='pause')return false;
       if(fStatus==='parti'&&st!=='parti')return false;
       if(st==='parti'&&s.departure_date){const dd=new Date(s.departure_date);if(cur>=new Date(dd.getFullYear(),dd.getMonth()+1,1)&&fStatus!=='parti'&&fStatus!=='tous')return false;}
@@ -3909,12 +3909,10 @@ function render(){
   visibleRows=staff.filter(s=>{
     const st=s.status||(s.active?'actif':'parti');
     if(fStatus==='actif'){
-      if(st==='parti'){
-        if(!s.departure_date) return false;
-        const dd=new Date(s.departure_date);
-        if(cur >= new Date(dd.getFullYear(), dd.getMonth()+1, 1)) return false;
+      if(st==='parti'||st==='pause'){
+        const hasSh=planningRows.some(r=>r.employee_id===s.id);
+        if(!hasSh) return false;
       }
-      if(st==='pause'){const hasSh=planningRows.some(r=>r.employee_id===s.id);if(!hasSh)return false;}
     }
     if(fStatus==='pause' && st!=='pause') return false;
     if(fStatus==='parti' && st!=='parti') return false;
