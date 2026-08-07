@@ -89,6 +89,7 @@ Deno.serve(async (req) => {
     let targetAuthId: string|null = null;
     let alreadyExisted = false;
     let magicLinkSent  = false;
+    let magicLinkError: string|null = null;
 
     if (existing) {
       alreadyExisted = true;
@@ -104,6 +105,7 @@ Deno.serve(async (req) => {
           redirectTo,
         });
         magicLinkSent = !resetErr;
+        if (resetErr) { magicLinkError = resetErr.message; console.error('resetPasswordForEmail error:', resetErr.message); }
       } else {
         // Compte non confirmé → re-générer le lien d'invitation
         const { error: mlErr } = await admin.auth.admin.generateLink({
@@ -112,6 +114,7 @@ Deno.serve(async (req) => {
           options: { redirectTo },
         });
         magicLinkSent = !mlErr;
+        if (mlErr) { magicLinkError = mlErr.message; console.error('generateLink(invite) error:', mlErr.message); }
       }
 
     } else {
@@ -200,6 +203,7 @@ Deno.serve(async (req) => {
       user_id: userId,
       already_existed: alreadyExisted,
       magic_link_sent: magicLinkSent,
+      magic_link_error: magicLinkError,
       direct_link: directLink,
     });
 

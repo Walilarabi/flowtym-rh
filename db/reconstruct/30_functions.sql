@@ -10,8 +10,10 @@ AS $function$
 $function$;
 
 -- get_user_hotel_id()/set_active_hotel() (verbatim schéma live) — l'hôtel réellement ACTIF de
--- l'appelant, source de vérité déjà utilisée par la RLS de `hotels` (hotels_select : id =
--- get_user_hotel_id()) ; sql/98 en fait aussi la source de vérité pour le groupe courant.
+-- l'appelant, utilisé par la RLS de `hotels` pour la policy UPDATE (hotels_update_own : id =
+-- get_user_hotel_id() OR is_platform_admin()) — la policy SELECT (hotels_select) utilise depuis
+-- sql/101 pl_my_hotels() (multi-hôtel), voir sql/101_fix_hotels_select_multi_hotel_rls.sql ;
+-- sql/98 en fait aussi la source de vérité pour le groupe courant.
 CREATE OR REPLACE FUNCTION public.get_user_hotel_id()
  RETURNS uuid LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path TO 'public','pg_catalog'
 AS $function$

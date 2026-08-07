@@ -1782,23 +1782,36 @@ function renderUserDrawerBody(row, detail, allHotels, allGroups, onChange){
     title:'Réactiver cet utilisateur', body:'L\'utilisateur retrouve immédiatement tous ses accès existants.', confirmLabel:'Réactiver',
     onConfirm: async()=>{ const {error}=await sb.rpc('admin_set_user_status',{p_user_id:row.user_id,p_active:true}); if(error) throw error; flash('Utilisateur réactivé.'); refresh(); }
   }));
-  $('uResetPwd').onclick=()=>confirmAction({
-    title:'Réinitialiser le mot de passe', body:`Un e-mail de réinitialisation sera envoyé à ${esc(id.email)}.`, confirmLabel:'Envoyer',
-    onConfirm: async()=>{ const {error}=await sb.auth.resetPasswordForEmail(id.email); if(error) throw error; flash('E-mail de réinitialisation envoyé.'); }
-  });
-  $('uResend')&&($('uResend').onclick=()=>{
+  // Route la réinitialisation via l'Edge Function invite-user (pas resetPasswordForEmail direct) :
+  // pour un compte existant confirmé elle appelle en interne resetPasswordForEmail (même effet),
+  // mais génère EN PLUS un lien direct de secours (direct_link) si l'e-mail n'arrive pas.
+  const sendAccountEmail=async(title,fallbackTitle)=>{
     const primary=hotelAcc.find(h=>h.is_default)||hotelAcc[0];
-    if(!primary){ flash('Aucun hôtel associé : impossible de renvoyer une invitation.','e'); return; }
-    confirmAction({
-      title:'Renvoyer l\'invitation', body:`Un nouveau lien sera envoyé à ${esc(id.email)} pour l'hôtel ${esc(primary.hotel_name)}.`, confirmLabel:'Renvoyer',
-      onConfirm: async()=>{
-        const {data,error}=await sb.functions.invoke('invite-user',{body:{email:id.email, full_name:id.full_name, role:primary.role, hotel_id:primary.hotel_id, access_type:'manager'}});
-        if(error) throw new Error(data?.error||error.message);
-        if(data?.error) throw new Error(data.error);
-        flash('Invitation renvoyée.');
+    if(!primary){ flash('Aucun hôtel associé : impossible d\'envoyer un lien.','e'); return; }
+    if(!confirm(`${title} pour ${id.email} (hôtel ${primary.hotel_name}). Continuer ?`)) return;
+    try{
+      const {data,error}=await sb.functions.invoke('invite-user',{body:{email:id.email, full_name:id.full_name, role:primary.role, hotel_id:primary.hotel_id, access_type:'manager'}});
+      if(error) throw new Error(data?.error||error.message);
+      if(data?.error) throw new Error(data.error);
+      if(data?.direct_link && data?.magic_link_sent===false){
+        $('modal').innerHTML=`
+          <h3><i class="fa-solid fa-triangle-exclamation" style="color:#d97706"></i> L'envoi de l'e-mail a échoué</h3>
+          <p style="font-size:13px;color:var(--muted);margin-bottom:10px">Partagez ce lien directement à ${esc(id.email)} :</p>
+          <div style="background:#f4f4f7;border:1px solid var(--line);border-radius:8px;padding:10px 12px;word-break:break-all;font-size:11.5px;font-family:monospace;margin-bottom:12px">${esc(data.direct_link)}</div>
+          <div class="mact">
+            <button class="btn g" id="mCancel">Fermer</button>
+            <button class="btn p" id="mCopyLink"><i class="fa-solid fa-copy"></i> Copier le lien</button>
+          </div>`;
+        $('modalbg').classList.add('on');
+        $('mCancel').onclick=()=>$('modalbg').classList.remove('on');
+        $('mCopyLink').onclick=()=>navigator.clipboard.writeText(data.direct_link).then(()=>flash('Lien copié ✓'));
+      } else {
+        flash(fallbackTitle);
       }
-    });
-  });
+    }catch(e){ flash(errorLabel(e.message),'e'); }
+  };
+  $('uResetPwd').onclick=()=>sendAccountEmail('Réinitialiser le mot de passe','E-mail de réinitialisation envoyé.');
+  $('uResend')&&($('uResend').onclick=()=>sendAccountEmail('Renvoyer l\'invitation','Invitation renvoyée.'));
 
   el_bindHotelAccessActions(row, hotelAcc, refresh);
 
@@ -1816,7 +1829,18 @@ function renderUserDrawerBody(row, detail, allHotels, allGroups, onChange){
     if(!groupId) return;
     confirmAction({
       title:'Accorder l\'accès sur tout le groupe', body:'L\'utilisateur recevra le rôle choisi sur chaque hôtel actuel de ce groupe.', confirmLabel:'Accorder',
-      onConfirm: async()=>{ const {error}=await sb.rpc('admin_grant_hotel_group_access',{p_user_id:row.user_id,p_group_id:groupId,p_role:role}); if(error) throw error; flash('Accès groupe accordé.'); refresh(); }
+      onConfirm: async()=>{
+        const {data,error}=await sb.rpc('admin_grant_hotel_group_access',{p_user_id:row.user_id,p_group_id:groupId,p_role:role});
+        if(error) throw error;
+        const rows=data||[];
+        const failed=rows.filter(r=>!r.granted);
+        if(failed.length){
+          flash(`Accès accordé sur ${rows.length-failed.length}/${rows.length} hôtel(s) — échec sur : ${failed.map(f=>f.hotel_name).join(', ')}`,'e');
+        } else {
+          flash(`Accès accordé sur ${rows.length} hôtel(s) du groupe.`);
+        }
+        refresh();
+      }
     });
   };
   $('uGroupRevoke').onclick=()=>{
