@@ -15451,6 +15451,17 @@ function openInviteForm(onSuccess, access_type='manager'){
     $('invSend').disabled=true; $('invSend').innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Envoi en cours…';
     try{
       const res=await BE.inviteUser(hotelId,email,full_name,role,access_type);
+      const directLinkBlock=res?.direct_link?`
+          <div class="mb">
+            <div style="background:#f8f9fb;border:1px solid var(--line);border-radius:10px;padding:12px 14px;font-size:12.5px;color:var(--ink2);margin-bottom:10px">
+              ${res.magic_link_sent===false?'<i class="fa-solid fa-triangle-exclamation" style="color:#d97706"></i> <b>L\'envoi de l\'e-mail a échoué.</b> ':'<i class="fa-solid fa-circle-info" style="color:#2563eb"></i> '}
+              Partagez ce lien directement si l'e-mail n'arrive pas :
+            </div>
+            <div style="background:#f4f4f7;border:1px solid var(--line);border-radius:8px;padding:10px 12px;word-break:break-all;font-size:11.5px;font-family:monospace;margin-bottom:10px">${esc(res.direct_link)}</div>
+            <button class="btn g" style="width:100%;justify-content:center" onclick="navigator.clipboard.writeText(${JSON.stringify(res.direct_link)}).then(()=>flash('Lien copié ✓'))">
+              <i class="fa-solid fa-copy"></i> Copier le lien
+            </button>
+          </div>`:'';
       if(res?.already_existed){
         $('modal').innerHTML=`
           <div class="mh">
@@ -15461,6 +15472,7 @@ function openInviteForm(onSuccess, access_type='manager'){
             </div>
             <button class="mh-x" onclick="closeModal()" title="Fermer"><i class="fa-solid fa-xmark"></i></button>
           </div>
+          ${directLinkBlock}
           <div class="mact"><button class="btn p" onclick="closeModal()"><i class="fa-solid fa-check"></i> OK</button></div>`;
       } else {
         $('modal').innerHTML=`
@@ -15479,6 +15491,7 @@ function openInviteForm(onSuccess, access_type='manager'){
               Le lien est valable <b>24h</b>.
             </div>
           </div>
+          ${directLinkBlock}
           <div class="mact"><button class="btn p" onclick="closeModal()"><i class="fa-solid fa-check"></i> Terminé</button></div>`;
       }
       if(onSuccess) onSuccess();
